@@ -1,16 +1,16 @@
 // app/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box, Button, Container, TextField, Typography, Paper, Stack, Alert, CircularProgress, Divider
 } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-// アイコン (GoogleなどはMUI標準にないのでテキストか画像で代用推奨ですが、ここではGoogleIcon等がある前提またはテキストで実装)
+// アイコン (MUIにないものは文字で代用か、別途SVGコンポーネント化推奨)
 import GoogleIcon from '@mui/icons-material/Google';
 import AppleIcon from '@mui/icons-material/Apple';
-import MicrosoftIcon from '@mui/icons-material/Window'; // Microsoftの代用
+import MicrosoftIcon from '@mui/icons-material/Window';
 
 export default function AuthPage() {
   const router = useRouter();
@@ -22,6 +22,31 @@ export default function AuthPage() {
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+  // マウント時にURLを取得してリダイレクト先を決定
+  const [redirectUrl, setRedirectUrl] = useState('');
+  useEffect(() => {
+    setRedirectUrl(`${window.location.origin}/auth/callback`);
+  }, []);
+
+  // SSOログイン処理
+  const handleOAuth = async (provider: 'google' | 'azure' | 'apple') => {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: provider,
+      options: {
+        redirectTo: redirectUrl, // ★ここが重要：現在のドメインのCallback URLを指定
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+      },
+    });
+    if (error) {
+      setMessage({ type: 'error', text: error.message });
+      setLoading(false);
+    }
+  };
 
   // メールログイン・登録処理
   const handleAuth = async (e: React.FormEvent) => {
@@ -62,38 +87,17 @@ export default function AuthPage() {
     }
   };
 
-  // SSOログイン処理
-  const handleOAuth = async (provider: 'google' | 'azure' | 'apple') => {
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: provider,
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        },
-      },
-    });
-    if (error) {
-      setMessage({ type: 'error', text: error.message });
-      setLoading(false);
-    }
-  };
-
   // ログイン後の振り分け
   const checkProfileAndRedirect = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // プロフィールがあるか確認
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
 
     if (profile) {
       if (profile.role === 'staff') router.push('/helper');
       else router.push('/admin/dashboard');
     } else {
-      // プロフィールがない = SSO初回の新規ユーザー -> セットアップへ
       router.push('/setup');
     }
   };
@@ -110,16 +114,15 @@ export default function AuthPage() {
 
             {message && <Alert severity={message.type}>{message.text}</Alert>}
 
-            {/* SSOボタンエリア (ログインモード時のみ表示推奨だが、登録時も同じフローでいける) */}
             {isLoginMode && (
               <Stack spacing={1.5}>
-                <Button variant="outlined" startIcon={<GoogleIcon />} onClick={() => handleOAuth('google')} fullWidth sx={{ color: '#333', borderColor: '#ccc' }}>
+                <Button variant="outlined" startIcon={<GoogleIcon />} onClick={() => handleOAuth('google')} fullWidth sx={{ color: '#333', borderColor: '#ccc', py: 1.5 }}>
                   Googleで続ける
                 </Button>
-                <Button variant="outlined" startIcon={<MicrosoftIcon />} onClick={() => handleOAuth('azure')} fullWidth sx={{ color: '#333', borderColor: '#ccc' }}>
+                <Button variant="outlined" startIcon={<MicrosoftIcon />} onClick={() => handleOAuth('azure')} fullWidth sx={{ color: '#333', borderColor: '#ccc', py: 1.5 }}>
                   Microsoftで続ける
                 </Button>
-                <Button variant="outlined" startIcon={<AppleIcon />} onClick={() => handleOAuth('apple')} fullWidth sx={{ color: '#333', borderColor: '#ccc' }}>
+                <Button variant="outlined" startIcon={<AppleIcon />} onClick={() => handleOAuth('apple')} fullWidth sx={{ color: '#333', borderColor: '#ccc', py: 1.5 }}>
                   Appleで続ける
                 </Button>
 
