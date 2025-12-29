@@ -1,17 +1,41 @@
 // app/auth/callback/route.ts
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
 export async function GET(request: Request) {
     const { searchParams, origin } = new URL(request.url);
     const code = searchParams.get('code');
+    // ログイン後のデフォルトリダイレクト先
+    let next = '/admin/dashboard';
 
     if (code) {
-        // 1. コードをセッションに交換
+        const cookieStore = await cookies(); // Next.js 15/16ではawaitが必要
+
+        // サーバーサイド用のSupabaseクライアントを作成
+        const supabase = createServerClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            {
+                cookies: {
+                    get(name: string) {
+                        return cookieStore.get(name)?.value;
+                    },
+                    set(name: string, value: string, options: CookieOptions) {
+                        cookieStore.set({ name, value, ...options });
+                    },
+                    remove(name: string, options: CookieOptions) {
+                        cookieStore.delete({ name, ...options });
+                    },
+                },
+            }
+        );
+
+        // コードをセッションに交換 (ここでCookieがセットされる)
         const { error } = await supabase.auth.exchangeCodeForSession(code);
 
         if (!error) {
-            // 2. ユーザー情報を取得して振り分け判定
+            // ユーザー情報を取得して振り分け判定
             const { data: { user } } = await supabase.auth.getUser();
 
             if (user) {
@@ -23,20 +47,27 @@ export async function GET(request: Request) {
                     .maybeSingle();
 
                 if (profile) {
-                    // 既存ユーザー：権限に応じてダッシュボードかヘルパー画面へ
+                    // 既存ユーザー：権限に応じて振り分け
                     if (profile.role === 'staff') {
-                        return NextResponse.redirect(`${origin}/helper`);
+                        next = '/helper';
+                    } else if (profile.role === 'super_admin') {
+                        next = '/super-admin';
                     } else {
-                        return NextResponse.redirect(`${origin}/admin/dashboard`);
+                        next = '/admin/dashboard';
                     }
                 } else {
                     // 新規ユーザー：セットアップ画面へ
-                    return NextResponse.redirect(`${origin}/setup`);
+                    next = '/setup';
                 }
+
+                // 成功時のリダイレクト
+                return NextResponse.redirect(`${origin}${next}`);
             }
+        } else {
+            console.error('Auth Exchange Error:', error);
         }
     }
 
-    // エラー時はトップへ戻す
+    // エラー時やコードがない場合はトップへ戻す
     return NextResponse.redirect(`${origin}/`);
 }
