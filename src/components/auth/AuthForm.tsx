@@ -3,9 +3,8 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Box, Button, TextField, Typography, Paper, Stack, Alert, CircularProgress, Divider, Link
+    Box, Button, TextField, Typography, Stack, Alert, CircularProgress, Divider
 } from '@mui/material';
-import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 // SVG Icons
@@ -21,13 +20,11 @@ type Props = {
 };
 
 export const AuthForm = ({ mode }: Props) => {
-    const router = useRouter();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [orgName, setOrgName] = useState('');
     const [userName, setUserName] = useState('');
 
-    // スタッフモードの場合は常にログイン画面
     const [isRegisterMode, setIsRegisterMode] = useState(false);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
@@ -37,6 +34,7 @@ export const AuthForm = ({ mode }: Props) => {
         setOrigin(window.location.origin);
     }, []);
 
+    // SSOログイン
     const handleOAuth = async (provider: 'google' | 'azure') => {
         if (!origin) return;
         setLoading(true);
@@ -53,6 +51,7 @@ export const AuthForm = ({ mode }: Props) => {
         }
     };
 
+    // メール認証
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
@@ -61,24 +60,26 @@ export const AuthForm = ({ mode }: Props) => {
         try {
             if (isRegisterMode && mode === 'admin') {
                 // --- 新規事業所登録 (Adminのみ) ---
-                const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
+                // 1. Authユーザー作成
+                const { data: authData, error: authError } = await supabase.auth.signUp({
+                    email,
+                    password,
+                });
                 if (authError) throw authError;
                 if (!authData.user) throw new Error('ユーザー作成失敗');
 
-                const { data: orgData, error: orgError } = await supabase.from('organizations').insert([{ name: orgName }]).select().single();
-                if (orgError) throw orgError;
+                // 2. RPCを使って事業所とプロフィールを一括作成 (RLS回避のため)
+                // ※signUp直後でセッションが確立されている前提
+                const { error: rpcError } = await supabase.rpc('register_organization_and_profile', {
+                    org_name: orgName,
+                    user_name: userName
+                });
 
-                const { error: profileError } = await supabase.from('profiles').insert([{
-                    id: authData.user.id,
-                    organization_id: orgData.id,
-                    name: userName,
-                    role: 'owner',
-                    is_agreed: true,
-                    agreed_at: new Date().toISOString()
-                }]);
-                if (profileError) throw profileError;
+                if (rpcError) throw rpcError;
 
                 setMessage({ type: 'success', text: '登録完了！ダッシュボードへ移動します。' });
+
+                // 画面遷移
                 setTimeout(() => { window.location.href = '/admin/dashboard'; }, 1000);
 
             } else {
@@ -86,9 +87,8 @@ export const AuthForm = ({ mode }: Props) => {
                 const { error } = await supabase.auth.signInWithPassword({ email, password });
                 if (error) throw error;
 
-                // リダイレクトロジックは auth/callback と同様にMiddlewareやページ側で制御されるが、
-                // ここでは明示的にリロードして状態更新
-                // (本来はロールを見て振り分けるが、Middlewareにお任せでルートへ飛ばす)
+                // ログイン成功後のリダイレクト
+                // Staffならヘルパー画面、Adminならダッシュボードへ
                 window.location.href = mode === 'staff' ? '/helper' : '/admin/dashboard';
             }
         } catch (err: any) {

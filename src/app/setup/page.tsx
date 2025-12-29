@@ -15,7 +15,6 @@ export default function SetupPage() {
     const [saving, setSaving] = useState(false);
     const [orgName, setOrgName] = useState('');
     const [userName, setUserName] = useState('');
-    const [userId, setUserId] = useState('');
 
     useEffect(() => {
         checkUser();
@@ -27,10 +26,7 @@ export default function SetupPage() {
             router.push('/');
             return;
         }
-        setUserId(user.id);
-
-        // 既にプロフィールがある場合はセットアップ不要
-        const { data: profile } = await supabase.from('profiles').select('id').eq('id', user.id).single();
+        const { data: profile } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle();
         if (profile) {
             router.push('/admin/dashboard');
         } else {
@@ -43,30 +39,15 @@ export default function SetupPage() {
         setSaving(true);
 
         try {
-            // 1. 事業所作成
-            const { data: org, error: orgError } = await supabase
-                .from('organizations')
-                .insert([{ name: orgName }])
-                .select()
-                .single();
+            // ★修正: RPC（SQL関数）を呼び出して一発登録
+            const { error } = await supabase.rpc('register_organization_and_profile', {
+                org_name: orgName,
+                user_name: userName
+            });
 
-            if (orgError) throw orgError;
+            if (error) throw error;
 
-            // 2. プロフィール作成 (Ownerとして)
-            const { error: profileError } = await supabase
-                .from('profiles')
-                .insert({
-                    id: userId,
-                    organization_id: org.id,
-                    name: userName,
-                    role: 'owner',
-                    is_agreed: true, // ここで作成する＝規約同意済みとみなす
-                    agreed_at: new Date().toISOString()
-                });
-
-            if (profileError) throw profileError;
-
-            window.location.href = '/admin/dashboard'; // リロード込みで移動
+            window.location.href = '/admin/dashboard';
         } catch (error) {
             console.error(error);
             alert('セットアップに失敗しました');
