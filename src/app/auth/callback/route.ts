@@ -1,37 +1,38 @@
-// app/auth/callback/route.ts
 import { NextResponse } from 'next/server';
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
 export async function GET(request: Request) {
     const { searchParams, origin } = new URL(request.url);
     const code = searchParams.get('code');
-    // ログイン後のデフォルトリダイレクト先
+    // デフォルトのリダイレクト先
     let next = '/admin/dashboard';
 
     if (code) {
-        const cookieStore = await cookies(); // Next.js 15/16ではawaitが必要
+        const cookieStore = await cookies();
 
-        // サーバーサイド用のSupabaseクライアントを作成
         const supabase = createServerClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL!,
             process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
             {
                 cookies: {
-                    get(name: string) {
-                        return cookieStore.get(name)?.value;
+                    getAll() {
+                        return cookieStore.getAll();
                     },
-                    set(name: string, value: string, options: CookieOptions) {
-                        cookieStore.set({ name, value, ...options });
-                    },
-                    remove(name: string, options: CookieOptions) {
-                        cookieStore.delete({ name, ...options });
+                    setAll(cookiesToSet) {
+                        try {
+                            cookiesToSet.forEach(({ name, value, options }) =>
+                                cookieStore.set(name, value, options)
+                            );
+                        } catch {
+                            // Server Component から呼ばれた場合は無視されることがあるが問題なし
+                        }
                     },
                 },
             }
         );
 
-        // コードをセッションに交換 (ここでCookieがセットされる)
+        // コードをセッションに交換
         const { error } = await supabase.auth.exchangeCodeForSession(code);
 
         if (!error) {
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
                     .maybeSingle();
 
                 if (profile) {
-                    // 既存ユーザー：権限に応じて振り分け
+                    // 既存ユーザー
                     if (profile.role === 'staff') {
                         next = '/helper';
                     } else if (profile.role === 'super_admin') {
@@ -56,18 +57,20 @@ export async function GET(request: Request) {
                         next = '/admin/dashboard';
                     }
                 } else {
-                    // 新規ユーザー：セットアップ画面へ
+                    // 新規ユーザー -> セットアップへ
                     next = '/setup';
                 }
 
-                // 成功時のリダイレクト
+                // 成功: 意図したページへリダイレクト
                 return NextResponse.redirect(`${origin}${next}`);
             }
         } else {
-            console.error('Auth Exchange Error:', error);
+            console.error('SSO Code Exchange Error:', error);
         }
+    } else {
+        console.error('No code received in callback');
     }
 
-    // エラー時やコードがない場合はトップへ戻す
-    return NextResponse.redirect(`${origin}/`);
+    // 失敗時はトップへ戻す（エラー表示パラメータ付き）
+    return NextResponse.redirect(`${origin}/?error=auth_failed`);
 }
