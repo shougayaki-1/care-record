@@ -6,13 +6,13 @@ import {
   Checkbox, FormControlLabel, Radio, RadioGroup,
   FormControl, FormLabel, Paper, Stack, Divider,
   AppBar, Toolbar, IconButton, CircularProgress, FormGroup,
-  Switch, Autocomplete, Chip, Alert, FormHelperText
+  Switch, Autocomplete, Chip, Alert, FormHelperText, InputAdornment
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
-import WarningIcon from '@mui/icons-material/Warning';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { useToast } from '@/components/ui/ToastProvider';
 
 type FormItem = {
   id: string;
@@ -26,36 +26,27 @@ type FormItem = {
 export default function RecordPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
+  const { showToast } = useToast();
+
   const clientId = params.clientId as string;
+  const reportId = searchParams.get('reportId');
 
   const [clientName, setClientName] = useState('');
   const [template, setTemplate] = useState<FormItem[]>([]);
   const [answers, setAnswers] = useState<Record<string, any>>({});
-
-  // ヘルパー選択用
   const [allHelpers, setAllHelpers] = useState<{ id: string, name: string, isAssigned: boolean }[]>([]);
   const [selectedHelpers, setSelectedHelpers] = useState<string[]>([]);
 
-  // 固定入力項目
   const [startDateTime, setStartDateTime] = useState('');
   const [endDateTime, setEndDateTime] = useState('');
   const [serviceTime, setServiceTime] = useState('');
   const [travelTime, setTravelTime] = useState('0');
 
-  // エラー状態管理
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [warnings, setWarnings] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    const now = new Date();
-    setStartDateTime(formatDatetimeLocal(now));
-    // デフォルトは1時間後
-    const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
-    setEndDateTime(formatDatetimeLocal(oneHourLater));
-
-    fetchData();
-  }, []);
+  const [loading, setLoading] = useState(true);
 
   const formatDatetimeLocal = (date: Date) => {
     const year = date.getFullYear();
@@ -65,6 +56,22 @@ export default function RecordPage() {
     const minutes = String(date.getMinutes()).padStart(2, '0');
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   };
+
+  useEffect(() => {
+    const init = async () => {
+      const now = new Date();
+      if (!reportId) {
+        setStartDateTime(formatDatetimeLocal(now));
+        const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
+        setEndDateTime(formatDatetimeLocal(oneHourLater));
+      }
+      await fetchData();
+      if (reportId) await loadExistingReport();
+      setLoading(false);
+    };
+    init();
+  }, [reportId]);
+
 
   const fetchData = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -94,21 +101,43 @@ export default function RecordPage() {
         })).sort((a, b) => (a.isAssigned === b.isAssigned) ? 0 : a.isAssigned ? -1 : 1);
 
         setAllHelpers(sorted);
-        const me = sorted.find(p => p.id === user.id);
-        if (me) setSelectedHelpers([me.name]);
+        if (!reportId) {
+          const me = sorted.find(p => p.id === user.id);
+          if (me) setSelectedHelpers([me.name]);
+        }
       }
+    }
+  };
+
+  const loadExistingReport = async () => {
+    try {
+      const { data: report, error: rError } = await supabase.from('reports').select('*').eq('id', reportId).single();
+      const { data: values, error: vError } = await supabase.from('report_values').select('data').eq('report_id', reportId).single();
+
+      if (rError || vError) throw new Error('Load failed');
+
+      if (report) {
+        setStartDateTime(formatDatetimeLocal(new Date(report.start_at)));
+        setEndDateTime(formatDatetimeLocal(new Date(report.end_at)));
+      }
+      if (values && values.data) {
+        if (values.data.service_time) setServiceTime(values.data.service_time);
+        if (values.data.travel_time) setTravelTime(values.data.travel_time);
+        if (values.data._helpers) setSelectedHelpers(values.data._helpers);
+        setAnswers(values.data);
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('データの読み込みに失敗しました', 'error');
     }
   };
 
   const handleAnswerChange = (id: string, value: any) => {
     setAnswers(prev => ({ ...prev, [id]: value }));
-    // エラーがあれば消す
     if (errors[id]) {
-      setErrors(prev => {
-        const newErrors = { ...prev };
-        delete newErrors[id];
-        return newErrors;
-      });
+      const newErrors = { ...errors };
+      delete newErrors[id];
+      setErrors(newErrors);
     }
   };
 
@@ -119,23 +148,19 @@ export default function RecordPage() {
         ? [...currentList, option]
         : currentList.filter(v => v !== option);
 
-      // エラー解消チェック
       if (errors[itemId] && newList.length > 0) {
         const newErrors = { ...errors };
         delete newErrors[itemId];
         setErrors(newErrors);
       }
-
       return { ...prev, [itemId]: newList };
     });
   };
 
-  // バリデーション実行関数
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
     const newWarnings: string[] = [];
 
-    // 1. 固定項目のチェック
     if (!startDateTime) newErrors['startDateTime'] = '開始日時を入力してください';
     if (!endDateTime) newErrors['endDateTime'] = '終了日時を入力してください';
     if (selectedHelpers.length === 0) newErrors['selectedHelpers'] = 'ヘルパーを選択してください';
@@ -149,28 +174,21 @@ export default function RecordPage() {
       if (start > end) {
         newErrors['endDateTime'] = '終了日時は開始日時より後にしてください';
       }
-
-      // 未来日付警告 (エラーにはしない)
       if (start > now || end > now) {
         newWarnings.push('未来の日時が設定されています。正しいですか？');
       }
     }
 
-    // 2. テンプレート項目の必須チェック
     template.forEach(item => {
       if (item.required) {
         const val = answers[item.id];
-
         if (item.type === 'checkbox') {
-          // checkboxの必須 = 必ずチェックON
           if (!val) newErrors[item.id] = 'この項目はチェック必須です';
         } else if (item.type === 'multicheckbox') {
-          // multicheckboxの必須 = 1つ以上選択
           if (!val || !Array.isArray(val) || val.length === 0) {
             newErrors[item.id] = '少なくとも1つ選択してください';
           }
         } else {
-          // text, number, select等
           if (!val || String(val).trim() === '') {
             newErrors[item.id] = '必須項目です';
           }
@@ -185,31 +203,17 @@ export default function RecordPage() {
 
   const handleSubmit = async () => {
     if (!validateForm()) {
-      window.scrollTo({ top: 0, behavior: 'smooth' }); // エラー箇所へ誘導
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
-    // 警告がある場合は確認ダイアログを出す
     if (warnings.length > 0) {
-      if (!confirm(`${warnings.join('\n')}\n\nこのまま送信しますか？`)) return;
+      if (!confirm(`${warnings.join('\n')}\n\nこのまま保存しますか？`)) return;
     }
 
     setSubmitting(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-
-      const { data: report, error: reportError } = await supabase
-        .from('reports')
-        .insert({
-          client_id: clientId,
-          helper_id: user?.id,
-          start_at: new Date(startDateTime).toISOString(),
-          end_at: new Date(endDateTime).toISOString()
-        })
-        .select()
-        .single();
-
-      if (reportError) throw reportError;
 
       const finalData = {
         ...answers,
@@ -218,34 +222,69 @@ export default function RecordPage() {
         travel_time: travelTime
       };
 
-      await supabase.from('report_values').insert({ report_id: report.id, data: finalData });
+      if (reportId) {
+        await supabase.from('reports').update({
+          start_at: new Date(startDateTime).toISOString(),
+          end_at: new Date(endDateTime).toISOString(),
+          status: 'pending',
+          approved_by: null,
+          approved_at: null
+        }).eq('id', reportId);
 
-      alert('記録を送信しました！');
-      router.push('/helper');
+        await supabase.from('report_values').update({ data: finalData }).eq('report_id', reportId);
+        showToast('記録を修正しました', 'success');
+      } else {
+        const { data: report, error: reportError } = await supabase
+          .from('reports')
+          .insert({
+            client_id: clientId,
+            helper_id: user?.id,
+            start_at: new Date(startDateTime).toISOString(),
+            end_at: new Date(endDateTime).toISOString()
+          })
+          .select()
+          .single();
+
+        if (reportError) throw reportError;
+        await supabase.from('report_values').insert({ report_id: report.id, data: finalData });
+        showToast('記録を送信しました', 'success');
+      }
+
+      router.push(reportId ? '/helper/history' : '/helper');
+
     } catch (error) {
       console.error(error);
-      alert('送信失敗: サーバーエラーが発生しました');
+      showToast('送信に失敗しました', 'error');
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (!clientName) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
+  if (loading) return <Box p={4} textAlign="center"><CircularProgress /></Box>;
 
   return (
     <Box sx={{ bgcolor: '#fff', minHeight: '100vh', pb: 10 }}>
       <AppBar position="fixed" color="default" elevation={1} sx={{ bgcolor: '#fff' }}>
         <Toolbar>
           <IconButton edge="start" onClick={() => router.back()}><CloseIcon /></IconButton>
-          <Typography variant="h6" sx={{ flexGrow: 1, ml: 1, fontWeight: 'bold' }}>{clientName} 様</Typography>
-          <Button variant="contained" endIcon={<SendIcon />} onClick={handleSubmit} disabled={submitting} sx={{ fontWeight: 'bold' }}>送信</Button>
+          <Typography variant="h6" sx={{ flexGrow: 1, ml: 1, fontWeight: 'bold' }}>
+            {reportId ? '記録の修正' : `${clientName} 様`}
+          </Typography>
+          <Button
+            variant="contained"
+            endIcon={<SendIcon />}
+            onClick={handleSubmit}
+            disabled={submitting}
+            sx={{ fontWeight: 'bold' }}
+          >
+            {reportId ? '更新' : '送信'}
+          </Button>
         </Toolbar>
       </AppBar>
       <Toolbar />
 
       <Container maxWidth="sm" sx={{ mt: 3 }}>
 
-        {/* エラーサマリー表示 */}
         {Object.keys(errors).length > 0 && (
           <Alert severity="error" sx={{ mb: 2 }}>
             入力内容に不備があります。赤字の項目を確認してください。
@@ -254,11 +293,9 @@ export default function RecordPage() {
 
         <Stack spacing={3}>
 
-          {/* --- 固定：基本情報エリア --- */}
           <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f8f9fa', borderRadius: 3, borderColor: (errors['startDateTime'] || errors['endDateTime'] || errors['selectedHelpers']) ? 'error.main' : undefined }}>
             <Stack spacing={3}>
 
-              {/* ヘルパー */}
               <Box>
                 <Typography variant="subtitle2" fontWeight="bold" gutterBottom color={errors['selectedHelpers'] ? 'error' : 'textPrimary'}>
                   担当ヘルパー {errors['selectedHelpers'] && <span style={{ fontSize: '0.8em' }}>({errors['selectedHelpers']})</span>}
@@ -286,7 +323,6 @@ export default function RecordPage() {
 
               <Divider />
 
-              {/* 日時 */}
               <Box>
                 <Typography variant="subtitle2" fontWeight="bold" gutterBottom>サービス提供日時</Typography>
                 <Stack spacing={2}>
@@ -323,7 +359,6 @@ export default function RecordPage() {
 
               <Divider />
 
-              {/* 時間入力 */}
               <Box>
                 <Typography variant="subtitle2" fontWeight="bold" gutterBottom>提供時間詳細</Typography>
                 <Stack direction="row" spacing={2}>
@@ -337,6 +372,8 @@ export default function RecordPage() {
                       setServiceTime(e.target.value);
                       if (e.target.value) { const ne = { ...errors }; delete ne['serviceTime']; setErrors(ne); }
                     }}
+                    // スマホで数字キーパッドを出すための設定
+                    inputProps={{ inputMode: 'decimal', pattern: '[0-9]*' }}
                     InputProps={{ endAdornment: <Typography variant="caption">h</Typography> }}
                     sx={{ bgcolor: '#fff' }}
                     error={!!errors['serviceTime']}
@@ -348,6 +385,8 @@ export default function RecordPage() {
                     fullWidth
                     value={travelTime}
                     onChange={(e) => setTravelTime(e.target.value)}
+                    // スマホで数字キーパッドを出すための設定
+                    inputProps={{ inputMode: 'decimal', pattern: '[0-9]*' }}
                     InputProps={{ endAdornment: <Typography variant="caption">h</Typography> }}
                     sx={{ bgcolor: '#fff' }}
                   />
@@ -357,7 +396,6 @@ export default function RecordPage() {
             </Stack>
           </Paper>
 
-          {/* --- 可変：テンプレート項目 --- */}
           {template.map((item) => {
             if (item.type === 'section') {
               return (
@@ -413,6 +451,8 @@ export default function RecordPage() {
                         placeholder={item.required ? '必須入力' : '入力してください'}
                         value={answers[item.id] || ''}
                         onChange={(e) => handleAnswerChange(item.id, e.target.value)}
+                        // 数字タイプの場合もキーパッドを表示
+                        inputProps={item.type === 'number' ? { inputMode: 'decimal', pattern: '[0-9]*' } : undefined}
                         error={hasError}
                         helperText={errors[item.id]}
                       />

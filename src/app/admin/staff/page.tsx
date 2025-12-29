@@ -1,492 +1,361 @@
-// app/admin/staff/page.tsx
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import {
-    Box, Typography, Paper, Table, TableBody, TableCell,
-    TableContainer, TableHead, TableRow, Chip, Button,
-    Dialog, DialogTitle, DialogContent, DialogActions,
-    FormGroup, FormControlLabel, Checkbox, Select, MenuItem,
-    CircularProgress, Alert, TextField, Stack, IconButton, InputAdornment,
-    Tabs, Tab, LinearProgress
+import { useEffect, useState } from 'react';
+import { 
+  Box, Typography, Paper, Table, TableBody, TableCell, 
+  TableContainer, TableHead, TableRow, Chip, Button, 
+  Dialog, DialogTitle, DialogContent, DialogActions, 
+  TextField, Stack, IconButton, InputAdornment,
+  Tabs, Tab, Select, MenuItem, FormControl, InputLabel, Tooltip,
+  Alert
 } from '@mui/material';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
-import SaveIcon from '@mui/icons-material/Save';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
-import FileUploadIcon from '@mui/icons-material/FileUpload';
-import DownloadIcon from '@mui/icons-material/Download';
+import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
 import { supabase } from '@/lib/supabase';
-import { createStaffDirectly } from '@/app/actions/staff'; // Server Action
+import { useToast } from '@/components/ui/ToastProvider';
+
+// ★ここを本番URLに固定
+const BASE_URL = 'https://care-record.vercel.app';
 
 // 型定義
 type StaffProfile = {
-    id: string;
-    name: string;
-    role: 'owner' | 'manager' | 'staff';
+  id: string; // profiles.id または invitations.id
+  name: string;
+  role: 'owner' | 'manager' | 'staff';
+  status: 'active' | 'invited';
+  invitation_code?: string; // 招待コード表示用
 };
-type Client = { id: string; name: string; };
 
 export default function StaffPage() {
-    const [staffList, setStaffList] = useState<StaffProfile[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [currentUserRole, setCurrentUserRole] = useState<string>('');
-    const [orgId, setOrgId] = useState<string>('');
+  const { showToast } = useToast();
+  const [staffList, setStaffList] = useState<StaffProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  const [currentUserRole, setCurrentUserRole] = useState<string>('');
+  const [orgId, setOrgId] = useState('');
+  
+  // 招待作成用
+  const [openInvite, setOpenInvite] = useState(false);
+  const [inviteMode, setInviteMode] = useState(0); 
+  const [generatedLink, setGeneratedLink] = useState('');
+  const [newInviteName, setNewInviteName] = useState('');
+  const [newInviteRole, setNewInviteRole] = useState('staff');
 
-    // 担当割り当て用
-    const [allClients, setAllClients] = useState<Client[]>([]);
-    const [openAssign, setOpenAssign] = useState(false);
-    const [selectedStaff, setSelectedStaff] = useState<StaffProfile | null>(null);
-    const [assignedClientIds, setAssignedClientIds] = useState<string[]>([]);
-    const [savingAssign, setSavingAssign] = useState(false);
+  // 招待編集用
+  const [openEditInvite, setOpenEditInvite] = useState(false);
+  const [editingInviteId, setEditingInviteId] = useState('');
+  const [editInviteName, setEditInviteName] = useState('');
+  const [editInviteRole, setEditInviteRole] = useState('staff');
 
-    // --- 招待・登録機能用 ---
-    const [openInvite, setOpenInvite] = useState(false);
-    const [inviteMode, setInviteMode] = useState(0); // 0:リンク, 1:指定リンク, 2:直接, 3:CSV
-    const [generatedLink, setGeneratedLink] = useState('');
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-    // 入力フォーム用
-    const [targetName, setTargetName] = useState('');
-    const [targetEmail, setTargetEmail] = useState('');
-    const [targetPassword, setTargetPassword] = useState('');
-    const [targetAssignedIds, setTargetAssignedIds] = useState<string[]>([]);
-    const [isProcessing, setIsProcessing] = useState(false);
+  const fetchData = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      
+      const { data: profile } = await supabase.from('profiles').select('organization_id, role').eq('id', user.id).single();
+      if (!profile) return;
+      
+      setOrgId(profile.organization_id);
+      setCurrentUserRole(profile.role);
 
-    // --- CSVインポート用 ---
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const [importLogs, setImportLogs] = useState<string[]>([]);
-    const [importProgress, setImportProgress] = useState(0);
+      // 1. アクティブなスタッフ
+      const { data: activeStaff } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .order('created_at', { ascending: true });
 
-    useEffect(() => {
-        fetchData();
-    }, []);
+      // 2. 招待中（未登録）
+      const { data: invitations } = await supabase
+        .from('invitations')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .eq('is_used', false);
 
-    const fetchData = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+      const mergedList: StaffProfile[] = [];
+      
+      // 招待中
+      invitations?.forEach((inv: any) => {
+        mergedList.push({
+          id: inv.id,
+          name: inv.target_name || '(招待中・名前未設定)',
+          role: inv.role as any,
+          status: 'invited',
+          invitation_code: inv.code
+        });
+      });
 
-            const { data: myProfile } = await supabase
-                .from('profiles')
-                .select('organization_id, role')
-                .eq('id', user.id)
-                .single();
+      // 登録済み
+      activeStaff?.forEach((st: any) => {
+        mergedList.push({
+          id: st.id,
+          name: st.name,
+          role: st.role as any,
+          status: 'active'
+        });
+      });
 
-            if (!myProfile) return;
-            setCurrentUserRole(myProfile.role);
-            setOrgId(myProfile.organization_id);
+      setStaffList(mergedList);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            const { data: staffData } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('organization_id', myProfile.organization_id)
-                .order('created_at', { ascending: true });
+  // --- 招待作成 ---
+  const handleGenerateLink = async () => {
+    if (!orgId) return;
+    try {
+      const code = crypto.randomUUID().split('-')[0] + crypto.randomUUID().split('-')[1];
+      const { data: { user } } = await supabase.auth.getUser();
 
-            setStaffList(staffData as StaffProfile[] || []);
+      const { error } = await supabase.from('invitations').insert({
+        organization_id: orgId,
+        code: code,
+        created_by: user?.id,
+        target_name: inviteMode === 1 ? newInviteName : null,
+        role: newInviteRole
+      });
 
-            const { data: clientsData } = await supabase
-                .from('clients')
-                .select('id, name')
-                .eq('organization_id', myProfile.organization_id);
+      if (error) throw error;
 
-            setAllClients(clientsData || []);
+      // ★修正: 固定URLを使用
+      const url = `${BASE_URL}/join?code=${code}`;
+      
+      setGeneratedLink(url);
+      showToast('招待リンクを発行しました', 'success');
+      fetchData();
+    } catch (error) {
+      showToast('発行に失敗しました', 'error');
+    }
+  };
 
-        } catch (error) {
-            console.error(error);
-        } finally {
-            setLoading(false);
-        }
-    };
+  // --- 招待キャンセル（削除） ---
+  const handleCancelInvite = async (invitationId: string) => {
+    if (!confirm('この招待を取り消しますか？\nリンクは無効になります。')) return;
+    try {
+      const { error } = await supabase.from('invitations').delete().eq('id', invitationId);
+      if (error) throw error;
+      showToast('招待を取り消しました', 'info');
+      fetchData();
+    } catch (error) {
+      console.error(error);
+      showToast('取り消しに失敗しました', 'error');
+    }
+  };
 
-    // --- 担当割り当てロジック ---
-    const handleOpenAssign = async (staff: StaffProfile) => {
-        setSelectedStaff(staff);
-        setOpenAssign(true);
-        setSavingAssign(false);
-        const { data } = await supabase.from('assignments').select('client_id').eq('helper_id', staff.id);
-        setAssignedClientIds(data ? data.map((d: any) => d.client_id) : []);
-    };
+  // --- 招待編集（モーダルOPEN） ---
+  const openEditInviteModal = (staff: StaffProfile) => {
+    setEditingInviteId(staff.id);
+    setEditInviteName(staff.name === '(招待中・名前未設定)' ? '' : staff.name);
+    setEditInviteRole(staff.role);
+    setOpenEditInvite(true);
+  };
 
-    const handleSaveAssignments = async () => {
-        if (!selectedStaff) return;
-        setSavingAssign(true);
-        try {
-            await supabase.from('assignments').delete().eq('helper_id', selectedStaff.id);
-            if (assignedClientIds.length > 0) {
-                await supabase.from('assignments').insert(
-                    assignedClientIds.map(clientId => ({ helper_id: selectedStaff.id, client_id: clientId }))
-                );
-            }
-            alert('担当を更新しました');
-            setOpenAssign(false);
-        } catch {
-            alert('エラー');
-        } finally {
-            setSavingAssign(false);
-        }
-    };
+  // --- 招待編集（保存） ---
+  const handleUpdateInvite = async () => {
+    try {
+      const { error } = await supabase.from('invitations').update({
+        target_name: editInviteName || null,
+        role: editInviteRole
+      }).eq('id', editingInviteId);
 
-    // --- 招待・作成ロジック ---
-    const handleGenerateLink = async () => {
-        if (!orgId) return;
-        setIsProcessing(true);
-        try {
-            const code = crypto.randomUUID().split('-')[0] + crypto.randomUUID().split('-')[1];
-            const { data: { user } } = await supabase.auth.getUser();
+      if (error) throw error;
+      showToast('招待内容を更新しました', 'success');
+      setOpenEditInvite(false);
+      fetchData();
+    } catch (error) {
+      showToast('更新に失敗しました', 'error');
+    }
+  };
 
-            const { error } = await supabase.from('invitations').insert({
-                organization_id: orgId,
-                code: code,
-                created_by: user?.id,
-                target_name: inviteMode === 1 ? targetName : null,
-                target_client_ids: inviteMode === 1 ? targetAssignedIds : null
-            });
+  // --- 既存スタッフのロール変更 ---
+  const handleChangeStaffRole = async (staffId: string, newRole: string) => {
+    try {
+      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', staffId);
+      if (error) throw error;
+      showToast('権限を変更しました', 'success');
+      setStaffList(prev => prev.map(p => p.id === staffId ? { ...p, role: newRole as any } : p));
+    } catch (error) {
+      showToast('権限変更に失敗しました', 'error');
+    }
+  };
 
-            if (error) throw error;
-            const url = `${window.location.origin}/join?code=${code}`;
-            setGeneratedLink(url);
-        } catch (error) {
-            console.error(error);
-            alert('リンク発行失敗');
-        } finally {
-            setIsProcessing(false);
-        }
-    };
+  // --- リンクコピー用 ---
+  const copyInviteLink = (code: string) => {
+    // ★修正: 固定URLを使用
+    const url = `${BASE_URL}/join?code=${code}`;
+    
+    navigator.clipboard.writeText(url);
+    showToast('招待リンクをコピーしました', 'info');
+  };
 
-    const handleDirectCreate = async () => {
-        if (!targetName || !targetEmail || !targetPassword) {
-            alert('すべての項目を入力してください');
-            return;
-        }
-        setIsProcessing(true);
-        try {
-            await createStaffDirectly({
-                email: targetEmail,
-                password: targetPassword,
-                name: targetName,
-                organizationId: orgId,
-                assignedClientIds: targetAssignedIds
-            });
-            alert('アカウントを作成しました！');
-            setOpenInvite(false);
-            fetchData();
-        } catch (error: any) {
-            console.error(error);
-            alert('作成失敗: ' + error.message);
-        } finally {
-            setIsProcessing(false);
-        }
-    };
+  return (
+    <Box sx={{ p: 3 }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h5" fontWeight="bold">スタッフ管理</Typography>
+        <Button variant="contained" startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); }}>
+          スタッフを招待
+        </Button>
+      </Stack>
 
-    // --- CSVインポート処理 ---
-    const handleCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+      <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e0e0e0' }}>
+        <Table>
+          <TableHead>
+            <TableRow sx={{ bgcolor: '#f9f9f9' }}>
+              <TableCell>氏名</TableCell>
+              <TableCell>権限</TableCell>
+              <TableCell>ステータス</TableCell>
+              <TableCell align="right">操作</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {staffList.map((staff) => (
+              <TableRow key={staff.id}>
+                <TableCell sx={{ fontWeight: 'bold' }}>{staff.name}</TableCell>
+                
+                {/* 権限 (Ownerなら変更可能) */}
+                <TableCell>
+                  {currentUserRole === 'owner' ? (
+                     <Select
+                       size="small"
+                       value={staff.role}
+                       onChange={(e) => {
+                         if (staff.status === 'active') {
+                           handleChangeStaffRole(staff.id, e.target.value);
+                         }
+                       }}
+                       disabled={staff.status === 'invited'} 
+                       sx={{ minWidth: 110, fontSize: 13, height: 32 }}
+                     >
+                       <MenuItem value="staff">ヘルパー</MenuItem>
+                       <MenuItem value="manager">管理者</MenuItem>
+                       <MenuItem value="owner">共同代表</MenuItem>
+                     </Select>
+                  ) : (
+                    <Chip label={staff.role} size="small" />
+                  )}
+                </TableCell>
+                
+                <TableCell>
+                  {staff.status === 'invited' ? (
+                    <Chip label="招待中" color="warning" size="small" variant="outlined" />
+                  ) : (
+                    <Chip label="有効" color="success" size="small" variant="outlined" />
+                  )}
+                </TableCell>
+                
+                <TableCell align="right">
+                  {staff.status === 'invited' && currentUserRole === 'owner' && (
+                    <Stack direction="row" spacing={1} justifyContent="flex-end">
+                      <Tooltip title="リンクをコピー">
+                        <IconButton size="small" onClick={() => copyInviteLink(staff.invitation_code!)}>
+                          <ContentCopyIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="内容を編集">
+                        <IconButton size="small" color="primary" onClick={() => openEditInviteModal(staff)}>
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="招待を取り消す">
+                        <IconButton size="small" color="error" onClick={() => handleCancelInvite(staff.id)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
 
-        setIsProcessing(true);
-        setImportLogs(['読み込み開始...']);
-        setImportProgress(0);
+      {/* --- 新規招待ダイアログ --- */}
+      <Dialog open={openInvite} onClose={() => setOpenInvite(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 'bold' }}>スタッフ招待</DialogTitle>
+        <DialogContent dividers>
+          <Tabs value={inviteMode} onChange={(_, v) => { setInviteMode(v); setGeneratedLink(''); }} sx={{ mb: 2 }}>
+            <Tab label="汎用リンク" />
+            <Tab label="名前指定リンク" />
+          </Tabs>
 
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            const text = event.target?.result as string;
-            if (!text) return;
+          <Stack spacing={3}>
+            <FormControl fullWidth size="small">
+              <InputLabel>付与する権限</InputLabel>
+              <Select value={newInviteRole} label="付与する権限" onChange={(e) => setNewInviteRole(e.target.value)}>
+                <MenuItem value="staff">ヘルパー (Staff)</MenuItem>
+                <MenuItem value="manager">管理者 (Manager)</MenuItem>
+                <MenuItem value="owner">共同代表 (Owner)</MenuItem>
+              </Select>
+            </FormControl>
 
-            // 行ごとに分割 (改行コード対応)
-            const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
-
-            // ヘッダー行を除外するか判定（今回は1行目が "name" 等なら除外）
-            let startIndex = 0;
-            if (lines[0].includes('name') || lines[0].includes('氏名')) {
-                startIndex = 1;
-            }
-
-            const total = lines.length - startIndex;
-            let successCount = 0;
-            let failCount = 0;
-
-            for (let i = startIndex; i < lines.length; i++) {
-                const line = lines[i];
-                // カンマ区切りで分割
-                const cols = line.split(',');
-                // フォーマット: name, email, password, role(任意)
-                const name = cols[0]?.trim();
-                const email = cols[1]?.trim();
-                const password = cols[2]?.trim();
-                const role = cols[3]?.trim(); // owner, manager, staff
-
-                if (!name || !email || !password) {
-                    setImportLogs(prev => [...prev, `[スキップ] 行${i + 1}: 必須項目不足 (${line})`]);
-                    failCount++;
-                    continue;
-                }
-
-                try {
-                    // Server Action呼び出し
-                    await createStaffDirectly({
-                        email,
-                        password,
-                        name,
-                        organizationId: orgId,
-                        assignedClientIds: [] // CSVでは担当割り当ては行わない（ID指定が難しいため）
-                    });
-
-                    // ロールが指定されていれば更新 (デフォルトはstaff)
-                    if (role && ['owner', 'manager', 'staff'].includes(role)) {
-                        // emailからIDを引くのは難しいので、createStaffDirectlyがIDを返してくれれば良いが
-                        // 今回は一旦スキップし、必要なら後でロール変更してもらう運用とする
-                        // (完璧にするならcreateStaffDirectlyでロールも指定できるように改修が必要)
-                    }
-
-                    setImportLogs(prev => [...prev, `[成功] ${name} (${email})`]);
-                    successCount++;
-                } catch (err: any) {
-                    setImportLogs(prev => [...prev, `[失敗] ${name}: ${err.message}`]);
-                    failCount++;
-                }
-
-                // 進捗更新
-                setImportProgress(Math.round(((i - startIndex + 1) / total) * 100));
-            }
-
-            setImportLogs(prev => [...prev, `完了: 成功 ${successCount}件, 失敗 ${failCount}件`]);
-            setIsProcessing(false);
-
-            if (successCount > 0) {
-                fetchData(); // リスト更新
-            }
-        };
-
-        reader.readAsText(file);
-        // 同じファイルを再選択できるようにリセット
-        e.target.value = '';
-    };
-
-    // サンプルCSVのダウンロード
-    const downloadSampleCSV = () => {
-        const csvContent = '\uFEFFname,email,password,role\n山田太郎,taro@example.com,pass1234,staff\n鈴木花子,hanako@example.com,pass5678,manager';
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', 'staff_import_sample.csv');
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    };
-
-    const resetInviteForm = () => {
-        setInviteMode(0);
-        setGeneratedLink('');
-        setTargetName('');
-        setTargetEmail('');
-        setTargetPassword('');
-        setTargetAssignedIds([]);
-        setIsProcessing(false);
-        setImportLogs([]);
-        setImportProgress(0);
-    };
-
-    return (
-        <Box sx={{ p: 3 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-                <Typography variant="h5" fontWeight="bold">スタッフ管理</Typography>
-                <Button
-                    variant="contained"
-                    startIcon={<PersonAddIcon />}
-                    onClick={() => { setOpenInvite(true); resetInviteForm(); }}
-                >
-                    スタッフ追加・招待
-                </Button>
-            </Stack>
-
-            {/* スタッフ一覧テーブル */}
-            {loading ? <CircularProgress /> : (
-                <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e0e0e0' }}>
-                    <Table>
-                        <TableHead>
-                            <TableRow sx={{ bgcolor: '#f9f9f9' }}>
-                                <TableCell>氏名</TableCell>
-                                <TableCell>権限</TableCell>
-                                <TableCell>担当</TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {staffList.map((staff) => (
-                                <TableRow key={staff.id}>
-                                    <TableCell sx={{ fontWeight: 'bold' }}>{staff.name}</TableCell>
-                                    <TableCell><Chip label={staff.role} color={staff.role === 'owner' ? 'primary' : 'default'} size="small" /></TableCell>
-                                    <TableCell>
-                                        <Button
-                                            variant="outlined"
-                                            size="small"
-                                            startIcon={<AssignmentIndIcon />}
-                                            onClick={() => handleOpenAssign(staff)}
-                                        >
-                                            担当設定
-                                        </Button>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
+            {inviteMode === 1 && (
+              <TextField 
+                label="スタッフ氏名" fullWidth size="small"
+                value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} 
+              />
             )}
 
-            {/* --- 追加・招待ダイアログ --- */}
-            <Dialog open={openInvite} onClose={() => setOpenInvite(false)} maxWidth="sm" fullWidth>
-                <DialogTitle sx={{ fontWeight: 'bold' }}>スタッフ追加</DialogTitle>
-                <DialogContent dividers>
-
-                    <Tabs
-                        value={inviteMode}
-                        onChange={(_, v) => { setInviteMode(v); setGeneratedLink(''); setImportLogs([]); }}
-                        variant="scrollable"
-                        scrollButtons="auto"
-                        sx={{ mb: 3 }}
-                    >
-                        <Tab label="汎用リンク" />
-                        <Tab label="名前・担当指定" />
-                        <Tab label="直接作成" />
-                        <Tab label="CSV一括作成" icon={<FileUploadIcon />} iconPosition="start" />
-                    </Tabs>
-
-                    {/* モード0: 汎用リンク */}
-                    {inviteMode === 0 && (
-                        <Stack spacing={2}>
-                            <Typography variant="body2">誰でも使える招待リンクを発行します。</Typography>
-                            {!generatedLink ? (
-                                <Button variant="contained" onClick={handleGenerateLink} disabled={isProcessing}>リンクを発行</Button>
-                            ) : (
-                                <InviteLinkView url={generatedLink} />
-                            )}
-                        </Stack>
-                    )}
-
-                    {/* モード1: 名前・担当指定 */}
-                    {inviteMode === 1 && (
-                        <Stack spacing={2}>
-                            <Typography variant="body2">特定のスタッフ専用のリンクを発行します。</Typography>
-                            {!generatedLink ? (
-                                <>
-                                    <TextField label="スタッフ氏名" fullWidth value={targetName} onChange={(e) => setTargetName(e.target.value)} />
-                                    <Typography variant="caption">担当利用者の事前設定（任意）</Typography>
-                                    <Paper variant="outlined" sx={{ p: 1, maxHeight: 150, overflow: 'auto' }}>
-                                        <FormGroup>
-                                            {allClients.map((client) => (
-                                                <FormControlLabel key={client.id} control={<Checkbox checked={targetAssignedIds.includes(client.id)} onChange={() => { setTargetAssignedIds(prev => prev.includes(client.id) ? prev.filter(id => id !== client.id) : [...prev, client.id]); }} />} label={client.name} />
-                                            ))}
-                                        </FormGroup>
-                                    </Paper>
-                                    <Button variant="contained" onClick={handleGenerateLink} disabled={!targetName || isProcessing}>専用リンクを発行</Button>
-                                </>
-                            ) : (
-                                <InviteLinkView url={generatedLink} />
-                            )}
-                        </Stack>
-                    )}
-
-                    {/* モード2: 直接作成 */}
-                    {inviteMode === 2 && (
-                        <Stack spacing={2}>
-                            <Typography variant="body2">管理者がアカウントを直接作成します。</Typography>
-                            <TextField label="氏名" fullWidth required value={targetName} onChange={(e) => setTargetName(e.target.value)} />
-                            <TextField label="メール" fullWidth required value={targetEmail} onChange={(e) => setTargetEmail(e.target.value)} />
-                            <TextField label="パスワード" fullWidth required type="password" value={targetPassword} onChange={(e) => setTargetPassword(e.target.value)} />
-                            <Button variant="contained" onClick={handleDirectCreate} disabled={isProcessing}>{isProcessing ? '作成中...' : 'アカウントを作成'}</Button>
-                        </Stack>
-                    )}
-
-                    {/* モード3: CSVインポート */}
-                    {inviteMode === 3 && (
-                        <Stack spacing={3}>
-                            <Box sx={{ p: 2, bgcolor: '#f9f9f9', borderRadius: 2 }}>
-                                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>1. CSVファイルを用意する</Typography>
-                                <Typography variant="body2" color="text.secondary" paragraph>
-                                    フォーマット: <code>氏名,メール,パスワード,権限(任意)</code><br />
-                                    ※ヘッダー行（name,email...）は自動スキップされます。
-                                </Typography>
-                                <Button size="small" startIcon={<DownloadIcon />} onClick={downloadSampleCSV}>サンプルCSVをダウンロード</Button>
-                            </Box>
-
-                            <Box>
-                                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>2. ファイルを選択してアップロード</Typography>
-                                <Button
-                                    component="label"
-                                    variant="contained"
-                                    startIcon={<FileUploadIcon />}
-                                    fullWidth
-                                    disabled={isProcessing}
-                                >
-                                    {isProcessing ? 'インポート中...' : 'CSVファイルを選択'}
-                                    <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept=".csv"
-                                        hidden
-                                        onChange={handleCSVUpload}
-                                    />
-                                </Button>
-                            </Box>
-
-                            {/* インポートログ表示 */}
-                            {(isProcessing || importLogs.length > 0) && (
-                                <Box>
-                                    <Typography variant="caption" gutterBottom>進捗状況: {importProgress}%</Typography>
-                                    <LinearProgress variant="determinate" value={importProgress} sx={{ mb: 1 }} />
-                                    <Paper variant="outlined" sx={{ p: 1, height: 150, overflow: 'auto', bgcolor: '#333', color: '#fff' }}>
-                                        {importLogs.map((log, i) => (
-                                            <Typography key={i} variant="caption" display="block" sx={{ fontFamily: 'monospace' }}>
-                                                {log}
-                                            </Typography>
-                                        ))}
-                                    </Paper>
-                                </Box>
-                            )}
-                        </Stack>
-                    )}
-
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setOpenInvite(false)}>閉じる</Button>
-                </DialogActions>
-            </Dialog>
-
-            {/* 担当割り当てダイアログ(既存) */}
-            <Dialog open={openAssign} onClose={() => setOpenAssign(false)} maxWidth="xs" fullWidth>
-                <DialogTitle>担当設定</DialogTitle>
-                <DialogContent dividers>
-                    <FormGroup>
-                        {allClients.map((client) => (
-                            <FormControlLabel key={client.id} control={<Checkbox checked={assignedClientIds.includes(client.id)} onChange={() => { setAssignedClientIds(prev => prev.includes(client.id) ? prev.filter(id => id !== client.id) : [...prev, client.id]); }} />} label={client.name} />
-                        ))}
-                    </FormGroup>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setOpenAssign(false)}>キャンセル</Button>
-                    <Button onClick={handleSaveAssignments} variant="contained" startIcon={<SaveIcon />} disabled={savingAssign}>保存</Button>
-                </DialogActions>
-            </Dialog>
-        </Box>
-    );
-}
-
-function InviteLinkView({ url }: { url: string }) {
-    return (
-        <Stack spacing={1}>
-            <Alert severity="success">リンクを発行しました！</Alert>
-            <TextField
-                value={url}
-                fullWidth
-                InputProps={{
-                    readOnly: true,
+            {!generatedLink ? (
+              <Button variant="contained" onClick={handleGenerateLink}>リンクを発行</Button>
+            ) : (
+              <Stack spacing={1}>
+                <Alert severity="success">リンクを発行しました！</Alert>
+                <TextField 
+                  value={generatedLink} fullWidth 
+                  InputProps={{
                     endAdornment: (
-                        <InputAdornment position="end">
-                            <IconButton onClick={() => { navigator.clipboard.writeText(url); alert('コピーしました'); }} color="primary"><ContentCopyIcon /></IconButton>
-                        </InputAdornment>
+                      <InputAdornment position="end">
+                        <IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}>
+                          <ContentCopyIcon />
+                        </IconButton>
+                      </InputAdornment>
                     )
-                }}
-            />
-        </Stack>
-    );
+                  }} 
+                />
+              </Stack>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenInvite(false)}>閉じる</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* --- 招待編集ダイアログ --- */}
+      <Dialog open={openEditInvite} onClose={() => setOpenEditInvite(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>招待内容の編集</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={3} mt={1}>
+             <TextField 
+                label="スタッフ氏名 (任意)" fullWidth size="small"
+                placeholder="未設定の場合は空欄"
+                value={editInviteName} onChange={(e) => setEditInviteName(e.target.value)} 
+              />
+             <FormControl fullWidth size="small">
+              <InputLabel>権限</InputLabel>
+              <Select value={editInviteRole} label="権限" onChange={(e) => setEditInviteRole(e.target.value)}>
+                <MenuItem value="staff">ヘルパー</MenuItem>
+                <MenuItem value="manager">管理者</MenuItem>
+                <MenuItem value="owner">共同代表</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenEditInvite(false)}>キャンセル</Button>
+          <Button onClick={handleUpdateInvite} variant="contained">保存</Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
 }

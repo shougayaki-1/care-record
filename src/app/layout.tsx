@@ -3,12 +3,12 @@ import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import theme from '@/theme';
-import { Inter, Poppins } from "next/font/google"; // Poppinsを追加
+import { Inter, Poppins } from "next/font/google";
 import "./globals.css";
 import { TermsAgreementModal } from "@/components/auth/TermsAgreementModal";
+import { ToastProvider } from "@/components/ui/ToastProvider";
 
 const inter = Inter({ subsets: ["latin"] });
-// タイトル用フォント設定 (太字700)
 const poppins = Poppins({
   weight: ['700'],
   subsets: ['latin'],
@@ -40,14 +40,20 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      {/* bodyにフォント変数を適用 */}
       <body className={`${inter.className} ${poppins.variable}`}>
         <AppRouterCacheProvider>
           <ThemeProvider theme={theme}>
             <CssBaseline />
-            {/* 規約同意モーダル (全ページ共通) */}
-            <TermsAgreementModal />
-            {children}
+
+            {/* トースト通知プロバイダー */}
+            <ToastProvider>
+
+              {/* 規約同意モーダル (全ページ共通) */}
+              <TermsAgreementModal />
+
+              {children}
+            </ToastProvider>
+
           </ThemeProvider>
         </AppRouterCacheProvider>
       </body>

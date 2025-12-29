@@ -1,35 +1,19 @@
-// app/helper/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import {
-    Box,
-    Typography,
-    Card,
-    CardActionArea,
-    CardContent,
-    Stack,
-    AppBar,
-    Toolbar,
-    Container,
-    Avatar,
-    CircularProgress,
-    Button,
-    Chip,
-    Alert,
-    IconButton // 追加
+    Box, Typography, Card, CardActionArea, CardContent, Stack, AppBar, Toolbar, Container,
+    Avatar, CircularProgress, Button, Chip, Alert, IconButton
 } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import LogoutIcon from '@mui/icons-material/Logout';
-import SettingsIcon from '@mui/icons-material/Settings'; // 追加
+import SettingsIcon from '@mui/icons-material/Settings';
+import HistoryIcon from '@mui/icons-material/History'; // 追加
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-type Client = {
-    id: string;
-    name: string;
-};
+type Client = { id: string; name: string; };
 
 export default function HelperHome() {
     const router = useRouter();
@@ -63,7 +47,6 @@ export default function HelperHome() {
 
             let targetClients: Client[] = [];
 
-            // Owner または Manager の場合は全員表示
             if (profile.role === 'owner' || profile.role === 'manager') {
                 const { data } = await supabase
                     .from('clients')
@@ -72,14 +55,12 @@ export default function HelperHome() {
                     .order('created_at', { ascending: false });
                 targetClients = data || [];
             } else {
-                // Staffの場合は担当のみ
                 const { data } = await supabase
                     .from('assignments')
                     .select(`clients (id, name)`)
                     .eq('helper_id', user.id);
 
                 if (data) {
-                    // data構造: [{ clients: {id, name} }, ...] -> flatten -> [{id, name}, ...]
                     targetClients = data.map((d: any) => d.clients).filter(Boolean);
                 }
             }
@@ -110,8 +91,13 @@ export default function HelperHome() {
                         </Typography>
                     </Box>
 
-                    {/* プロフィール設定ボタン */}
-                    <IconButton color="inherit" onClick={() => router.push('/profile')} sx={{ mr: 1 }}>
+                    {/* 履歴ボタン (追加) */}
+                    <IconButton color="primary" onClick={() => router.push('/helper/history')} sx={{ mr: 1 }} title="提供記録履歴">
+                        <HistoryIcon />
+                    </IconButton>
+
+                    {/* 設定ボタン */}
+                    <IconButton color="inherit" onClick={() => router.push('/profile')} sx={{ mr: 1 }} title="アカウント設定">
                         <SettingsIcon />
                     </IconButton>
 
