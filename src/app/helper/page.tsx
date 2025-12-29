@@ -2,24 +2,41 @@
 
 import { useEffect, useState } from 'react';
 import {
-    Box, Typography, Card, CardActionArea, CardContent, Stack, AppBar, Toolbar, Container,
-    Avatar, CircularProgress, Button, Chip, Alert, IconButton
+    Box,
+    Typography,
+    Card,
+    CardActionArea,
+    CardContent,
+    Stack,
+    AppBar,
+    Toolbar,
+    Container,
+    Avatar,
+    CircularProgress,
+    Button,
+    Chip,
+    Alert,
+    IconButton
 } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import LogoutIcon from '@mui/icons-material/Logout';
 import SettingsIcon from '@mui/icons-material/Settings';
-import HistoryIcon from '@mui/icons-material/History'; // 追加
+import HistoryIcon from '@mui/icons-material/History';
+import DashboardIcon from '@mui/icons-material/Dashboard'; // 追加
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-type Client = { id: string; name: string; };
+type Client = {
+    id: string;
+    name: string;
+};
 
 export default function HelperHome() {
     const router = useRouter();
     const [clients, setClients] = useState<Client[]>([]);
     const [loading, setLoading] = useState(true);
-    const [userRole, setUserRole] = useState<'owner' | 'manager' | 'staff' | null>(null);
+    const [userRole, setUserRole] = useState<'owner' | 'manager' | 'staff' | 'super_admin' | null>(null);
     const [userName, setUserName] = useState('');
 
     useEffect(() => {
@@ -47,7 +64,8 @@ export default function HelperHome() {
 
             let targetClients: Client[] = [];
 
-            if (profile.role === 'owner' || profile.role === 'manager') {
+            // Owner, Manager, Super Admin の場合は全員表示
+            if (['owner', 'manager', 'super_admin'].includes(profile.role)) {
                 const { data } = await supabase
                     .from('clients')
                     .select('id, name')
@@ -55,6 +73,7 @@ export default function HelperHome() {
                     .order('created_at', { ascending: false });
                 targetClients = data || [];
             } else {
+                // Staffの場合は担当のみ
                 const { data } = await supabase
                     .from('assignments')
                     .select(`clients (id, name)`)
@@ -78,20 +97,39 @@ export default function HelperHome() {
         router.push('/');
     };
 
+    // 管理者かどうか判定
+    const isAdmin = ['owner', 'manager', 'super_admin'].includes(userRole || '');
+
     if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', height: '100vh', alignItems: 'center' }}><CircularProgress /></Box>;
 
     return (
         <Box sx={{ bgcolor: '#f8f9fa', minHeight: '100vh', pb: 8 }}>
             <AppBar position="sticky" elevation={0} sx={{ bgcolor: '#fff', color: '#333', borderBottom: '1px solid #e0e0e0' }}>
                 <Toolbar>
-                    <Box sx={{ flexGrow: 1 }}>
-                        <Typography variant="h6" fontWeight="bold" color="primary.main">CareRecord</Typography>
-                        <Typography variant="caption" color="text.secondary">
+                    <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
+                        <Typography variant="h6" fontWeight="bold" color="primary.main" sx={{ mr: 2 }}>
+                            CareRecord
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>
                             {userName} さん ({userRole})
                         </Typography>
                     </Box>
 
-                    {/* 履歴ボタン (追加) */}
+                    {/* 管理者用：ダッシュボードに戻るボタン */}
+                    {isAdmin && (
+                        <Button
+                            color="primary"
+                            variant="outlined"
+                            size="small"
+                            startIcon={<DashboardIcon />}
+                            onClick={() => router.push('/admin/dashboard')}
+                            sx={{ mr: 2, fontWeight: 'bold', border: '1px solid #e0e0e0' }}
+                        >
+                            管理画面へ
+                        </Button>
+                    )}
+
+                    {/* 履歴ボタン */}
                     <IconButton color="primary" onClick={() => router.push('/helper/history')} sx={{ mr: 1 }} title="提供記録履歴">
                         <HistoryIcon />
                     </IconButton>
@@ -113,9 +151,9 @@ export default function HelperHome() {
                     <Typography variant="body2" color="text.secondary">記録を行う利用者を選択してください。</Typography>
                 </Box>
 
-                {(userRole === 'owner' || userRole === 'manager') && (
+                {isAdmin && (
                     <Alert severity="info" sx={{ mb: 3 }} icon={<AdminPanelSettingsIcon />}>
-                        管理者権限のため、全利用者が表示されています。
+                        管理者権限のため、事業所の全利用者が表示されています。
                     </Alert>
                 )}
 
