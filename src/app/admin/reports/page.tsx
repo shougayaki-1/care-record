@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { 
-  Box, Typography, Paper, Table, TableBody, TableCell, 
-  TableContainer, TableHead, TableRow, Chip, Button, 
-  CircularProgress, Stack, Dialog, DialogTitle, DialogContent, 
+import {
+  Box, Typography, Paper, Table, TableBody, TableCell,
+  TableContainer, TableHead, TableRow, Chip, Button,
+  CircularProgress, Stack, Dialog, DialogTitle, DialogContent,
   DialogActions, Divider, IconButton, Alert, TextField, MenuItem,
   Checkbox, TableSortLabel, Switch, FormControlLabel
 } from '@mui/material';
@@ -32,7 +32,7 @@ type Report = {
   clients: { id: string, name: string };
   helper: { name: string };
   approved_by_user?: { name: string };
-  report_values: { data: any } | { data: any }[]; 
+  report_values: { data: any } | { data: any }[];
 };
 
 type FormItem = { id: string; label: string; type: string; options?: string; };
@@ -43,13 +43,13 @@ export default function ReportsPage() {
   const [reports, setReports] = useState<Report[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   // --- フィルター状態 ---
   const [filterClientId, setFilterClientId] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all'); 
+  const [filterStatus, setFilterStatus] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [onlyPending, setOnlyPending] = useState(false); 
+  const [onlyPending, setOnlyPending] = useState(false);
 
   // --- ソート状態 ---
   const [order, setOrder] = useState<Order>('desc');
@@ -67,7 +67,7 @@ export default function ReportsPage() {
   useEffect(() => {
     fetchClients();
     fetchReports();
-  }, [order, orderBy, onlyPending]); 
+  }, [order, orderBy, onlyPending]);
 
   // --- データ取得関連 ---
   const fetchClients = async () => {
@@ -81,7 +81,7 @@ export default function ReportsPage() {
 
   const fetchReports = async () => {
     setLoading(true);
-    setSelected([]); 
+    setSelected([]);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -102,7 +102,7 @@ export default function ReportsPage() {
       if (filterClientId !== 'all') query = query.eq('client_id', filterClientId);
       if (startDate) query = query.gte('start_at', `${startDate}T00:00:00`);
       if (endDate) query = query.lte('end_at', `${endDate}T23:59:59`);
-      
+
       if (onlyPending) {
         query = query.eq('status', 'pending');
       } else if (filterStatus !== 'all') {
@@ -117,19 +117,19 @@ export default function ReportsPage() {
 
       const { data, error } = await query;
       if (error) throw error;
-      
+
       let sortedData = data as any[] || [];
-      
+
       // ソート補完 (クライアント名など)
       if (orderBy === 'client_name') {
         sortedData.sort((a: any, b: any) => {
-          return order === 'asc' 
+          return order === 'asc'
             ? a.clients.name.localeCompare(b.clients.name)
             : b.clients.name.localeCompare(a.clients.name);
         });
       } else if (orderBy === 'helper_name') {
         sortedData.sort((a: any, b: any) => {
-          return order === 'asc' 
+          return order === 'asc'
             ? a.helper.name.localeCompare(b.helper.name)
             : b.helper.name.localeCompare(a.helper.name);
         });
@@ -179,7 +179,7 @@ export default function ReportsPage() {
     setProcessing(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       const updateData = {
         status: 'approved' as ReportStatus, // ★型キャスト
         approved_by: user?.id,
@@ -204,7 +204,7 @@ export default function ReportsPage() {
         }
         return r;
       }));
-      
+
       setSelected([]);
       alert('一括承認しました');
     } catch (error) {
@@ -229,12 +229,12 @@ export default function ReportsPage() {
   };
 
   const handleBulkDownloadPDF = async () => {
-    const targetReports = selected.length > 0 
+    const targetReports = selected.length > 0
       ? reports.filter(r => selected.includes(r.id))
       : reports;
 
     if (targetReports.length === 0) return;
-    
+
     const originalText = document.title;
     document.title = "PDF生成中...";
 
@@ -275,7 +275,7 @@ export default function ReportsPage() {
     setProcessing(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       const updateData = {
         status: status, // 引数がすでにReportStatus型なのでキャスト不要
         approved_by: status === 'approved' ? user?.id : null,
@@ -283,14 +283,14 @@ export default function ReportsPage() {
       };
 
       await supabase.from('reports').update(updateData).eq('id', selectedReport.id);
-      
+
       setReports(prev => prev.map(r => {
         if (r.id === selectedReport.id) {
-          return { 
-            ...r, 
+          return {
+            ...r,
             ...updateData,
             // 承認者名の更新
-            approved_by_user: status === 'approved' ? { name: 'あなた' } : undefined 
+            approved_by_user: status === 'approved' ? { name: 'あなた' } : undefined
           };
         }
         return r;
@@ -302,7 +302,7 @@ export default function ReportsPage() {
 
   const handleOpenDetail = async (report: Report) => {
     setSelectedReport(report);
-    setCurrentTemplate([]); 
+    setCurrentTemplate([]);
     try {
       const { data } = await supabase.from('form_templates').select('schema').eq('client_id', report.clients.id).maybeSingle();
       if (data?.schema) setCurrentTemplate(data.schema as FormItem[]);
@@ -311,7 +311,7 @@ export default function ReportsPage() {
   };
 
   const StatusBadge = ({ status }: { status: string }) => {
-    switch(status) {
+    switch (status) {
       case 'approved': return <Chip label="承認済" color="success" size="small" icon={<CheckCircleIcon />} />;
       case 'remanded': return <Chip label="差戻し" color="error" size="small" />;
       default: return <Chip label="未承認" color="warning" size="small" />;
@@ -326,7 +326,7 @@ export default function ReportsPage() {
       <Paper sx={{ p: 2, mb: 3 }} elevation={0} variant="outlined">
         <Stack spacing={2}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
-            
+
             <FormControlLabel
               control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />}
               label={<Typography fontWeight="bold" color={onlyPending ? "warning.main" : "text.secondary"}>未承認のみ表示</Typography>}
@@ -350,7 +350,7 @@ export default function ReportsPage() {
               <MenuItem value="approved">承認済</MenuItem>
               <MenuItem value="remanded">差戻し</MenuItem>
             </TextField>
-            
+
             <Stack direction="row" spacing={1} alignItems="center">
               <TextField type="date" label="開始日" size="small" InputLabelProps={{ shrink: true }} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
               <Typography>～</Typography>
@@ -363,10 +363,10 @@ export default function ReportsPage() {
       </Paper>
 
       {/* 一括操作ツールバー */}
-      <Paper 
-        elevation={0} 
-        sx={{ 
-          p: 2, mb: 2, 
+      <Paper
+        elevation={0}
+        sx={{
+          p: 2, mb: 2,
           bgcolor: selected.length > 0 ? alpha('#2255CC', 0.1) : 'transparent',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 60
         }}
@@ -377,17 +377,17 @@ export default function ReportsPage() {
               {selected.length} 件選択中
             </Typography>
             <Stack direction="row" spacing={2}>
-              <Button 
-                variant="contained" color="primary" 
-                startIcon={<DoneAllIcon />} 
+              <Button
+                variant="contained" color="primary"
+                startIcon={<DoneAllIcon />}
                 onClick={handleBulkApprove}
                 disabled={processing}
               >
                 一括承認
               </Button>
-              <Button 
-                variant="outlined" color="error" 
-                startIcon={<PictureAsPdfIcon />} 
+              <Button
+                variant="outlined" color="error"
+                startIcon={<PictureAsPdfIcon />}
                 onClick={handleBulkDownloadPDF}
               >
                 選択分をPDF出力
@@ -408,7 +408,7 @@ export default function ReportsPage() {
 
       {/* テーブル */}
       {loading ? <CircularProgress /> : (
-        <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e0e0e0', maxHeight: '70vh' }}>
+        <TableContainer sx={{ maxHeight: '70vh', overflowX: 'auto', maxWidth: '100vw' }}>
           <Table stickyHeader>
             <TableHead>
               <TableRow>
@@ -450,9 +450,9 @@ export default function ReportsPage() {
                 reports.map((row) => {
                   const isItemSelected = selected.indexOf(row.id) !== -1;
                   return (
-                    <TableRow 
-                      key={row.id} 
-                      hover 
+                    <TableRow
+                      key={row.id}
+                      hover
                       selected={isItemSelected}
                       role="checkbox"
                       aria-checked={isItemSelected}
@@ -468,7 +468,7 @@ export default function ReportsPage() {
                       <TableCell>
                         <Typography variant="body2">{new Date(row.start_at).toLocaleDateString()}</Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {new Date(row.start_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} ~
+                          {new Date(row.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ~
                         </Typography>
                       </TableCell>
                       <TableCell sx={{ fontWeight: 'bold' }}>{row.clients.name}</TableCell>
@@ -486,46 +486,46 @@ export default function ReportsPage() {
           </Table>
         </TableContainer>
       )}
-      
+
       {/* 詳細ダイアログ (変更なし) */}
       <Dialog open={openDetail} onClose={() => setOpenDetail(false)} maxWidth="md" fullWidth>
-         <DialogTitle sx={{display:'flex', justifyContent:'space-between'}}>
-            詳細確認
-            <IconButton onClick={() => setOpenDetail(false)}><CloseIcon /></IconButton>
-         </DialogTitle>
-         <DialogContent dividers>
-            {selectedReportData ? (
-              <Stack spacing={1}>
-                {Object.entries(selectedReportData).map(([key, value]) => {
-                   if (key.startsWith('_') || key.endsWith('_detail')) return null;
-                   const label = currentTemplate.find(t => t.id === key)?.label || key;
-                   let displayValue = value;
-                   if (Array.isArray(value)) displayValue = value.join(', ');
-                   if (typeof value === 'boolean') displayValue = value ? '実施' : '未実施';
-                   const detail = selectedReportData[`${key}_detail`];
-                   return (
-                     <Box key={key} display="flex" borderBottom="1px solid #eee" py={1}>
-                       <Typography width="40%" fontWeight="bold" fontSize={14}>{label}</Typography>
-                       <Box width="60%">
-                         <Typography fontSize={14}>{String(displayValue)}</Typography>
-                         {detail && <Typography fontSize={12} color="primary">↳ {String(detail)}</Typography>}
-                       </Box>
-                     </Box>
-                   );
-                })}
-              </Stack>
-            ) : <Typography>データなし</Typography>}
-         </DialogContent>
-         <DialogActions>
-            {selectedReport?.status !== 'approved' ? (
-              <>
-                <Button onClick={() => handleUpdateStatus('remanded')} color="error">差戻し</Button>
-                <Button variant="contained" onClick={() => handleUpdateStatus('approved')} startIcon={<CheckCircleIcon />}>承認する</Button>
-              </>
-            ) : (
-              <Button onClick={() => handleUpdateStatus('remanded')} color="warning">承認取消</Button>
-            )}
-         </DialogActions>
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          詳細確認
+          <IconButton onClick={() => setOpenDetail(false)}><CloseIcon /></IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {selectedReportData ? (
+            <Stack spacing={1}>
+              {Object.entries(selectedReportData).map(([key, value]) => {
+                if (key.startsWith('_') || key.endsWith('_detail')) return null;
+                const label = currentTemplate.find(t => t.id === key)?.label || key;
+                let displayValue = value;
+                if (Array.isArray(value)) displayValue = value.join(', ');
+                if (typeof value === 'boolean') displayValue = value ? '実施' : '未実施';
+                const detail = selectedReportData[`${key}_detail`];
+                return (
+                  <Box key={key} display="flex" borderBottom="1px solid #eee" py={1}>
+                    <Typography width="40%" fontWeight="bold" fontSize={14}>{label}</Typography>
+                    <Box width="60%">
+                      <Typography fontSize={14}>{String(displayValue)}</Typography>
+                      {detail && <Typography fontSize={12} color="primary">↳ {String(detail)}</Typography>}
+                    </Box>
+                  </Box>
+                );
+              })}
+            </Stack>
+          ) : <Typography>データなし</Typography>}
+        </DialogContent>
+        <DialogActions>
+          {selectedReport?.status !== 'approved' ? (
+            <>
+              <Button onClick={() => handleUpdateStatus('remanded')} color="error">差戻し</Button>
+              <Button variant="contained" onClick={() => handleUpdateStatus('approved')} startIcon={<CheckCircleIcon />}>承認する</Button>
+            </>
+          ) : (
+            <Button onClick={() => handleUpdateStatus('remanded')} color="warning">承認取消</Button>
+          )}
+        </DialogActions>
       </Dialog>
     </Box>
   );
