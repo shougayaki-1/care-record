@@ -21,7 +21,6 @@ import { useRouter, usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 const drawerWidth = 280;
-
 type UserRole = 'owner' | 'manager' | 'staff' | 'super_admin';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -31,7 +30,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
     const [role, setRole] = useState<UserRole | null>(null);
     const [loading, setLoading] = useState(true);
-    const [menuOpen, setMenuOpen] = useState(false); // 全デバイス共通の開閉状態
+    const [menuOpen, setMenuOpen] = useState(false);
 
     useEffect(() => {
         checkUserRole();
@@ -56,8 +55,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         router.push('/');
     };
 
-    const toggleMenu = (open: boolean) => (event: React.KeyboardEvent | React.MouseEvent) => {
-        if (event.type === 'keydown' && ((event as React.KeyboardEvent).key === 'Tab' || (event as React.KeyboardEvent).key === 'Shift')) return;
+    const toggleMenu = (open: boolean) => () => {
         setMenuOpen(open);
     };
 
@@ -71,64 +69,38 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         { text: 'アカウント設定', icon: <AccountCircleIcon />, path: '/profile', allowed: ['owner', 'manager', 'super_admin'] },
     ];
 
-    if (loading) return <Box sx={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CircularProgress /></Box>;
+    if (loading) return (
+        <Box sx={{ height: '100vh', width: '100vw', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CircularProgress />
+        </Box>
+    );
 
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-            {/* --- ヘッダー (全デバイス共通) --- */}
-            <AppBar
-                position="fixed"
-                sx={{
-                    bgcolor: '#ffffff',
-                    color: '#333',
-                    boxShadow: 'none',
-                    borderBottom: '1px solid #eee',
-                    zIndex: (theme) => theme.zIndex.drawer + 1
-                }}
-            >
+        <Box sx={{ display: 'flex', flexDirection: 'column', width: '100vw', minHeight: '100vh', overflowX: 'hidden' }}>
+            {/* ヘッダー */}
+            <AppBar position="fixed" sx={{ bgcolor: '#fff', color: '#333', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', zIndex: theme.zIndex.drawer + 1 }}>
                 <Toolbar>
-                    <IconButton
-                        color="inherit"
-                        edge="start"
-                        onClick={toggleMenu(true)}
-                        sx={{ mr: 2 }}
-                    >
+                    <IconButton color="inherit" edge="start" onClick={toggleMenu(true)} sx={{ mr: 1 }}>
                         <MenuIcon />
                     </IconButton>
-
-                    <Typography
-                        variant="h6"
-                        noWrap
-                        component="div"
-                        sx={{
-                            flexGrow: 1,
-                            color: theme.palette.primary.main,
-                            fontWeight: '800',
-                            fontFamily: 'var(--font-poppins)',
-                            fontSize: { xs: '1.1rem', sm: '1.25rem' }
-                        }}
-                    >
+                    <Typography variant="h6" noWrap sx={{ flexGrow: 1, color: theme.palette.primary.main, fontWeight: '800', fontFamily: 'var(--font-poppins)' }}>
                         CareRecord
                     </Typography>
-
-                    <Button color="inherit" onClick={handleLogout} sx={{ color: '#666', textTransform: 'none' }}>
-                        <LogoutIcon sx={{ mr: 0.5, fontSize: 20 }} />
-                        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>ログアウト</Box>
-                    </Button>
+                    <IconButton color="inherit" onClick={handleLogout} size="small">
+                        <LogoutIcon />
+                    </IconButton>
                 </Toolbar>
             </AppBar>
 
-            {/* --- サイドメニュー (全デバイス共通: スライド式) --- */}
+            {/* スライドメニュー */}
             <Drawer
                 anchor="left"
                 open={menuOpen}
                 onClose={toggleMenu(false)}
-                PaperProps={{ sx: { width: drawerWidth, border: 'none' } }}
+                PaperProps={{ sx: { width: drawerWidth } }}
             >
-                <Box sx={{ p: 2 }}>
-                    <Box sx={{ mb: 2, px: 1, py: 2 }}>
-                        <Typography variant="h6" fontWeight="800" color="primary">Menu</Typography>
-                    </Box>
+                <Box sx={{ p: 2, pt: 4 }}>
+                    <Typography variant="h6" fontWeight="800" color="primary" sx={{ mb: 3, px: 2 }}>Menu</Typography>
                     <List>
                         {menuItems.map((item) => {
                             if (role && !item.allowed.includes(role)) return null;
@@ -138,24 +110,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                                     <ListItemButton
                                         selected={isSelected}
                                         onClick={() => {
-                                            router.push(item.path);
+                                            router.push(item.path); // ここを item.id から item.path に修正しました
                                             setMenuOpen(false);
                                         }}
                                         sx={{
                                             borderRadius: '12px',
-                                            py: 1.5,
-                                            '&.Mui-selected': {
-                                                bgcolor: alpha(theme.palette.primary.main, 0.12),
-                                                color: theme.palette.primary.main,
-                                                fontWeight: 'bold',
-                                                '& .MuiListItemIcon-root': { color: theme.palette.primary.main }
-                                            }
+                                            '&.Mui-selected': { bgcolor: alpha(theme.palette.primary.main, 0.1) }
                                         }}
                                     >
-                                        <ListItemIcon sx={{ minWidth: 40, color: isSelected ? theme.palette.primary.main : '#777' }}>
+                                        <ListItemIcon sx={{ minWidth: 40, color: isSelected ? 'primary.main' : 'inherit' }}>
                                             {item.icon}
                                         </ListItemIcon>
-                                        <ListItemText primary={item.text} primaryTypographyProps={{ fontWeight: isSelected ? '700' : '500' }} />
+                                        <ListItemText primary={item.text} primaryTypographyProps={{ fontWeight: isSelected ? 'bold' : '500' }} />
                                     </ListItemButton>
                                 </ListItem>
                             );
@@ -164,18 +130,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </Box>
             </Drawer>
 
-            {/* --- メインコンテンツ --- */}
-            <Box
-                component="main"
-                sx={{
-                    flexGrow: 1,
-                    bgcolor: 'background.default',
-                    pt: '80px', // AppBarの高さ分確保
-                    pb: 4,
-                    minHeight: '100vh',
-                    width: '100%'
-                }}
-            >
+            {/* メインコンテンツ */}
+            <Box component="main" sx={{ flexGrow: 1, pt: '80px', pb: 4, width: '100vw' }}>
                 <Container maxWidth="lg">
                     {children}
                 </Container>

@@ -25,18 +25,15 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "CareRecord",
   },
-  formatDetection: {
-    telephone: false, // 電話番号の自動リンクを無効化（誤作動防止）
-  },
 };
 
-// ★ここを強化
+// Androidの勝手なズーム・縮小を防止する設定
 export const viewport: Viewport = {
   themeColor: "#2255CC",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
-  userScalable: false, // ズーム禁止（アプリライクな挙動）
+  userScalable: false,
 };
 
 export default function RootLayout({
@@ -46,7 +43,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <body className={`${inter.className} ${poppins.variable}`}>
+      <head>
+        {/* Next.jsのviewport exportが効かない古いAndroidブラウザ向けの予備タグ */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+      </head>
+      <body className={`${inter.className} ${poppins.variable}`} style={{ margin: 0, padding: 0 }}>
         <AppRouterCacheProvider>
           <ThemeProvider theme={theme}>
             <CssBaseline />
