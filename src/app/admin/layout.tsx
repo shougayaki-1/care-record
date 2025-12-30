@@ -1,3 +1,4 @@
+// app/admin/layout.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -7,7 +8,7 @@ import {
     Button, CircularProgress, IconButton
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
-import MenuIcon from '@mui/icons-material/Menu'; // ハンバーガーアイコン
+import MenuIcon from '@mui/icons-material/Menu';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import PeopleIcon from '@mui/icons-material/People';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -34,7 +35,7 @@ export default function AdminLayout({
 
     const [role, setRole] = useState<UserRole | null>(null);
     const [loading, setLoading] = useState(true);
-    const [mobileOpen, setMobileOpen] = useState(false); // スマホメニューの開閉状態
+    const [mobileOpen, setMobileOpen] = useState(false);
 
     useEffect(() => {
         checkUserRole();
@@ -82,11 +83,10 @@ export default function AdminLayout({
         { text: 'アカウント設定', icon: <AccountCircleIcon />, path: '/profile', allowed: ['owner', 'manager', 'super_admin'] },
     ];
 
-    // メニューの中身（PC/スマホ共通）
     const drawer = (
         <Box sx={{ overflow: 'auto', p: 2 }}>
-            {/* スマホ版ドロワーにはヘッダーの高さ分の余白を入れる */}
-            <Toolbar sx={{ display: { sm: 'none' } }} />
+            {/* スマホ用: ヘッダー分の余白 */}
+            <Toolbar sx={{ display: { md: 'none' } }} />
             <List>
                 {menuItems.map((item) => {
                     if (role && !item.allowed.includes(role)) return null;
@@ -97,7 +97,7 @@ export default function AdminLayout({
                                 selected={isSelected}
                                 onClick={() => {
                                     router.push(item.path);
-                                    setMobileOpen(false); // スマホならメニュー閉じる
+                                    setMobileOpen(false);
                                 }}
                                 sx={{
                                     borderRadius: '12px',
@@ -137,17 +137,18 @@ export default function AdminLayout({
                     color: '#333',
                     boxShadow: 'none',
                     borderBottom: '1px solid #eee',
-                    width: { sm: `calc(100% - ${drawerWidth}px)` }, // PCではドロワーの幅分縮める
-                    ml: { sm: `${drawerWidth}px` }
+                    // PC表示(md以上)のときだけ幅を縮める
+                    width: { md: `calc(100% - ${drawerWidth}px)` },
+                    ml: { md: `${drawerWidth}px` }
                 }}
             >
                 <Toolbar>
-                    {/* ハンバーガーメニュー (スマホのみ表示) */}
+                    {/* ハンバーガーメニュー: md未満で表示 */}
                     <IconButton
                         color="inherit"
                         edge="start"
                         onClick={handleDrawerToggle}
-                        sx={{ mr: 2, display: { sm: 'none' } }}
+                        sx={{ mr: 2, display: { md: 'none' } }}
                     >
                         <MenuIcon />
                     </IconButton>
@@ -163,38 +164,37 @@ export default function AdminLayout({
 
             <Box
                 component="nav"
-                sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
+                sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
             >
-                {/* スマホ用ドロワー (一時的) */}
+                {/* スマホ用ドロワー (Temporary) */}
                 <Drawer
                     variant="temporary"
                     open={mobileOpen}
                     onClose={handleDrawerToggle}
-                    ModalProps={{ keepMounted: true }} // パフォーマンス向上
+                    ModalProps={{ keepMounted: true }}
                     sx={{
-                        display: { xs: 'block', sm: 'none' },
+                        display: { xs: 'block', md: 'none' }, // md未満で表示
                         '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
                     }}
                 >
                     {drawer}
                 </Drawer>
 
-                {/* PC用ドロワー (常時) */}
+                {/* PC用ドロワー (Permanent) */}
                 <Drawer
                     variant="permanent"
                     sx={{
-                        display: { xs: 'none', sm: 'block' },
+                        display: { xs: 'none', md: 'block' }, // md以上で表示
                         '& .MuiDrawer-paper': {
                             boxSizing: 'border-box',
                             width: drawerWidth,
                             borderRight: '1px solid #f0f0f0',
-                            top: '64px', // ヘッダーの下から開始したい場合調整。AppBarのzIndexが高いのでこのままでOK
                             height: '100%'
                         },
                     }}
                     open
                 >
-                    <Toolbar /> {/* ヘッダー分のスペーサー */}
+                    <Toolbar />
                     {drawer}
                 </Drawer>
             </Box>
@@ -204,10 +204,11 @@ export default function AdminLayout({
                 sx={{
                     flexGrow: 1,
                     p: 3,
-                    width: { sm: `calc(100% - ${drawerWidth}px)` },
+                    // PC表示のときだけ幅を調整
+                    width: { md: `calc(100% - ${drawerWidth}px)` },
                     bgcolor: 'background.default',
                     minHeight: '100vh',
-                    mt: '64px' // ヘッダーの高さ分下げる
+                    mt: '64px'
                 }}
             >
                 {children}
