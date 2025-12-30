@@ -1,10 +1,11 @@
+// app/admin/layout.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import {
     Box, AppBar, Toolbar, Typography, Drawer,
     List, ListItem, ListItemButton, ListItemIcon, ListItemText,
-    Button, CircularProgress, IconButton
+    Button, CircularProgress, IconButton, Container
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -19,22 +20,18 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import { useRouter, usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-const drawerWidth = 260;
+const drawerWidth = 280;
 
 type UserRole = 'owner' | 'manager' | 'staff' | 'super_admin';
 
-export default function AdminLayout({
-    children,
-}: {
-    children: React.ReactNode;
-}) {
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
     const router = useRouter();
     const pathname = usePathname();
     const theme = useTheme();
 
     const [role, setRole] = useState<UserRole | null>(null);
     const [loading, setLoading] = useState(true);
-    const [mobileOpen, setMobileOpen] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(false); // 全デバイス共通の開閉状態
 
     useEffect(() => {
         checkUserRole();
@@ -46,19 +43,10 @@ export default function AdminLayout({
             router.push('/');
             return;
         }
-
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', user.id)
-            .single();
-
+        const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
         if (profile) {
-            if (profile.role === 'staff') {
-                router.push('/helper');
-            } else {
-                setRole(profile.role as UserRole);
-            }
+            if (profile.role === 'staff') router.push('/helper');
+            else setRole(profile.role as UserRole);
         }
         setLoading(false);
     };
@@ -68,8 +56,9 @@ export default function AdminLayout({
         router.push('/');
     };
 
-    const handleDrawerToggle = () => {
-        setMobileOpen(!mobileOpen);
+    const toggleMenu = (open: boolean) => (event: React.KeyboardEvent | React.MouseEvent) => {
+        if (event.type === 'keydown' && ((event as React.KeyboardEvent).key === 'Tab' || (event as React.KeyboardEvent).key === 'Shift')) return;
+        setMenuOpen(open);
     };
 
     const menuItems = [
@@ -82,60 +71,13 @@ export default function AdminLayout({
         { text: 'アカウント設定', icon: <AccountCircleIcon />, path: '/profile', allowed: ['owner', 'manager', 'super_admin'] },
     ];
 
-    const drawer = (
-        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            {/* ドロワー内ヘッダー */}
-            <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid #eee' }}>
-                <Typography variant="h6" fontWeight="800" color="primary">CareRecord</Typography>
-            </Box>
-
-            <Box sx={{ overflow: 'auto', p: 2, flexGrow: 1 }}>
-                <List>
-                    {menuItems.map((item) => {
-                        if (role && !item.allowed.includes(role)) return null;
-                        const isSelected = pathname === item.path;
-                        return (
-                            <ListItem key={item.text} disablePadding sx={{ mb: 1 }}>
-                                <ListItemButton
-                                    selected={isSelected}
-                                    onClick={() => {
-                                        router.push(item.path);
-                                        setMobileOpen(false); // メニュー選択時に閉じる
-                                    }}
-                                    sx={{
-                                        borderRadius: '12px',
-                                        py: 1.5,
-                                        color: '#555',
-                                        '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.04) },
-                                        '&.Mui-selected': {
-                                            bgcolor: alpha(theme.palette.primary.main, 0.12),
-                                            color: theme.palette.primary.main,
-                                            fontWeight: 'bold',
-                                            '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.16) },
-                                            '& .MuiListItemIcon-root': { color: theme.palette.primary.main }
-                                        }
-                                    }}
-                                >
-                                    <ListItemIcon sx={{ minWidth: 40, color: isSelected ? theme.palette.primary.main : '#777' }}>
-                                        {item.icon}
-                                    </ListItemIcon>
-                                    <ListItemText primary={item.text} primaryTypographyProps={{ fontWeight: isSelected ? '700' : '500', fontSize: '0.95rem' }} />
-                                </ListItemButton>
-                            </ListItem>
-                        );
-                    })}
-                </List>
-            </Box>
-        </Box>
-    );
-
     if (loading) return <Box sx={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CircularProgress /></Box>;
 
     return (
-        <Box sx={{ display: 'flex', minHeight: '100vh', flexDirection: 'column' }}>
-            {/* ヘッダー (固定) */}
+        <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+            {/* --- ヘッダー (全デバイス共通) --- */}
             <AppBar
-                position="sticky"
+                position="fixed"
                 sx={{
                     bgcolor: '#ffffff',
                     color: '#333',
@@ -148,45 +90,95 @@ export default function AdminLayout({
                     <IconButton
                         color="inherit"
                         edge="start"
-                        onClick={handleDrawerToggle}
+                        onClick={toggleMenu(true)}
                         sx={{ mr: 2 }}
                     >
                         <MenuIcon />
                     </IconButton>
 
-                    <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, color: theme.palette.primary.main, fontWeight: '800', letterSpacing: '0.5px' }}>
-                        CareRecord SaaS
+                    <Typography
+                        variant="h6"
+                        noWrap
+                        component="div"
+                        sx={{
+                            flexGrow: 1,
+                            color: theme.palette.primary.main,
+                            fontWeight: '800',
+                            fontFamily: 'var(--font-poppins)',
+                            fontSize: { xs: '1.1rem', sm: '1.25rem' }
+                        }}
+                    >
+                        CareRecord
                     </Typography>
-                    <Button color="inherit" startIcon={<LogoutIcon />} onClick={handleLogout} sx={{ color: '#666' }}>
-                        ログアウト
+
+                    <Button color="inherit" onClick={handleLogout} sx={{ color: '#666', textTransform: 'none' }}>
+                        <LogoutIcon sx={{ mr: 0.5, fontSize: 20 }} />
+                        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>ログアウト</Box>
                     </Button>
                 </Toolbar>
             </AppBar>
 
-            {/* ドロワー (開閉式・全デバイス共通) */}
+            {/* --- サイドメニュー (全デバイス共通: スライド式) --- */}
             <Drawer
-                variant="temporary"
-                open={mobileOpen}
-                onClose={handleDrawerToggle}
-                ModalProps={{ keepMounted: true }}
-                sx={{
-                    '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
-                }}
+                anchor="left"
+                open={menuOpen}
+                onClose={toggleMenu(false)}
+                PaperProps={{ sx: { width: drawerWidth, border: 'none' } }}
             >
-                {drawer}
+                <Box sx={{ p: 2 }}>
+                    <Box sx={{ mb: 2, px: 1, py: 2 }}>
+                        <Typography variant="h6" fontWeight="800" color="primary">Menu</Typography>
+                    </Box>
+                    <List>
+                        {menuItems.map((item) => {
+                            if (role && !item.allowed.includes(role)) return null;
+                            const isSelected = pathname === item.path;
+                            return (
+                                <ListItem key={item.text} disablePadding sx={{ mb: 1 }}>
+                                    <ListItemButton
+                                        selected={isSelected}
+                                        onClick={() => {
+                                            router.push(item.path);
+                                            setMenuOpen(false);
+                                        }}
+                                        sx={{
+                                            borderRadius: '12px',
+                                            py: 1.5,
+                                            '&.Mui-selected': {
+                                                bgcolor: alpha(theme.palette.primary.main, 0.12),
+                                                color: theme.palette.primary.main,
+                                                fontWeight: 'bold',
+                                                '& .MuiListItemIcon-root': { color: theme.palette.primary.main }
+                                            }
+                                        }}
+                                    >
+                                        <ListItemIcon sx={{ minWidth: 40, color: isSelected ? theme.palette.primary.main : '#777' }}>
+                                            {item.icon}
+                                        </ListItemIcon>
+                                        <ListItemText primary={item.text} primaryTypographyProps={{ fontWeight: isSelected ? '700' : '500' }} />
+                                    </ListItemButton>
+                                </ListItem>
+                            );
+                        })}
+                    </List>
+                </Box>
             </Drawer>
 
-            {/* メインコンテンツ */}
+            {/* --- メインコンテンツ --- */}
             <Box
                 component="main"
                 sx={{
                     flexGrow: 1,
-                    p: 3,
-                    width: '100%',
                     bgcolor: 'background.default',
+                    pt: '80px', // AppBarの高さ分確保
+                    pb: 4,
+                    minHeight: '100vh',
+                    width: '100%'
                 }}
             >
-                {children}
+                <Container maxWidth="lg">
+                    {children}
+                </Container>
             </Box>
         </Box>
     );
