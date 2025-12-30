@@ -1,24 +1,44 @@
 /* app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-html, body {
-  max-width: 100vw;
-  overflow-x: hidden; /* 絶対に横スクロールさせない */
-  position: relative;
-  -webkit-text-size-adjust: 100%; /* iOS/Androidでの自動文字縮小を禁止 */
+:root {
+  --primary-blue: #2255CC;
 }
 
-/* 画面をはみ出しがちなテーブル要素のガード */
-* {
-  max-width: 100vw;
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #f4f7f9;
+  /* 少し落ち着いた背景色 */
+  color: #1a1c1e;
+  -webkit-text-size-adjust: 100%;
 }
 
-/* MUIコンポーネントが横幅を突き破るのを防ぐ */
+/* スマホでの入力ズーム防止 */
+@media screen and (max-width: 600px) {
+
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* MUIのコンテナがPCで端まで広がらないように制限 */
 .MuiContainer-root {
-  max-width: 100vw !important;
-  padding-left: 16px !important;
-  padding-right: 16px !important;
+  display: flex;
+  flex-direction: column;
 }
 
-.MuiPaper-root {
-  max-width: 100% !important;
+/* 共通：カードのホバー効果 */
+.hover-card {
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.hover-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1) !important;
 }

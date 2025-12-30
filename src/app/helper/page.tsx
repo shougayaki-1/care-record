@@ -1,3 +1,4 @@
+// app/helper/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -8,21 +9,13 @@ import {
     CardActionArea,
     CardContent,
     Stack,
-    AppBar,
-    Toolbar,
     Container,
     Avatar,
     CircularProgress,
-    Button,
     Chip,
-    Alert,
-    IconButton
+    Alert
 } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
-import LogoutIcon from '@mui/icons-material/Logout';
-import SettingsIcon from '@mui/icons-material/Settings';
-import HistoryIcon from '@mui/icons-material/History';
-import DashboardIcon from '@mui/icons-material/Dashboard'; // 追加
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -36,7 +29,7 @@ export default function HelperHome() {
     const router = useRouter();
     const [clients, setClients] = useState<Client[]>([]);
     const [loading, setLoading] = useState(true);
-    const [userRole, setUserRole] = useState<'owner' | 'manager' | 'staff' | 'super_admin' | null>(null);
+    const [userRole, setUserRole] = useState<string>('');
     const [userName, setUserName] = useState('');
 
     useEffect(() => {
@@ -59,13 +52,14 @@ export default function HelperHome() {
 
             if (profileError || !profile) return;
 
-            setUserRole(profile.role as any);
+            setUserRole(profile.role);
             setUserName(profile.name);
 
             let targetClients: Client[] = [];
 
-            // Owner, Manager, Super Admin の場合は全員表示
+            // 権限による出し分けロジック
             if (['owner', 'manager', 'super_admin'].includes(profile.role)) {
+                // 管理者権限：事業所の全員を表示
                 const { data } = await supabase
                     .from('clients')
                     .select('id, name')
@@ -73,7 +67,7 @@ export default function HelperHome() {
                     .order('created_at', { ascending: false });
                 targetClients = data || [];
             } else {
-                // Staffの場合は担当のみ
+                // 一般スタッフ：担当割り当てられている人のみ表示
                 const { data } = await supabase
                     .from('assignments')
                     .select(`clients (id, name)`)
@@ -86,97 +80,94 @@ export default function HelperHome() {
 
             setClients(targetClients);
         } catch (error) {
-            console.error('Error:', error);
+            console.error('Error fetching data:', error);
         } finally {
             setLoading(false);
         }
     };
 
-    const handleLogout = async () => {
-        await supabase.auth.signOut();
-        router.push('/');
-    };
-
-    // 管理者かどうか判定
-    const isAdmin = ['owner', 'manager', 'super_admin'].includes(userRole || '');
-
-    if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', height: '100vh', alignItems: 'center' }}><CircularProgress /></Box>;
+    if (loading) {
+        return (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+                <CircularProgress />
+            </Box>
+        );
+    }
 
     return (
-        <Box sx={{ bgcolor: '#f8f9fa', minHeight: '100vh', pb: 8 }}>
-            <AppBar position="sticky" elevation={0} sx={{ bgcolor: '#fff', color: '#333', borderBottom: '1px solid #e0e0e0' }}>
-                <Toolbar>
-                    <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
-                        <Typography variant="h6" fontWeight="bold" color="primary.main" sx={{ mr: 2 }}>
-                            CareRecord
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>
-                            {userName} さん ({userRole})
-                        </Typography>
+        <Container maxWidth="sm" sx={{ py: 4 }}>
+            <Box sx={{ mb: 4 }}>
+                <Typography
+                    variant="h4"
+                    sx={{
+                        fontFamily: 'var(--font-poppins)',
+                        fontWeight: 900,
+                        color: '#2255CC',
+                        mb: 1
+                    }}
+                >
+                    CareRecord
+                </Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800, mb: 1 }}>記録を始める</Typography>
+                <Typography variant="body2" color="text.secondary">
+                    サービス提供を行う利用者を選択してください。
+                </Typography>
+            </Box>
+
+            {/* 管理者用インフォメーション */}
+            {['owner', 'manager', 'super_admin'].includes(userRole) && (
+                <Alert severity="info" sx={{ mb: 3, borderRadius: 3 }} icon={<AdminPanelSettingsIcon />}>
+                    あなたは管理者権限のため、事業所の全利用者が表示されています。
+                </Alert>
+            )}
+
+            {/* 利用者リスト */}
+            <Stack spacing={2}>
+                {clients.length === 0 ? (
+                    <Box textAlign="center" py={10}>
+                        <Typography color="text.secondary">表示できる利用者がいません</Typography>
                     </Box>
-
-                    {/* 管理者用：ダッシュボードに戻るボタン */}
-                    {isAdmin && (
-                        <Button
-                            color="primary"
-                            variant="outlined"
-                            size="small"
-                            startIcon={<DashboardIcon />}
-                            onClick={() => router.push('/admin/dashboard')}
-                            sx={{ mr: 2, fontWeight: 'bold', border: '1px solid #e0e0e0' }}
+                ) : (
+                    clients.map((client) => (
+                        <Card
+                            key={client.id}
+                            elevation={0}
+                            sx={{
+                                border: '1px solid #e0e0e0',
+                                borderRadius: 4,
+                                overflow: 'hidden'
+                            }}
                         >
-                            管理画面へ
-                        </Button>
-                    )}
-
-                    {/* 履歴ボタン */}
-                    <IconButton color="primary" onClick={() => router.push('/helper/history')} sx={{ mr: 1 }} title="提供記録履歴">
-                        <HistoryIcon />
-                    </IconButton>
-
-                    {/* 設定ボタン */}
-                    <IconButton color="inherit" onClick={() => router.push('/profile')} sx={{ mr: 1 }} title="アカウント設定">
-                        <SettingsIcon />
-                    </IconButton>
-
-                    <Button color="inherit" size="small" startIcon={<LogoutIcon />} onClick={handleLogout}>
-                        ログアウト
-                    </Button>
-                </Toolbar>
-            </AppBar>
-
-            <Container maxWidth="sm" sx={{ mt: 3 }}>
-                <Box sx={{ mb: 3 }}>
-                    <Typography variant="h5" fontWeight="bold" gutterBottom>サービス提供記録</Typography>
-                    <Typography variant="body2" color="text.secondary">記録を行う利用者を選択してください。</Typography>
-                </Box>
-
-                {isAdmin && (
-                    <Alert severity="info" sx={{ mb: 3 }} icon={<AdminPanelSettingsIcon />}>
-                        管理者権限のため、事業所の全利用者が表示されています。
-                    </Alert>
+                            <CardActionArea onClick={() => router.push(`/helper/record/${client.id}`)} sx={{ p: 2.5 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5 }}>
+                                    <Avatar
+                                        sx={{
+                                            bgcolor: 'primary.light',
+                                            color: 'primary.main',
+                                            width: 56,
+                                            height: 56,
+                                            fontSize: '1.5rem'
+                                        }}
+                                    >
+                                        <PersonIcon />
+                                    </Avatar>
+                                    <Box>
+                                        <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                                            {client.name} 様
+                                        </Typography>
+                                        <Chip
+                                            label="記録作成"
+                                            size="small"
+                                            color="primary"
+                                            sx={{ mt: 0.5, fontWeight: 'bold' }}
+                                        />
+                                    </Box>
+                                </Box>
+                            </CardActionArea>
+                        </Card>
+                    ))
                 )}
-
-                <Stack spacing={2}>
-                    {clients.length === 0 ? (
-                        <Box textAlign="center" py={5}><Typography color="text.secondary">利用者が表示されません</Typography></Box>
-                    ) : (
-                        clients.map((client) => (
-                            <Card key={client.id} elevation={0} sx={{ border: '1px solid #e0e0e0', borderRadius: 3 }}>
-                                <CardActionArea onClick={() => router.push(`/helper/record/${client.id}`)} sx={{ p: 2 }}>
-                                    <CardContent sx={{ p: 0, display: 'flex', alignItems: 'center', gap: 2 }}>
-                                        <Avatar sx={{ bgcolor: 'primary.light', color: 'primary.main' }}><PersonIcon /></Avatar>
-                                        <Box>
-                                            <Typography variant="h6" fontWeight="bold">{client.name} 様</Typography>
-                                            <Chip label="記録を作成" size="small" color="primary" variant="outlined" sx={{ mt: 0.5, height: 20, fontSize: '0.7rem' }} />
-                                        </Box>
-                                    </CardContent>
-                                </CardActionArea>
-                            </Card>
-                        ))
-                    )}
-                </Stack>
-            </Container>
-        </Box>
+            </Stack>
+        </Container>
     );
 }
