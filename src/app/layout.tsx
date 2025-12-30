@@ -1,4 +1,3 @@
-// app/layout.tsx
 import type { Metadata, Viewport } from "next";
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
 import { ThemeProvider } from '@mui/material/styles';
@@ -20,14 +19,25 @@ export const metadata: Metadata = {
   title: "CareRecord",
   description: "訪問介護記録サービス",
   manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "CareRecord",
+  },
+  formatDetection: {
+    telephone: false,
+  },
 };
 
+// ★修正: Androidの縮小防止設定を強化
 export const viewport: Viewport = {
   themeColor: "#2255CC",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  minimumScale: 1, // これを追加（縮小を禁止）
   userScalable: false,
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({
@@ -37,10 +47,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <head>
-        {/* Android Chrome向けの強力な強制指定 */}
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover" />
-      </head>
+      {/* headタグ内の手動meta viewportは削除しました（競合防止のため） */}
       <body className={`${inter.className} ${poppins.variable}`}>
         <AppRouterCacheProvider>
           <ThemeProvider theme={theme}>
