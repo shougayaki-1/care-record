@@ -1,20 +1,24 @@
 /* app/globals.css */
 
-html,
-body {
+html, body {
   max-width: 100vw;
-  overflow-x: hidden;
-  /* 横スクロールを物理的に禁止 */
+  overflow-x: hidden; /* 絶対に横スクロールさせない */
   position: relative;
+  -webkit-text-size-adjust: 100%; /* iOS/Androidでの自動文字縮小を禁止 */
 }
 
+/* 画面をはみ出しがちなテーブル要素のガード */
 * {
-  -webkit-tap-highlight-color: transparent;
-  /* モバイルのタップ青枠を消す */
+  max-width: 100vw;
 }
 
-/* MUIのテーブルなどがはみ出さないようにガード */
-.MuiTableContainer-root {
-  max-width: 100%;
-  overflow-x: auto !important;
+/* MUIコンポーネントが横幅を突き破るのを防ぐ */
+.MuiContainer-root {
+  max-width: 100vw !important;
+  padding-left: 16px !important;
+  padding-right: 16px !important;
+}
+
+.MuiPaper-root {
+  max-width: 100% !important;
 }
