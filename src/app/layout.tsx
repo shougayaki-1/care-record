@@ -10,7 +10,11 @@ import { TermsAgreementModal } from "@/components/auth/TermsAgreementModal";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 
 const inter = Inter({ subsets: ["latin"] });
-const poppins = Poppins({ weight: ['700'], subsets: ['latin'], variable: '--font-poppins' });
+const poppins = Poppins({
+  weight: ['700'],
+  subsets: ['latin'],
+  variable: '--font-poppins'
+});
 
 export const metadata: Metadata = {
   title: "CareRecord",
@@ -18,24 +22,24 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
 };
 
-// AndroidにPC版と誤認させないための決定的な設定
 export const viewport: Viewport = {
   themeColor: "#2255CC",
   width: "device-width",
-  initialScale: 1.0,
-  maximumScale: 1.0,
-  userScalable: false, // ユーザーによるズームを禁止（アプリ化）
-  viewportFit: 'cover',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html lang="ja">
       <head>
-        {/* 手動のmetaタグを追加して強制力を高める */}
+        {/* Android Chrome向けの強力な強制指定 */}
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover" />
-        <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
       </head>
       <body className={`${inter.className} ${poppins.variable}`}>
         <AppRouterCacheProvider>
