@@ -5,36 +5,78 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>プライバシーポリシー | CareRecord</title>
     <style>
-        body { font-family: sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
-        h1 { border-bottom: 2px solid #2255CC; padding-bottom: 10px; color: #2255CC; }
-        h2 { margin-top: 30px; border-left: 5px solid #eee; padding-left: 10px; }
-        p { margin-bottom: 15px; }
-        .back-link { display: block; margin-top: 40px; padding: 10px; background: #f0f0f0; text-align: center; text-decoration: none; color: #333; border-radius: 5px; }
+        body { font-family: "Helvetica Neue", Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
+        .container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        h1 { border-bottom: 2px solid #2255CC; padding-bottom: 10px; color: #2255CC; font-size: 24px; }
+        h2 { margin-top: 30px; border-left: 5px solid #2255CC; padding-left: 10px; font-size: 18px; background: #eef2ff; padding: 8px 10px; }
+        p { margin-bottom: 15px; font-size: 14px; }
+        ul { margin-bottom: 15px; font-size: 14px; }
+        li { margin-bottom: 5px; }
+        .google-section { border: 1px solid #ddd; padding: 15px; background-color: #ffffef; border-radius: 5px; }
+        .footer { margin-top: 40px; font-size: 12px; color: #666; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }
+        a { color: #2255CC; text-decoration: none; }
     </style>
 </head>
 <body>
-    <h1>プライバシーポリシー</h1>
-    <p>CareRecord（以下，「当社」といいます。）は，本ウェブサイト上で提供するサービス（以下，「本サービス」といいます。）における，ユーザーの個人情報の取扱いについて，以下のとおりプライバシーポリシー（以下，「本ポリシー」といいます。）を定めます。</p>
+    <div class="container">
+        <h1>プライバシーポリシー</h1>
+        <p>CareRecord（以下，「当社」といいます。）は，本ウェブサイト上で提供するサービス（以下，「本サービス」といいます。）におけるユーザーの個人情報の取扱いについて，以下のとおりプライバシーポリシー（以下，「本ポリシー」といいます。）を定めます。</p>
 
-    <h2>第1条（個人情報）</h2>
-    <p>「個人情報」とは，個人情報保護法にいう「個人情報」を指すものとし，生存する個人に関する情報であって，当該情報に含まれる氏名，生年月日，住所，電話番号，連絡先その他の記述等により特定の個人を識別できる情報を指します。</p>
+        <h2>第1条（収集する情報）</h2>
+        <p>当社は、本サービスの利用にあたり、以下の情報を取得する場合があります。</p>
+        <ul>
+            <li><strong>アカウント情報：</strong>氏名、メールアドレス、プロフィール画像（Google/Microsoftアカウント連携時）</li>
+            <li><strong>サービス利用情報：</strong>訪問介護記録データ、ログデータ、利用日時</li>
+        </ul>
 
-    <h2>第2条（個人情報の収集方法）</h2>
-    <p>当社は，ユーザーが利用登録をする際に氏名，生年月日，住所，電話番号，メールアドレスなどの個人情報をお尋ねすることがあります。</p>
+        <h2>第2条（利用目的）</h2>
+        <p>当社が個人情報を収集・利用する目的は，以下のとおりです。</p>
+        <ul>
+            <li>本サービスの利用登録、本人確認、認証のため</li>
+            <li>訪問介護記録の作成、保存、管理および出力のため</li>
+            <li>本サービスの維持、改善、不正利用の防止のため</li>
+            <li>ユーザーからのお問い合わせに対応するため</li>
+        </ul>
 
-    <h2>第3条（個人情報の利用目的）</h2>
-    <p>当社が個人情報を収集・利用する目的は，以下のとおりです。<br>
-    ・当社サービスの提供・運営のため<br>
-    ・ユーザーからのお問い合わせに回答するため（本人確認を行うことを含む）</p>
+        <div class="google-section">
+            <h2>第3条（Googleユーザーデータの取扱い）</h2>
+            <p>本サービスは、Google APIを通じて取得した情報（Googleアカウントの氏名、メールアドレス、プロフィール画像）を、以下の制限に従って取り扱います。</p>
+            <ul>
+                <li><strong>利用の制限：</strong>取得したGoogleユーザーデータは、本サービスへのログインおよびアカウント識別のためにのみ使用し、その他の目的（広告配信や第三者への販売など）には一切使用しません。</li>
+                <li><strong>保存と保護：</strong>取得したデータは、適切なセキュリティ対策を講じた安全なデータベース（Supabase等）に保存されます。</li>
+                <li><strong>第三者提供の禁止：</strong>法令に基づく場合を除き、ユーザーの同意なくGoogleユーザーデータを第三者に提供、販売、共有することはありません。</li>
+                <li><strong>AIモデルへの使用禁止：</strong>Googleユーザーデータを、AI（人工知能）モデルのトレーニングに使用することはありません。</li>
+            </ul>
+            <p>本サービスのGoogle APIからの情報の使用および他のアプリへの転送は、<a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank">Google API Services User Data Policy</a>（Limited Use要件を含む）を遵守します。</p>
+        </div>
 
-    <h2>第4条（お問い合わせ窓口）</h2>
-    <p>本ポリシーに関するお問い合わせは，下記の窓口までお願いいたします。<br>
-    Eメールアドレス：support@carerecord.example.com</p>
+        <h2>第4条（個人情報の管理）</h2>
+        <p>当社は、ユーザーの個人情報を正確かつ最新の状態に保ち、個人情報への不正アクセス・紛失・破損・改ざん・漏洩などを防止するため、セキュリティシステムの維持・管理体制の整備等の必要な措置を講じます。</p>
 
-    <br>
-    <p>以上</p>
-    <p>制定日：202X年X月X日</p>
+        <h2>第5条（個人情報の第三者提供）</h2>
+        <p>当社は，次に掲げる場合を除いて，あらかじめユーザーの同意を得ることなく，第三者に個人情報を提供することはありません。</p>
+        <ol>
+            <li>法令に基づく場合</li>
+            <li>人の生命，身体または財産の保護のために必要がある場合</li>
+            <li>公衆衛生の向上または児童の健全な育成の推進のために特に必要がある場合</li>
+        </ol>
 
-    <a href="/" class="back-link">アプリに戻る</a>
+        <h2>第6条（データの削除・退会）</h2>
+        <p>ユーザーは、本サービスの設定画面または下記のお問い合わせ窓口を通じて、いつでも自身のアカウントおよび関連する個人情報の削除を請求することができます。削除請求を受けた場合、当社は速やかに当該データを物理的または論理的に削除します。</p>
+
+        <h2>第7条（お問い合わせ窓口）</h2>
+        <p>本ポリシーに関するお問い合わせは，下記の窓口までお願いいたします。</p>
+        <p>
+            <strong>CareRecord 運営事務局</strong><br>
+            担当：[あなたの名前 または 管理者名]<br>
+            Eメールアドレス：[連絡先メールアドレス]
+        </p>
+
+        <div class="footer">
+            <a href="/home.html">ホームに戻る</a> | <a href="/terms.html">利用規約</a>
+            <br><br>
+            制定日：202X年X月X日
+        </div>
+    </div>
 </body>
 </html>

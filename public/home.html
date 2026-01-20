@@ -1,47 +1,83 @@
-<!-- public/home.html -->
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CareRecord - 訪問介護記録サービス</title>
+    <title>CareRecord - 訪問介護記録プラットフォーム</title>
     <style>
-        body { margin: 0; font-family: "Helvetica Neue", Arial, sans-serif; color: #333; }
-        header { background: #2255CC; color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
-        .hero { background: #f4f7ff; padding: 60px 20px; text-align: center; }
-        .btn { background: #2255CC; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; }
-        .btn-login { background: white; color: #2255CC; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-weight: bold; }
-        .features { padding: 40px 20px; max-width: 1000px; margin: 0 auto; }
-        footer { background: #333; color: white; padding: 20px; text-align: center; }
-        footer a { color: #ccc; text-decoration: none; margin: 0 10px; }
+        body { margin: 0; font-family: "Helvetica Neue", Arial, sans-serif; color: #333; line-height: 1.6; }
+        header { background: #fff; border-bottom: 1px solid #eee; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
+        .logo { font-size: 24px; font-weight: bold; color: #2255CC; text-decoration: none; }
+        .hero { background: linear-gradient(135deg, #2255CC 0%, #003399 100%); color: white; padding: 80px 20px; text-align: center; }
+        .hero h1 { font-size: 36px; margin-bottom: 20px; }
+        .hero p { font-size: 18px; opacity: 0.9; margin-bottom: 40px; }
+        .btn { display: inline-block; padding: 12px 30px; border-radius: 30px; font-weight: bold; text-decoration: none; transition: 0.3s; }
+        .btn-primary { background: white; color: #2255CC; }
+        .btn-primary:hover { background: #f0f0f0; }
+        .btn-outline { border: 1px solid #2255CC; color: #2255CC; margin-left: 10px; }
+        .section { padding: 60px 20px; max-width: 1000px; margin: 0 auto; text-align: center; }
+        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 30px; margin-top: 40px; }
+        .feature-card { padding: 30px; border-radius: 10px; background: #f9f9f9; border: 1px solid #eee; }
+        .feature-icon { font-size: 40px; color: #2255CC; margin-bottom: 15px; display: block; }
+        footer { background: #333; color: white; padding: 30px 20px; text-align: center; margin-top: 50px; }
+        footer a { color: #ccc; text-decoration: none; margin: 0 10px; font-size: 14px; }
+        footer a:hover { color: white; }
     </style>
 </head>
 <body>
     <header>
-        <div style="font-size: 24px; font-weight: bold;">CareRecord</div>
-        <a href="/" class="btn-login">ログイン / 登録</a>
+        <a href="#" class="logo">CareRecord</a>
+        <nav>
+            <a href="/" class="btn btn-outline">ログイン</a>
+        </nav>
     </header>
 
     <section class="hero">
-        <h1>訪問介護の記録を、もっとシンプルに。</h1>
-        <p>スマホで完結する介護記録プラットフォーム</p>
-        <br><br>
-        <a href="/" class="btn">今すぐ無料で始める</a>
+        <h1>訪問介護の記録を、<br>もっとシンプルに、確実に。</h1>
+        <p>スマホひとつで完結する、クラウド型介護記録プラットフォーム。<br>Googleアカウント連携で、すぐに始められます。</p>
+        <a href="/" class="btn btn-primary">今すぐ無料で始める</a>
     </section>
 
-    <section class="features">
-        <h2>特徴</h2>
-        <ul>
-            <li>スマホでかんたん入力</li>
-            <li>リアルタイム共有</li>
-            <li>PDF帳票出力対応</li>
-        </ul>
+    <section class="section">
+        <h2>CareRecordの特徴</h2>
+        <p>現場の声から生まれた、使いやすさを追求した機能</p>
+
+        <div class="features">
+            <div class="feature-card">
+                <span class="feature-icon">📱</span>
+                <h3>スマホで完結</h3>
+                <p>直感的なUIで、訪問先からすぐに記録を入力。PCを開く必要はありません。</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">☁️</span>
+                <h3>クラウド同期</h3>
+                <p>データはリアルタイムでクラウドに保存。管理者とスタッフ間の情報共有がスムーズに。</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">🔒</span>
+                <h3>安全なセキュリティ</h3>
+                <p>Google/Microsoft認証による堅牢なセキュリティで、大切な利用者の情報を守ります。</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="section" style="background-color: #f8f9fa; border-radius: 20px;">
+        <h2>ご利用の流れ</h2>
+        <div style="text-align: left; max-width: 600px; margin: 30px auto;">
+            <p><strong>Step 1. アカウント登録</strong><br>GoogleまたはMicrosoftアカウントを使って、ワンクリックで登録できます。</p>
+            <p><strong>Step 2. 事業所設定</strong><br>事業所の作成、または招待リンクから既存のチームに参加します。</p>
+            <p><strong>Step 3. 利用開始</strong><br>利用者情報の登録や、日々の記録業務をすぐに開始できます。</p>
+        </div>
+        <a href="/" class="btn" style="background: #2255CC; color: white;">アプリを起動する</a>
     </section>
 
     <footer>
-        <a href="/terms.html">利用規約</a>
-        <a href="/privacy.html">プライバシーポリシー</a>
-        <p>&copy; 2024 CareRecord</p>
+        <div>
+            <a href="/home.html">ホーム</a>
+            <a href="/terms.html">利用規約</a>
+            <a href="/privacy.html">プライバシーポリシー</a>
+        </div>
+        <p style="margin-top: 20px; font-size: 12px; opacity: 0.6;">&copy; 2024 CareRecord. All rights reserved.</p>
     </footer>
 </body>
 </html>
