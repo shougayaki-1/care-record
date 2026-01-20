@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 // PWAプラグインの読み込み
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const withPWA = require('next-pwa')({
   dest: 'public', // サービスワーカーの出力先
   register: true,
@@ -9,6 +10,10 @@ const withPWA = require('next-pwa')({
 });
 
 const nextConfig: NextConfig = {
+  // 型付きルーティングを無効化してエラーを回避
+  experimental: {
+    typedRoutes: false,
+  },
   // PDFライブラリのための設定 (既存)
   webpack: (config) => {
     config.resolve.alias.canvas = false;

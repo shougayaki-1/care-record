@@ -1,0 +1,282 @@
+'use client';
+
+import { useEffect, useState, useCallback } from 'react';
+import { 
+  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
+  Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Stack, 
+  IconButton, Select, MenuItem, FormControl, InputLabel
+} from '@mui/material';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import DeleteIcon from '@mui/icons-material/Delete'; // 追加
+import { supabase } from '@/lib/supabase';
+import { useWorkspace } from '@/context/WorkspaceContext';
+import { useToast } from '@/components/ui/ToastProvider';
+
+const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
+
+type StaffProfile = {
+  id: string; 
+  name: string;
+  role: string;
+  status: 'active' | 'invited';
+  invitation_code?: string;
+};
+
+// DBレスポンス型
+type MemberRow = {
+  user_id: string;
+  role: string;
+};
+
+type ProfileRow = {
+  id: string;
+  name: string;
+};
+
+type InvitationRow = {
+  id: string;
+  target_name: string | null;
+  role: string;
+  code: string;
+};
+
+export default function StaffPage() {
+  const { currentOrg, loading: wsLoading } = useWorkspace();
+  const { showToast } = useToast();
+  const [staffList, setStaffList] = useState<StaffProfile[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+  
+  const [openInvite, setOpenInvite] = useState(false);
+  const [generatedLink, setGeneratedLink] = useState('');
+  const [newInviteName, setNewInviteName] = useState('');
+  const [newInviteRole, setNewInviteRole] = useState('staff');
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) setCurrentUserId(user.id);
+    };
+    fetchUser();
+  }, []);
+
+  const fetchData = useCallback(async () => {
+    if (!currentOrg) return;
+    try {
+      // 1. 組織メンバーの取得
+      const { data: membersData, error: membersError } = await supabase
+        .from('organization_members')
+        .select('user_id, role')
+        .eq('organization_id', currentOrg.id);
+
+      if (membersError) throw membersError;
+
+      // 2. プロフィールの取得
+      const membersList = (membersData as unknown as MemberRow[]) || [];
+      const memberIds = membersList.map((m) => m.user_id);
+      
+      const profilesMap: Record<string, string> = {};
+
+      if (memberIds.length > 0) {
+        const { data: profilesData, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, name')
+          .in('id', memberIds);
+        
+        if (profilesError) throw profilesError;
+
+        const profiles = (profilesData || []) as unknown as ProfileRow[];
+        profiles.forEach(p => {
+          profilesMap[p.id] = p.name;
+        });
+      }
+
+      // 3. 招待中データの取得
+      const { data: invitationsData, error: inviteError } = await supabase
+        .from('invitations')
+        .select('*')
+        .eq('organization_id', currentOrg.id)
+        .eq('is_used', false);
+
+      if (inviteError) throw inviteError;
+
+      const mergedList: StaffProfile[] = [];
+
+      // A. 招待中リストの作成
+      const invitations = (invitationsData || []) as unknown as InvitationRow[];
+      invitations.forEach((inv) => {
+        mergedList.push({
+          id: inv.id, // invitation.id
+          name: inv.target_name || '(招待中)',
+          role: inv.role,
+          status: 'invited',
+          invitation_code: inv.code
+        });
+      });
+
+      // B. 参加済みメンバーリストの作成
+      membersList.forEach((m) => {
+        mergedList.push({
+          id: m.user_id, // user_id
+          name: profilesMap[m.user_id] || '名前未設定',
+          role: m.role,
+          status: 'active'
+        });
+      });
+      
+      setStaffList(mergedList);
+    } catch (e) { 
+      console.error('Error fetching staff:', e); 
+    }
+  }, [currentOrg]);
+
+  useEffect(() => {
+    if (!wsLoading && currentOrg) {
+        fetchData();
+    }
+  }, [wsLoading, currentOrg, fetchData]);
+
+  const handleGenerateLink = async () => {
+    if (!currentOrg) return;
+    const code = crypto.randomUUID().slice(0, 8);
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from('invitations').insert({
+      organization_id: currentOrg.id,
+      code,
+      created_by: user?.id,
+      target_name: newInviteName || null,
+      role: newInviteRole
+    });
+    setGeneratedLink(`${BASE_URL}/join?code=${code}`);
+    fetchData(); 
+  };
+
+  const handleChangeRole = async (targetId: string, newRole: string) => {
+    if (!currentOrg) return;
+    try {
+      const { error } = await supabase.from('organization_members')
+        .update({ role: newRole })
+        .eq('organization_id', currentOrg.id)
+        .eq('user_id', targetId);
+      
+      if (error) throw error;
+      
+      showToast('権限を変更しました');
+      fetchData();
+    } catch (error) {
+      console.error(error);
+      showToast('変更に失敗しました', 'error');
+    }
+  };
+
+  // メンバー削除または招待取り消し
+  const handleDelete = async (staff: StaffProfile) => {
+    if (!currentOrg) return;
+    
+    const message = staff.status === 'active'
+        ? `本当に「${staff.name}」さんをメンバーから削除しますか？\n※この操作は取り消せません。`
+        : `「${staff.name}」さんへの招待を取り消しますか？`;
+
+    if (!confirm(message)) return;
+
+    try {
+        if (staff.status === 'active') {
+            // メンバー削除 (organization_membersから削除)
+            const { error } = await supabase
+                .from('organization_members')
+                .delete()
+                .eq('organization_id', currentOrg.id)
+                .eq('user_id', staff.id);
+            if (error) throw error;
+        } else {
+            // 招待取り消し (invitationsから削除)
+            const { error } = await supabase
+                .from('invitations')
+                .delete()
+                .eq('id', staff.id);
+            if (error) throw error;
+        }
+        showToast('削除しました');
+        fetchData();
+    } catch (e) {
+        console.error(e);
+        showToast('エラーが発生しました', 'error');
+    }
+  };
+
+  if (wsLoading || !currentOrg) return null;
+
+  return (
+    <Box>
+      <Stack direction="row" justifyContent="space-between" mb={3}>
+        <Typography variant="h5" fontWeight="bold">スタッフ管理</Typography>
+        <Button variant="contained" startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); }}>招待</Button>
+      </Stack>
+
+      <TableContainer component={Paper}>
+        <Table>
+          <TableHead><TableRow><TableCell>氏名</TableCell><TableCell>権限</TableCell><TableCell>ステータス</TableCell><TableCell>操作</TableCell></TableRow></TableHead>
+          <TableBody>
+            {staffList.map((staff) => (
+              <TableRow key={staff.id}>
+                <TableCell>{staff.name}</TableCell>
+                <TableCell>
+                  {staff.status === 'active' && currentOrg.role === 'owner' && staff.id !== currentUserId ? (
+                    <Select size="small" value={staff.role} onChange={(e) => handleChangeRole(staff.id, e.target.value)}>
+                      <MenuItem value="staff">ヘルパー</MenuItem>
+                      <MenuItem value="manager">管理者</MenuItem>
+                      <MenuItem value="owner">共同代表</MenuItem>
+                    </Select>
+                  ) : <Chip label={staff.role} size="small" />}
+                </TableCell>
+                <TableCell><Chip label={staff.status === 'active' ? '有効' : '招待中'} color={staff.status === 'active' ? 'success' : 'warning'} size="small" /></TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={1}>
+                    {/* 招待リンクコピーボタン (招待中のみ) */}
+                    {staff.status === 'invited' && staff.invitation_code && (
+                      <IconButton size="small" onClick={() => { navigator.clipboard.writeText(`${BASE_URL}/join?code=${staff.invitation_code}`); showToast('コピーしました'); }}>
+                        <ContentCopyIcon />
+                      </IconButton>
+                    )}
+                    
+                    {/* 削除ボタン (オーナー権限のみ、かつ自分自身以外) */}
+                    {currentOrg.role === 'owner' && staff.id !== currentUserId && (
+                        <IconButton size="small" color="error" onClick={() => handleDelete(staff)}>
+                            <DeleteIcon />
+                        </IconButton>
+                    )}
+                  </Stack>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      <Dialog open={openInvite} onClose={() => setOpenInvite(false)}>
+        <DialogTitle>招待リンク作成</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} minWidth={300}>
+             <FormControl fullWidth size="small">
+               <InputLabel id="invite-role-label">権限</InputLabel>
+               <Select 
+                 labelId="invite-role-label"
+                 label="権限"
+                 value={newInviteRole} 
+                 onChange={(e) => setNewInviteRole(e.target.value)}
+               >
+                 <MenuItem value="staff">ヘルパー</MenuItem>
+                 <MenuItem value="manager">管理者</MenuItem>
+               </Select>
+             </FormControl>
+             <TextField label="氏名 (任意)" size="small" value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} />
+             {!generatedLink ? <Button variant="contained" onClick={handleGenerateLink}>発行</Button> : (
+               <TextField value={generatedLink} InputProps={{ endAdornment: <IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}><ContentCopyIcon /></IconButton> }} />
+             )}
+          </Stack>
+        </DialogContent>
+        <DialogActions><Button onClick={() => setOpenInvite(false)}>閉じる</Button></DialogActions>
+      </Dialog>
+    </Box>
+  );
+}

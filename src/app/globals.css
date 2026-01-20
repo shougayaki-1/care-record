@@ -7,36 +7,13 @@
   --primary-blue: #2255CC;
 }
 
-/* HTMLとBODYを強制的に画面幅に固定 */
-html,
 body {
-  width: 100% !important;
-  max-width: 100vw !important;
-  overflow-x: hidden !important;
-  /* 横スクロールを物理的に禁止 */
-  margin: 0 !important;
-  padding: 0 !important;
   background-color: #f8f9fa;
   /* スマホでの文字サイズ自動調整をオフ */
   -webkit-text-size-adjust: 100%;
 }
 
-/* 入力フォームのズーム防止 (16pxルール) */
-input,
-textarea,
-select {
-  font-size: 16px !important;
-}
-
-/* 全要素に対して「はみ出し」を禁止 */
-* {
-  box-sizing: border-box !important;
-  max-width: 100vw !important;
-}
-
-/* MUIのテーブルなどが幅を広げるのを防ぐ */
-.MuiTable-root {
-  width: 100% !important;
-  table-layout: fixed !important;
-  /* テーブルを強制的に幅内に収める */
-}
+/* 
+   MUIのスタイル計算を妨害していた強制スタイル（!important）を削除しました。
+   これにより、TextFieldの高さやレイアウトがMUIの標準仕様通りにレンダリングされます。
+*/
