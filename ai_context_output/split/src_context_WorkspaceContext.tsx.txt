@@ -39,16 +39,41 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // 初回読み込み
     fetchWorkspaces();
+
+    // 認証状態の変化を監視
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      console.log(`[WorkspaceProvider] Auth event: ${event}`);
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        fetchWorkspaces();
+      } else if (event === 'SIGNED_OUT') {
+        setCurrentOrg(null);
+        setOrgList([]);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fetchWorkspaces = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setLoading(false);
+      setLoading(true);
+      // getSessionでセッションの存在を確認（getUserより速く、クライアントサイド向き）
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.user) {
+        console.log('[WorkspaceProvider] No session.');
+        setOrgList([]);
+        setCurrentOrg(null);
         return;
       }
+
+      const user = session.user;
+      console.log('[WorkspaceProvider] Fetching for user:', user.id);
 
       const { data, error } = await supabase
         .from('organization_members')
@@ -61,12 +86,11 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
 
       if (error) throw error;
 
-      // 型アサーションを使用せず、適切な型チェックを行う
       const members = data as unknown as OrgMemberResponse[];
 
       if (members && members.length > 0) {
         const list: Workspace[] = members
-          .filter(m => m.organizations) // 組織が存在するもののみ
+          .filter(m => m.organizations)
           .map((m) => ({
             id: m.organizations!.id,
             name: m.organizations!.name,

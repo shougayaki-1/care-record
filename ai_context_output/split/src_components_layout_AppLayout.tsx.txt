@@ -19,6 +19,7 @@ import ExpandMore from '@mui/icons-material/ExpandMore';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import LogoutIcon from '@mui/icons-material/Logout';
+import BusinessIcon from '@mui/icons-material/Business';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -29,11 +30,13 @@ const SIDEBAR_WIDTH = 240;
 
 // 1. 左端レール (事業所切り替え)
 const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], currentOrg: Workspace | null, switchOrg: (id: string) => void }) => {
+  const router = useRouter(); // ★追加: ルーターを使用
+
   return (
     <Box sx={{
       width: RAIL_WIDTH,
-      bgcolor: '#E3E5E8', // Discord風の少し濃いグレーに変更
-      borderRight: 'none', // 背景色で区切るので線は不要
+      bgcolor: '#E3E5E8', 
+      borderRight: 'none',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -51,7 +54,6 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
               onClick={() => switchOrg(org.id)}
               sx={{ 
                 p: 0,
-                // 選択時の青いリング表示
                 border: isSelected ? `2px solid #2255CC` : '2px solid transparent',
                 borderRadius: '50%',
                 transition: 'all 0.2s',
@@ -62,7 +64,7 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
             >
               <Avatar
                 sx={{
-                  bgcolor: isSelected ? '#2255CC' : '#F2F3F5', // 非選択時はサイドバー色に合わせる
+                  bgcolor: isSelected ? '#2255CC' : '#F2F3F5',
                   color: isSelected ? '#fff' : '#555',
                   width: 48, height: 48,
                   fontSize: '1rem',
@@ -89,7 +91,7 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
             transition: 'all 0.2s',
             '&:hover': { bgcolor: '#23A559', color: '#fff' }
           }}
-          onClick={() => {/* セットアップ画面へ */}}
+          onClick={() => router.push('/setup')} // ★修正: セットアップ画面へ遷移
         >
           <AddIcon />
         </IconButton>
@@ -98,7 +100,12 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
   );
 };
 
-// 2. サイドバー (メニュー)
+// ... (以下、ChannelSidebar, UserPanel, AppLayout は変更なし。以前のコードを維持)
+// 省略せずに記述する場合は、前回のAppLayout.tsxの残りの部分（ChannelSidebar以降）をここに続けてください。
+// ここでは変更点のある ServerRail 部分のみ抜粋して解説していますが、
+// 実際にはファイル全体を書き換える形になります。
+
+// --- 以下、既存コードのまま ---
 const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onClose?: () => void }) => {
   const router = useRouter();
   const pathname = usePathname();
@@ -120,25 +127,24 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
   };
 
   const isAdmin = ['owner', 'manager'].includes(currentOrg.role);
+  const isOwner = currentOrg.role === 'owner';
 
-  // カテゴリ見出し
   const categoryStyle = {
     px: 2, pt: 2.5, pb: 1,
     fontSize: '0.75rem',
     fontWeight: 'bold',
-    color: '#6D6F78', // Discord風のテキストグレー
+    color: '#6D6F78', 
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
     ml: 1
   };
 
-  // メニューアイテムのスタイル
   const itemStyle = (active: boolean) => ({
     mx: 1,
-    borderRadius: '4px', // Discordらしさを少し残すため角丸を小さめに（Material的には8px程度でもOK）
+    borderRadius: '4px',
     mb: 0.25,
     color: active ? '#060607' : '#5C5E66',
-    bgcolor: active ? 'rgba(0, 0, 0, 0.04)' : 'transparent', // 選択色をグレー系に戻しつつ薄く
+    bgcolor: active ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
     fontWeight: active ? 600 : 500,
     '&:hover': {
       bgcolor: active ? 'rgba(0, 0, 0, 0.04)' : 'rgba(0, 0, 0, 0.02)',
@@ -153,13 +159,12 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
   return (
     <Box sx={{ 
       width: SIDEBAR_WIDTH, 
-      bgcolor: '#F2F3F5', // Discord風の薄いグレー
+      bgcolor: '#F2F3F5',
       display: 'flex', 
       flexDirection: 'column', 
       height: '100%', 
-      borderRight: 'none' // メインとの境界は色で分ける
+      borderRight: 'none'
     }}>
-      {/* 事業所名ヘッダー */}
       <Box sx={{ 
         height: 48, 
         display: 'flex', 
@@ -222,6 +227,15 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
 
             <Typography sx={categoryStyle}>管理</Typography>
             <List disablePadding>
+              {isOwner && (
+                <ListItem disablePadding>
+                  <ListItemButton onClick={() => handleNav('/app/settings')} sx={itemStyle(isActive('/app/settings'))}>
+                    <ListItemIcon><BusinessIcon fontSize="small" /></ListItemIcon>
+                    <ListItemText primary="事業所設定" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+                  </ListItemButton>
+                </ListItem>
+              )}
+              
               <ListItem disablePadding>
                 <ListItemButton onClick={() => handleNav('/app/clients')} sx={itemStyle(isActive('/app/clients'))}>
                   <ListItemIcon><PeopleIcon fontSize="small" /></ListItemIcon>
@@ -242,7 +256,6 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
   );
 };
 
-// 3. アカウントパネル (最下部・全幅)
 const UserPanel = ({ onClose }: { onClose?: () => void }) => {
   const router = useRouter();
   const [userName, setUserName] = useState('');
@@ -263,8 +276,8 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
 
   return (
     <Box sx={{ 
-      height: 52, // 高さを少しコンパクトに
-      bgcolor: '#EBEDEF', // サイドバー(#F2F3F5)より少し濃い色
+      height: 52, 
+      bgcolor: '#EBEDEF', 
       display: 'flex', 
       alignItems: 'center', 
       px: 1.5,
@@ -298,7 +311,6 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
   );
 };
 
-// メインレイアウト
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -308,7 +320,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', bgcolor: '#ffffff' }}>
       
-      {/* モバイル用AppBar */}
       {isMobile && (
         <Box sx={{ position: 'fixed', top: 0, left: 0, right: 0, height: 48, bgcolor: '#F2F3F5', borderBottom: '1px solid #E3E5E8', display: 'flex', alignItems: 'center', px: 2, zIndex: 1200 }}>
           <IconButton edge="start" onClick={() => setMobileOpen(true)} size="small" sx={{ mr: 2 }}><MenuIcon /></IconButton>
@@ -316,25 +327,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </Box>
       )}
 
-      {/* PC用ナビゲーション (左端レール + サイドバー + アカウントパネル) */}
       <Box sx={{
         width: RAIL_WIDTH + SIDEBAR_WIDTH,
         display: { xs: 'none', md: 'flex' },
         flexDirection: 'column',
         height: '100%',
-        bgcolor: '#E3E5E8' // レールの背景色に合わせる
+        bgcolor: '#E3E5E8' 
       }}>
-        {/* 上部: レールとサイドバーを横並び */}
         <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
           <ServerRail orgList={orgList} currentOrg={currentOrg} switchOrg={switchOrg} />
           <ChannelSidebar currentOrg={currentOrg} />
         </Box>
-        
-        {/* 下部: ユーザーパネル (横断配置) */}
         <UserPanel />
       </Box>
 
-      {/* モバイル用ドロワー */}
       <Drawer
         variant="temporary"
         open={mobileOpen}
@@ -351,7 +357,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </Box>
       </Drawer>
 
-      {/* メインコンテンツエリア */}
       <Box
         component="main"
         sx={{
@@ -361,10 +366,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           display: 'flex', 
           flexDirection: 'column',
           overflow: 'hidden',
-          pt: { xs: 6, md: 0 },
-          '& > .MuiBox-root': {
-             // ページのルート要素に対するスタイルが必要であればここに記述
-          }
+          pt: { xs: 6, md: 0 }
         }}
       >
         {children}

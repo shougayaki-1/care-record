@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Box, Typography, Paper, TextField, Button, Stack, CircularProgress, Card, CardActionArea, Alert
 } from '@mui/material';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { User } from '@supabase/supabase-js';
 import BusinessIcon from '@mui/icons-material/Business';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import PersonIcon from '@mui/icons-material/Person';
@@ -21,7 +22,7 @@ export default function SetupPage() {
     const [submitting, setSubmitting] = useState(false);
     const [step, setStep] = useState<Step>('profile');
     const [userId, setUserId] = useState('');
-    const [hasMembership, setHasMembership] = useState(false); // ★追加: 既存メンバーかどうかのフラグ
+    const [hasMembership, setHasMembership] = useState(false);
     
     // 入力値
     const [userName, setUserName] = useState('');
@@ -34,50 +35,82 @@ export default function SetupPage() {
         }
     }, [paramInviteCode]);
 
-    const checkUser = useCallback(async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-            router.push('/');
-            return;
-        }
-        setUserId(user.id);
+    useEffect(() => {
+        let mounted = true;
 
-        // プロフィール確認
-        const { data: profile } = await supabase.from('profiles').select('name').eq('id', user.id).single();
-        
-        // 名前があればセット
-        if (profile?.name) {
-            setUserName(profile.name);
-        }
+        const processUser = async (user: User) => {
+            if (!mounted) return;
+            console.log('[SetupPage] Session confirmed for:', user.id);
+            setUserId(user.id);
 
-        // 所属確認
-        const { data: members } = await supabase.from('organization_members').select('id').eq('user_id', user.id);
-        const isMember = members && members.length > 0;
-        setHasMembership(isMember || false);
+            try {
+                const { data: profile, error: profileError } = await supabase.from('profiles').select('name').eq('id', user.id).single();
+                
+                if (profileError && profileError.code !== 'PGRST116') {
+                    console.error('[SetupPage] Profile fetch error:', profileError);
+                }
 
-        // ★修正: 既存メンバーでも、明示的にこのページに来た場合はアクセスを許可する
-        // (以前はここで /app にリダイレクトしていた)
+                const { data: members } = await supabase.from('organization_members').select('id').eq('user_id', user.id);
+                const isMember = members && members.length > 0;
+                setHasMembership(isMember || false);
 
-        // 画面遷移の判定
-        if (profile?.name) {
-            // 名前登録済みなら、招待コードがあれば即参加画面、なければ選択画面
-            if (paramInviteCode) {
-                setStep('join');
-            } else {
-                setStep('choice');
+                if (profile?.name) {
+                    setUserName(profile.name);
+                    if (paramInviteCode) {
+                        setStep('join');
+                    } else {
+                        setStep('choice');
+                    }
+                } else {
+                    setStep('profile');
+                }
+                
+                if (mounted) setLoading(false);
+            } catch (err) {
+                console.error('[SetupPage] Setup error:', err);
+                if (mounted) setLoading(false);
             }
-        } else {
-            // 名前未登録ならプロフィール入力へ
-            setStep('profile');
-        }
-        
-        setLoading(false);
+        };
+
+        const initSetup = async () => {
+            console.log('[SetupPage] Checking user session...');
+            const { data: { session } } = await supabase.auth.getSession();
+
+            if (!session) {
+                console.log('[SetupPage] No initial session, waiting for auth state change...');
+                // ここではまだリダイレクトせず、イベント発火を少し待つ
+            } else {
+                await processUser(session.user);
+            }
+        };
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            console.log(`[SetupPage] Auth Event: ${event}`);
+            
+            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+                if (session) {
+                    await processUser(session.user);
+                } else if (event === 'INITIAL_SESSION') {
+                    // ★重要: 初期チェック完了時にセッションがなければ、認証失敗とみなしてログイン画面へ
+                    console.warn('[SetupPage] INITIAL_SESSION received but no session found. Redirecting to login.');
+                    if (mounted) router.replace('/?error=session_missing');
+                }
+            } else if (event === 'SIGNED_OUT') {
+                if (mounted) router.replace('/');
+            }
+        });
+
+        initSetup();
+
+        return () => {
+            mounted = false;
+            subscription.unsubscribe();
+        };
     }, [router, paramInviteCode]);
 
-    useEffect(() => {
-        checkUser();
-    }, [checkUser]);
-
+    // ... (以降の関数群、return部分は変更なし。そのまま維持してください) ...
+    // handleSaveProfile, handleCreateOrg, handleJoinOrg, およびJSX部分
+    
     const getErrorMessage = (error: unknown): string => {
         if (error instanceof Error) return error.message;
         if (typeof error === 'object' && error !== null && 'message' in error) {
@@ -129,7 +162,6 @@ export default function SetupPage() {
         if (!inviteCode.trim()) return;
         setSubmitting(true);
         try {
-            // 1. 招待コード検証
             const { data: invite, error: inviteError } = await supabase
                 .from('invitations')
                 .select('*')
@@ -143,7 +175,6 @@ export default function SetupPage() {
                 return;
             }
 
-            // 2. 既にその事業所のメンバーかチェック (重複エラー回避)
             const { data: existingMember } = await supabase
                 .from('organization_members')
                 .select('id')
@@ -152,14 +183,12 @@ export default function SetupPage() {
                 .maybeSingle();
 
             if (existingMember) {
-                // 既に参加済みの場合は、その事業所に切り替えて移動
                 await supabase.from('profiles').update({ last_organization_id: invite.organization_id }).eq('id', userId);
                 alert('すでにこの事業所に参加しています。移動します。');
                 window.location.href = '/app';
                 return;
             }
 
-            // 3. メンバー追加
             const { error: memberError } = await supabase
                 .from('organization_members')
                 .insert({
@@ -170,10 +199,8 @@ export default function SetupPage() {
 
             if (memberError) throw memberError;
 
-            // 4. 招待を使用済みに更新
             await supabase.from('invitations').update({ is_used: true }).eq('id', invite.id);
 
-            // 5. 担当割り当て (あれば)
             if (invite.target_client_ids && invite.target_client_ids.length > 0) {
                 const assignments = invite.target_client_ids.map((clientId: string) => ({
                     helper_id: userId,
@@ -182,10 +209,8 @@ export default function SetupPage() {
                 await supabase.from('assignments').insert(assignments);
             }
 
-            // 参加した事業所を「最後に選択した事業所」として保存
             await supabase.from('profiles').update({ last_organization_id: invite.organization_id }).eq('id', userId);
 
-            // 完了
             window.location.href = '/app';
         } catch (e) {
             console.error('Join Org Error:', e);
@@ -194,7 +219,7 @@ export default function SetupPage() {
         }
     };
 
-    if (loading) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
+    if (loading) return <Box p={5} textAlign="center"><CircularProgress /><Typography mt={2}>セットアップ情報を取得中...</Typography></Box>;
 
     return (
         <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f5f5f5', p: 2 }}>
@@ -269,7 +294,6 @@ export default function SetupPage() {
                             </CardActionArea>
                         </Card>
 
-                        {/* ★追加: 既存メンバーの場合はキャンセルボタンを表示 */}
                         {hasMembership && (
                             <Button color="inherit" onClick={() => router.push('/app')}>
                                 キャンセルしてアプリに戻る

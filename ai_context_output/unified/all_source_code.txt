@@ -150,8 +150,9 @@ import {
     Box, Button, Typography, Paper, Stack, TextField,
     MenuItem, IconButton, Card, CardContent, Switch,
     FormControlLabel, Alert, CircularProgress, Dialog,
-    DialogTitle, DialogContent, DialogActions, Select, Divider,
-    Tabs, Tab, Checkbox, FormGroup
+    DialogTitle, DialogContent, DialogActions, Divider,
+    Tabs, Tab, Checkbox, FormGroup, List, ListItem, ListItemButton, ListItemText, ListItemIcon,
+    Tooltip, Chip, Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -166,69 +167,29 @@ import CommentIcon from '@mui/icons-material/Comment';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import DescriptionIcon from '@mui/icons-material/Description';
 import FolderIcon from '@mui/icons-material/Folder';
+import ContentPasteIcon from '@mui/icons-material/ContentPaste';
+import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
+import PersonIcon from '@mui/icons-material/Person';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import CopyAllIcon from '@mui/icons-material/CopyAll';
+
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
-
-type FormItem = {
-    id: string;
-    label: string;
-    type: 'text' | 'number' | 'checkbox' | 'time' | 'select' | 'section' | 'multicheckbox';
-    options?: string;
-    required: boolean;
-    hasDetail?: boolean;
-};
+import { callGasApi } from '@/app/actions/gas';
+import { STANDARD_TEMPLATES, COMPREHENSIVE_TEMPLATE, FormItem } from '@/constants/formTemplates';
+import { convertSchemaToReadable, FormItem as HelperFormItem } from '../../../../utils/templateHelper';
+import { useToast } from '@/components/ui/ToastProvider';
 
 type Staff = { id: string; name: string; type: 'member' | 'ghost' };
-
-const DEFAULT_TEMPLATE: FormItem[] = [
-    { id: 'sec_medical', label: '【医療的ケア・身体介護】', type: 'section', required: false },
-    { id: 'sputum_suction', label: '痰等の吸引（気管・口腔）', type: 'checkbox', required: false },
-    { id: 'sputum_cleaning', label: '痰等の吸引に関わる物品の清掃等', type: 'checkbox', required: false },
-    { id: 'meal_help', label: '食事介助', type: 'multicheckbox', options: '朝,昼,晩,他', required: false, hasDetail: true },
-    { id: 'water_supply', label: '水分補給', type: 'checkbox', required: false },
-    { id: 'medication', label: '服薬介助', type: 'checkbox', required: false },
-    { id: 'excretion', label: '排泄介助', type: 'checkbox', required: false, hasDetail: true },
-    { id: 'urine_disposal', label: '排尿：尿破棄 (ml)', type: 'number', required: false },
-    { id: 'oral_care', label: '口腔ケア', type: 'checkbox', required: false },
-    { id: 'body_cleaning', label: '清拭・整容介助', type: 'multicheckbox', options: '全身,顔,上肢,下肢,手,足,背,陰部,頭部,臀部,整髪,耳掃除,爪切り,髭剃り,その他', required: false, hasDetail: true },
-    { id: 'partial_bath', label: '部分浴', type: 'multicheckbox', options: '手,足,洗髪,陰部洗浄', required: false },
-    { id: 'medical_app', label: '処置（シップ・薬・座薬・点眼）', type: 'multicheckbox', options: 'シップ貼付,薬塗布,座薬挿入,点眼', required: false },
-    { id: 'change_clothes', label: '更衣介助', type: 'checkbox', required: false, hasDetail: true },
-    { id: 'observation', label: '観察', type: 'multicheckbox', options: 'モニター,皮膚,体位置,表情,他', required: false, hasDetail: true },
-    { id: 'vital_check', label: 'バイタル測定（実施項目）', type: 'multicheckbox', options: '体温,血圧,脈拍,SpO2,他', required: false, hasDetail: true },
-    { id: 'temp_adjust', label: '温度調整', type: 'multicheckbox', options: '体温,室温', required: false },
-    { id: 'sec_support', label: '【生活援助・移動支援】', type: 'section', required: false },
-    { id: 'position_change', label: '体位・安楽', type: 'multicheckbox', options: '体位交換,良肢位,疼痛緩和,褥瘡予防', required: false },
-    { id: 'env_maintenance', label: '環境整備', type: 'checkbox', required: false },
-    { id: 'daily_assist_group', label: '日常の補佐', type: 'multicheckbox', options: 'コミュニケーション支援,各関節・筋肉の運動の補助,パソコン等の操作・設定,電話等の補助,書類の整理,家電等の設定・操作,他', required: false, hasDetail: true },
-    { id: 'bedding_change', label: '寝具交換', type: 'checkbox', required: false, hasDetail: true },
-    { id: 'transfer_assist', label: '移乗介助', type: 'checkbox', required: false },
-    { id: 'move_assist', label: '移動介助（手押し車いす）', type: 'checkbox', required: false },
-    { id: 'outing_assist', label: '外出介助', type: 'checkbox', required: false },
-    { id: 'outing_prep', label: '外出に関する必要物品の用意・後片付', type: 'checkbox', required: false },
-    { id: 'sec_housework', label: '【家事・その他】', type: 'section', required: false },
-    { id: 'cooking', label: '調理・配膳', type: 'multicheckbox', options: '調理,配膳,下膳,後片付け', required: false },
-    { id: 'cleaning', label: '掃除等・ゴミ出し', type: 'multicheckbox', options: '玄関,居間,寝室,台所,廊下,トイレ,浴室,洗面所,物品庫,掃除機,拭き掃除,他', required: false, hasDetail: true },
-    { id: 'clothes_mending', label: '衣類の整理・補修', type: 'multicheckbox', options: '衣類の整理,被服の補修', required: false },
-    { id: 'proxy_service', label: '代行業務', type: 'multicheckbox', options: '買物,銀行,郵便局,薬受け取り,他', required: false, hasDetail: true },
-    { id: 'goods_organize', label: '物品整理', type: 'multicheckbox', options: '医薬品,衣料品,食料品,他', required: false, hasDetail: true },
-    { id: 'laundry', label: '洗濯', type: 'multicheckbox', options: '干す,収納', required: false },
-    { id: 'consultation', label: '相談援助', type: 'multicheckbox', options: '相談援助,情報収集,提供', required: false },
-    { id: 'watching', label: '見守り', type: 'checkbox', required: false },
-    { id: 'other_note', label: 'その他', type: 'text', required: false },
-    { id: 'hospital_comm', label: '入院時コミュニケーション支援', type: 'checkbox', required: false },
-    { id: 'sec_confirm', label: '【確認事項】', type: 'section', required: false },
-    { id: 'benefit_change', label: '●給付変更事項', type: 'multicheckbox', options: '時間延長,時間短縮,追加訪問,時間変更', required: false },
-    { id: 'exit_check', label: '●退出時確認事項', type: 'multicheckbox', options: '鍵,火元,電気,水道,戸締まり,ガス元栓,ボイラー', required: false },
-    { id: 'special_note', label: '《特記事項》', type: 'text', required: false },
-];
 
 export default function ClientSettingsPage() {
     const router = useRouter();
     const params = useParams();
     const clientId = params.id as string;
     const { currentOrg, loading: wsLoading } = useWorkspace();
+    const { showToast } = useToast();
 
     const [loading, setLoading] = useState(true);
     const [clientName, setClientName] = useState('');
@@ -242,11 +203,12 @@ export default function ClientSettingsPage() {
     const [templateId, setTemplateId] = useState('');
 
     const [isSaving, setIsSaving] = useState(false);
+    const [isCreatingTemplate, setIsCreatingTemplate] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
     const [openCopyDialog, setOpenCopyDialog] = useState(false);
+    const [copyTab, setCopyTab] = useState(0); 
     const [otherClients, setOtherClients] = useState<{id: string, name: string}[]>([]);
-    const [copySourceId, setCopySourceId] = useState('');
 
     const fetchClientData = useCallback(async () => {
         try {
@@ -260,7 +222,7 @@ export default function ClientSettingsPage() {
             if (template?.schema && Array.isArray(template.schema) && template.schema.length > 0) {
                 setFormItems(template.schema as FormItem[]);
             } else {
-                const initItems = DEFAULT_TEMPLATE.map(item => ({ ...item, id: crypto.randomUUID() }));
+                const initItems = COMPREHENSIVE_TEMPLATE.map(item => ({ ...item, id: crypto.randomUUID() }));
                 setFormItems(initItems);
             }
 
@@ -401,139 +363,459 @@ export default function ClientSettingsPage() {
         setAssignedStaffIds(prev => prev.includes(staffId) ? prev.filter(id => id !== staffId) : [...prev, staffId]);
     };
 
-    const handleCopy = async () => {
-        if (!copySourceId) return;
-        try {
-            const { data: template } = await supabase.from('form_templates').select('schema').eq('client_id', copySourceId).maybeSingle();
+    const handleCopy = async (sourceType: 'standard' | 'client', sourceId: string) => {
+        if (!confirm('現在の設定はすべて上書きされます。よろしいですか？')) return;
+
+        let newSchema: FormItem[] = [];
+        if (sourceType === 'standard') {
+            const tmpl = STANDARD_TEMPLATES.find(t => t.key === sourceId);
+            if (tmpl) newSchema = tmpl.schema;
+        } else {
+            const { data: template } = await supabase.from('form_templates').select('schema').eq('client_id', sourceId).maybeSingle();
             if (template?.schema) {
-                if (confirm('現在の設定はすべて上書きされます。よろしいですか？')) {
-                    const copiedItems = (template.schema as FormItem[]).map(item => ({ ...item, id: crypto.randomUUID() }));
-                    setFormItems(copiedItems);
-                    setOpenCopyDialog(false);
-                    setMessage({ type: 'success', text: '設定をコピーしました' });
-                }
-            } else {
-                alert('設定がありません');
+                newSchema = template.schema as FormItem[];
             }
-        } catch (error) { console.error(error); }
+        }
+
+        if (newSchema.length > 0) {
+            const copiedItems = newSchema.map(item => ({ ...item, id: crypto.randomUUID() }));
+            setFormItems(copiedItems);
+            setOpenCopyDialog(false);
+            setMessage({ type: 'success', text: '設定を反映しました' });
+        } else {
+            alert('テンプレートの取得に失敗しました');
+        }
+    };
+
+    const handleCreateTemplate = async () => {
+        if (!currentOrg || !clientName) return;
+
+        if (templateId) {
+            if (!confirm('既にテンプレートIDが入力されています。新しく作成して上書きしますか？')) return;
+        }
+
+        setIsCreatingTemplate(true);
+        setMessage(null);
+
+        try {
+            const { data: orgData } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg.id).single();
+            const { data: clientData } = await supabase.from('clients').select('google_folder_id').eq('id', clientId).single();
+            
+            if (!orgData?.google_folder_id) {
+                throw new Error('事業所のGoogleドライブ連携が設定されていません。「事業所設定」から連携を行ってください。');
+            }
+
+            const folderRes = await callGasApi({
+                action: 'manage_client_folder',
+                orgFolderId: orgData.google_folder_id,
+                clientName: clientName,
+                currentFolderId: clientData?.google_folder_id
+            });
+            
+            if (folderRes.status !== 'success') throw new Error('フォルダ作成エラー: ' + folderRes.message);
+            
+            if (folderRes.folderId !== clientData?.google_folder_id) {
+                await supabase.from('clients').update({ google_folder_id: folderRes.folderId }).eq('id', clientId);
+            }
+
+            const readableSchema = convertSchemaToReadable(formItems);
+
+            const createRes = await callGasApi({
+                action: 'create_template_doc',
+                folderId: folderRes.folderId,
+                clientName: clientName,
+                schema: readableSchema 
+            });
+
+            if (createRes.status === 'success') {
+                setTemplateId(createRes.docId);
+                await supabase.from('clients').update({ google_template_id: createRes.docId }).eq('id', clientId);
+                setMessage({ type: 'success', text: 'テンプレートを作成し、連携しました！別タブで開きます。' });
+                window.open(createRes.docUrl, '_blank');
+            } else {
+                throw new Error(createRes.message);
+            }
+
+        } catch (e) {
+            console.error(e);
+            setMessage({ type: 'error', text: 'エラーが発生しました: ' + String(e) });
+        } finally {
+            setIsCreatingTemplate(false);
+        }
+    };
+
+    const copyTag = (text: string) => {
+        navigator.clipboard.writeText(text);
+        showToast(`コピーしました: ${text}`);
+    };
+
+    // UI用: スキーマを日本語化してリスト表示用に加工
+    const renderTagList = () => {
+        const readableItems = convertSchemaToReadable(formItems);
+        const groups: { title: string, items: HelperFormItem[] }[] = [];
+        let currentGroup = { title: '基本・その他', items: [] as HelperFormItem[] };
+
+        readableItems.forEach(item => {
+            if (item.type === 'section') {
+                if (currentGroup.items.length > 0) groups.push(currentGroup);
+                currentGroup = { title: item.label, items: [] };
+            } else {
+                currentGroup.items.push(item);
+            }
+        });
+        if (currentGroup.items.length > 0) groups.push(currentGroup);
+
+        return groups;
+    };
+
+    // 全タグを一括コピーする機能
+    const handleCopyAllTags = () => {
+        const groups = renderTagList();
+        let allTagsText = "";
+        
+        groups.forEach(group => {
+            allTagsText += `\n■ ${group.title}\n`;
+            group.items.forEach((item: HelperFormItem) => {
+                if (['checkbox', 'text', 'number', 'time'].includes(item.type)) {
+                    allTagsText += `${item.label}: {{${item.id}}}\n`;
+                    if (item.hasDetail) allTagsText += `  └ 詳細: {{${item.id}_詳細}}\n`;
+                } else if (['multicheckbox', 'select'].includes(item.type)) {
+                    allTagsText += `▼ ${item.label}\n`;
+                    const options = item.options?.split(',') || [];
+                    options.forEach((opt: string) => {
+                        // ★修正ポイント: フォーマットを「項目名: {{タグ}}」に変更
+                        allTagsText += `${opt.trim()}: {{${item.id}_${opt.trim()}}}  `;
+                    });
+                    allTagsText += "\n";
+                    if (item.hasDetail) allTagsText += `  (詳細/他: {{${item.id}_詳細}})\n`;
+                }
+            });
+        });
+        
+        allTagsText += "\n■ 共通項目\n";
+        ['利用者名', '担当ヘルパー名', '開始日付', '開始時刻', '終了日付', '終了時刻', 'サービス時間', '移動時間'].forEach(key => {
+            allTagsText += `${key}: {{${key}}}\n`;
+        });
+
+        navigator.clipboard.writeText(allTagsText);
+        showToast("全てのタグをコピーしました");
     };
 
     if (loading) return <Box p={4}><CircularProgress /></Box>;
 
     return (
-        <Box sx={{ p: 3, pb: 12, bgcolor: '#f5f5f5', minHeight: '100vh' }}>
-            <Paper elevation={0} sx={{ p: 2, mb: 3, border: '1px solid #e0e0e0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Stack direction="row" alignItems="center" spacing={2}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <Box sx={{ p: 2, borderBottom: '1px solid #e0e0e0', bgcolor: '#fff', flexShrink: 0 }}>
+                <Stack direction="row" alignItems="center" spacing={2} mb={2}>
                     <IconButton onClick={() => router.back()}><ArrowBackIcon /></IconButton>
                     <Box>
                         <Typography variant="caption" color="text.secondary">利用者設定</Typography>
                         <Typography variant="h5" fontWeight="bold">{clientName} 様</Typography>
                     </Box>
                 </Stack>
-            </Paper>
-
-            <Paper sx={{ mb: 3 }}>
                 <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="fullWidth">
                     <Tab icon={<DescriptionIcon />} label="記録フォーム" />
                     <Tab icon={<AssignmentIndIcon />} label="担当スタッフ" />
                     <Tab icon={<FolderIcon />} label="帳票・連携" />
                 </Tabs>
-            </Paper>
+            </Box>
 
-            {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: '#f5f5f5' }}>
+                {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
-            {tabIndex === 0 && (
-                <Box>
-                    <Box display="flex" justifyContent="flex-end" gap={1} mb={2}>
-                        <Button variant="outlined" color="secondary" onClick={() => { if (confirm('標準設定に戻しますか？')) setFormItems(DEFAULT_TEMPLATE.map(i => ({ ...i, id: crypto.randomUUID() }))) }}>標準設定に戻す</Button>
-                        <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={() => setOpenCopyDialog(true)} disabled={otherClients.length === 0}>他からコピー</Button>
-                    </Box>
-                    <Stack spacing={2}>
-                        {formItems.map((item, index) => (
-                            <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid #2255CC' : 'none', bgcolor: item.type === 'section' ? '#eef2ff' : 'white' }}>
-                                <CardContent sx={{ p: '16px !important' }}>
-                                    <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2}>
-                                        <Stack direction="column" spacing={0.5}>
-                                            <IconButton size="small" onClick={() => moveField(index, 'up')} disabled={index === 0}><ArrowUpwardIcon fontSize="small" /></IconButton>
-                                            <IconButton size="small" onClick={() => moveField(index, 'down')} disabled={index === formItems.length - 1}><ArrowDownwardIcon fontSize="small" /></IconButton>
-                                            <IconButton color="error" size="small" onClick={() => removeField(index)} sx={{ mt: 1 }}><DeleteIcon fontSize="small" /></IconButton>
-                                        </Stack>
-                                        <Box sx={{ flexGrow: 1, width: '100%' }}>
-                                            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} mb={1}>
-                                                <TextField select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ minWidth: 160 }} InputProps={{ startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null }}>
-                                                    <MenuItem value="section" sx={{ fontWeight: 'bold', color: 'primary.main' }}>■ セクション見出し</MenuItem>
-                                                    <Divider /><MenuItem value="checkbox">チェック (ON/OFF)</MenuItem><MenuItem value="multicheckbox">複数選択</MenuItem><MenuItem value="text">テキスト入力</MenuItem><MenuItem value="number">数値入力</MenuItem><MenuItem value="select">1つ選択 (ラジオ)</MenuItem><MenuItem value="time">時間</MenuItem>
-                                                </TextField>
-                                                <TextField label={item.type === 'section' ? "セクション名" : "質問内容"} size="small" fullWidth value={item.label} onChange={(e) => updateField(index, 'label', e.target.value)} sx={{ '& .MuiInputBase-input': { fontWeight: item.type === 'section' ? 'bold' : 'normal', fontSize: item.type === 'section' ? '1.1rem' : '1rem' } }} />
-                                                {item.type !== 'section' && <FormControlLabel control={<Switch size="small" checked={item.required} onChange={(e) => updateField(index, 'required', e.target.checked)} />} label="必須" sx={{ minWidth: 80 }} />}
+                {tabIndex === 0 && (
+                    <Box>
+                        <Box display="flex" justifyContent="flex-end" gap={1} mb={2}>
+                            <Button 
+                                variant="outlined" 
+                                startIcon={<ContentCopyIcon />} 
+                                onClick={() => { setOpenCopyDialog(true); setCopyTab(0); }}
+                            >
+                                テンプレート読込 / コピー
+                            </Button>
+                        </Box>
+                        <Stack spacing={2} pb={2}>
+                            {formItems.map((item, index) => (
+                                <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid #2255CC' : 'none', bgcolor: item.type === 'section' ? '#eef2ff' : 'white' }}>
+                                    <CardContent sx={{ p: '16px !important' }}>
+                                        <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2}>
+                                            <Stack direction="column" spacing={0.5}>
+                                                <IconButton size="small" onClick={() => moveField(index, 'up')} disabled={index === 0}><ArrowUpwardIcon fontSize="small" /></IconButton>
+                                                <IconButton size="small" onClick={() => moveField(index, 'down')} disabled={index === formItems.length - 1}><ArrowDownwardIcon fontSize="small" /></IconButton>
+                                                <IconButton color="error" size="small" onClick={() => removeField(index)} sx={{ mt: 1 }}><DeleteIcon fontSize="small" /></IconButton>
                                             </Stack>
-                                            {(item.type === 'checkbox' || item.type === 'multicheckbox' || item.type === 'select') && (
-                                                <FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: 1 }} />
-                                            )}
-                                            {(item.type === 'select' || item.type === 'multicheckbox') && (
-                                                <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={item.options || ''} onChange={(e) => updateField(index, 'options', e.target.value)} InputProps={{ startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} /> }} />
-                                            )}
-                                        </Box>
+                                            <Box sx={{ flexGrow: 1, width: '100%' }}>
+                                                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} mb={1}>
+                                                    <TextField select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ minWidth: 160 }} InputProps={{ startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null }}>
+                                                        <MenuItem value="section" sx={{ fontWeight: 'bold', color: 'primary.main' }}>■ セクション見出し</MenuItem>
+                                                        <Divider /><MenuItem value="checkbox">チェック (ON/OFF)</MenuItem><MenuItem value="multicheckbox">複数選択</MenuItem><MenuItem value="text">テキスト入力</MenuItem><MenuItem value="number">数値入力</MenuItem><MenuItem value="select">1つ選択 (ラジオ)</MenuItem><MenuItem value="time">時間</MenuItem>
+                                                    </TextField>
+                                                    <TextField label={item.type === 'section' ? "セクション名" : "質問内容"} size="small" fullWidth value={item.label} onChange={(e) => updateField(index, 'label', e.target.value)} sx={{ '& .MuiInputBase-input': { fontWeight: item.type === 'section' ? 'bold' : 'normal', fontSize: item.type === 'section' ? '1.1rem' : '1rem' } }} />
+                                                    {item.type !== 'section' && <FormControlLabel control={<Switch size="small" checked={item.required} onChange={(e) => updateField(index, 'required', e.target.checked)} />} label="必須" sx={{ minWidth: 80 }} />}
+                                                </Stack>
+                                                {(item.type === 'checkbox' || item.type === 'multicheckbox' || item.type === 'select') && (
+                                                    <FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: 1 }} />
+                                                )}
+                                                {(item.type === 'select' || item.type === 'multicheckbox') && (
+                                                    <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={item.options || ''} onChange={(e) => updateField(index, 'options', e.target.value)} InputProps={{ startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} /> }} />
+                                                )}
+                                            </Box>
+                                        </Stack>
+                                    </CardContent>
+                                </Card>
+                            ))}
+                            <Button variant="outlined" startIcon={<AddCircleIcon />} onClick={addField} size="large" sx={{ border: '2px dashed #ccc', color: '#666', py: 2 }}>項目を追加する</Button>
+                        </Stack>
+                    </Box>
+                )}
+
+                {tabIndex === 1 && (
+                    <Card variant="outlined">
+                        <CardContent>
+                            <Typography variant="subtitle1" fontWeight="bold" gutterBottom>この利用者を担当するスタッフを選択してください</Typography>
+                            <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。</Typography>
+                            <FormGroup>
+                                <Typography variant="subtitle2" sx={{ mt: 1, mb: 1, color: 'primary.main' }}>メンバー（ログインユーザー）</Typography>
+                                <Box display="flex" flexWrap="wrap" gap={2}>
+                                    {allStaffs.filter(s => s.type === 'member').map(staff => (
+                                        <FormControlLabel key={staff.id} control={<Checkbox checked={assignedStaffIds.includes(staff.id)} onChange={() => handleToggleStaff(staff.id)} />} label={staff.name} sx={{ minWidth: 150 }} />
+                                    ))}
+                                </Box>
+                                <Typography variant="subtitle2" sx={{ mt: 3, mb: 1, color: 'secondary.main' }}>アカウントなし（転記用）</Typography>
+                                <Box display="flex" flexWrap="wrap" gap={2}>
+                                    {allStaffs.filter(s => s.type === 'ghost').map(staff => (
+                                        <FormControlLabel key={staff.id} control={<Checkbox checked={assignedStaffIds.includes(staff.id)} onChange={() => handleToggleStaff(staff.id)} />} label={staff.name} sx={{ minWidth: 150 }} />
+                                    ))}
+                                </Box>
+                            </FormGroup>
+                        </CardContent>
+                    </Card>
+                )}
+
+                {tabIndex === 2 && (
+                    <Stack spacing={3}>
+                        <Card variant="outlined">
+                            <CardContent>
+                                <Stack direction="row" alignItems="center" gap={2} mb={2}>
+                                    <DescriptionIcon color="primary" fontSize="large" />
+                                    <Box>
+                                        <Typography variant="h6" fontWeight="bold">Googleドキュメント連携</Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                            帳票の雛形（テンプレート）を管理します。
+                                        </Typography>
+                                    </Box>
+                                </Stack>
+
+                                <Divider sx={{ my: 2 }} />
+
+                                <Box mb={4}>
+                                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
+                                        <AutoFixHighIcon color="secondary" fontSize="small" /> 1. テンプレートを作成・連携
+                                    </Typography>
+                                    <Typography variant="body2" color="text.secondary" paragraph>
+                                        マスターテンプレート（共通のひな形）をコピーして、この利用者専用のGoogleドキュメントを作成します。<br/>
+                                        作成後、下記リストから必要なタグをコピーしてドキュメントに貼り付け、レイアウトを調整してください。
+                                    </Typography>
+                                    
+                                    <Button 
+                                        variant="contained" 
+                                        color="secondary" 
+                                        onClick={handleCreateTemplate} 
+                                        disabled={isCreatingTemplate || formItems.length === 0}
+                                        startIcon={isCreatingTemplate ? <CircularProgress size={20} color="inherit" /> : <AddCircleIcon />}
+                                    >
+                                        {isCreatingTemplate ? '作成中...' : 'テンプレートを新規作成する'}
+                                    </Button>
+                                    
+                                    <Box mt={2}>
+                                        <Typography variant="caption" color="text.secondary">ID手動設定:</Typography>
+                                        <TextField 
+                                            size="small"
+                                            fullWidth
+                                            value={templateId} 
+                                            onChange={(e) => setTemplateId(e.target.value)} 
+                                            placeholder="作成済みのGoogleドキュメントIDがあればここに入力" 
+                                            sx={{ mt: 0.5 }}
+                                        />
+                                    </Box>
+                                </Box>
+
+                                <Divider />
+
+                                <Box mt={3}>
+                                    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+                                        <Typography variant="subtitle2" fontWeight="bold" display="flex" alignItems="center" gap={1}>
+                                            <ContentPasteIcon color="primary" fontSize="small" /> 2. 利用可能な差し込みタグ一覧
+                                        </Typography>
+                                        <Button 
+                                            variant="outlined" 
+                                            size="small" 
+                                            startIcon={<CopyAllIcon />} 
+                                            onClick={handleCopyAllTags}
+                                        >
+                                            全てのタグをコピー
+                                        </Button>
                                     </Stack>
-                                </CardContent>
-                            </Card>
-                        ))}
-                        <Button variant="outlined" startIcon={<AddCircleIcon />} onClick={addField} size="large" sx={{ border: '2px dashed #ccc', color: '#666', py: 2 }}>項目を追加する</Button>
+                                    <Alert severity="info" sx={{ mb: 2 }}>
+                                        クリックするとタグをコピーできます。Googleドキュメントの表の中に貼り付けてください。<br/>
+                                        データが存在する場合、タグの部分が ☑︎ やテキストに置き換わります。
+                                    </Alert>
+
+                                    {renderTagList().map((group, gIdx) => (
+                                        <Accordion key={gIdx} defaultExpanded={gIdx === 0}>
+                                            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: '#f8f9fa' }}>
+                                                <Typography fontWeight="bold">{group.title}</Typography>
+                                            </AccordionSummary>
+                                            <AccordionDetails>
+                                                <Box display="flex" flexWrap="wrap" gap={1}>
+                                                    {group.items.map(item => {
+                                                        if (['checkbox', 'text', 'number', 'time'].includes(item.type)) {
+                                                            const tag = `{{${item.id}}}`;
+                                                            const detailTag = item.hasDetail ? `{{${item.id}_詳細}}` : null;
+                                                            return (
+                                                                <Box key={item.id} display="flex" gap={1} alignItems="center">
+                                                                    <Tooltip title="クリックしてコピー">
+                                                                        <Chip label={`${item.label}: ${tag}`} onClick={() => copyTag(tag)} clickable />
+                                                                    </Tooltip>
+                                                                    {detailTag && (
+                                                                        <Tooltip title="詳細入力のタグ">
+                                                                            <Chip label={`詳細: ${detailTag}`} onClick={() => copyTag(detailTag)} clickable size="small" variant="outlined" />
+                                                                        </Tooltip>
+                                                                    )}
+                                                                </Box>
+                                                            );
+                                                        }
+                                                        if (['multicheckbox', 'select'].includes(item.type)) {
+                                                            const options = item.options?.split(',') || [];
+                                                            return (
+                                                                <Box key={item.id} width="100%" sx={{ p: 1, border: '1px dashed #ddd', borderRadius: 1 }}>
+                                                                    <Typography variant="caption" display="block" mb={0.5} fontWeight="bold">{item.label}</Typography>
+                                                                    <Box display="flex" flexWrap="wrap" gap={1}>
+                                                                        {options.map((opt: string) => {
+                                                                            const cleanOpt = opt.trim();
+                                                                            const tag = `{{${item.id}_${cleanOpt}}}`;
+                                                                            return (
+                                                                                <Tooltip key={cleanOpt} title="クリックしてコピー">
+                                                                                    {/* ★修正ポイント: ラベルの形式を変更 */}
+                                                                                    <Chip label={`${cleanOpt}: ${tag}`} onClick={() => copyTag(tag)} clickable size="small" />
+                                                                                </Tooltip>
+                                                                            );
+                                                                        })}
+                                                                        {item.hasDetail && (
+                                                                            <Tooltip title="詳細/その他のタグ">
+                                                                                <Chip label={`詳細: {{${item.id}_詳細}}`} onClick={() => copyTag(`{{${item.id}_詳細}}`)} clickable size="small" variant="outlined" />
+                                                                            </Tooltip>
+                                                                        )}
+                                                                    </Box>
+                                                                </Box>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })}
+                                                </Box>
+                                            </AccordionDetails>
+                                        </Accordion>
+                                    ))}
+                                    
+                                    <Accordion>
+                                        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: '#f8f9fa' }}>
+                                            <Typography fontWeight="bold">共通項目（日付・ヘルパー名など）</Typography>
+                                        </AccordionSummary>
+                                        <AccordionDetails>
+                                            <Box display="flex" flexWrap="wrap" gap={1}>
+                                                {['利用者名', '担当ヘルパー名', '開始日付', '開始時刻', '終了日付', '終了時刻', 'サービス時間', '移動時間'].map(key => (
+                                                    <Tooltip key={key} title="クリックしてコピー">
+                                                        <Chip label={`{{${key}}}`} onClick={() => copyTag(`{{${key}}}`)} clickable color="primary" variant="outlined" />
+                                                    </Tooltip>
+                                                ))}
+                                            </Box>
+                                        </AccordionDetails>
+                                    </Accordion>
+                                </Box>
+                            </CardContent>
+                        </Card>
                     </Stack>
-                </Box>
-            )}
+                )}
+            </Box>
 
-            {tabIndex === 1 && (
-                <Card variant="outlined">
-                    <CardContent>
-                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>この利用者を担当するスタッフを選択してください</Typography>
-                        <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。</Typography>
-                        <FormGroup>
-                            <Typography variant="subtitle2" sx={{ mt: 1, mb: 1, color: 'primary.main' }}>メンバー（ログインユーザー）</Typography>
-                            <Box display="flex" flexWrap="wrap" gap={2}>
-                                {allStaffs.filter(s => s.type === 'member').map(staff => (
-                                    <FormControlLabel key={staff.id} control={<Checkbox checked={assignedStaffIds.includes(staff.id)} onChange={() => handleToggleStaff(staff.id)} />} label={staff.name} sx={{ minWidth: 150 }} />
-                                ))}
-                            </Box>
-                            <Typography variant="subtitle2" sx={{ mt: 3, mb: 1, color: 'secondary.main' }}>アカウントなし（転記用）</Typography>
-                            <Box display="flex" flexWrap="wrap" gap={2}>
-                                {allStaffs.filter(s => s.type === 'ghost').map(staff => (
-                                    <FormControlLabel key={staff.id} control={<Checkbox checked={assignedStaffIds.includes(staff.id)} onChange={() => handleToggleStaff(staff.id)} />} label={staff.name} sx={{ minWidth: 150 }} />
-                                ))}
-                            </Box>
-                        </FormGroup>
-                    </CardContent>
-                </Card>
-            )}
-
-            {tabIndex === 2 && (
-                <Card variant="outlined">
-                    <CardContent>
-                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Googleドキュメント連携</Typography>
-                        <Typography variant="body2" color="text.secondary" paragraph>
-                            この利用者の帳票作成に使用する、GoogleドキュメントのテンプレートIDを指定してください。<br/>
-                            （URLの <code>/d/xxxxxxxx/edit</code> の <code>xxxxxxxx</code> の部分です）
-                        </Typography>
-                        <TextField label="テンプレートID" fullWidth value={templateId} onChange={(e) => setTemplateId(e.target.value)} placeholder="GoogleドキュメントID" />
-                    </CardContent>
-                </Card>
-            )}
-
-            <Paper sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, p: 2, zIndex: 100, borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'center' }}>
+            <Paper elevation={3} sx={{ p: 2, borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'center', bgcolor: '#fff', flexShrink: 0, zIndex: 10 }}>
                 <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={() => { if (tabIndex === 0) handleSaveForm(); if (tabIndex === 1) handleSaveAssignments(); if (tabIndex === 2) handleSaveTemplateId(); }} disabled={isSaving} sx={{ minWidth: 300, fontWeight: 'bold', height: 48 }}>
                     {isSaving ? '保存中...' : '設定を保存'}
                 </Button>
             </Paper>
 
-            <Dialog open={openCopyDialog} onClose={() => setOpenCopyDialog(false)}>
-                <DialogTitle>設定のコピー</DialogTitle>
-                <DialogContent dividers sx={{ minWidth: 300 }}>
-                    <Select fullWidth value={copySourceId} displayEmpty onChange={(e) => setCopySourceId(e.target.value)}>
-                        <MenuItem value="" disabled>利用者を選択</MenuItem>
-                        {otherClients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
-                    </Select>
+            <Dialog open={openCopyDialog} onClose={() => setOpenCopyDialog(false)} maxWidth="sm" fullWidth>
+                <DialogTitle>記録項目の設定を読み込む</DialogTitle>
+                <DialogContent dividers sx={{ p: 0 }}>
+                    <Tabs 
+                        value={copyTab} 
+                        onChange={(_, v) => setCopyTab(v)} 
+                        variant="fullWidth" 
+                        sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#f8f9fa' }}
+                    >
+                        <Tab icon={<LibraryBooksIcon />} label="標準テンプレート" />
+                        <Tab icon={<PersonIcon />} label="他の利用者からコピー" />
+                    </Tabs>
+
+                    <Box sx={{ p: 2, minHeight: 300 }}>
+                        {copyTab === 0 && (
+                            <Stack spacing={2}>
+                                <Typography variant="body2" color="text.secondary">
+                                    用途に合わせて標準的な記録項目セットを一括反映します。<br/>
+                                    反映後、自由に項目の追加・削除が可能です。
+                                </Typography>
+                                <List sx={{ bgcolor: 'background.paper', border: '1px solid #eee', borderRadius: 2 }}>
+                                    {STANDARD_TEMPLATES.map((tmpl, index) => (
+                                        <div key={tmpl.key}>
+                                            <ListItem disablePadding>
+                                                <ListItemButton onClick={() => handleCopy('standard', tmpl.key)}>
+                                                    <ListItemIcon>
+                                                        <ContentPasteIcon color="primary" />
+                                                    </ListItemIcon>
+                                                    <ListItemText 
+                                                        primary={<Typography fontWeight="bold">{tmpl.name}</Typography>} 
+                                                        secondary={tmpl.description} 
+                                                    />
+                                                </ListItemButton>
+                                            </ListItem>
+                                            {index < STANDARD_TEMPLATES.length - 1 && <Divider />}
+                                        </div>
+                                    ))}
+                                </List>
+                            </Stack>
+                        )}
+
+                        {copyTab === 1 && (
+                            <Stack spacing={2}>
+                                <Typography variant="body2" color="text.secondary">
+                                    同じ事業所内の他の利用者の設定をコピーします。
+                                </Typography>
+                                {otherClients.length === 0 ? (
+                                    <Alert severity="info">他に登録されている利用者がいません</Alert>
+                                ) : (
+                                    <List sx={{ bgcolor: 'background.paper', border: '1px solid #eee', borderRadius: 2 }}>
+                                        {otherClients.map((client, index) => (
+                                            <div key={client.id}>
+                                                <ListItem disablePadding>
+                                                    <ListItemButton onClick={() => handleCopy('client', client.id)}>
+                                                        <ListItemIcon>
+                                                            <PersonIcon color="secondary" />
+                                                        </ListItemIcon>
+                                                        <ListItemText primary={client.name} />
+                                                    </ListItemButton>
+                                                </ListItem>
+                                                {index < otherClients.length - 1 && <Divider />}
+                                            </div>
+                                        ))}
+                                    </List>
+                                )}
+                            </Stack>
+                        )}
+                    </Box>
                 </DialogContent>
-                <DialogActions><Button onClick={() => setOpenCopyDialog(false)}>キャンセル</Button><Button onClick={handleCopy} variant="contained" disabled={!copySourceId}>コピー実行</Button></DialogActions>
+                <DialogActions>
+                    <Button onClick={() => setOpenCopyDialog(false)}>キャンセル</Button>
+                </DialogActions>
             </Dialog>
         </Box>
     );
@@ -1706,11 +1988,10 @@ import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRe
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
+import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
-
-// 修正: undefined を追加して PDF側の型定義と互換性を持たせる
-type ReportValuesData = Record<string, string | number | boolean | string[] | null | undefined>;
+type ReportValuesData = Record<string, FormValue>;
 
 type Report = {
   id: string; start_at: string; end_at: string; created_at: string; updated_at: string; status: ReportStatus; approved_at: string | null;
@@ -1720,7 +2001,6 @@ type Report = {
   report_values: { data: ReportValuesData } | { data: ReportValuesData }[];
 };
 type ClientData = { id: string; name: string };
-type FormItem = { id: string; label: string; type: string; options?: string; hasDetail?: boolean; };
 type CsvColumnDef = { header: string; key: string; type: 'value' | 'bool' | 'option'; matchValue?: string; };
 
 export default function ReportsPage() {
@@ -1835,7 +2115,6 @@ export default function ReportsPage() {
 
   const getTargetReports = () => selected.length > 0 ? reports.filter(r => selected.includes(r.id)) : reports;
 
-  // CSVエクスポート処理
   const handleExportCSV = async () => {
       const targetReports = getTargetReports();
       if (targetReports.length === 0) { alert('出力するデータがありません。'); return; }
@@ -1849,13 +2128,13 @@ export default function ReportsPage() {
         const seenHeaders = new Set<string>();
 
         templates?.forEach(tmpl => {
-            const schema = tmpl.schema as FormItem[];
+            const schema = tmpl.schema as HelperFormItem[];
             if (!schema) return;
             schema.forEach(item => {
                 if (item.type === 'section') return;
                 if (['multicheckbox', 'select'].includes(item.type) && item.options) {
                     const options = item.options.split(',');
-                    options.forEach(opt => {
+                    options.forEach((opt: string) => {
                         const cleanOpt = opt.trim();
                         const header = `${item.label}_${cleanOpt}`;
                         if (!seenHeaders.has(header)) { dynamicColumns.push({ header: header, key: item.id, type: 'option', matchValue: cleanOpt }); seenHeaders.add(header); }
@@ -1940,7 +2219,7 @@ export default function ReportsPage() {
             helperName: getHelperNames(report),
             startAt: report.start_at, endAt: report.end_at, 
             data: data, 
-            template: (tmplData?.schema as FormItem[]) || []
+            template: (tmplData?.schema as HelperFormItem[]) || []
           };
           return pdfData;
         }));
@@ -1952,6 +2231,60 @@ export default function ReportsPage() {
         link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
         link.click();
       } catch (e) { console.error(e); alert('PDF作成中にエラーが発生しました'); }
+  };
+
+  // --- GAS連携用のデータ加工関数 ---
+  // rawData (UUIDキー) を、スキーマに基づいて「日本語キー」かつ「全項目補完済み」のデータに変換する
+  const preparePdfData = (
+    rawData: ReportValuesData, 
+    schema: HelperFormItem[], 
+    keyMap: Record<string, string>
+  ): Record<string, unknown> => {
+    const result: Record<string, unknown> = {};
+
+    // 1. スキーマをループして、各項目について値を決定する
+    schema.forEach(item => {
+        // 日本語のキー名を取得（例: "食事介助"）
+        const labelKey = keyMap[item.id] || item.id;
+        
+        const val = rawData[item.id];
+
+        if (item.type === 'checkbox') {
+            // チェックボックス: 値がなければ明示的に false を入れる
+            // これによりGAS側で「☐」が表示される
+            result[labelKey] = !!val; 
+            
+            // 詳細があればそれも追加
+            if (item.hasDetail) {
+                const detailKey = `${labelKey}_詳細`;
+                // 詳細は入力がなければ空文字にしておく（あるいは送らなくてもGAS側で消える）
+                result[detailKey] = rawData[`${item.id}_detail`] || "";
+            }
+        } 
+        else if (item.type === 'multicheckbox' || item.type === 'select') {
+            // 複数選択: 選択肢ごとにキーを展開する (例: 食事介助_朝: true)
+            const selectedValues: string[] = Array.isArray(val) ? val : (val ? [String(val)] : []);
+            
+            if (item.options) {
+                item.options.split(',').forEach((opt: string) => {
+                    const cleanOpt = opt.trim();
+                    const optKey = `${labelKey}_${cleanOpt}`;
+                    // 選択されていれば true, なければ false
+                    result[optKey] = selectedValues.includes(cleanOpt);
+                });
+            }
+            if (item.hasDetail) {
+                const detailKey = `${labelKey}_詳細`;
+                result[detailKey] = rawData[`${item.id}_detail`] || "";
+            }
+        } 
+        else {
+            // テキスト、数値など: 値がなければ空文字
+            result[labelKey] = (val === null || val === undefined) ? "" : val;
+        }
+    });
+
+    return result;
   };
 
   // GASによる帳票作成処理
@@ -1968,6 +2301,17 @@ export default function ReportsPage() {
 
       const clientIds = Object.keys(clientGroups);
       const { data: clientsInfo } = await supabase.from('clients').select('id, name, google_template_id, google_folder_id').in('id', clientIds);
+      
+      const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
+
+      const schemaMap: Record<string, HelperFormItem[]> = {};
+      const keyMaps: Record<string, Record<string, string>> = {}; // クライアントごとのID->日本語マップ
+
+      templates?.forEach(t => { 
+          const s = t.schema as HelperFormItem[];
+          schemaMap[t.client_id] = s;
+          keyMaps[t.client_id] = generateKeyMap(s); // utilsの関数を使ってマップ生成
+      });
 
       const { data: orgInfo } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg!.id).single();
       if (!orgInfo?.google_folder_id) { alert('事業所のGoogleドライブ連携が設定されていません。\n設定画面から連携を行ってください。'); return; }
@@ -1975,8 +2319,17 @@ export default function ReportsPage() {
       if (!confirm(`${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）`)) return;
       setGasProgress({ total: targetReports.length, current: 0, currentName: '準備中...' });
 
+      // 最後に開くフォルダURLを保持する変数
+      let lastOpenedFolderUrl: string | null = null;
+
       try {
           let processedCount = 0;
+          
+          // フォルダ名用のタイムスタンプ生成
+          const now = new Date();
+          const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+          const exportFolderName = `${timeStr}_出力分`;
+
           for (const client of clientsInfo || []) {
               const reports = clientGroups[client.id];
               if (!reports) continue;
@@ -1987,6 +2340,8 @@ export default function ReportsPage() {
               }
 
               setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: フォルダ確認中...` }));
+              
+              // クライアントのルートフォルダを確保
               const folderRes = await callGasApi({
                   action: 'manage_client_folder',
                   orgFolderId: orgInfo.google_folder_id,
@@ -1998,13 +2353,27 @@ export default function ReportsPage() {
               if (folderRes.folderId !== client.google_folder_id) {
                   await supabase.from('clients').update({ google_folder_id: folderRes.folderId }).eq('id', client.id);
               }
-              const targetFolderId = folderRes.folderId;
+              const clientRootFolderId = folderRes.folderId;
+
+              // 出力用のサブフォルダを作成
+              setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: サブフォルダ作成中...` }));
+              const subFolderRes = await callGasApi({
+                  action: 'create_sub_folder',
+                  parentId: clientRootFolderId,
+                  folderName: exportFolderName
+              });
+              const targetFolderId = subFolderRes.folderId; 
+              
+              // 最後に作成したフォルダのURLを保存（ループ終了後に開くため）
+              lastOpenedFolderUrl = subFolderRes.folderUrl;
+
+              const clientSchema = schemaMap[client.id] || [];
+              const clientKeyMap = keyMaps[client.id] || {};
 
               for (const report of reports) {
                   setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: ${new Date(report.start_at).toLocaleDateString()} の記録を作成中...` }));
                   const data = getReportData(report) || {};
                   
-                  // 修正: flatDataの型を any から明示的な型へ変更
                   const flatData: Record<string, string | number | boolean | null | undefined> = {};
                   
                   const start = new Date(report.start_at);
@@ -2017,32 +2386,32 @@ export default function ReportsPage() {
                   flatData['終了日付'] = `${end.getFullYear()}/${end.getMonth()+1}/${end.getDate()}`;
                   flatData['終了時刻'] = `${end.getHours()}:${String(end.getMinutes()).padStart(2,'0')}`;
                   
-                  // 修正: 型アサーションを追加して型エラーを回避
                   flatData['サービス時間'] = (data.service_time as string | number) || '0';
                   flatData['移動時間'] = (data.travel_time as string | number) || '0';
 
-                  Object.keys(data).forEach(key => {
-                      const val = data[key];
-                      if (key.endsWith('_detail')) { 
-                          flatData[key] = val as string | number | boolean | null | undefined; 
-                      }
-                      else if (Array.isArray(val)) { val.forEach(v => { flatData[`${key}_${v}`] = "○"; }); }
-                      else if (typeof val === 'boolean') { flatData[key] = val ? "○" : ""; }
-                      else { flatData[key] = val as string | number | boolean | null | undefined; }
-                  });
+                  // ★修正: 独自の変換関数を使って、不足しているfalseなどを補完したデータを生成
+                  const readableData = preparePdfData(data, clientSchema, clientKeyMap);
+                  
+                  const finalPayload = { ...flatData, ...readableData } as Record<string, unknown>;
 
                   await callGasApi({
                       action: 'create_pdf',
-                      folderId: targetFolderId,
+                      folderId: targetFolderId, 
                       templateId: client.google_template_id,
-                      data: flatData,
+                      data: finalPayload, 
                       fileName: `${client.name}_${(flatData['開始日付'] as string).replace(/\//g,'-')}_提供記録`
                   });
                   processedCount++;
                   setGasProgress({ total: targetReports.length, current: processedCount, currentName: '' });
               }
           }
-          alert('作成が完了しました。\nGoogleドライブを確認してください。');
+          alert('作成が完了しました。保存先のフォルダを開きます。');
+          
+          // ★追加: 最後に処理したフォルダを開く
+          if (lastOpenedFolderUrl) {
+              window.open(lastOpenedFolderUrl, '_blank');
+          }
+
       } catch (e) { console.error(e); alert('エラーが発生しました: ' + e); } 
       finally { setGasProgress(null); }
   };
@@ -2139,7 +2508,7 @@ export default function ReportsPage() {
                      <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
                        <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
                        <TableCell><Chip label={row.status === 'approved' ? '承認済' : row.status === 'remanded' ? '差戻し' : '未承認'} color={row.status === 'approved' ? 'success' : row.status === 'remanded' ? 'error' : 'warning'} size="small" variant="outlined" /></TableCell>
-                       <TableCell>{new Date(row.start_at).toLocaleDateString()} {new Date(row.start_at).getHours()}:{String(new Date(row.start_at).getMinutes()).padStart(2,'0')}</TableCell>
+                       <TableCell>{new Date(row.start_at).toLocaleDateString()}</TableCell>
                        <TableCell>{row.clients.name}</TableCell>
                        <TableCell>{getHelperNames(row)}</TableCell>
                        <TableCell><Button size="small" variant="outlined" onClick={() => handleOpenDetail(row)} sx={{ fontSize: '0.75rem', py: 0.5 }}>詳細</Button></TableCell>
@@ -2666,50 +3035,93 @@ export default function StaffPage() {
 
 --- START OF FILE src/app/auth/callback/route.ts ---
 
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
 
-export async function GET(request: Request) {
-    const { searchParams, origin } = new URL(request.url);
-    const code = searchParams.get('code');
-    // nextパラメータがあればそこへ、なければ /app へ
-    const next = searchParams.get('next') || '/app';
+export async function GET(request: NextRequest) {
+  const requestUrl = new URL(request.url);
+  const code = requestUrl.searchParams.get('code');
+  const next = requestUrl.searchParams.get('next') || '/app';
+  const origin = requestUrl.origin;
 
-    if (code) {
-        const cookieStore = await cookies();
+  console.log('--- Auth Callback Start ---');
+  console.log('Code present:', !!code);
+  console.log('Origin:', origin);
 
-        const supabase = createServerClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            {
-                cookies: {
-                    getAll() {
-                        return cookieStore.getAll();
-                    },
-                    setAll(cookiesToSet) {
-                        try {
-                            cookiesToSet.forEach(({ name, value, options }) =>
-                                cookieStore.set(name, value, options)
-                            );
-                        } catch {
-                            // Server Component context warning handled
-                        }
-                    },
-                },
-            }
-        );
+  if (!code) {
+    console.error('No code provided');
+    return NextResponse.redirect(`${origin}/?error=no_code`);
+  }
 
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-
-        if (!error) {
-            // セッション確立成功、指定されたページへリダイレクト
-            return NextResponse.redirect(`${origin}${next}`);
-        }
+  // クライアント作成
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          const cookies = request.cookies.getAll();
+          // console.log('Current Cookies:', cookies.map(c => c.name)); // 必要ならコメントアウト解除
+          return cookies;
+        },
+        setAll(cookiesToSet) {
+          // ここでは何もしない（exchangeの結果を見るため）
+          console.log('Supabase requested to set cookies:', cookiesToSet.map(c => `${c.name} (secure: ${c.options?.secure})`));
+        },
+      },
     }
+  );
 
-    // エラー時
-    return NextResponse.redirect(`${origin}/?error=auth_failed`);
+  // コード交換実行
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+  if (error) {
+    console.error('!!! Exchange Error !!!', error);
+    return NextResponse.redirect(`${origin}/?error=${error.name}&details=${error.message}`);
+  }
+
+  if (!data.session) {
+    console.error('!!! No session in data !!!');
+    return NextResponse.redirect(`${origin}/?error=no_session_data`);
+  }
+
+  console.log('Session exchanged successfully.');
+  console.log('User ID:', data.session.user.id);
+
+  // 成功したので、実際にCookieをセットするレスポンスを作る
+  const response = NextResponse.redirect(`${origin}${next}`);
+  
+  const supabaseForResponse = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            // 本番環境かどうかでSecure属性を調整するロジック（重要）
+            // localhost (http) の場合は secure: false にしないと保存されない
+            const isLocal = origin.startsWith('http://localhost');
+            const finalOptions = {
+                ...options,
+                secure: !isLocal && options.secure, // ローカルならfalseへ強制
+            };
+            
+            console.log(`Setting Cookie: ${name}, Secure: ${finalOptions.secure}, Path: ${finalOptions.path}`);
+            response.cookies.set(name, value, finalOptions);
+          });
+        },
+      },
+    }
+  );
+  
+  // セッション情報をリフレッシュしてCookie書き込みをトリガー
+  await supabaseForResponse.auth.setSession(data.session);
+
+  console.log('--- Auth Callback End ---');
+  return response;
 }
 
 
@@ -2893,22 +3305,38 @@ export default function Loading() {
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Box, Paper, CircularProgress, Container } from '@mui/material';
-import { useRouter } from 'next/navigation';
+import { Box, Paper, CircularProgress, Container, Alert } from '@mui/material'; // Alert追加
+import { useRouter, useSearchParams } from 'next/navigation'; // useSearchParams追加
 import { supabase } from '@/lib/supabase';
 import { AuthForm } from '@/components/auth/AuthForm';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [checking, setChecking] = useState(true);
+  const [debugMsg, setDebugMsg] = useState(''); // デバッグ表示用
+
+  // URLパラメータのエラーを表示
+  const errorParam = searchParams.get('error');
+  const detailsParam = searchParams.get('details');
 
   useEffect(() => {
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      console.log('[LoginPage] Checking session...');
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (error) {
+          console.error('[LoginPage] GetSession Error:', error);
+      }
+
       if (session) {
+        console.log('[LoginPage] Session found. Redirecting to /app', session.user.id);
         router.replace('/app');
       } else {
+        console.log('[LoginPage] No session found.');
         setChecking(false);
+        // デバッグ用にコンソールだけでなく画面にも出す（必要なら）
+        setDebugMsg('No Session Found');
       }
     };
     checkSession();
@@ -2916,8 +3344,9 @@ export default function LoginPage() {
 
   if (checking) {
     return (
-      <Box height="100vh" display="flex" justifyContent="center" alignItems="center" bgcolor="#f8f9fa">
+      <Box height="100vh" display="flex" flexDirection="column" justifyContent="center" alignItems="center" bgcolor="#f8f9fa">
         <CircularProgress />
+        <p style={{ marginTop: 10, color: '#666' }}>Checking Session...</p>
       </Box>
     );
   }
@@ -2933,11 +3362,15 @@ export default function LoginPage() {
         py: 4
       }}
     >
-      {/* 
-        Container maxWidth="xs" は約444pxに幅を制限します。
-        これで確実に横幅が抑制されます。
-      */}
       <Container maxWidth="xs">
+        {/* エラーがあれば表示 */}
+        {(errorParam || detailsParam) && (
+             <Alert severity="error" sx={{ mb: 2 }}>
+                 Login Error: {errorParam} <br/>
+                 {detailsParam}
+             </Alert>
+        )}
+        
         <Paper 
           elevation={0} 
           sx={{ 
@@ -2961,12 +3394,13 @@ export default function LoginPage() {
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Box, Typography, Paper, TextField, Button, Stack, CircularProgress, Card, CardActionArea, Alert
 } from '@mui/material';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { User } from '@supabase/supabase-js';
 import BusinessIcon from '@mui/icons-material/Business';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import PersonIcon from '@mui/icons-material/Person';
@@ -2982,6 +3416,7 @@ export default function SetupPage() {
     const [submitting, setSubmitting] = useState(false);
     const [step, setStep] = useState<Step>('profile');
     const [userId, setUserId] = useState('');
+    const [hasMembership, setHasMembership] = useState(false);
     
     // 入力値
     const [userName, setUserName] = useState('');
@@ -2994,52 +3429,82 @@ export default function SetupPage() {
         }
     }, [paramInviteCode]);
 
-    const checkUser = useCallback(async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-            router.push('/');
-            return;
-        }
-        setUserId(user.id);
+    useEffect(() => {
+        let mounted = true;
 
-        // プロフィール確認
-        const { data: profile } = await supabase.from('profiles').select('name').eq('id', user.id).single();
-        
-        // 名前があればセット
-        if (profile?.name) {
-            setUserName(profile.name);
-        }
+        const processUser = async (user: User) => {
+            if (!mounted) return;
+            console.log('[SetupPage] Session confirmed for:', user.id);
+            setUserId(user.id);
 
-        // 所属確認
-        const { data: members } = await supabase.from('organization_members').select('id').eq('user_id', user.id);
-        const hasMembership = members && members.length > 0;
+            try {
+                const { data: profile, error: profileError } = await supabase.from('profiles').select('name').eq('id', user.id).single();
+                
+                if (profileError && profileError.code !== 'PGRST116') {
+                    console.error('[SetupPage] Profile fetch error:', profileError);
+                }
 
-        // ★修正ポイント: 所属があっても、招待コードがある場合は参加フローへ進める
-        if (hasMembership && !paramInviteCode) {
-            router.push('/app');
-            return;
-        }
+                const { data: members } = await supabase.from('organization_members').select('id').eq('user_id', user.id);
+                const isMember = members && members.length > 0;
+                setHasMembership(isMember || false);
 
-        // 画面遷移の判定
-        if (profile?.name) {
-            // 名前登録済みなら、招待コードがあれば即参加画面、なければ選択画面
-            if (paramInviteCode) {
-                setStep('join');
-            } else {
-                setStep('choice');
+                if (profile?.name) {
+                    setUserName(profile.name);
+                    if (paramInviteCode) {
+                        setStep('join');
+                    } else {
+                        setStep('choice');
+                    }
+                } else {
+                    setStep('profile');
+                }
+                
+                if (mounted) setLoading(false);
+            } catch (err) {
+                console.error('[SetupPage] Setup error:', err);
+                if (mounted) setLoading(false);
             }
-        } else {
-            // 名前未登録ならプロフィール入力へ
-            setStep('profile');
-        }
-        
-        setLoading(false);
+        };
+
+        const initSetup = async () => {
+            console.log('[SetupPage] Checking user session...');
+            const { data: { session } } = await supabase.auth.getSession();
+
+            if (!session) {
+                console.log('[SetupPage] No initial session, waiting for auth state change...');
+                // ここではまだリダイレクトせず、イベント発火を少し待つ
+            } else {
+                await processUser(session.user);
+            }
+        };
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            console.log(`[SetupPage] Auth Event: ${event}`);
+            
+            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+                if (session) {
+                    await processUser(session.user);
+                } else if (event === 'INITIAL_SESSION') {
+                    // ★重要: 初期チェック完了時にセッションがなければ、認証失敗とみなしてログイン画面へ
+                    console.warn('[SetupPage] INITIAL_SESSION received but no session found. Redirecting to login.');
+                    if (mounted) router.replace('/?error=session_missing');
+                }
+            } else if (event === 'SIGNED_OUT') {
+                if (mounted) router.replace('/');
+            }
+        });
+
+        initSetup();
+
+        return () => {
+            mounted = false;
+            subscription.unsubscribe();
+        };
     }, [router, paramInviteCode]);
 
-    useEffect(() => {
-        checkUser();
-    }, [checkUser]);
-
+    // ... (以降の関数群、return部分は変更なし。そのまま維持してください) ...
+    // handleSaveProfile, handleCreateOrg, handleJoinOrg, およびJSX部分
+    
     const getErrorMessage = (error: unknown): string => {
         if (error instanceof Error) return error.message;
         if (typeof error === 'object' && error !== null && 'message' in error) {
@@ -3091,7 +3556,6 @@ export default function SetupPage() {
         if (!inviteCode.trim()) return;
         setSubmitting(true);
         try {
-            // 1. 招待コード検証
             const { data: invite, error: inviteError } = await supabase
                 .from('invitations')
                 .select('*')
@@ -3105,7 +3569,6 @@ export default function SetupPage() {
                 return;
             }
 
-            // 2. 既にその事業所のメンバーかチェック (重複エラー回避)
             const { data: existingMember } = await supabase
                 .from('organization_members')
                 .select('id')
@@ -3114,14 +3577,12 @@ export default function SetupPage() {
                 .maybeSingle();
 
             if (existingMember) {
-                // 既に参加済みの場合は、その事業所に切り替えて移動
                 await supabase.from('profiles').update({ last_organization_id: invite.organization_id }).eq('id', userId);
                 alert('すでにこの事業所に参加しています。移動します。');
                 window.location.href = '/app';
                 return;
             }
 
-            // 3. メンバー追加
             const { error: memberError } = await supabase
                 .from('organization_members')
                 .insert({
@@ -3132,10 +3593,8 @@ export default function SetupPage() {
 
             if (memberError) throw memberError;
 
-            // 4. 招待を使用済みに更新
             await supabase.from('invitations').update({ is_used: true }).eq('id', invite.id);
 
-            // 5. 担当割り当て (あれば)
             if (invite.target_client_ids && invite.target_client_ids.length > 0) {
                 const assignments = invite.target_client_ids.map((clientId: string) => ({
                     helper_id: userId,
@@ -3144,10 +3603,8 @@ export default function SetupPage() {
                 await supabase.from('assignments').insert(assignments);
             }
 
-            // ★追加: 参加した事業所を「最後に選択した事業所」として保存（ログイン後にその事業所が開くように）
             await supabase.from('profiles').update({ last_organization_id: invite.organization_id }).eq('id', userId);
 
-            // 完了
             window.location.href = '/app';
         } catch (e) {
             console.error('Join Org Error:', e);
@@ -3156,13 +3613,12 @@ export default function SetupPage() {
         }
     };
 
-    if (loading) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
+    if (loading) return <Box p={5} textAlign="center"><CircularProgress /><Typography mt={2}>セットアップ情報を取得中...</Typography></Box>;
 
     return (
         <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f5f5f5', p: 2 }}>
             <Paper elevation={0} sx={{ p: 4, width: '100%', maxWidth: 480, borderRadius: 3, border: '1px solid #ddd' }}>
                 
-                {/* 既存メンバーが招待で来た場合のメッセージ */}
                 {step === 'join' && paramInviteCode && (
                     <Alert severity="info" sx={{ mb: 3 }}>
                         招待コードが検出されました。<br/>新しい事業所に参加しますか？
@@ -3231,6 +3687,12 @@ export default function SetupPage() {
                                 </Stack>
                             </CardActionArea>
                         </Card>
+
+                        {hasMembership && (
+                            <Button color="inherit" onClick={() => router.push('/app')}>
+                                キャンセルしてアプリに戻る
+                            </Button>
+                        )}
                     </Stack>
                 )}
 
@@ -3279,8 +3741,6 @@ export default function SetupPage() {
                             onChange={(e) => setInviteCode(e.target.value)} 
                         />
                         <Stack direction="row" spacing={2}>
-                            {/* 招待コード付きで直接来た場合は戻るボタンを隠す（またはアプリへ戻るにする）か検討だが、
-                                一旦 choice に戻る挙動にしておく */}
                             <Button fullWidth onClick={() => paramInviteCode ? router.push('/app') : setStep('choice')} disabled={submitting}>
                                 {paramInviteCode ? 'キャンセル' : '戻る'}
                             </Button>
@@ -3518,7 +3978,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { useSearchParams } from 'next/navigation';
 
-// ロゴコンポーネント (SVG)
+// ... (Logoコンポーネントは省略、そのまま使用) ...
 const GoogleLogo = () => (
     <svg width="20" height="20" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" /><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" /><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" /><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" /></svg>
 );
@@ -3528,7 +3988,6 @@ const MicrosoftLogo = () => (
 
 export const AuthForm = () => {
     const searchParams = useSearchParams();
-    // useRouterは使用していないため削除
     
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -3540,12 +3999,15 @@ export const AuthForm = () => {
     const [origin, setOrigin] = useState('');
 
     const isRegisterMode = tabIndex === 1;
-    // URLパラメータ "next" があればそこへ、なければ "/app" へ
     const nextUrl = searchParams.get('next') || '/app';
+    const errorParam = searchParams.get('error'); // エラーパラメータの取得
 
     useEffect(() => {
         setOrigin(window.location.origin);
-    }, []);
+        if (errorParam === 'auth_callback_failed') {
+            setMessage({ type: 'error', text: 'ログイン処理に失敗しました。もう一度お試しください。' });
+        }
+    }, [errorParam]);
 
     const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
         setTabIndex(newValue);
@@ -3606,6 +4068,7 @@ export const AuthForm = () => {
                     }
                     throw error;
                 }
+                // Routerではなくwindow.locationで確実にリロードさせる
                 window.location.href = nextUrl;
             }
         } catch (err) {
@@ -3629,6 +4092,7 @@ export const AuthForm = () => {
 
     return (
         <Stack spacing={3}>
+            {/* ... (表示部分は変更なし) ... */}
             <Box textAlign="center" mb={1}>
                 <Typography
                     variant="h4"
@@ -3642,7 +4106,6 @@ export const AuthForm = () => {
                 </Typography>
             </Box>
 
-            {/* タブ切り替え */}
             <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
                 <Tabs value={tabIndex} onChange={handleTabChange} variant="fullWidth">
                     <Tab label="ログイン" />
@@ -3888,6 +4351,7 @@ import ExpandMore from '@mui/icons-material/ExpandMore';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import LogoutIcon from '@mui/icons-material/Logout';
+import BusinessIcon from '@mui/icons-material/Business';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -3898,11 +4362,13 @@ const SIDEBAR_WIDTH = 240;
 
 // 1. 左端レール (事業所切り替え)
 const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], currentOrg: Workspace | null, switchOrg: (id: string) => void }) => {
+  const router = useRouter(); // ★追加: ルーターを使用
+
   return (
     <Box sx={{
       width: RAIL_WIDTH,
-      bgcolor: '#E3E5E8', // Discord風の少し濃いグレーに変更
-      borderRight: 'none', // 背景色で区切るので線は不要
+      bgcolor: '#E3E5E8', 
+      borderRight: 'none',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -3920,7 +4386,6 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
               onClick={() => switchOrg(org.id)}
               sx={{ 
                 p: 0,
-                // 選択時の青いリング表示
                 border: isSelected ? `2px solid #2255CC` : '2px solid transparent',
                 borderRadius: '50%',
                 transition: 'all 0.2s',
@@ -3931,7 +4396,7 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
             >
               <Avatar
                 sx={{
-                  bgcolor: isSelected ? '#2255CC' : '#F2F3F5', // 非選択時はサイドバー色に合わせる
+                  bgcolor: isSelected ? '#2255CC' : '#F2F3F5',
                   color: isSelected ? '#fff' : '#555',
                   width: 48, height: 48,
                   fontSize: '1rem',
@@ -3958,7 +4423,7 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
             transition: 'all 0.2s',
             '&:hover': { bgcolor: '#23A559', color: '#fff' }
           }}
-          onClick={() => {/* セットアップ画面へ */}}
+          onClick={() => router.push('/setup')} // ★修正: セットアップ画面へ遷移
         >
           <AddIcon />
         </IconButton>
@@ -3967,7 +4432,12 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
   );
 };
 
-// 2. サイドバー (メニュー)
+// ... (以下、ChannelSidebar, UserPanel, AppLayout は変更なし。以前のコードを維持)
+// 省略せずに記述する場合は、前回のAppLayout.tsxの残りの部分（ChannelSidebar以降）をここに続けてください。
+// ここでは変更点のある ServerRail 部分のみ抜粋して解説していますが、
+// 実際にはファイル全体を書き換える形になります。
+
+// --- 以下、既存コードのまま ---
 const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onClose?: () => void }) => {
   const router = useRouter();
   const pathname = usePathname();
@@ -3989,25 +4459,24 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
   };
 
   const isAdmin = ['owner', 'manager'].includes(currentOrg.role);
+  const isOwner = currentOrg.role === 'owner';
 
-  // カテゴリ見出し
   const categoryStyle = {
     px: 2, pt: 2.5, pb: 1,
     fontSize: '0.75rem',
     fontWeight: 'bold',
-    color: '#6D6F78', // Discord風のテキストグレー
+    color: '#6D6F78', 
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
     ml: 1
   };
 
-  // メニューアイテムのスタイル
   const itemStyle = (active: boolean) => ({
     mx: 1,
-    borderRadius: '4px', // Discordらしさを少し残すため角丸を小さめに（Material的には8px程度でもOK）
+    borderRadius: '4px',
     mb: 0.25,
     color: active ? '#060607' : '#5C5E66',
-    bgcolor: active ? 'rgba(0, 0, 0, 0.04)' : 'transparent', // 選択色をグレー系に戻しつつ薄く
+    bgcolor: active ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
     fontWeight: active ? 600 : 500,
     '&:hover': {
       bgcolor: active ? 'rgba(0, 0, 0, 0.04)' : 'rgba(0, 0, 0, 0.02)',
@@ -4022,13 +4491,12 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
   return (
     <Box sx={{ 
       width: SIDEBAR_WIDTH, 
-      bgcolor: '#F2F3F5', // Discord風の薄いグレー
+      bgcolor: '#F2F3F5',
       display: 'flex', 
       flexDirection: 'column', 
       height: '100%', 
-      borderRight: 'none' // メインとの境界は色で分ける
+      borderRight: 'none'
     }}>
-      {/* 事業所名ヘッダー */}
       <Box sx={{ 
         height: 48, 
         display: 'flex', 
@@ -4091,6 +4559,15 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
 
             <Typography sx={categoryStyle}>管理</Typography>
             <List disablePadding>
+              {isOwner && (
+                <ListItem disablePadding>
+                  <ListItemButton onClick={() => handleNav('/app/settings')} sx={itemStyle(isActive('/app/settings'))}>
+                    <ListItemIcon><BusinessIcon fontSize="small" /></ListItemIcon>
+                    <ListItemText primary="事業所設定" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+                  </ListItemButton>
+                </ListItem>
+              )}
+              
               <ListItem disablePadding>
                 <ListItemButton onClick={() => handleNav('/app/clients')} sx={itemStyle(isActive('/app/clients'))}>
                   <ListItemIcon><PeopleIcon fontSize="small" /></ListItemIcon>
@@ -4111,7 +4588,6 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
   );
 };
 
-// 3. アカウントパネル (最下部・全幅)
 const UserPanel = ({ onClose }: { onClose?: () => void }) => {
   const router = useRouter();
   const [userName, setUserName] = useState('');
@@ -4132,8 +4608,8 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
 
   return (
     <Box sx={{ 
-      height: 52, // 高さを少しコンパクトに
-      bgcolor: '#EBEDEF', // サイドバー(#F2F3F5)より少し濃い色
+      height: 52, 
+      bgcolor: '#EBEDEF', 
       display: 'flex', 
       alignItems: 'center', 
       px: 1.5,
@@ -4167,7 +4643,6 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
   );
 };
 
-// メインレイアウト
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -4177,7 +4652,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', bgcolor: '#ffffff' }}>
       
-      {/* モバイル用AppBar */}
       {isMobile && (
         <Box sx={{ position: 'fixed', top: 0, left: 0, right: 0, height: 48, bgcolor: '#F2F3F5', borderBottom: '1px solid #E3E5E8', display: 'flex', alignItems: 'center', px: 2, zIndex: 1200 }}>
           <IconButton edge="start" onClick={() => setMobileOpen(true)} size="small" sx={{ mr: 2 }}><MenuIcon /></IconButton>
@@ -4185,25 +4659,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </Box>
       )}
 
-      {/* PC用ナビゲーション (左端レール + サイドバー + アカウントパネル) */}
       <Box sx={{
         width: RAIL_WIDTH + SIDEBAR_WIDTH,
         display: { xs: 'none', md: 'flex' },
         flexDirection: 'column',
         height: '100%',
-        bgcolor: '#E3E5E8' // レールの背景色に合わせる
+        bgcolor: '#E3E5E8' 
       }}>
-        {/* 上部: レールとサイドバーを横並び */}
         <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
           <ServerRail orgList={orgList} currentOrg={currentOrg} switchOrg={switchOrg} />
           <ChannelSidebar currentOrg={currentOrg} />
         </Box>
-        
-        {/* 下部: ユーザーパネル (横断配置) */}
         <UserPanel />
       </Box>
 
-      {/* モバイル用ドロワー */}
       <Drawer
         variant="temporary"
         open={mobileOpen}
@@ -4220,7 +4689,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </Box>
       </Drawer>
 
-      {/* メインコンテンツエリア */}
       <Box
         component="main"
         sx={{
@@ -4230,10 +4698,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           display: 'flex', 
           flexDirection: 'column',
           overflow: 'hidden',
-          pt: { xs: 6, md: 0 },
-          '& > .MuiBox-root': {
-             // ページのルート要素に対するスタイルが必要であればここに記述
-          }
+          pt: { xs: 6, md: 0 }
         }}
       >
         {children}
@@ -4710,6 +5175,73 @@ export const useToast = () => {
 };
 
 
+--- START OF FILE src/constants/formTemplates.ts ---
+
+// src/constants/formTemplates.ts
+
+export type FormItem = {
+  id: string;
+  label: string;
+  type: 'text' | 'number' | 'checkbox' | 'time' | 'select' | 'section' | 'multicheckbox';
+  options?: string;
+  required: boolean;
+  hasDetail?: boolean;
+};
+
+// 1. 身体介護中心テンプレート
+export const PHYSICAL_CARE_TEMPLATE: FormItem[] = [
+  { id: 'sec_medical', label: '【身体介護・医療的ケア】', type: 'section', required: false },
+  { id: 'meal_help', label: '食事介助', type: 'multicheckbox', options: '全介助,一部介助,見守り,水分補給', required: false, hasDetail: true },
+  { id: 'excretion', label: '排泄介助', type: 'multicheckbox', options: 'トイレ誘導,オムツ交換,パッド交換,ポータブルトイレ,陰部洗浄', required: false, hasDetail: true },
+  { id: 'body_cleaning', label: '清拭・入浴', type: 'multicheckbox', options: '全身清拭,部分清拭,入浴介助,洗髪,足浴', required: false, hasDetail: true },
+  { id: 'change_clothes', label: '更衣介助', type: 'checkbox', required: false, hasDetail: true },
+  { id: 'medication', label: '服薬確認', type: 'checkbox', required: false },
+  { id: 'vital_check', label: 'バイタル測定', type: 'multicheckbox', options: '体温,血圧,脈拍,SpO2', required: false, hasDetail: true },
+  { id: 'sec_note', label: '【その他】', type: 'section', required: false },
+  { id: 'special_note', label: '特記事項', type: 'text', required: false },
+];
+
+// 2. 生活援助中心テンプレート
+export const HOUSEWORK_TEMPLATE: FormItem[] = [
+  { id: 'sec_housework', label: '【生活援助】', type: 'section', required: false },
+  { id: 'cooking', label: '調理', type: 'multicheckbox', options: '下ごしらえ,調理,配膳,後片付け', required: false, hasDetail: true },
+  { id: 'cleaning', label: '掃除', type: 'multicheckbox', options: '居室,トイレ,浴室,台所,ゴミ出し', required: false, hasDetail: true },
+  { id: 'laundry', label: '洗濯', type: 'multicheckbox', options: '洗濯機,干す,取り込み,たたむ,収納', required: false },
+  { id: 'shopping', label: '買い物代行', type: 'checkbox', required: false, hasDetail: true },
+  { id: 'sec_note', label: '【その他】', type: 'section', required: false },
+  { id: 'special_note', label: '特記事項', type: 'text', required: false },
+];
+
+// 3. 総合テンプレート（重度訪問介護などフルの内容）
+// ※ 元のコードにあった DEFAULT_TEMPLATE をここに移動
+export const COMPREHENSIVE_TEMPLATE: FormItem[] = [
+    { id: 'sec_medical', label: '【医療的ケア・身体介護】', type: 'section', required: false },
+    { id: 'sputum_suction', label: '痰等の吸引（気管・口腔）', type: 'checkbox', required: false },
+    { id: 'meal_help', label: '食事介助', type: 'multicheckbox', options: '朝,昼,晩,他', required: false, hasDetail: true },
+    { id: 'excretion', label: '排泄介助', type: 'checkbox', required: false, hasDetail: true },
+    { id: 'body_cleaning', label: '清拭・整容介助', type: 'multicheckbox', options: '全身,顔,上肢,下肢,清拭,入浴介助', required: false, hasDetail: true },
+    { id: 'change_clothes', label: '更衣介助', type: 'checkbox', required: false, hasDetail: true },
+    { id: 'vital_check', label: 'バイタル測定', type: 'multicheckbox', options: '体温,血圧,脈拍,SpO2', required: false, hasDetail: true },
+    { id: 'sec_support', label: '【生活援助・移動支援】', type: 'section', required: false },
+    { id: 'position_change', label: '体位交換', type: 'checkbox', required: false },
+    { id: 'move_assist', label: '移動・移乗介助', type: 'checkbox', required: false },
+    { id: 'sec_housework', label: '【家事】', type: 'section', required: false },
+    { id: 'cooking', label: '調理・配膳', type: 'multicheckbox', options: '調理,配膳,下膳', required: false },
+    { id: 'cleaning', label: '掃除・ゴミ出し', type: 'multicheckbox', options: '居室,水回り,ゴミ出し', required: false },
+    { id: 'laundry', label: '洗濯', type: 'checkbox', required: false },
+    { id: 'sec_confirm', label: '【確認事項】', type: 'section', required: false },
+    { id: 'exit_check', label: '退出時確認（火元・戸締まり）', type: 'checkbox', required: false },
+    { id: 'special_note', label: '《特記事項》', type: 'text', required: false },
+];
+
+// リストとしてエクスポート
+export const STANDARD_TEMPLATES = [
+  { key: 'comprehensive', name: '標準セット（重度訪問・総合）', schema: COMPREHENSIVE_TEMPLATE, description: '身体介護から生活援助まで網羅したフルセット' },
+  { key: 'physical', name: '身体介護中心', schema: PHYSICAL_CARE_TEMPLATE, description: '入浴・排泄・食事などの身体ケアに特化' },
+  { key: 'housework', name: '生活援助中心', schema: HOUSEWORK_TEMPLATE, description: '掃除・洗濯・調理などの家事援助に特化' },
+];
+
+
 --- START OF FILE src/context/WorkspaceContext.tsx ---
 
 'use client';
@@ -4753,16 +5285,41 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // 初回読み込み
     fetchWorkspaces();
+
+    // 認証状態の変化を監視
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      console.log(`[WorkspaceProvider] Auth event: ${event}`);
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        fetchWorkspaces();
+      } else if (event === 'SIGNED_OUT') {
+        setCurrentOrg(null);
+        setOrgList([]);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fetchWorkspaces = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setLoading(false);
+      setLoading(true);
+      // getSessionでセッションの存在を確認（getUserより速く、クライアントサイド向き）
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.user) {
+        console.log('[WorkspaceProvider] No session.');
+        setOrgList([]);
+        setCurrentOrg(null);
         return;
       }
+
+      const user = session.user;
+      console.log('[WorkspaceProvider] Fetching for user:', user.id);
 
       const { data, error } = await supabase
         .from('organization_members')
@@ -4775,12 +5332,11 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
 
       if (error) throw error;
 
-      // 型アサーションを使用せず、適切な型チェックを行う
       const members = data as unknown as OrgMemberResponse[];
 
       if (members && members.length > 0) {
         const list: Workspace[] = members
-          .filter(m => m.organizations) // 組織が存在するもののみ
+          .filter(m => m.organizations)
           .map((m) => ({
             id: m.organizations!.id,
             name: m.organizations!.name,
@@ -4924,14 +5480,19 @@ export async function updateSession(request: NextRequest) {
                     return request.cookies.getAll();
                 },
                 setAll(cookiesToSet) {
+                    // リクエスト側のCookieを更新
                     cookiesToSet.forEach(({ name, value, options }) =>
                         request.cookies.set(name, value),
                     );
+                    
+                    // レスポンスを再作成して最新の状態にする（これが重要）
                     response = NextResponse.next({
                         request: {
                             headers: request.headers,
                         },
                     });
+                    
+                    // ★修正点: 手動でのオプション上書きをやめ、Supabaseのoptionsをそのまま使う
                     cookiesToSet.forEach(({ name, value, options }) =>
                         response.cookies.set(name, value, options),
                     );
@@ -4940,9 +5501,92 @@ export async function updateSession(request: NextRequest) {
         }
     );
 
-    // 重要: getUserでセッションをリフレッシュする
+    // セッションをリフレッシュ
     await supabase.auth.getUser();
 
     return response;
 }
+
+
+--- START OF FILE src/utils/templateHelper.ts ---
+
+// src/utils/templateHelper.ts
+
+export type FormItem = {
+    id: string;
+    label: string;
+    type: string;
+    options?: string;
+    hasDetail?: boolean;
+    required?: boolean;
+    [key: string]: unknown; 
+};
+
+export type FormValue = string | number | boolean | string[] | null | undefined;
+
+/**
+ * フォームの設定(Schema)を元に、UUIDと日本語キーの対応マップを生成します
+ */
+export const generateKeyMap = (schema: FormItem[]) => {
+    const idToLabelMap: Record<string, string> = {};
+    const labelCount: Record<string, number> = {};
+
+    schema.forEach(item => {
+        // ★修正ポイント: 記号（●、■、▼、《》、【】）を除去する正規表現を強化
+        // これにより "●給付変更事項" -> "給付変更事項" に統一されます
+        let cleanLabel = item.label.replace(/[{}[\].●■▼《》【】]/g, '').trim();
+        
+        if (!cleanLabel) cleanLabel = "項目";
+
+        // 重複チェック（同じ名前の項目がある場合、_2, _3 をつける）
+        if (labelCount[cleanLabel]) {
+            labelCount[cleanLabel]++;
+            const uniqueLabel = `${cleanLabel}_${labelCount[cleanLabel]}`;
+            idToLabelMap[item.id] = uniqueLabel;
+        } else {
+            labelCount[cleanLabel] = 1;
+            idToLabelMap[item.id] = cleanLabel;
+        }
+    });
+
+    return idToLabelMap;
+};
+
+/**
+ * GASに送信するために、スキーマのID部分を日本語キーに置換した新しいスキーマを作成します
+ */
+export const convertSchemaToReadable = (schema: FormItem[]) => {
+    const keyMap = generateKeyMap(schema);
+    return schema.map(item => ({
+        ...item,
+        id: keyMap[item.id] || item.id 
+    }));
+};
+
+/**
+ * 記録データ(UUIDキー)を、日本語キーのデータに変換します
+ */
+export const convertDataToReadable = (data: Record<string, FormValue>, schema: FormItem[]) => {
+    const keyMap = generateKeyMap(schema);
+    const newData: Record<string, FormValue> = {};
+
+    Object.keys(data).forEach(key => {
+        // detail項目の処理 (uuid_detail -> 日本語_詳細)
+        if (key.endsWith('_detail')) {
+            const originalId = key.replace('_detail', '');
+            const newKey = keyMap[originalId] ? `${keyMap[originalId]}_詳細` : key;
+            newData[newKey] = data[key];
+        } 
+        // 通常項目の処理
+        else if (keyMap[key]) {
+            newData[keyMap[key]] = data[key];
+        }
+        // マップにないもの（基本情報など）はそのまま
+        else {
+            newData[key] = data[key];
+        }
+    });
+
+    return newData;
+};
 

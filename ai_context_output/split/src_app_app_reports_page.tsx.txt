@@ -20,11 +20,10 @@ import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRe
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
+import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
-
-// 修正: undefined を追加して PDF側の型定義と互換性を持たせる
-type ReportValuesData = Record<string, string | number | boolean | string[] | null | undefined>;
+type ReportValuesData = Record<string, FormValue>;
 
 type Report = {
   id: string; start_at: string; end_at: string; created_at: string; updated_at: string; status: ReportStatus; approved_at: string | null;
@@ -34,7 +33,6 @@ type Report = {
   report_values: { data: ReportValuesData } | { data: ReportValuesData }[];
 };
 type ClientData = { id: string; name: string };
-type FormItem = { id: string; label: string; type: string; options?: string; hasDetail?: boolean; };
 type CsvColumnDef = { header: string; key: string; type: 'value' | 'bool' | 'option'; matchValue?: string; };
 
 export default function ReportsPage() {
@@ -149,7 +147,6 @@ export default function ReportsPage() {
 
   const getTargetReports = () => selected.length > 0 ? reports.filter(r => selected.includes(r.id)) : reports;
 
-  // CSVエクスポート処理
   const handleExportCSV = async () => {
       const targetReports = getTargetReports();
       if (targetReports.length === 0) { alert('出力するデータがありません。'); return; }
@@ -163,13 +160,13 @@ export default function ReportsPage() {
         const seenHeaders = new Set<string>();
 
         templates?.forEach(tmpl => {
-            const schema = tmpl.schema as FormItem[];
+            const schema = tmpl.schema as HelperFormItem[];
             if (!schema) return;
             schema.forEach(item => {
                 if (item.type === 'section') return;
                 if (['multicheckbox', 'select'].includes(item.type) && item.options) {
                     const options = item.options.split(',');
-                    options.forEach(opt => {
+                    options.forEach((opt: string) => {
                         const cleanOpt = opt.trim();
                         const header = `${item.label}_${cleanOpt}`;
                         if (!seenHeaders.has(header)) { dynamicColumns.push({ header: header, key: item.id, type: 'option', matchValue: cleanOpt }); seenHeaders.add(header); }
@@ -254,7 +251,7 @@ export default function ReportsPage() {
             helperName: getHelperNames(report),
             startAt: report.start_at, endAt: report.end_at, 
             data: data, 
-            template: (tmplData?.schema as FormItem[]) || []
+            template: (tmplData?.schema as HelperFormItem[]) || []
           };
           return pdfData;
         }));
@@ -266,6 +263,60 @@ export default function ReportsPage() {
         link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
         link.click();
       } catch (e) { console.error(e); alert('PDF作成中にエラーが発生しました'); }
+  };
+
+  // --- GAS連携用のデータ加工関数 ---
+  // rawData (UUIDキー) を、スキーマに基づいて「日本語キー」かつ「全項目補完済み」のデータに変換する
+  const preparePdfData = (
+    rawData: ReportValuesData, 
+    schema: HelperFormItem[], 
+    keyMap: Record<string, string>
+  ): Record<string, unknown> => {
+    const result: Record<string, unknown> = {};
+
+    // 1. スキーマをループして、各項目について値を決定する
+    schema.forEach(item => {
+        // 日本語のキー名を取得（例: "食事介助"）
+        const labelKey = keyMap[item.id] || item.id;
+        
+        const val = rawData[item.id];
+
+        if (item.type === 'checkbox') {
+            // チェックボックス: 値がなければ明示的に false を入れる
+            // これによりGAS側で「☐」が表示される
+            result[labelKey] = !!val; 
+            
+            // 詳細があればそれも追加
+            if (item.hasDetail) {
+                const detailKey = `${labelKey}_詳細`;
+                // 詳細は入力がなければ空文字にしておく（あるいは送らなくてもGAS側で消える）
+                result[detailKey] = rawData[`${item.id}_detail`] || "";
+            }
+        } 
+        else if (item.type === 'multicheckbox' || item.type === 'select') {
+            // 複数選択: 選択肢ごとにキーを展開する (例: 食事介助_朝: true)
+            const selectedValues: string[] = Array.isArray(val) ? val : (val ? [String(val)] : []);
+            
+            if (item.options) {
+                item.options.split(',').forEach((opt: string) => {
+                    const cleanOpt = opt.trim();
+                    const optKey = `${labelKey}_${cleanOpt}`;
+                    // 選択されていれば true, なければ false
+                    result[optKey] = selectedValues.includes(cleanOpt);
+                });
+            }
+            if (item.hasDetail) {
+                const detailKey = `${labelKey}_詳細`;
+                result[detailKey] = rawData[`${item.id}_detail`] || "";
+            }
+        } 
+        else {
+            // テキスト、数値など: 値がなければ空文字
+            result[labelKey] = (val === null || val === undefined) ? "" : val;
+        }
+    });
+
+    return result;
   };
 
   // GASによる帳票作成処理
@@ -282,6 +333,17 @@ export default function ReportsPage() {
 
       const clientIds = Object.keys(clientGroups);
       const { data: clientsInfo } = await supabase.from('clients').select('id, name, google_template_id, google_folder_id').in('id', clientIds);
+      
+      const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
+
+      const schemaMap: Record<string, HelperFormItem[]> = {};
+      const keyMaps: Record<string, Record<string, string>> = {}; // クライアントごとのID->日本語マップ
+
+      templates?.forEach(t => { 
+          const s = t.schema as HelperFormItem[];
+          schemaMap[t.client_id] = s;
+          keyMaps[t.client_id] = generateKeyMap(s); // utilsの関数を使ってマップ生成
+      });
 
       const { data: orgInfo } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg!.id).single();
       if (!orgInfo?.google_folder_id) { alert('事業所のGoogleドライブ連携が設定されていません。\n設定画面から連携を行ってください。'); return; }
@@ -289,8 +351,17 @@ export default function ReportsPage() {
       if (!confirm(`${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）`)) return;
       setGasProgress({ total: targetReports.length, current: 0, currentName: '準備中...' });
 
+      // 最後に開くフォルダURLを保持する変数
+      let lastOpenedFolderUrl: string | null = null;
+
       try {
           let processedCount = 0;
+          
+          // フォルダ名用のタイムスタンプ生成
+          const now = new Date();
+          const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+          const exportFolderName = `${timeStr}_出力分`;
+
           for (const client of clientsInfo || []) {
               const reports = clientGroups[client.id];
               if (!reports) continue;
@@ -301,6 +372,8 @@ export default function ReportsPage() {
               }
 
               setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: フォルダ確認中...` }));
+              
+              // クライアントのルートフォルダを確保
               const folderRes = await callGasApi({
                   action: 'manage_client_folder',
                   orgFolderId: orgInfo.google_folder_id,
@@ -312,13 +385,27 @@ export default function ReportsPage() {
               if (folderRes.folderId !== client.google_folder_id) {
                   await supabase.from('clients').update({ google_folder_id: folderRes.folderId }).eq('id', client.id);
               }
-              const targetFolderId = folderRes.folderId;
+              const clientRootFolderId = folderRes.folderId;
+
+              // 出力用のサブフォルダを作成
+              setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: サブフォルダ作成中...` }));
+              const subFolderRes = await callGasApi({
+                  action: 'create_sub_folder',
+                  parentId: clientRootFolderId,
+                  folderName: exportFolderName
+              });
+              const targetFolderId = subFolderRes.folderId; 
+              
+              // 最後に作成したフォルダのURLを保存（ループ終了後に開くため）
+              lastOpenedFolderUrl = subFolderRes.folderUrl;
+
+              const clientSchema = schemaMap[client.id] || [];
+              const clientKeyMap = keyMaps[client.id] || {};
 
               for (const report of reports) {
                   setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: ${new Date(report.start_at).toLocaleDateString()} の記録を作成中...` }));
                   const data = getReportData(report) || {};
                   
-                  // 修正: flatDataの型を any から明示的な型へ変更
                   const flatData: Record<string, string | number | boolean | null | undefined> = {};
                   
                   const start = new Date(report.start_at);
@@ -331,32 +418,32 @@ export default function ReportsPage() {
                   flatData['終了日付'] = `${end.getFullYear()}/${end.getMonth()+1}/${end.getDate()}`;
                   flatData['終了時刻'] = `${end.getHours()}:${String(end.getMinutes()).padStart(2,'0')}`;
                   
-                  // 修正: 型アサーションを追加して型エラーを回避
                   flatData['サービス時間'] = (data.service_time as string | number) || '0';
                   flatData['移動時間'] = (data.travel_time as string | number) || '0';
 
-                  Object.keys(data).forEach(key => {
-                      const val = data[key];
-                      if (key.endsWith('_detail')) { 
-                          flatData[key] = val as string | number | boolean | null | undefined; 
-                      }
-                      else if (Array.isArray(val)) { val.forEach(v => { flatData[`${key}_${v}`] = "○"; }); }
-                      else if (typeof val === 'boolean') { flatData[key] = val ? "○" : ""; }
-                      else { flatData[key] = val as string | number | boolean | null | undefined; }
-                  });
+                  // ★修正: 独自の変換関数を使って、不足しているfalseなどを補完したデータを生成
+                  const readableData = preparePdfData(data, clientSchema, clientKeyMap);
+                  
+                  const finalPayload = { ...flatData, ...readableData } as Record<string, unknown>;
 
                   await callGasApi({
                       action: 'create_pdf',
-                      folderId: targetFolderId,
+                      folderId: targetFolderId, 
                       templateId: client.google_template_id,
-                      data: flatData,
+                      data: finalPayload, 
                       fileName: `${client.name}_${(flatData['開始日付'] as string).replace(/\//g,'-')}_提供記録`
                   });
                   processedCount++;
                   setGasProgress({ total: targetReports.length, current: processedCount, currentName: '' });
               }
           }
-          alert('作成が完了しました。\nGoogleドライブを確認してください。');
+          alert('作成が完了しました。保存先のフォルダを開きます。');
+          
+          // ★追加: 最後に処理したフォルダを開く
+          if (lastOpenedFolderUrl) {
+              window.open(lastOpenedFolderUrl, '_blank');
+          }
+
       } catch (e) { console.error(e); alert('エラーが発生しました: ' + e); } 
       finally { setGasProgress(null); }
   };
@@ -453,7 +540,7 @@ export default function ReportsPage() {
                      <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
                        <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
                        <TableCell><Chip label={row.status === 'approved' ? '承認済' : row.status === 'remanded' ? '差戻し' : '未承認'} color={row.status === 'approved' ? 'success' : row.status === 'remanded' ? 'error' : 'warning'} size="small" variant="outlined" /></TableCell>
-                       <TableCell>{new Date(row.start_at).toLocaleDateString()} {new Date(row.start_at).getHours()}:{String(new Date(row.start_at).getMinutes()).padStart(2,'0')}</TableCell>
+                       <TableCell>{new Date(row.start_at).toLocaleDateString()}</TableCell>
                        <TableCell>{row.clients.name}</TableCell>
                        <TableCell>{getHelperNames(row)}</TableCell>
                        <TableCell><Button size="small" variant="outlined" onClick={() => handleOpenDetail(row)} sx={{ fontSize: '0.75rem', py: 0.5 }}>詳細</Button></TableCell>
