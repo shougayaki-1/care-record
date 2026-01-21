@@ -14,6 +14,9 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import TagIcon from '@mui/icons-material/Tag';
 import ArticleIcon from '@mui/icons-material/Article';
+import DeleteIcon from '@mui/icons-material/Delete';
+import RestoreIcon from '@mui/icons-material/Restore';
+
 import { supabase } from '@/lib/supabase';
 import { pdf } from '@react-pdf/renderer';
 import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRecordDocument';
@@ -21,6 +24,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
+import { useToast } from '@/components/ui/ToastProvider';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 type ReportValuesData = Record<string, FormValue>;
@@ -39,6 +43,8 @@ export default function ReportsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { currentOrg, loading: wsLoading } = useWorkspace();
+  const { showToast } = useToast();
+  
   const [reports, setReports] = useState<Report[]>([]);
   const [clients, setClients] = useState<ClientData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,7 +135,44 @@ export default function ReportsPage() {
         await supabase.from('reports').update(updateData).in('id', selected);
         setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, ...updateData, approved_by_user: { name: 'あなた' } } : r));
         setSelected([]);
-      } catch (e) { console.error(e); alert('エラーが発生しました'); } finally { setProcessing(false); }
+        showToast('一括承認しました');
+      } catch (e) { console.error(e); showToast('エラーが発生しました', 'error'); } finally { setProcessing(false); }
+  };
+
+  const handleBulkRemand = async () => {
+    if (selected.length === 0 || !confirm(`${selected.length}件を一括で差戻ししますか？`)) return;
+    setProcessing(true);
+    try {
+        await supabase.from('reports').update({ status: 'remanded', approved_by: null, approved_at: null }).in('id', selected);
+        setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, status: 'remanded' as ReportStatus } : r));
+        setSelected([]);
+        showToast('差し戻しました');
+    } catch (e) { 
+        console.error(e);
+        showToast('エラーが発生しました', 'error'); 
+    } finally { setProcessing(false); }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selected.length === 0 || !confirm(`${selected.length}件を削除しますか？\nこの操作は取り消せません。`)) return;
+    
+    // 承認済みが含まれていないかチェック
+    const targets = reports.filter(r => selected.includes(r.id));
+    if (targets.some(r => r.status === 'approved')) {
+        alert('選択項目の中に「承認済み」の記録が含まれています。\n承認を取り消してから削除してください。');
+        return;
+    }
+
+    setProcessing(true);
+    try {
+        await supabase.from('reports').delete().in('id', selected);
+        setReports(prev => prev.filter(r => !selected.includes(r.id)));
+        setSelected([]);
+        showToast('削除しました');
+    } catch (e) { 
+        console.error(e);
+        showToast('エラーが発生しました', 'error'); 
+    } finally { setProcessing(false); }
   };
 
   const getReportData = (report: Report): ReportValuesData | null => {
@@ -265,43 +308,28 @@ export default function ReportsPage() {
       } catch (e) { console.error(e); alert('PDF作成中にエラーが発生しました'); }
   };
 
-  // --- GAS連携用のデータ加工関数 ---
-  // rawData (UUIDキー) を、スキーマに基づいて「日本語キー」かつ「全項目補完済み」のデータに変換する
   const preparePdfData = (
     rawData: ReportValuesData, 
     schema: HelperFormItem[], 
     keyMap: Record<string, string>
   ): Record<string, unknown> => {
     const result: Record<string, unknown> = {};
-
-    // 1. スキーマをループして、各項目について値を決定する
     schema.forEach(item => {
-        // 日本語のキー名を取得（例: "食事介助"）
         const labelKey = keyMap[item.id] || item.id;
-        
         const val = rawData[item.id];
-
         if (item.type === 'checkbox') {
-            // チェックボックス: 値がなければ明示的に false を入れる
-            // これによりGAS側で「☐」が表示される
             result[labelKey] = !!val; 
-            
-            // 詳細があればそれも追加
             if (item.hasDetail) {
                 const detailKey = `${labelKey}_詳細`;
-                // 詳細は入力がなければ空文字にしておく（あるいは送らなくてもGAS側で消える）
                 result[detailKey] = rawData[`${item.id}_detail`] || "";
             }
         } 
         else if (item.type === 'multicheckbox' || item.type === 'select') {
-            // 複数選択: 選択肢ごとにキーを展開する (例: 食事介助_朝: true)
             const selectedValues: string[] = Array.isArray(val) ? val : (val ? [String(val)] : []);
-            
             if (item.options) {
                 item.options.split(',').forEach((opt: string) => {
                     const cleanOpt = opt.trim();
                     const optKey = `${labelKey}_${cleanOpt}`;
-                    // 選択されていれば true, なければ false
                     result[optKey] = selectedValues.includes(cleanOpt);
                 });
             }
@@ -311,15 +339,12 @@ export default function ReportsPage() {
             }
         } 
         else {
-            // テキスト、数値など: 値がなければ空文字
             result[labelKey] = (val === null || val === undefined) ? "" : val;
         }
     });
-
     return result;
   };
 
-  // GASによる帳票作成処理
   const handleCreateGasPdf = async () => {
       const targetReports = getTargetReports();
       if (targetReports.length === 0) { alert('出力するデータがありません。'); return; }
@@ -337,12 +362,12 @@ export default function ReportsPage() {
       const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
 
       const schemaMap: Record<string, HelperFormItem[]> = {};
-      const keyMaps: Record<string, Record<string, string>> = {}; // クライアントごとのID->日本語マップ
+      const keyMaps: Record<string, Record<string, string>> = {};
 
       templates?.forEach(t => { 
           const s = t.schema as HelperFormItem[];
           schemaMap[t.client_id] = s;
-          keyMaps[t.client_id] = generateKeyMap(s); // utilsの関数を使ってマップ生成
+          keyMaps[t.client_id] = generateKeyMap(s);
       });
 
       const { data: orgInfo } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg!.id).single();
@@ -351,13 +376,10 @@ export default function ReportsPage() {
       if (!confirm(`${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）`)) return;
       setGasProgress({ total: targetReports.length, current: 0, currentName: '準備中...' });
 
-      // 最後に開くフォルダURLを保持する変数
       let lastOpenedFolderUrl: string | null = null;
 
       try {
           let processedCount = 0;
-          
-          // フォルダ名用のタイムスタンプ生成
           const now = new Date();
           const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
           const exportFolderName = `${timeStr}_出力分`;
@@ -373,7 +395,6 @@ export default function ReportsPage() {
 
               setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: フォルダ確認中...` }));
               
-              // クライアントのルートフォルダを確保
               const folderRes = await callGasApi({
                   action: 'manage_client_folder',
                   orgFolderId: orgInfo.google_folder_id,
@@ -387,7 +408,6 @@ export default function ReportsPage() {
               }
               const clientRootFolderId = folderRes.folderId;
 
-              // 出力用のサブフォルダを作成
               setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: サブフォルダ作成中...` }));
               const subFolderRes = await callGasApi({
                   action: 'create_sub_folder',
@@ -395,8 +415,6 @@ export default function ReportsPage() {
                   folderName: exportFolderName
               });
               const targetFolderId = subFolderRes.folderId; 
-              
-              // 最後に作成したフォルダのURLを保存（ループ終了後に開くため）
               lastOpenedFolderUrl = subFolderRes.folderUrl;
 
               const clientSchema = schemaMap[client.id] || [];
@@ -417,13 +435,10 @@ export default function ReportsPage() {
                   flatData['開始時刻'] = `${start.getHours()}:${String(start.getMinutes()).padStart(2,'0')}`;
                   flatData['終了日付'] = `${end.getFullYear()}/${end.getMonth()+1}/${end.getDate()}`;
                   flatData['終了時刻'] = `${end.getHours()}:${String(end.getMinutes()).padStart(2,'0')}`;
-                  
                   flatData['サービス時間'] = (data.service_time as string | number) || '0';
                   flatData['移動時間'] = (data.travel_time as string | number) || '0';
 
-                  // ★修正: 独自の変換関数を使って、不足しているfalseなどを補完したデータを生成
                   const readableData = preparePdfData(data, clientSchema, clientKeyMap);
-                  
                   const finalPayload = { ...flatData, ...readableData } as Record<string, unknown>;
 
                   await callGasApi({
@@ -438,11 +453,7 @@ export default function ReportsPage() {
               }
           }
           alert('作成が完了しました。保存先のフォルダを開きます。');
-          
-          // ★追加: 最後に処理したフォルダを開く
-          if (lastOpenedFolderUrl) {
-              window.open(lastOpenedFolderUrl, '_blank');
-          }
+          if (lastOpenedFolderUrl) window.open(lastOpenedFolderUrl, '_blank');
 
       } catch (e) { console.error(e); alert('エラーが発生しました: ' + e); } 
       finally { setGasProgress(null); }
@@ -504,6 +515,8 @@ export default function ReportsPage() {
                             {gasProgress ? '作成中...' : '帳票作成(GAS)'}
                         </Button>
                         <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>
+                        <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</Button>
+                        <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</Button>
                     </>
                  ) : (
                      <Button variant="outlined" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
