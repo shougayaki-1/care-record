@@ -21,6 +21,7 @@ export default function SetupPage() {
     const [submitting, setSubmitting] = useState(false);
     const [step, setStep] = useState<Step>('profile');
     const [userId, setUserId] = useState('');
+    const [hasMembership, setHasMembership] = useState(false); // ★追加: 既存メンバーかどうかのフラグ
     
     // 入力値
     const [userName, setUserName] = useState('');
@@ -51,13 +52,11 @@ export default function SetupPage() {
 
         // 所属確認
         const { data: members } = await supabase.from('organization_members').select('id').eq('user_id', user.id);
-        const hasMembership = members && members.length > 0;
+        const isMember = members && members.length > 0;
+        setHasMembership(isMember || false);
 
-        // ★修正ポイント: 所属があっても、招待コードがある場合は参加フローへ進める
-        if (hasMembership && !paramInviteCode) {
-            router.push('/app');
-            return;
-        }
+        // ★修正: 既存メンバーでも、明示的にこのページに来た場合はアクセスを許可する
+        // (以前はここで /app にリダイレクトしていた)
 
         // 画面遷移の判定
         if (profile?.name) {
@@ -183,7 +182,7 @@ export default function SetupPage() {
                 await supabase.from('assignments').insert(assignments);
             }
 
-            // ★追加: 参加した事業所を「最後に選択した事業所」として保存（ログイン後にその事業所が開くように）
+            // 参加した事業所を「最後に選択した事業所」として保存
             await supabase.from('profiles').update({ last_organization_id: invite.organization_id }).eq('id', userId);
 
             // 完了
@@ -201,7 +200,6 @@ export default function SetupPage() {
         <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f5f5f5', p: 2 }}>
             <Paper elevation={0} sx={{ p: 4, width: '100%', maxWidth: 480, borderRadius: 3, border: '1px solid #ddd' }}>
                 
-                {/* 既存メンバーが招待で来た場合のメッセージ */}
                 {step === 'join' && paramInviteCode && (
                     <Alert severity="info" sx={{ mb: 3 }}>
                         招待コードが検出されました。<br/>新しい事業所に参加しますか？
@@ -270,6 +268,13 @@ export default function SetupPage() {
                                 </Stack>
                             </CardActionArea>
                         </Card>
+
+                        {/* ★追加: 既存メンバーの場合はキャンセルボタンを表示 */}
+                        {hasMembership && (
+                            <Button color="inherit" onClick={() => router.push('/app')}>
+                                キャンセルしてアプリに戻る
+                            </Button>
+                        )}
                     </Stack>
                 )}
 
@@ -318,8 +323,6 @@ export default function SetupPage() {
                             onChange={(e) => setInviteCode(e.target.value)} 
                         />
                         <Stack direction="row" spacing={2}>
-                            {/* 招待コード付きで直接来た場合は戻るボタンを隠す（またはアプリへ戻るにする）か検討だが、
-                                一旦 choice に戻る挙動にしておく */}
                             <Button fullWidth onClick={() => paramInviteCode ? router.push('/app') : setStep('choice')} disabled={submitting}>
                                 {paramInviteCode ? 'キャンセル' : '戻る'}
                             </Button>

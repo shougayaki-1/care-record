@@ -10,6 +10,7 @@ import LockIcon from '@mui/icons-material/Lock';
 import PersonIcon from '@mui/icons-material/Person';
 import LinkIcon from '@mui/icons-material/Link';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 
@@ -20,10 +21,7 @@ const MicrosoftLogo = () => (
     <svg width="20" height="20" viewBox="0 0 23 23"><path fill="#f35325" d="M1 1h10v10H1z" /><path fill="#81bc06" d="M12 1h10v10H12z" /><path fill="#05a6f0" d="M1 12h10v10H1z" /><path fill="#ffba08" d="M12 12h10v10H12z" /></svg>
 );
 
-// 必要なプロパティのみを定義
-type UserIdentity = {
-    provider: string;
-};
+type UserIdentity = { provider: string; };
 
 export default function ProfilePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
@@ -38,9 +36,7 @@ export default function ProfilePage() {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
-    useEffect(() => {
-        fetchProfile();
-    }, []);
+    useEffect(() => { fetchProfile(); }, []);
 
     const fetchProfile = async () => {
         try {
@@ -49,8 +45,6 @@ export default function ProfilePage() {
             setUserId(user.id);
             setEmail(user.email || '');
             if (user.identities) {
-                // unknownを経由することで、Supabaseの型定義との互換性エラーを回避しつつ、
-                // ローカルで定義した型として扱います
                 const identities = user.identities as unknown as UserIdentity[];
                 setLinkedProviders(identities.map((id) => id.provider));
             }
@@ -75,81 +69,77 @@ export default function ProfilePage() {
             }
             setMessage({ type: 'success', text: '更新しました' });
             setNewPassword(''); setConfirmPassword('');
-        } catch (e) {
-            if (e instanceof Error) {
-                setMessage({ type: 'error', text: e.message });
-            }
-        } finally { setSaving(false); }
+        } catch (e) { if (e instanceof Error) setMessage({ type: 'error', text: e.message }); } 
+        finally { setSaving(false); }
     };
 
     const handleLinkIdentity = async (provider: 'google' | 'azure') => {
-        const { error } = await supabase.auth.linkIdentity({
-            provider, options: { redirectTo: `${window.location.origin}/app/profile` }
-        });
+        const { error } = await supabase.auth.linkIdentity({ provider, options: { redirectTo: `${window.location.origin}/app/profile` } });
         if (error) setMessage({ type: 'error', text: error.message });
     };
 
-    if (loading || wsLoading) return <CircularProgress />;
+    if (loading || wsLoading) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
 
     return (
-        <Container maxWidth="sm">
-            <Typography variant="h5" fontWeight="bold" mb={3}>アカウント設定</Typography>
-            {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
+                <AccountCircleIcon sx={{ color: 'action.active', mr: 2 }} />
+                <Typography variant="h6" fontWeight="bold" color="text.primary">アカウント設定</Typography>
+            </Box>
 
-            <Paper sx={{ p: 4, borderRadius: 3 }}>
-                <Stack spacing={4}>
-                    <Box>
-                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
-                            <PersonIcon color="primary" /> 基本情報
-                        </Typography>
-                        <Stack spacing={2} mt={1}>
-                            <TextField label="メールアドレス" value={email} disabled fullWidth size="small" />
-                            <TextField label="氏名" value={name} onChange={(e) => setName(e.target.value)} fullWidth required />
-                            {currentOrg && (
-                                <TextField 
-                                    label="現在の事業所での権限" 
-                                    value={currentOrg.role} 
-                                    disabled 
-                                    fullWidth 
-                                    size="small"
-                                    helperText={`事業所: ${currentOrg.name}`}
-                                />
-                            )}
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
+                <Container maxWidth="sm">
+                    {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
+
+                    <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+                        <Stack spacing={4}>
+                            <Box>
+                                <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
+                                    <PersonIcon color="primary" /> 基本情報
+                                </Typography>
+                                <Stack spacing={2} mt={1}>
+                                    <TextField label="メールアドレス" value={email} disabled fullWidth size="small" />
+                                    <TextField label="氏名" value={name} onChange={(e) => setName(e.target.value)} fullWidth required />
+                                    {currentOrg && (
+                                        <TextField label="現在の事業所での権限" value={currentOrg.role} disabled fullWidth size="small" helperText={`事業所: ${currentOrg.name}`} />
+                                    )}
+                                </Stack>
+                            </Box>
+                            <Divider />
+                            <Box>
+                                <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
+                                    <LinkIcon color="primary" /> 外部連携
+                                </Typography>
+                                <Stack spacing={2} mt={1}>
+                                    {['google', 'azure'].map(p => (
+                                        <Box key={p} display="flex" justifyContent="space-between" alignItems="center" p={2} border="1px solid" borderColor="divider" borderRadius={2}>
+                                            <Box display="flex" alignItems="center" gap={2}>
+                                                {p === 'google' ? <GoogleLogo /> : <MicrosoftLogo />}
+                                                <Typography fontWeight="bold" textTransform="capitalize">{p === 'azure' ? 'Microsoft' : 'Google'}</Typography>
+                                            </Box>
+                                            {linkedProviders.includes(p) ? <Chip label="連携済" color="success" size="small" icon={<CheckCircleIcon />} /> : 
+                                            <Button variant="outlined" size="small" onClick={() => handleLinkIdentity(p as 'google' | 'azure')}>連携</Button>}
+                                        </Box>
+                                    ))}
+                                </Stack>
+                            </Box>
+                            <Divider />
+                            <Box>
+                                <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
+                                    <LockIcon color="primary" /> パスワード変更
+                                </Typography>
+                                <Stack spacing={2} mt={1}>
+                                    <TextField label="新しいパスワード" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} fullWidth />
+                                    <TextField label="確認" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} fullWidth />
+                                </Stack>
+                            </Box>
+                            <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleUpdateProfile} disabled={saving} sx={{ py: 1.5 }}>
+                                {saving ? '保存中...' : '設定を保存'}
+                            </Button>
                         </Stack>
-                    </Box>
-                    <Divider />
-                    <Box>
-                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
-                            <LinkIcon color="primary" /> 外部連携
-                        </Typography>
-                        <Stack spacing={2} mt={1}>
-                            {['google', 'azure'].map(p => (
-                                <Box key={p} display="flex" justifyContent="space-between" alignItems="center" p={2} border="1px solid #eee" borderRadius={2}>
-                                    <Box display="flex" alignItems="center" gap={2}>
-                                        {p === 'google' ? <GoogleLogo /> : <MicrosoftLogo />}
-                                        <Typography fontWeight="bold" textTransform="capitalize">{p === 'azure' ? 'Microsoft' : 'Google'}</Typography>
-                                    </Box>
-                                    {linkedProviders.includes(p) ? <Chip label="連携済" color="success" size="small" icon={<CheckCircleIcon />} /> : 
-                                    <Button variant="outlined" size="small" onClick={() => handleLinkIdentity(p as 'google' | 'azure')}>連携</Button>}
-                                </Box>
-                            ))}
-                        </Stack>
-                    </Box>
-                    <Divider />
-                    <Box>
-                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
-                            <LockIcon color="primary" /> パスワード変更
-                        </Typography>
-                        <Stack spacing={2} mt={1}>
-                            <TextField label="新しいパスワード" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} fullWidth />
-                            <TextField label="確認" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} fullWidth />
-                        </Stack>
-                    </Box>
-                    <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleUpdateProfile} disabled={saving} sx={{ py: 1.5 }}>
-                        {saving ? '保存中...' : '設定を保存'}
-                    </Button>
-                </Stack>
-            </Paper>
-        </Container>
+                    </Paper>
+                </Container>
+            </Box>
+        </Box>
     );
 }

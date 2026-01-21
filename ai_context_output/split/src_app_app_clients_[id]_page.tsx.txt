@@ -5,7 +5,8 @@ import {
     Box, Button, Typography, Paper, Stack, TextField,
     MenuItem, IconButton, Card, CardContent, Switch,
     FormControlLabel, Alert, CircularProgress, Dialog,
-    DialogTitle, DialogContent, DialogActions, Select, Divider
+    DialogTitle, DialogContent, DialogActions, Select, Divider,
+    Tabs, Tab, Checkbox, FormGroup
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -17,6 +18,9 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import TitleIcon from '@mui/icons-material/Title';
 import CheckBoxIcon from '@mui/icons-material/CheckBox';
 import CommentIcon from '@mui/icons-material/Comment';
+import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
+import DescriptionIcon from '@mui/icons-material/Description';
+import FolderIcon from '@mui/icons-material/Folder';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
@@ -30,7 +34,8 @@ type FormItem = {
     hasDetail?: boolean;
 };
 
-// デフォルトテンプレート
+type Staff = { id: string; name: string; type: 'member' | 'ghost' };
+
 const DEFAULT_TEMPLATE: FormItem[] = [
     { id: 'sec_medical', label: '【医療的ケア・身体介護】', type: 'section', required: false },
     { id: 'sputum_suction', label: '痰等の吸引（気管・口腔）', type: 'checkbox', required: false },
@@ -82,8 +87,15 @@ export default function ClientSettingsPage() {
 
     const [loading, setLoading] = useState(true);
     const [clientName, setClientName] = useState('');
+    const [tabIndex, setTabIndex] = useState(0);
 
     const [formItems, setFormItems] = useState<FormItem[]>([]);
+    
+    const [allStaffs, setAllStaffs] = useState<Staff[]>([]);
+    const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([]);
+    
+    const [templateId, setTemplateId] = useState('');
+
     const [isSaving, setIsSaving] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
@@ -91,31 +103,48 @@ export default function ClientSettingsPage() {
     const [otherClients, setOtherClients] = useState<{id: string, name: string}[]>([]);
     const [copySourceId, setCopySourceId] = useState('');
 
-    // useCallbackでラップして依存関係を解決
     const fetchClientData = useCallback(async () => {
         try {
-            const { data: client } = await supabase.from('clients').select('name').eq('id', clientId).single();
-            if (client) setClientName(client.name);
+            const { data: client } = await supabase.from('clients').select('name, google_template_id').eq('id', clientId).single();
+            if (client) {
+                setClientName(client.name);
+                setTemplateId(client.google_template_id || '');
+            }
 
-            const { data: template } = await supabase
-                .from('form_templates')
-                .select('schema')
-                .eq('client_id', clientId)
-                .maybeSingle();
-
+            const { data: template } = await supabase.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle();
             if (template?.schema && Array.isArray(template.schema) && template.schema.length > 0) {
-                // anyキャストを削除し、FormItem[]型として扱う
                 setFormItems(template.schema as FormItem[]);
             } else {
                 const initItems = DEFAULT_TEMPLATE.map(item => ({ ...item, id: crypto.randomUUID() }));
                 setFormItems(initItems);
             }
+
+            if (currentOrg) {
+                let staffs: Staff[] = [];
+                const { data: members } = await supabase.from('organization_members').select('user_id').eq('organization_id', currentOrg.id);
+                if (members) {
+                    const userIds = members.map(m => m.user_id);
+                    const { data: profiles } = await supabase.from('profiles').select('id, name').in('id', userIds);
+                    if (profiles) staffs = [...staffs, ...profiles.map(p => ({ id: p.id, name: p.name, type: 'member' as const }))];
+                }
+                const { data: ghosts } = await supabase.from('ghost_staffs').select('id, name').eq('organization_id', currentOrg.id);
+                if (ghosts) staffs = [...staffs, ...ghosts.map(g => ({ id: g.id, name: g.name, type: 'ghost' as const }))];
+                
+                setAllStaffs(staffs);
+
+                const { data: assigns } = await supabase.from('assignments').select('helper_id, ghost_staff_id').eq('client_id', clientId);
+                if (assigns) {
+                    const ids = assigns.map(a => a.helper_id || a.ghost_staff_id).filter(id => id !== null) as string[];
+                    setAssignedStaffIds(ids);
+                }
+            }
+
         } catch (error) {
             console.error(error);
         } finally {
             setLoading(false);
         }
-    }, [clientId]);
+    }, [clientId, currentOrg]);
 
     const fetchOtherClients = useCallback(async () => {
         if (!currentOrg) return;
@@ -131,31 +160,20 @@ export default function ClientSettingsPage() {
     }, [wsLoading, currentOrg, fetchClientData, fetchOtherClients]);
 
     const addField = () => {
-        const newField: FormItem = {
-            id: crypto.randomUUID(),
-            label: '',
-            type: 'checkbox',
-            required: false,
-            hasDetail: false
-        };
+        const newField: FormItem = { id: crypto.randomUUID(), label: '', type: 'checkbox', required: false, hasDetail: false };
         setFormItems([...formItems, newField]);
     };
-
     const removeField = (index: number) => {
         if (!confirm('この項目を削除しますか？')) return;
         const newItems = [...formItems];
         newItems.splice(index, 1);
         setFormItems(newItems);
     };
-
-    // any型を FormItem[keyof FormItem] に修正
     const updateField = (index: number, key: keyof FormItem, value: FormItem[keyof FormItem]) => {
         const newItems = [...formItems];
-        // 型安全な代入のためにスプレッド構文を使用
         newItems[index] = { ...newItems[index], [key]: value };
         setFormItems(newItems);
     };
-
     const moveField = (index: number, direction: 'up' | 'down') => {
         if (direction === 'up' && index === 0) return;
         if (direction === 'down' && index === formItems.length - 1) return;
@@ -165,17 +183,19 @@ export default function ClientSettingsPage() {
         setFormItems(newItems);
     };
 
-    const handleSave = async () => {
+    const handleSaveForm = async () => {
         setIsSaving(true);
         setMessage(null);
         try {
             const { data: existing } = await supabase.from('form_templates').select('id').eq('client_id', clientId).maybeSingle();
             if (existing) {
-                await supabase.from('form_templates').update({ schema: formItems, updated_at: new Date() }).eq('client_id', clientId);
+                const { error } = await supabase.from('form_templates').update({ schema: formItems, updated_at: new Date() }).eq('client_id', clientId);
+                if (error) throw error;
             } else {
-                await supabase.from('form_templates').insert({ client_id: clientId, schema: formItems });
+                const { error } = await supabase.from('form_templates').insert({ client_id: clientId, schema: formItems });
+                if (error) throw error;
             }
-            setMessage({ type: 'success', text: '設定を保存しました！' });
+            setMessage({ type: 'success', text: 'フォーム設定を保存しました！' });
             setTimeout(() => setMessage(null), 3000);
         } catch (error) {
             console.error(error);
@@ -185,13 +205,63 @@ export default function ClientSettingsPage() {
         }
     };
 
+    const handleSaveAssignments = async () => {
+        setIsSaving(true);
+        setMessage(null);
+        try {
+            const { error: deleteError } = await supabase.from('assignments').delete().eq('client_id', clientId);
+            if (deleteError) throw deleteError;
+
+            const inserts = assignedStaffIds.map(staffId => {
+                const staff = allStaffs.find(s => s.id === staffId);
+                return {
+                    client_id: clientId,
+                    helper_id: staff?.type === 'member' ? staffId : null,
+                    ghost_staff_id: staff?.type === 'ghost' ? staffId : null
+                };
+            });
+
+            if (inserts.length > 0) {
+                const { error: insertError } = await supabase.from('assignments').insert(inserts);
+                if (insertError) throw insertError;
+            }
+
+            setMessage({ type: 'success', text: '担当スタッフを更新しました！' });
+            setTimeout(() => setMessage(null), 3000);
+            fetchClientData();
+        } catch (error) {
+            console.error('Assignment save error:', error);
+            setMessage({ type: 'error', text: '更新に失敗しました' });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleSaveTemplateId = async () => {
+        setIsSaving(true);
+        setMessage(null);
+        try {
+            await supabase.from('clients').update({ google_template_id: templateId }).eq('id', clientId);
+            setMessage({ type: 'success', text: 'テンプレートIDを保存しました' });
+            setTimeout(() => setMessage(null), 3000);
+        } catch (e) {
+            console.error(e);
+            setMessage({ type: 'error', text: '保存失敗' });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleToggleStaff = (staffId: string) => {
+        setAssignedStaffIds(prev => prev.includes(staffId) ? prev.filter(id => id !== staffId) : [...prev, staffId]);
+    };
+
     const handleCopy = async () => {
         if (!copySourceId) return;
         try {
             const { data: template } = await supabase.from('form_templates').select('schema').eq('client_id', copySourceId).maybeSingle();
             if (template?.schema) {
                 if (confirm('現在の設定はすべて上書きされます。よろしいですか？')) {
-                    // anyキャストを FormItem[] に修正
                     const copiedItems = (template.schema as FormItem[]).map(item => ({ ...item, id: crypto.randomUUID() }));
                     setFormItems(copiedItems);
                     setOpenCopyDialog(false);
@@ -200,9 +270,7 @@ export default function ClientSettingsPage() {
             } else {
                 alert('設定がありません');
             }
-        } catch (error) {
-            console.error(error);
-        }
+        } catch (error) { console.error(error); }
     };
 
     if (loading) return <Box p={4}><CircularProgress /></Box>;
@@ -213,78 +281,103 @@ export default function ClientSettingsPage() {
                 <Stack direction="row" alignItems="center" spacing={2}>
                     <IconButton onClick={() => router.back()}><ArrowBackIcon /></IconButton>
                     <Box>
-                        <Typography variant="caption" color="text.secondary">記録フォーム設定</Typography>
+                        <Typography variant="caption" color="text.secondary">利用者設定</Typography>
                         <Typography variant="h5" fontWeight="bold">{clientName} 様</Typography>
                     </Box>
                 </Stack>
-                <Stack direction="row" spacing={1}>
-                    <Button variant="outlined" color="secondary" onClick={() => { if (confirm('画像と同じ標準設定に戻しますか？')) setFormItems(DEFAULT_TEMPLATE.map(i => ({ ...i, id: crypto.randomUUID() }))) }}>
-                        標準設定に戻す
-                    </Button>
-                    <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={() => setOpenCopyDialog(true)} disabled={otherClients.length === 0}>
-                        他の人からコピー
-                    </Button>
-                </Stack>
+            </Paper>
+
+            <Paper sx={{ mb: 3 }}>
+                <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="fullWidth">
+                    <Tab icon={<DescriptionIcon />} label="記録フォーム" />
+                    <Tab icon={<AssignmentIndIcon />} label="担当スタッフ" />
+                    <Tab icon={<FolderIcon />} label="帳票・連携" />
+                </Tabs>
             </Paper>
 
             {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
-            <Stack spacing={2}>
-                {formItems.map((item, index) => (
-                    <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid #2255CC' : 'none', bgcolor: item.type === 'section' ? '#eef2ff' : 'white' }}>
-                        <CardContent sx={{ p: '16px !important' }}>
-                            <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2}>
-                                <Stack direction="column" spacing={0.5}>
-                                    <IconButton size="small" onClick={() => moveField(index, 'up')} disabled={index === 0}><ArrowUpwardIcon fontSize="small" /></IconButton>
-                                    <IconButton size="small" onClick={() => moveField(index, 'down')} disabled={index === formItems.length - 1}><ArrowDownwardIcon fontSize="small" /></IconButton>
-                                    <IconButton color="error" size="small" onClick={() => removeField(index)} sx={{ mt: 1 }}><DeleteIcon fontSize="small" /></IconButton>
-                                </Stack>
-                                <Box sx={{ flexGrow: 1, width: '100%' }}>
-                                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} mb={1}>
-                                        <TextField
-                                            select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ minWidth: 160 }}
-                                            InputProps={{ startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null }}
-                                        >
-                                            <MenuItem value="section" sx={{ fontWeight: 'bold', color: 'primary.main' }}>■ セクション見出し</MenuItem>
-                                            <Divider />
-                                            <MenuItem value="checkbox">チェック (ON/OFF)</MenuItem>
-                                            <MenuItem value="multicheckbox">複数選択</MenuItem>
-                                            <MenuItem value="text">テキスト入力</MenuItem>
-                                            <MenuItem value="number">数値入力</MenuItem>
-                                            <MenuItem value="select">1つ選択 (ラジオ)</MenuItem>
-                                            <MenuItem value="time">時間</MenuItem>
-                                        </TextField>
-                                        <TextField
-                                            label={item.type === 'section' ? "セクション名" : "質問内容"} size="small" fullWidth value={item.label} onChange={(e) => updateField(index, 'label', e.target.value)}
-                                            sx={{ '& .MuiInputBase-input': { fontWeight: item.type === 'section' ? 'bold' : 'normal', fontSize: item.type === 'section' ? '1.1rem' : '1rem' } }}
-                                        />
-                                        {item.type !== 'section' && (
-                                            <FormControlLabel control={<Switch size="small" checked={item.required} onChange={(e) => updateField(index, 'required', e.target.checked)} />} label="必須" sx={{ minWidth: 80 }} />
-                                        )}
+            {tabIndex === 0 && (
+                <Box>
+                    <Box display="flex" justifyContent="flex-end" gap={1} mb={2}>
+                        <Button variant="outlined" color="secondary" onClick={() => { if (confirm('標準設定に戻しますか？')) setFormItems(DEFAULT_TEMPLATE.map(i => ({ ...i, id: crypto.randomUUID() }))) }}>標準設定に戻す</Button>
+                        <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={() => setOpenCopyDialog(true)} disabled={otherClients.length === 0}>他からコピー</Button>
+                    </Box>
+                    <Stack spacing={2}>
+                        {formItems.map((item, index) => (
+                            <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid #2255CC' : 'none', bgcolor: item.type === 'section' ? '#eef2ff' : 'white' }}>
+                                <CardContent sx={{ p: '16px !important' }}>
+                                    <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2}>
+                                        <Stack direction="column" spacing={0.5}>
+                                            <IconButton size="small" onClick={() => moveField(index, 'up')} disabled={index === 0}><ArrowUpwardIcon fontSize="small" /></IconButton>
+                                            <IconButton size="small" onClick={() => moveField(index, 'down')} disabled={index === formItems.length - 1}><ArrowDownwardIcon fontSize="small" /></IconButton>
+                                            <IconButton color="error" size="small" onClick={() => removeField(index)} sx={{ mt: 1 }}><DeleteIcon fontSize="small" /></IconButton>
+                                        </Stack>
+                                        <Box sx={{ flexGrow: 1, width: '100%' }}>
+                                            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} mb={1}>
+                                                <TextField select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ minWidth: 160 }} InputProps={{ startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null }}>
+                                                    <MenuItem value="section" sx={{ fontWeight: 'bold', color: 'primary.main' }}>■ セクション見出し</MenuItem>
+                                                    <Divider /><MenuItem value="checkbox">チェック (ON/OFF)</MenuItem><MenuItem value="multicheckbox">複数選択</MenuItem><MenuItem value="text">テキスト入力</MenuItem><MenuItem value="number">数値入力</MenuItem><MenuItem value="select">1つ選択 (ラジオ)</MenuItem><MenuItem value="time">時間</MenuItem>
+                                                </TextField>
+                                                <TextField label={item.type === 'section' ? "セクション名" : "質問内容"} size="small" fullWidth value={item.label} onChange={(e) => updateField(index, 'label', e.target.value)} sx={{ '& .MuiInputBase-input': { fontWeight: item.type === 'section' ? 'bold' : 'normal', fontSize: item.type === 'section' ? '1.1rem' : '1rem' } }} />
+                                                {item.type !== 'section' && <FormControlLabel control={<Switch size="small" checked={item.required} onChange={(e) => updateField(index, 'required', e.target.checked)} />} label="必須" sx={{ minWidth: 80 }} />}
+                                            </Stack>
+                                            {(item.type === 'checkbox' || item.type === 'multicheckbox' || item.type === 'select') && (
+                                                <FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: 1 }} />
+                                            )}
+                                            {(item.type === 'select' || item.type === 'multicheckbox') && (
+                                                <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={item.options || ''} onChange={(e) => updateField(index, 'options', e.target.value)} InputProps={{ startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} /> }} />
+                                            )}
+                                        </Box>
                                     </Stack>
+                                </CardContent>
+                            </Card>
+                        ))}
+                        <Button variant="outlined" startIcon={<AddCircleIcon />} onClick={addField} size="large" sx={{ border: '2px dashed #ccc', color: '#666', py: 2 }}>項目を追加する</Button>
+                    </Stack>
+                </Box>
+            )}
 
-                                    {/* 詳細入力オプション */}
-                                    {(item.type === 'checkbox' || item.type === 'multicheckbox' || item.type === 'select') && (
-                                        <FormControlLabel
-                                            control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />}
-                                            label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>}
-                                            sx={{ mb: 1, ml: 1 }}
-                                        />
-                                    )}
+            {tabIndex === 1 && (
+                <Card variant="outlined">
+                    <CardContent>
+                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>この利用者を担当するスタッフを選択してください</Typography>
+                        <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。</Typography>
+                        <FormGroup>
+                            <Typography variant="subtitle2" sx={{ mt: 1, mb: 1, color: 'primary.main' }}>メンバー（ログインユーザー）</Typography>
+                            <Box display="flex" flexWrap="wrap" gap={2}>
+                                {allStaffs.filter(s => s.type === 'member').map(staff => (
+                                    <FormControlLabel key={staff.id} control={<Checkbox checked={assignedStaffIds.includes(staff.id)} onChange={() => handleToggleStaff(staff.id)} />} label={staff.name} sx={{ minWidth: 150 }} />
+                                ))}
+                            </Box>
+                            <Typography variant="subtitle2" sx={{ mt: 3, mb: 1, color: 'secondary.main' }}>アカウントなし（転記用）</Typography>
+                            <Box display="flex" flexWrap="wrap" gap={2}>
+                                {allStaffs.filter(s => s.type === 'ghost').map(staff => (
+                                    <FormControlLabel key={staff.id} control={<Checkbox checked={assignedStaffIds.includes(staff.id)} onChange={() => handleToggleStaff(staff.id)} />} label={staff.name} sx={{ minWidth: 150 }} />
+                                ))}
+                            </Box>
+                        </FormGroup>
+                    </CardContent>
+                </Card>
+            )}
 
-                                    {(item.type === 'select' || item.type === 'multicheckbox') && (
-                                        <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={item.options || ''} onChange={(e) => updateField(index, 'options', e.target.value)} InputProps={{ startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} /> }} />
-                                    )}
-                                </Box>
-                            </Stack>
-                        </CardContent>
-                    </Card>
-                ))}
-                <Button variant="outlined" startIcon={<AddCircleIcon />} onClick={addField} size="large" sx={{ border: '2px dashed #ccc', color: '#666', py: 2 }}>項目を追加する</Button>
-            </Stack>
+            {tabIndex === 2 && (
+                <Card variant="outlined">
+                    <CardContent>
+                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Googleドキュメント連携</Typography>
+                        <Typography variant="body2" color="text.secondary" paragraph>
+                            この利用者の帳票作成に使用する、GoogleドキュメントのテンプレートIDを指定してください。<br/>
+                            （URLの <code>/d/xxxxxxxx/edit</code> の <code>xxxxxxxx</code> の部分です）
+                        </Typography>
+                        <TextField label="テンプレートID" fullWidth value={templateId} onChange={(e) => setTemplateId(e.target.value)} placeholder="GoogleドキュメントID" />
+                    </CardContent>
+                </Card>
+            )}
 
             <Paper sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, p: 2, zIndex: 100, borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'center' }}>
-                <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={isSaving} sx={{ minWidth: 300, fontWeight: 'bold', height: 48 }}>{isSaving ? '保存中...' : 'この設定を保存する'}</Button>
+                <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={() => { if (tabIndex === 0) handleSaveForm(); if (tabIndex === 1) handleSaveAssignments(); if (tabIndex === 2) handleSaveTemplateId(); }} disabled={isSaving} sx={{ minWidth: 300, fontWeight: 'bold', height: 48 }}>
+                    {isSaving ? '保存中...' : '設定を保存'}
+                </Button>
             </Paper>
 
             <Dialog open={openCopyDialog} onClose={() => setOpenCopyDialog(false)}>
@@ -295,10 +388,7 @@ export default function ClientSettingsPage() {
                         {otherClients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                     </Select>
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setOpenCopyDialog(false)}>キャンセル</Button>
-                    <Button onClick={handleCopy} variant="contained" disabled={!copySourceId}>コピー実行</Button>
-                </DialogActions>
+                <DialogActions><Button onClick={() => setOpenCopyDialog(false)}>キャンセル</Button><Button onClick={handleCopy} variant="contained" disabled={!copySourceId}>コピー実行</Button></DialogActions>
             </Dialog>
         </Box>
     );

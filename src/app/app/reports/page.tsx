@@ -3,38 +3,41 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Button,
-  CircularProgress, Stack, Dialog, DialogTitle, DialogContent, DialogActions, IconButton, TextField, MenuItem,
-  Checkbox, TableSortLabel, Switch, FormControlLabel
+  CircularProgress, Stack, TextField, MenuItem, Checkbox, TableSortLabel, Switch, FormControlLabel, Divider,
+  LinearProgress
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
-import CloseIcon from '@mui/icons-material/Close';
+import DownloadIcon from '@mui/icons-material/Download';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import SearchIcon from '@mui/icons-material/Search';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import TagIcon from '@mui/icons-material/Tag';
+import ArticleIcon from '@mui/icons-material/Article';
 import { supabase } from '@/lib/supabase';
 import { pdf } from '@react-pdf/renderer';
-import { ServiceRecordDocument } from '@/components/pdf/ServiceRecordDocument';
+import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRecordDocument';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { callGasApi } from '@/app/actions/gas';
+import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 
-type ReportStatus = 'pending' | 'approved' | 'remanded';
-
-// JSONデータの型定義
-type ReportValuesData = Record<string, string | number | boolean | string[] | null>;
+type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
+type ReportValuesData = Record<string, FormValue>;
 
 type Report = {
-  id: string;
-  service_date: string;
-  start_at: string;
-  end_at: string;
-  status: ReportStatus;
-  clients: { id: string; name: string };
+  id: string; start_at: string; end_at: string; created_at: string; updated_at: string; status: ReportStatus; approved_at: string | null;
+  clients: { id: string; name: string; organization_id: string };
   helper: { name: string };
   approved_by_user?: { name: string };
   report_values: { data: ReportValuesData } | { data: ReportValuesData }[];
 };
-
-type FormItem = { id: string; label: string; type: string; options?: string; };
-
 type ClientData = { id: string; name: string };
+type CsvColumnDef = { header: string; key: string; type: 'value' | 'bool' | 'option'; matchValue?: string; };
 
 export default function ReportsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const [reports, setReports] = useState<Report[]>([]);
   const [clients, setClients] = useState<ClientData[]>([]);
@@ -45,14 +48,26 @@ export default function ReportsPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [onlyPending, setOnlyPending] = useState(false);
+  
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const [orderBy, setOrderBy] = useState<string>('start_at');
   const [selected, setSelected] = useState<readonly string[]>([]);
-
-  const [selectedReport, setSelectedReport] = useState<Report | null>(null);
-  const [currentTemplate, setCurrentTemplate] = useState<FormItem[]>([]);
-  const [openDetail, setOpenDetail] = useState(false);
+  
   const [processing, setProcessing] = useState(false);
+  const [gasProgress, setGasProgress] = useState<{ total: number, current: number, currentName: string } | null>(null);
+
+  useEffect(() => {
+      const statusParam = searchParams.get('status');
+      const periodParam = searchParams.get('period');
+      if (statusParam === 'unapproved') setOnlyPending(true); else setOnlyPending(false);
+      if (periodParam === 'current_month') {
+          const now = new Date();
+          const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+          const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+          const formatDate = (d: Date) => d.toISOString().split('T')[0];
+          setStartDate(formatDate(firstDay)); setEndDate(formatDate(lastDay));
+      }
+  }, [searchParams]);
 
   const fetchClients = useCallback(async () => {
     if (!currentOrg) return;
@@ -62,60 +77,38 @@ export default function ReportsPage() {
 
   const fetchReports = useCallback(async () => {
     if (!currentOrg) return;
-    setLoading(true); setSelected([]);
+    setLoading(true); setSelected([]); 
     try {
-      let query = supabase
-        .from('reports')
-        .select(`
-          *,
-          clients!inner ( id, name, organization_id ),
+      let query = supabase.from('reports').select(`
+          *, clients!inner ( id, name, organization_id ),
           helper:profiles!reports_helper_id_fkey ( name ),
           approved_by_user:profiles!reports_approved_by_fkey ( name ),
           report_values ( data )
-        `)
-        .eq('clients.organization_id', currentOrg.id);
+        `).eq('clients.organization_id', currentOrg.id).neq('status', 'draft'); 
 
       if (filterClientId !== 'all') query = query.eq('client_id', filterClientId);
       if (startDate) query = query.gte('start_at', `${startDate}T00:00:00`);
       if (endDate) query = query.lte('end_at', `${endDate}T23:59:59`);
-
-      if (onlyPending) {
-        query = query.eq('status', 'pending');
-      } else if (filterStatus !== 'all') {
-        query = query.eq('status', filterStatus);
-      }
+      if (onlyPending) query = query.in('status', ['pending', 'remanded']);
+      else if (filterStatus !== 'all') query = query.eq('status', filterStatus);
 
       const { data, error } = await query;
       if (error) throw error;
-
-      // constに変更
       const sortedData = (data as unknown) as Report[] || [];
-      
       sortedData.sort((a, b) => {
           const valA = orderBy === 'start_at' ? a.start_at : (orderBy === 'client_name' ? a.clients.name : '');
           const valB = orderBy === 'start_at' ? b.start_at : (orderBy === 'client_name' ? b.clients.name : '');
-          
           if (valA < valB) return order === 'asc' ? -1 : 1;
           if (valA > valB) return order === 'asc' ? 1 : -1;
           return 0;
       });
-
       setReports(sortedData);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order]);
 
-  useEffect(() => {
-    if (!wsLoading && currentOrg) {
-      fetchClients();
-      fetchReports();
-    }
-  }, [wsLoading, currentOrg, fetchClients, fetchReports]);
+  useEffect(() => { if (!wsLoading && currentOrg) { fetchClients(); fetchReports(); } }, [wsLoading, currentOrg, fetchClients, fetchReports]);
 
-  const handleSelectAllClick = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.checked) { setSelected(reports.map(n => n.id)); return; }
-    setSelected([]);
-  };
-
+  const handleSelectAllClick = (event: React.ChangeEvent<HTMLInputElement>) => { if (event.target.checked) { setSelected(reports.map(n => n.id)); return; } setSelected([]); };
   const handleClick = (event: React.MouseEvent<unknown>, id: string) => {
       const selectedIndex = selected.indexOf(id);
       let newSelected: readonly string[] = [];
@@ -127,7 +120,8 @@ export default function ReportsPage() {
   };
 
   const handleBulkApprove = async () => {
-      if (!confirm('一括承認しますか？')) return;
+      if (selected.length === 0) return;
+      if (!confirm(`${selected.length}件を一括承認しますか？`)) return;
       setProcessing(true);
       try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -135,12 +129,7 @@ export default function ReportsPage() {
         await supabase.from('reports').update(updateData).in('id', selected);
         setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, ...updateData, approved_by_user: { name: 'あなた' } } : r));
         setSelected([]);
-      } catch (e) { 
-        console.error(e); 
-        alert('エラーが発生しました'); 
-      } finally { 
-        setProcessing(false); 
-      }
+      } catch (e) { console.error(e); alert('エラーが発生しました'); } finally { setProcessing(false); }
   };
 
   const getReportData = (report: Report): ReportValuesData | null => {
@@ -148,145 +137,421 @@ export default function ReportsPage() {
       if (Array.isArray(report.report_values)) return report.report_values[0]?.data;
       return (report.report_values as { data: ReportValuesData }).data;
   };
+  
+  const getHelperNames = (report: Report): string => {
+      const data = getReportData(report);
+      const helpers = (data?._helpers as string[]) || [];
+      if (helpers.length > 0) return helpers.join(', ');
+      return report.helper?.name || '不明'; 
+  };
+
+  const getTargetReports = () => selected.length > 0 ? reports.filter(r => selected.includes(r.id)) : reports;
+
+  const handleExportCSV = async () => {
+      const targetReports = getTargetReports();
+      if (targetReports.length === 0) { alert('出力するデータがありません。'); return; }
+      if (!confirm(`${targetReports.length}件のデータをエクスポートします。\n差し込み印刷用に全ての項目を列に展開します。よろしいですか？`)) return;
+      setProcessing(true);
+      try {
+        const clientIds = Array.from(new Set(targetReports.map(r => r.clients.id)));
+        const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
+
+        const dynamicColumns: CsvColumnDef[] = [];
+        const seenHeaders = new Set<string>();
+
+        templates?.forEach(tmpl => {
+            const schema = tmpl.schema as HelperFormItem[];
+            if (!schema) return;
+            schema.forEach(item => {
+                if (item.type === 'section') return;
+                if (['multicheckbox', 'select'].includes(item.type) && item.options) {
+                    const options = item.options.split(',');
+                    options.forEach((opt: string) => {
+                        const cleanOpt = opt.trim();
+                        const header = `${item.label}_${cleanOpt}`;
+                        if (!seenHeaders.has(header)) { dynamicColumns.push({ header: header, key: item.id, type: 'option', matchValue: cleanOpt }); seenHeaders.add(header); }
+                    });
+                } else if (item.type === 'checkbox') {
+                    const header = item.label;
+                    if (!seenHeaders.has(header)) { dynamicColumns.push({ header: header, key: item.id, type: 'bool' }); seenHeaders.add(header); }
+                } else {
+                    const header = item.label;
+                    if (!seenHeaders.has(header)) { dynamicColumns.push({ header: header, key: item.id, type: 'value' }); seenHeaders.add(header); }
+                }
+                if (item.hasDetail) {
+                    const header = `${item.label}_詳細`;
+                    if (!seenHeaders.has(header)) { dynamicColumns.push({ header: header, key: `${item.id}_detail`, type: 'value' }); seenHeaders.add(header); }
+                }
+            });
+        });
+
+        const fixedHeader = ['記録ID', 'ステータス', '利用者ID', '利用者名', '実施ヘルパー', '入力者名', '開始日付', '開始時刻', '終了日付', '終了時刻', 'サービス時間(h)', '移動時間(h)', '承認者名', '承認日時', '作成日時', '更新日時'];
+        const headerRow = [...fixedHeader, ...dynamicColumns.map(c => c.header)];
+        
+        const rows = targetReports.map(r => {
+            const data = getReportData(r) || {};
+            const start = new Date(r.start_at);
+            const end = new Date(r.end_at);
+            const formatDate = (d: Date) => `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+            const formatTime = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            let statusText = '';
+            switch(r.status) { case 'approved': statusText = '承認済'; break; case 'remanded': statusText = '差戻し'; break; case 'pending': statusText = '未承認'; break; default: statusText = r.status; }
+
+            const row = [
+                r.id, statusText, r.clients.id, r.clients.name, getHelperNames(r), r.helper?.name || '不明',
+                formatDate(start), formatTime(start), formatDate(end), formatTime(end),
+                data.service_time || '0', data.travel_time || '0',
+                r.approved_by_user?.name || '', r.approved_at ? new Date(r.approved_at).toLocaleString() : '',
+                new Date(r.created_at).toLocaleString(), new Date(r.updated_at).toLocaleString()
+            ];
+
+            dynamicColumns.forEach(col => {
+                const rawVal = data[col.key];
+                if (col.type === 'bool') { row.push(rawVal ? '○' : ''); } 
+                else if (col.type === 'option') {
+                    let isMatch = false;
+                    if (Array.isArray(rawVal)) isMatch = rawVal.includes(col.matchValue || '');
+                    else if (typeof rawVal === 'string') isMatch = rawVal === col.matchValue;
+                    row.push(isMatch ? '○' : '');
+                } else {
+                    if (rawVal === null || rawVal === undefined) row.push('');
+                    else { const strVal = Array.isArray(rawVal) ? rawVal.join(' ') : String(rawVal); row.push(`"${strVal.replace(/"/g, '""')}"`); }
+                }
+            });
+            return row.join(',');
+        });
+
+        const csvContent = '\uFEFF' + [headerRow.join(','), ...rows].join('\n'); 
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `reports_export_${new Date().toISOString().slice(0,10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (e) { console.error(e); alert('エクスポート中にエラーが発生しました'); } finally { setProcessing(false); }
+  };
 
   const handleBulkDownloadPDF = async () => {
-      const targetReports = selected.length > 0 ? reports.filter(r => selected.includes(r.id)) : reports;
-      if (targetReports.length === 0) return;
+      const targetReports = getTargetReports();
+      if (targetReports.length === 0) { alert('出力するデータがありません'); return; }
+      if (targetReports.length > 50) { if (!confirm(`${targetReports.length}件のPDFを作成します。\n時間がかかる場合があります。`)) return; } 
+      else { if (!confirm(`${targetReports.length}件のPDFを出力しますか？`)) return; }
+
       try {
         const pdfReports = await Promise.all(targetReports.map(async (report) => {
           const data = getReportData(report);
           if (!data) return null;
           const { data: tmplData } = await supabase.from('form_templates').select('schema').eq('client_id', report.clients.id).maybeSingle();
-          return {
-            id: report.id, clientName: report.clients.name, helperName: report.helper.name,
-            startAt: report.start_at, endAt: report.end_at, data: data, template: (tmplData?.schema as FormItem[]) || []
+          
+          const pdfData: PdfReportData = {
+            id: report.id, 
+            clientName: report.clients.name, 
+            helperName: getHelperNames(report),
+            startAt: report.start_at, endAt: report.end_at, 
+            data: data, 
+            template: (tmplData?.schema as HelperFormItem[]) || []
           };
+          return pdfData;
         }));
-        const validReports = pdfReports.filter((r): r is NonNullable<typeof r> => r !== null);
+        
+        const validReports = pdfReports.filter((r): r is PdfReportData => r !== null);
         const blob = await pdf(<ServiceRecordDocument reports={validReports} />).toBlob();
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = "reports.pdf";
+        link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
         link.click();
-      } catch (e) { 
-        console.error(e); 
-        alert('PDF作成中にエラーが発生しました'); 
-      }
+      } catch (e) { console.error(e); alert('PDF作成中にエラーが発生しました'); }
   };
 
-  const handleUpdateStatus = async (status: ReportStatus) => {
-      if (!selectedReport) return;
-      const { data: { user } } = await supabase.auth.getUser();
-      await supabase.from('reports').update({ status, approved_by: status === 'approved' ? user?.id : null }).eq('id', selectedReport.id);
-      setReports(prev => prev.map(r => r.id === selectedReport.id ? { ...r, status } : r));
-      setOpenDetail(false);
+  // --- GAS連携用のデータ加工関数 ---
+  // rawData (UUIDキー) を、スキーマに基づいて「日本語キー」かつ「全項目補完済み」のデータに変換する
+  const preparePdfData = (
+    rawData: ReportValuesData, 
+    schema: HelperFormItem[], 
+    keyMap: Record<string, string>
+  ): Record<string, unknown> => {
+    const result: Record<string, unknown> = {};
+
+    // 1. スキーマをループして、各項目について値を決定する
+    schema.forEach(item => {
+        // 日本語のキー名を取得（例: "食事介助"）
+        const labelKey = keyMap[item.id] || item.id;
+        
+        const val = rawData[item.id];
+
+        if (item.type === 'checkbox') {
+            // チェックボックス: 値がなければ明示的に false を入れる
+            // これによりGAS側で「☐」が表示される
+            result[labelKey] = !!val; 
+            
+            // 詳細があればそれも追加
+            if (item.hasDetail) {
+                const detailKey = `${labelKey}_詳細`;
+                // 詳細は入力がなければ空文字にしておく（あるいは送らなくてもGAS側で消える）
+                result[detailKey] = rawData[`${item.id}_detail`] || "";
+            }
+        } 
+        else if (item.type === 'multicheckbox' || item.type === 'select') {
+            // 複数選択: 選択肢ごとにキーを展開する (例: 食事介助_朝: true)
+            const selectedValues: string[] = Array.isArray(val) ? val : (val ? [String(val)] : []);
+            
+            if (item.options) {
+                item.options.split(',').forEach((opt: string) => {
+                    const cleanOpt = opt.trim();
+                    const optKey = `${labelKey}_${cleanOpt}`;
+                    // 選択されていれば true, なければ false
+                    result[optKey] = selectedValues.includes(cleanOpt);
+                });
+            }
+            if (item.hasDetail) {
+                const detailKey = `${labelKey}_詳細`;
+                result[detailKey] = rawData[`${item.id}_detail`] || "";
+            }
+        } 
+        else {
+            // テキスト、数値など: 値がなければ空文字
+            result[labelKey] = (val === null || val === undefined) ? "" : val;
+        }
+    });
+
+    return result;
   };
-  
-  const handleOpenDetail = async (report: Report) => {
-      setSelectedReport(report);
-      const { data } = await supabase.from('form_templates').select('schema').eq('client_id', report.clients.id).maybeSingle();
-      setCurrentTemplate((data?.schema as FormItem[]) || []);
-      setOpenDetail(true);
+
+  // GASによる帳票作成処理
+  const handleCreateGasPdf = async () => {
+      const targetReports = getTargetReports();
+      if (targetReports.length === 0) { alert('出力するデータがありません。'); return; }
+      
+      const clientGroups: Record<string, Report[]> = {};
+      targetReports.forEach(r => {
+          const cid = r.clients.id;
+          if (!clientGroups[cid]) clientGroups[cid] = [];
+          clientGroups[cid].push(r);
+      });
+
+      const clientIds = Object.keys(clientGroups);
+      const { data: clientsInfo } = await supabase.from('clients').select('id, name, google_template_id, google_folder_id').in('id', clientIds);
+      
+      const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
+
+      const schemaMap: Record<string, HelperFormItem[]> = {};
+      const keyMaps: Record<string, Record<string, string>> = {}; // クライアントごとのID->日本語マップ
+
+      templates?.forEach(t => { 
+          const s = t.schema as HelperFormItem[];
+          schemaMap[t.client_id] = s;
+          keyMaps[t.client_id] = generateKeyMap(s); // utilsの関数を使ってマップ生成
+      });
+
+      const { data: orgInfo } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg!.id).single();
+      if (!orgInfo?.google_folder_id) { alert('事業所のGoogleドライブ連携が設定されていません。\n設定画面から連携を行ってください。'); return; }
+
+      if (!confirm(`${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）`)) return;
+      setGasProgress({ total: targetReports.length, current: 0, currentName: '準備中...' });
+
+      // 最後に開くフォルダURLを保持する変数
+      let lastOpenedFolderUrl: string | null = null;
+
+      try {
+          let processedCount = 0;
+          
+          // フォルダ名用のタイムスタンプ生成
+          const now = new Date();
+          const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+          const exportFolderName = `${timeStr}_出力分`;
+
+          for (const client of clientsInfo || []) {
+              const reports = clientGroups[client.id];
+              if (!reports) continue;
+              if (!client.google_template_id) {
+                  processedCount += reports.length;
+                  setGasProgress({ total: targetReports.length, current: processedCount, currentName: `${client.name}: テンプレート未設定のためスキップ` });
+                  continue;
+              }
+
+              setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: フォルダ確認中...` }));
+              
+              // クライアントのルートフォルダを確保
+              const folderRes = await callGasApi({
+                  action: 'manage_client_folder',
+                  orgFolderId: orgInfo.google_folder_id,
+                  clientName: client.name,
+                  currentFolderId: client.google_folder_id
+              });
+
+              if (folderRes.status !== 'success') throw new Error(`Folder Error: ${folderRes.message}`);
+              if (folderRes.folderId !== client.google_folder_id) {
+                  await supabase.from('clients').update({ google_folder_id: folderRes.folderId }).eq('id', client.id);
+              }
+              const clientRootFolderId = folderRes.folderId;
+
+              // 出力用のサブフォルダを作成
+              setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: サブフォルダ作成中...` }));
+              const subFolderRes = await callGasApi({
+                  action: 'create_sub_folder',
+                  parentId: clientRootFolderId,
+                  folderName: exportFolderName
+              });
+              const targetFolderId = subFolderRes.folderId; 
+              
+              // 最後に作成したフォルダのURLを保存（ループ終了後に開くため）
+              lastOpenedFolderUrl = subFolderRes.folderUrl;
+
+              const clientSchema = schemaMap[client.id] || [];
+              const clientKeyMap = keyMaps[client.id] || {};
+
+              for (const report of reports) {
+                  setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: ${new Date(report.start_at).toLocaleDateString()} の記録を作成中...` }));
+                  const data = getReportData(report) || {};
+                  
+                  const flatData: Record<string, string | number | boolean | null | undefined> = {};
+                  
+                  const start = new Date(report.start_at);
+                  const end = new Date(report.end_at);
+                  
+                  flatData['利用者名'] = client.name;
+                  flatData['担当ヘルパー名'] = getHelperNames(report);
+                  flatData['開始日付'] = `${start.getFullYear()}/${start.getMonth()+1}/${start.getDate()}`;
+                  flatData['開始時刻'] = `${start.getHours()}:${String(start.getMinutes()).padStart(2,'0')}`;
+                  flatData['終了日付'] = `${end.getFullYear()}/${end.getMonth()+1}/${end.getDate()}`;
+                  flatData['終了時刻'] = `${end.getHours()}:${String(end.getMinutes()).padStart(2,'0')}`;
+                  
+                  flatData['サービス時間'] = (data.service_time as string | number) || '0';
+                  flatData['移動時間'] = (data.travel_time as string | number) || '0';
+
+                  // ★修正: 独自の変換関数を使って、不足しているfalseなどを補完したデータを生成
+                  const readableData = preparePdfData(data, clientSchema, clientKeyMap);
+                  
+                  const finalPayload = { ...flatData, ...readableData } as Record<string, unknown>;
+
+                  await callGasApi({
+                      action: 'create_pdf',
+                      folderId: targetFolderId, 
+                      templateId: client.google_template_id,
+                      data: finalPayload, 
+                      fileName: `${client.name}_${(flatData['開始日付'] as string).replace(/\//g,'-')}_提供記録`
+                  });
+                  processedCount++;
+                  setGasProgress({ total: targetReports.length, current: processedCount, currentName: '' });
+              }
+          }
+          alert('作成が完了しました。保存先のフォルダを開きます。');
+          
+          // ★追加: 最後に処理したフォルダを開く
+          if (lastOpenedFolderUrl) {
+              window.open(lastOpenedFolderUrl, '_blank');
+          }
+
+      } catch (e) { console.error(e); alert('エラーが発生しました: ' + e); } 
+      finally { setGasProgress(null); }
   };
-    
-  const selectedReportData = selectedReport ? getReportData(selectedReport) : null;
+
+  const handleOpenDetail = (report: Report) => { router.push(`/app/record/${report.clients.id}?reportId=${report.id}`); };
+  let headerTitle = "全件表示";
+  if (onlyPending) headerTitle = "未承認・差戻し";
+  if (searchParams.get('period') === 'current_month') headerTitle = "今月の記録";
 
   if (wsLoading || !currentOrg) return null;
 
   return (
-    <Box>
-       <Paper sx={{ p: 2, mb: 3 }}>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-            <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認のみ" />
-            <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: 150 }}>
-              <MenuItem value="all">全員</MenuItem>
-              {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
-            </TextField>
-            <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 120 }}>
-               <MenuItem value="all">全て</MenuItem><MenuItem value="pending">未承認</MenuItem><MenuItem value="approved">承認済</MenuItem>
-            </TextField>
-            
-            {/* 日付フィルタを追加 */}
-            <TextField 
-                type="date" 
-                label="開始日" 
-                size="small" 
-                InputLabelProps={{ shrink: true }} 
-                value={startDate} 
-                onChange={(e) => setStartDate(e.target.value)} 
-            />
-            <TextField 
-                type="date" 
-                label="終了日" 
-                size="small" 
-                InputLabelProps={{ shrink: true }} 
-                value={endDate} 
-                onChange={(e) => setEndDate(e.target.value)} 
-            />
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
+            <TagIcon sx={{ color: 'action.active', mr: 2 }} />
+            <Typography variant="h6" fontWeight="bold" color="text.primary">{headerTitle}</Typography>
+        </Box>
 
-            <Button variant="contained" onClick={fetchReports}>検索</Button>
-          </Stack>
-       </Paper>
-       
-       {selected.length > 0 && (
-         <Paper sx={{ p: 2, mb: 2, bgcolor: alpha('#2255CC', 0.1), display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-           <Typography>{selected.length} 件選択中</Typography>
-           <Stack direction="row" spacing={2}>
-             <Button variant="contained" onClick={handleBulkApprove} disabled={processing}>一括承認</Button>
-             <Button variant="outlined" color="error" onClick={handleBulkDownloadPDF}>PDF出力</Button>
-           </Stack>
-         </Paper>
-       )}
-
-       {loading ? <CircularProgress /> : (
-         <TableContainer>
-           <Table>
-             <TableHead>
-               <TableRow>
-                 <TableCell padding="checkbox"><Checkbox onChange={handleSelectAllClick} /></TableCell>
-                 <TableCell>ステータス</TableCell>
-                 <TableCell><TableSortLabel active={orderBy === 'start_at'} direction={order} onClick={() => { setOrder(order === 'asc' ? 'desc' : 'asc'); setOrderBy('start_at'); }}>日時</TableSortLabel></TableCell>
-                 <TableCell>利用者</TableCell>
-                 <TableCell>担当</TableCell>
-                 <TableCell>操作</TableCell>
-               </TableRow>
-             </TableHead>
-             <TableBody>
-               {reports.map((row) => (
-                 <TableRow key={row.id} selected={selected.includes(row.id)}>
-                   <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
-                   <TableCell><Chip label={row.status} color={row.status === 'approved' ? 'success' : row.status === 'remanded' ? 'error' : 'warning'} size="small" /></TableCell>
-                   <TableCell>{new Date(row.start_at).toLocaleDateString()} {new Date(row.start_at).getHours()}:{String(new Date(row.start_at).getMinutes()).padStart(2,'0')}</TableCell>
-                   <TableCell>{row.clients.name}</TableCell>
-                   <TableCell>{row.helper.name}</TableCell>
-                   <TableCell><Button size="small" onClick={() => handleOpenDetail(row)}>詳細</Button></TableCell>
-                 </TableRow>
-               ))}
-             </TableBody>
-           </Table>
-         </TableContainer>
-       )}
-
-       <Dialog open={openDetail} onClose={() => setOpenDetail(false)} maxWidth="md" fullWidth>
-         <DialogTitle>詳細確認 <IconButton onClick={() => setOpenDetail(false)} sx={{ float: 'right' }}><CloseIcon /></IconButton></DialogTitle>
-         <DialogContent dividers>
-           {selectedReportData && Object.entries(selectedReportData).map(([key, value]) => {
-             if (key.startsWith('_') || key.endsWith('_detail')) return null;
-             const label = currentTemplate.find(t => t.id === key)?.label || key;
-             return (
-               <Box key={key} display="flex" borderBottom="1px solid #eee" py={1}>
-                 <Typography width="40%" fontWeight="bold">{label}</Typography>
-                 <Typography width="60%">{String(value)}</Typography>
+       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
+           <Paper sx={{ p: 2, mb: 3, bgcolor: '#F2F3F5', boxShadow: 'none' }}>
+              <Stack spacing={2}>
+                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Box display="flex" alignItems="center" gap={1} color="#5C5E66">
+                        <FilterListIcon fontSize="small" />
+                        <Typography variant="subtitle2" fontWeight="bold">絞り込み:</Typography>
+                    </Box>
+                    <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: 150, bgcolor: 'white' }}>
+                        <MenuItem value="all">全員</MenuItem>
+                        {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
+                    </TextField>
+                    <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 120, bgcolor: 'white' }}>
+                        <MenuItem value="all">全て</MenuItem><MenuItem value="pending">未承認</MenuItem><MenuItem value="approved">承認済</MenuItem>
+                    </TextField>
+                    <Box display="flex" alignItems="center" gap={1}>
+                        <TextField type="date" label="開始日" size="small" InputLabelProps={{ shrink: true }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'white' }} />
+                        <Typography>～</Typography>
+                        <TextField type="date" label="終了日" size="small" InputLabelProps={{ shrink: true }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'white' }} />
+                    </Box>
+                    <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />
+                    <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none' }}>検索</Button>
+                </Stack>
+              </Stack>
+           </Paper>
+           
+           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? alpha('#2255CC', 0.1) : '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #E3E5E8', boxShadow: 'none' }}>
+               <Box>
+                   <Typography variant="body1" fontWeight="bold">
+                       {selected.length > 0 ? `${selected.length} 件選択中` : `検索結果: ${reports.length} 件`}
+                   </Typography>
                </Box>
-             );
-           })}
-         </DialogContent>
-         <DialogActions>
-           {selectedReport?.status !== 'approved' ? (
-             <><Button color="error" onClick={() => handleUpdateStatus('remanded')}>差戻し</Button><Button variant="contained" onClick={() => handleUpdateStatus('approved')}>承認</Button></>
-           ) : <Button color="warning" onClick={() => handleUpdateStatus('remanded')}>承認取消</Button>}
-         </DialogActions>
-       </Dialog>
+               <Stack direction="row" spacing={1}>
+                 <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing}>CSV</Button>
+                 <Button variant="outlined" size="small" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF}>PDF</Button>
+                 {selected.length > 0 ? (
+                    <>
+                        <Divider orientation="vertical" flexItem />
+                        <Button variant="contained" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
+                            {gasProgress ? '作成中...' : '帳票作成(GAS)'}
+                        </Button>
+                        <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>
+                    </>
+                 ) : (
+                     <Button variant="outlined" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
+                        {gasProgress ? '作成中...' : '全件帳票作成'}
+                     </Button>
+                 )}
+               </Stack>
+           </Paper>
+
+           {gasProgress && (
+               <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'white', p: 2, borderRadius: 2, boxShadow: 3, zIndex: 9999 }}>
+                   <Typography variant="body2" fontWeight="bold">帳票作成中...</Typography>
+                   <Typography variant="caption" display="block" sx={{ mb: 1 }}>{gasProgress.currentName}</Typography>
+                   <LinearProgress variant="determinate" value={(gasProgress.current / gasProgress.total) * 100} sx={{ width: 250 }} />
+                   <Typography variant="caption" sx={{ mt: 0.5, display: 'block', textAlign: 'right' }}>{gasProgress.current} / {gasProgress.total}</Typography>
+               </Box>
+           )}
+
+           {loading ? <CircularProgress /> : (
+             <TableContainer component={Paper} sx={{ boxShadow: 'none', border: '1px solid #E3E5E8' }}>
+               <Table>
+                 <TableHead sx={{ bgcolor: '#F2F3F5' }}>
+                   <TableRow>
+                     <TableCell padding="checkbox"><Checkbox onChange={handleSelectAllClick} /></TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>ステータス</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}><TableSortLabel active={orderBy === 'start_at'} direction={order} onClick={() => { setOrder(order === 'asc' ? 'desc' : 'asc'); setOrderBy('start_at'); }}>日時</TableSortLabel></TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>利用者</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>担当</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>操作</TableCell>
+                   </TableRow>
+                 </TableHead>
+                 <TableBody>
+                   {reports.map((row) => (
+                     <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                       <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
+                       <TableCell><Chip label={row.status === 'approved' ? '承認済' : row.status === 'remanded' ? '差戻し' : '未承認'} color={row.status === 'approved' ? 'success' : row.status === 'remanded' ? 'error' : 'warning'} size="small" variant="outlined" /></TableCell>
+                       <TableCell>{new Date(row.start_at).toLocaleDateString()}</TableCell>
+                       <TableCell>{row.clients.name}</TableCell>
+                       <TableCell>{getHelperNames(row)}</TableCell>
+                       <TableCell><Button size="small" variant="outlined" onClick={() => handleOpenDetail(row)} sx={{ fontSize: '0.75rem', py: 0.5 }}>詳細</Button></TableCell>
+                     </TableRow>
+                   ))}
+                   {reports.length === 0 && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: '#999' }}>該当する記録がありません</TableCell></TableRow>}
+                 </TableBody>
+               </Table>
+             </TableContainer>
+           )}
+       </Box>
     </Box>
   );
 }

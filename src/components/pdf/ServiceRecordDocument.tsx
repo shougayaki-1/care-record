@@ -1,6 +1,34 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font, Svg, Polyline } from '@react-pdf/renderer';
 
+// --- 型定義 ---
+type FormItem = {
+    id: string;
+    label: string;
+    type: string;
+    options?: string;
+    required?: boolean;
+    hasDetail?: boolean;
+};
+
+type ReportValue = string | number | boolean | string[] | null | undefined;
+type ReportDataMap = Record<string, ReportValue>;
+
+export type PdfReportData = {
+    id: string;
+    clientName: string;
+    helperName: string;
+    startAt: string;
+    endAt: string;
+    data: ReportDataMap;
+    template: FormItem[];
+};
+
+type Section = {
+    title: string;
+    items: FormItem[];
+};
+
 // --- 1. フォント設定 ---
 const getFontUrl = (filename: string) => {
     return typeof window !== 'undefined'
@@ -16,7 +44,7 @@ Font.register({
     ],
 });
 
-// --- 2. スタイル定義 (ご提示のデザイン) ---
+// --- 2. スタイル定義 ---
 const styles = StyleSheet.create({
     page: {
         padding: 15,
@@ -26,25 +54,25 @@ const styles = StyleSheet.create({
         lineHeight: 1.2,
     },
 
-    // ヘッダー部
+    // --- ヘッダー部 ---
     header: {
         marginBottom: 5,
-        borderBottomWidth: 1,
-        borderColor: '#444',
+        borderBottomWidth: 1.5,
+        borderColor: '#2255CC',
         paddingBottom: 2,
     },
     title: {
         fontSize: 14,
         fontWeight: 'bold',
-        marginBottom: 4,
-        color: '#000',
+        marginBottom: 3,
+        color: '#2255CC',
         textAlign: 'center',
     },
     headerRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-end',
-        marginBottom: 4,
+        marginBottom: 3,
     },
     headerLabel: { fontSize: 7, color: '#666', marginBottom: 1 },
     headerValue: { fontSize: 9, fontWeight: 'bold', color: '#000' },
@@ -52,88 +80,141 @@ const styles = StyleSheet.create({
     // ヘッダー内の情報ボックス
     infoBox: {
         flexDirection: 'row',
-        backgroundColor: '#f5f5f5',
+        backgroundColor: '#F0F5FF',
         padding: 4,
-        borderRadius: 2,
-        marginTop: 2,
+        borderRadius: 3,
+        marginTop: 3,
+        borderWidth: 0.5,
+        borderColor: '#D0E0FF',
     },
     infoItem: { marginRight: 12, flexDirection: 'row', alignItems: 'flex-end' },
 
-    // --- カラムレイアウト ---
+    // --- コンテンツレイアウト (横並び折り返し) ---
     columnsContainer: {
         flexDirection: 'row',
+        flexWrap: 'wrap', // 折り返しを有効化
         justifyContent: 'space-between',
-        marginTop: 5,
+        marginTop: 4,
     },
-    column: {
-        width: '49%',
-        flexDirection: 'column',
-    },
-
-    // セクション
+    // 各セクションブロック
     sectionBlock: {
-        marginBottom: 6,
-        borderWidth: 1,
-        borderColor: '#ddd',
+        width: '49%', // 2列配置
+        marginBottom: 5,
+        borderWidth: 0.5,
+        borderColor: '#B0C4DE',
         borderRadius: 3,
-        padding: 4,
+        overflow: 'hidden',
+        backgroundColor: '#fff',
     },
     sectionHeader: {
-        backgroundColor: '#eee',
+        backgroundColor: '#E6F0FF',
         fontSize: 8,
         fontWeight: 'bold',
-        padding: 2,
-        marginBottom: 3,
-        color: '#000',
+        padding: 3,
+        paddingLeft: 5,
+        color: '#003399',
+        borderBottomWidth: 0.5,
+        borderColor: '#D0E0FF',
+    },
+    sectionContent: {
+        padding: 4,
+        paddingBottom: 2,
     },
 
-    // 項目行
+    // --- 各項目のスタイル統一 ---
+    // 共通の行スタイル
     itemRow: {
-        flexDirection: 'row',
-        marginBottom: 2,
-        alignItems: 'flex-start',
+        marginBottom: 3,
         minHeight: 10,
     },
-
-    // チェックボックス枠（SVG描画用コンテナ）
+    // ラベル（項目名）
+    label: {
+        fontSize: 8,
+        color: '#444',
+        marginBottom: 1.5,
+    },
+    
+    // チェックボックス行（アイコン＋テキスト）
+    checkboxRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 2,
+    },
     checkBoxContainer: {
-        width: 9,
-        height: 9,
-        borderWidth: 1,
-        borderColor: '#555',
+        width: 8,
+        height: 8,
+        borderWidth: 0.5,
+        borderColor: '#2255CC',
         marginRight: 4,
-        marginTop: 1,
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: '#fff',
+        borderRadius: 1.5,
+    },
+    checkboxLabel: {
+        fontSize: 8,
+        flex: 1,
     },
 
-    // タグ
-    tagContainer: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 1 },
-    tag: {
-        marginRight: 3, marginBottom: 2, paddingHorizontal: 3, paddingVertical: 0,
-        borderWidth: 1, borderRadius: 3,
-        fontSize: 7,
+    // タグ（選択肢）コンテナ
+    tagContainer: { 
+        flexDirection: 'row', 
+        flexWrap: 'wrap',
     },
-    tagActive: { borderColor: '#000', backgroundColor: '#ddd', color: '#000' },
-    tagInactive: { borderColor: '#ddd', backgroundColor: 'transparent', color: '#999' },
+    tag: {
+        marginRight: 2, 
+        marginBottom: 2, 
+        paddingHorizontal: 4, 
+        paddingVertical: 1,
+        borderWidth: 0.5, 
+        borderRadius: 3,
+        fontSize: 7.5, // 読みやすいサイズに統一
+    },
+    tagActive: { 
+        borderColor: '#2255CC', 
+        backgroundColor: '#F0F5FF', 
+        color: '#2255CC',
+        fontWeight: 'bold'
+    },
+    tagInactive: { 
+        borderColor: '#ddd', 
+        backgroundColor: '#fff', 
+        color: '#888' 
+    },
+
+    // テキスト入力値
+    valueText: {
+        borderBottomWidth: 0.5,
+        borderColor: '#aaa',
+        paddingHorizontal: 2,
+        fontSize: 8,
+        fontWeight: 'bold',
+        color: '#000',
+        minWidth: 30,
+        textAlign: 'left', // 左寄せに変更して読みやすく
+    },
+    valueRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        flexWrap: 'wrap',
+    },
 
     // フッター
     footer: {
-        marginTop: 5,
+        marginTop: 4,
         borderTopWidth: 1,
-        borderColor: '#ccc',
-        paddingTop: 5,
+        borderColor: '#2255CC',
+        paddingTop: 4,
     },
     noteBox: {
-        minHeight: 35,
-        borderWidth: 1, borderColor: '#ddd', borderRadius: 3,
-        padding: 3, backgroundColor: '#fafafa', marginBottom: 5
+        minHeight: 30,
+        borderWidth: 0.5, borderColor: '#ccc', borderRadius: 3,
+        padding: 3, backgroundColor: '#FAFAFA', marginBottom: 4
     },
-    sealContainer: { flexDirection: 'row', justifyContent: 'flex-end' },
+    sealContainer: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 2 },
     sealBox: {
-        width: 50, height: 50,
-        borderWidth: 1, borderColor: '#ccc', marginLeft: 5,
+        width: 45, height: 45,
+        borderWidth: 0.5, borderColor: '#aaa', marginLeft: 8,
         justifyContent: 'space-between', alignItems: 'center', padding: 1
     },
 });
@@ -150,8 +231,7 @@ const formatTime = (dateStr: string) => {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
-// 除外ロジック
-const isExcluded = (item: any) => {
+const isExcluded = (item: FormItem) => {
     const id = item.id;
     const label = (item.label || '').trim();
     const excludeIds = ['service_time', 'travel_time', 'special_note', 'note', 'other_note'];
@@ -165,34 +245,34 @@ const isExcluded = (item: any) => {
 
 // --- 4. 部品コンポーネント ---
 
-// チェックボックス (SVG)
+// チェックボックス (T/F)
 const CheckBox = ({ checked, label }: { checked: boolean, label: string }) => (
-    <View style={styles.itemRow}>
+    <View style={styles.checkboxRow}>
         <View style={styles.checkBoxContainer}>
             {checked && (
-                <Svg width="8" height="8" viewBox="0 0 10 10">
-                    <Polyline points="2,5 4,8 8,2" stroke="#000" strokeWidth="1.5" fill="none" />
+                <Svg width="6" height="6" viewBox="0 0 10 10">
+                    <Polyline points="2,5 4,8 8,2" stroke="#2255CC" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                 </Svg>
             )}
         </View>
-        <Text style={{ flex: 1 }}>{label}</Text>
+        <Text style={[styles.checkboxLabel, { color: checked ? '#000' : '#555', fontWeight: checked ? 'bold' : 'normal' }]}>{label}</Text>
     </View>
 );
 
-// キー・バリュー表示
-const KeyValue = ({ label, value }: { label: string, value: any }) => (
+// テキスト・数値入力 (Label: Value)
+const KeyValue = ({ label, value }: { label: string, value: string | number | null | undefined }) => (
     <View style={styles.itemRow}>
-        <Text style={{ color: '#555', marginRight: 3 }}>{label}:</Text>
-        <Text style={{ borderBottomWidth: 1, borderColor: '#ddd', minWidth: 20, textAlign: 'center', fontWeight: 'bold' }}>
-            {value || '-'}
-        </Text>
+        <View style={styles.valueRow}>
+            <Text style={styles.label}>{label}: </Text>
+            <Text style={styles.valueText}>{value || '-'}</Text>
+        </View>
     </View>
 );
 
-// タグ表示
+// 選択肢 (Label: [Tag] [Tag]...)
 const Tags = ({ label, options, values }: { label: string, options: string[], values: string[] }) => (
-    <View style={{ marginBottom: 3 }}>
-        <Text style={{ color: '#555', marginBottom: 1 }}>{label}:</Text>
+    <View style={styles.itemRow}>
+        <Text style={styles.label}>{label}:</Text>
         <View style={styles.tagContainer}>
             {options.map((opt, i) => {
                 const isSelected = values.includes(opt.trim());
@@ -206,28 +286,25 @@ const Tags = ({ label, options, values }: { label: string, options: string[], va
     </View>
 );
 
-// --- 5. メインコンポーネント (一括出力対応) ---
-// 配列 reports を受け取るように変更
-export const ServiceRecordDocument = ({ reports }: { reports: any[] }) => {
+// --- 5. メインコンポーネント ---
+export const ServiceRecordDocument = ({ reports }: { reports: PdfReportData[] }) => {
     return (
         <Document>
             {reports.map((report, pageIndex) => {
                 const { data, template, clientName, helperName, startAt, endAt } = report;
 
-                // データ取得ヘルパー
                 const getValue = (id: string) => data[id];
-                const getList = (id: string) => {
+                const getList = (id: string): string[] => {
                     const v = data[id];
                     if (Array.isArray(v)) return v;
                     if (typeof v === 'string') return [v];
                     return [];
                 };
 
-                // セクション整理ロジック (ページごとに実行)
-                const sections: any[] = [];
-                let currentSection: any = null;
+                const sections: Section[] = [];
+                let currentSection: Section | null = null;
 
-                template.forEach((item: any) => {
+                template.forEach((item) => {
                     if (isExcluded(item)) return;
 
                     if (item.type === 'section') {
@@ -240,43 +317,36 @@ export const ServiceRecordDocument = ({ reports }: { reports: any[] }) => {
                 });
                 if (currentSection) sections.push(currentSection);
 
-                // カラム振り分け
-                const leftColumn: any[] = [];
-                const rightColumn: any[] = [];
-                sections.forEach((sec, index) => {
-                    if (index % 2 === 0) leftColumn.push(sec);
-                    else rightColumn.push(sec);
-                });
-
-                // セクション描画関数
-                const renderSection = (section: any, key: number) => (
+                // renderSection関数
+                const renderSection = (section: Section, key: number) => (
                     <View key={key} style={styles.sectionBlock}>
                         <Text style={styles.sectionHeader}>{section.title}</Text>
-                        {section.items.map((item: any, i: number) => {
-                            if (item.type === 'checkbox') {
-                                return <CheckBox key={i} label={item.label} checked={!!data[item.id]} />;
-                            }
-                            if (['text', 'number', 'time'].includes(item.type)) {
-                                return <KeyValue key={i} label={item.label} value={getValue(item.id)} />;
-                            }
-                            if (['multicheckbox', 'radio', 'select'].includes(item.type)) {
-                                return (
-                                    <Tags
-                                        key={i}
-                                        label={item.label}
-                                        options={item.options ? item.options.split(',') : []}
-                                        values={getList(item.id)}
-                                    />
-                                );
-                            }
-                            return null;
-                        })}
+                        <View style={styles.sectionContent}>
+                            {section.items.map((item, i) => {
+                                if (item.type === 'checkbox') {
+                                    return <CheckBox key={i} label={item.label} checked={!!data[item.id]} />;
+                                }
+                                if (['text', 'number', 'time'].includes(item.type)) {
+                                    return <KeyValue key={i} label={item.label} value={getValue(item.id) as string | number | null | undefined} />;
+                                }
+                                if (['multicheckbox', 'radio', 'select'].includes(item.type)) {
+                                    return (
+                                        <Tags
+                                            key={i}
+                                            label={item.label}
+                                            options={item.options ? item.options.split(',') : []}
+                                            values={getList(item.id)}
+                                        />
+                                    );
+                                }
+                                return null;
+                            })}
+                        </View>
                     </View>
                 );
 
                 return (
                     <Page key={pageIndex} size="A4" style={styles.page}>
-
                         {/* ヘッダー */}
                         <View style={styles.header}>
                             <Text style={styles.title}>サービス提供記録票</Text>
@@ -297,49 +367,43 @@ export const ServiceRecordDocument = ({ reports }: { reports: any[] }) => {
 
                             <View style={styles.infoBox}>
                                 <View style={styles.infoItem}>
-                                    <Text style={{ fontSize: 7, marginRight: 3 }}>サービス種別:</Text>
+                                    <Text style={{ fontSize: 7, marginRight: 4, color: '#444' }}>サービス種別:</Text>
                                     <Text style={{ fontSize: 8, fontWeight: 'bold' }}>重度訪問介護</Text>
                                 </View>
                                 <View style={styles.infoItem}>
-                                    <Text style={{ fontSize: 7, marginRight: 3 }}>サービス時間:</Text>
-                                    <Text style={{ fontSize: 8, fontWeight: 'bold' }}>{getValue('service_time') || 0} h</Text>
+                                    <Text style={{ fontSize: 7, marginRight: 4, color: '#444' }}>サービス時間:</Text>
+                                    <Text style={{ fontSize: 8, fontWeight: 'bold' }}>{getValue('service_time') as string | number || 0} h</Text>
                                 </View>
                                 <View style={styles.infoItem}>
-                                    <Text style={{ fontSize: 7, marginRight: 3 }}>移動時間:</Text>
-                                    <Text style={{ fontSize: 8, fontWeight: 'bold' }}>{getValue('travel_time') || 0} h</Text>
+                                    <Text style={{ fontSize: 7, marginRight: 4, color: '#444' }}>移動時間:</Text>
+                                    <Text style={{ fontSize: 8, fontWeight: 'bold' }}>{getValue('travel_time') as string | number || 0} h</Text>
                                 </View>
                             </View>
                         </View>
 
-                        {/* コンテンツ (2カラム) */}
+                        {/* コンテンツ (flexWrapで横→下へ流す) */}
                         <View style={styles.columnsContainer}>
-                            <View style={styles.column}>
-                                {leftColumn.map((sec, i) => renderSection(sec, i))}
-                            </View>
-                            <View style={styles.column}>
-                                {rightColumn.map((sec, i) => renderSection(sec, i))}
-                            </View>
+                            {sections.map((sec, i) => renderSection(sec, i))}
                         </View>
 
                         {/* フッター */}
                         <View style={styles.footer}>
-                            <Text style={{ fontSize: 8, fontWeight: 'bold', marginBottom: 2 }}>【特記事項】</Text>
+                            <Text style={{ fontSize: 8, fontWeight: 'bold', marginBottom: 2, color: '#2255CC' }}>【特記事項】</Text>
                             <View style={styles.noteBox}>
-                                <Text>{getValue('special_note')}</Text>
-                                <Text>{getValue('note')}</Text>
-                                <Text>{getValue('other_note')}</Text>
+                                <Text>{getValue('special_note') as string}</Text>
+                                <Text>{getValue('note') as string}</Text>
+                                <Text>{getValue('other_note') as string}</Text>
                             </View>
 
                             <View style={styles.sealContainer}>
                                 <View style={styles.sealBox}>
-                                    <Text style={{ fontSize: 6, width: '100%', textAlign: 'center', borderBottomWidth: 1, borderColor: '#eee' }}>管理者</Text>
+                                    <Text style={{ fontSize: 5, width: '100%', textAlign: 'center', borderBottomWidth: 0.5, borderColor: '#ccc', marginBottom: 15 }}>管理者</Text>
                                 </View>
                                 <View style={styles.sealBox}>
-                                    <Text style={{ fontSize: 6, width: '100%', textAlign: 'center', borderBottomWidth: 1, borderColor: '#eee' }}>責任者</Text>
+                                    <Text style={{ fontSize: 5, width: '100%', textAlign: 'center', borderBottomWidth: 0.5, borderColor: '#ccc', marginBottom: 15 }}>責任者</Text>
                                 </View>
                             </View>
                         </View>
-
                     </Page>
                 );
             })}

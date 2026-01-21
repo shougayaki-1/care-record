@@ -7,7 +7,7 @@ import { Inter, Poppins } from "next/font/google";
 import "./globals.css";
 import { TermsAgreementModal } from "@/components/auth/TermsAgreementModal";
 import { ToastProvider } from "@/components/ui/ToastProvider";
-import { WorkspaceProvider } from "@/context/WorkspaceContext"; // 追加
+import { WorkspaceProvider } from "@/context/WorkspaceContext";
 
 const inter = Inter({ subsets: ["latin"] });
 const poppins = Poppins({
@@ -36,13 +36,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ja">
+    // suppressHydrationWarning を追加して拡張機能による書き換えエラーを抑制
+    <html lang="ja" suppressHydrationWarning>
       <body className={`${inter.className} ${poppins.variable}`}>
         <AppRouterCacheProvider>
           <ThemeProvider theme={theme}>
             <CssBaseline />
             <ToastProvider>
-              {/* WorkspaceProviderを追加 */}
               <WorkspaceProvider>
                 <TermsAgreementModal />
                 {children}
