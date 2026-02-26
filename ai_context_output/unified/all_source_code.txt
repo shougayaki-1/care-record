@@ -33,6 +33,100 @@ export async function callGasApi(payload: Record<string, unknown>) {
 }
 
 
+--- START OF FILE src/app/actions/organization.ts ---
+
+'use server';
+
+import { createClient } from '@supabase/supabase-js';
+
+// 管理者権限クライアント
+const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+export async function deleteOrganization(orgId: string, userId: string) {
+    // 権限チェック
+    const { data: member } = await supabaseAdmin.from('organization_members')
+        .select('role').eq('organization_id', orgId).eq('user_id', userId).single();
+    
+    if (member?.role !== 'owner') throw new Error('権限がありません');
+
+    // 安全策: この事業所を「最後に開いた事業所」にしているユーザーの設定をクリア
+    await supabaseAdmin.from('profiles')
+        .update({ last_organization_id: null })
+        .eq('last_organization_id', orgId);
+
+    // 削除実行
+    const { error } = await supabaseAdmin.from('organizations').delete().eq('id', orgId);
+    if (error) throw new Error(error.message);
+    
+    return { success: true };
+}
+
+export async function leaveOrganization(orgId: string, userId: string) {
+    const { data: members } = await supabaseAdmin.from('organization_members')
+        .select('role, user_id').eq('organization_id', orgId);
+    
+    const owners = members?.filter(m => m.role === 'owner') || [];
+    const me = members?.find(m => m.user_id === userId); 
+
+    if (me?.role === 'owner' && owners.length <= 1 && (members?.length || 0) > 1) {
+        throw new Error('あなたが唯一のオーナーです。脱退する前に他のメンバーにオーナー権限を譲渡するか、事業所を削除してください。');
+    }
+
+    const { error } = await supabaseAdmin.from('organization_members')
+        .delete().eq('organization_id', orgId).eq('user_id', userId);
+    
+    if (error) throw new Error(error.message);
+    
+    // プロフィールのlast_organization_idもクリア
+    await supabaseAdmin.from('profiles')
+        .update({ last_organization_id: null })
+        .eq('id', userId)
+        .eq('last_organization_id', orgId);
+
+    return { success: true };
+}
+
+export async function transferOwner(orgId: string, currentOwnerId: string, newOwnerId: string) {
+    // トランザクション的に処理
+    const { error: error1 } = await supabaseAdmin.from('organization_members')
+        .update({ role: 'owner' }).eq('organization_id', orgId).eq('user_id', newOwnerId);
+    if (error1) throw error1;
+
+    const { error: error2 } = await supabaseAdmin.from('organization_members')
+        .update({ role: 'manager' }).eq('organization_id', orgId).eq('user_id', currentOwnerId);
+    if (error2) throw error2;
+
+    return { success: true };
+}
+
+export async function getAuditLogs(orgId: string) {
+    // SQLで profiles への FK を貼ったので結合可能になります
+    const { data, error } = await supabaseAdmin
+        .from('audit_logs')
+        .select('*, profiles:actor_id(name)')
+        .eq('organization_id', orgId)
+        .order('created_at', { ascending: false })
+        .limit(100);
+    
+    if (error) throw new Error(error.message);
+    return data;
+}
+
+export async function addAuditLog(params: { orgId: string, userId: string, action: string, target?: string, details?: Record<string, unknown> }) {
+    await supabaseAdmin.from('audit_logs').insert({
+        organization_id: params.orgId,
+        actor_id: params.userId,
+        action_type: params.action,
+        target_resource: params.target,
+        details: params.details
+    });
+}
+
+
 --- START OF FILE src/app/actions/staff.ts ---
 
 'use server';
@@ -136,6 +230,27 @@ export async function deleteOrganization(orgId: string) {
         .delete()
         .eq('id', orgId);
 
+    if (error) throw new Error(error.message);
+    return { success: true };
+}
+
+
+--- START OF FILE src/app/actions/user.ts ---
+
+'use server';
+
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+export async function deleteUserAccount(userId: string) {
+    // Authユーザー削除 (関連するpublicテーブルのデータはカスケード設定またはTriggerで削除される前提)
+    // ここではAuth削除のみ行う
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
     if (error) throw new Error(error.message);
     return { success: true };
 }
@@ -830,25 +945,34 @@ import { useEffect, useState, useCallback } from 'react';
 import { 
   Box, Typography, Button, Paper, Table, TableBody, TableCell, 
   TableContainer, TableHead, TableRow, Dialog, DialogTitle, DialogContent, 
-  DialogActions, TextField, IconButton, CircularProgress, Stack, Tooltip 
+  DialogActions, TextField, IconButton, Stack, Tooltip, Switch, FormControlLabel, Chip
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import SettingsIcon from '@mui/icons-material/Settings';
 import DeleteIcon from '@mui/icons-material/Delete';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import UnarchiveIcon from '@mui/icons-material/Unarchive';
 import PeopleIcon from '@mui/icons-material/People';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 
-type Client = { id: string; name: string; created_at: string; };
+type Client = { 
+    id: string; 
+    name: string; 
+    created_at: string; 
+    archived_at: string | null; 
+};
 
 export default function ClientsPage() {
   const router = useRouter();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
+  
   const [clients, setClients] = useState<Client[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(true);
   
   const [openAdd, setOpenAdd] = useState(false);
@@ -863,12 +987,26 @@ export default function ClientsPage() {
   const fetchClients = useCallback(async () => {
     if (!currentOrg) return;
     try {
-      const { data, error } = await supabase
-        .from('clients').select('*').eq('organization_id', currentOrg.id).order('created_at', { ascending: false });
+      let query = supabase
+        .from('clients')
+        .select('*')
+        .eq('organization_id', currentOrg.id)
+        .order('created_at', { ascending: false });
+      
+      // アーカイブフィルタ
+      if (!showArchived) {
+          query = query.is('archived_at', null);
+      }
+      
+      const { data, error } = await query;
       if (error) throw error;
       setClients(data || []);
-    } catch (error) { console.error(error); } finally { setLoading(false); }
-  }, [currentOrg]);
+    } catch (error) { 
+        console.error(error); 
+    } finally { 
+        setLoading(false); 
+    }
+  }, [currentOrg, showArchived]);
 
   useEffect(() => { if (!wsLoading && currentOrg) fetchClients(); }, [wsLoading, currentOrg, fetchClients]);
 
@@ -882,7 +1020,13 @@ export default function ClientsPage() {
       setOpenAdd(false);
       setNewName('');
       showToast('登録しました');
-    } catch (error) { console.error(error); showToast('登録に失敗しました', 'error'); } finally { setIsSubmitting(false); }
+      fetchClients(); // リフレッシュ
+    } catch (error) { 
+        console.error(error); 
+        showToast('登録に失敗しました', 'error'); 
+    } finally { 
+        setIsSubmitting(false); 
+    }
   };
 
   const handleOpenEdit = (client: Client) => { setEditId(client.id); setEditName(client.name); setOpenEdit(true); };
@@ -896,7 +1040,42 @@ export default function ClientsPage() {
           setClients(clients.map(c => c.id === editId ? { ...c, name: editName } : c));
           setOpenEdit(false);
           showToast('更新しました');
-      } catch (error) { console.error(error); showToast('更新に失敗しました', 'error'); } finally { setIsSubmitting(false); }
+      } catch (error) { 
+          console.error(error); 
+          showToast('更新に失敗しました', 'error'); 
+      } finally { 
+          setIsSubmitting(false); 
+      }
+  };
+
+  const handleArchive = async (id: string, isArchive: boolean) => {
+      try {
+          const { error } = await supabase
+            .from('clients')
+            .update({ archived_at: isArchive ? new Date().toISOString() : null })
+            .eq('id', id);
+          
+          if (error) throw error;
+          
+          showToast(isArchive ? 'アーカイブしました' : '復元しました');
+          fetchClients();
+      } catch(e) { 
+          console.error(e);
+          showToast('エラーが発生しました', 'error'); 
+      }
+  };
+
+  const handleDelete = async (id: string) => {
+      if(!confirm('本当に削除しますか？\nこの利用者の記録データも全て削除されます。\nこの操作は取り消せません。')) return;
+      try {
+          const { error } = await supabase.from('clients').delete().eq('id', id);
+          if (error) throw error;
+          showToast('完全に削除しました');
+          fetchClients();
+      } catch(e) { 
+          console.error(e);
+          showToast('削除できませんでした。権限などを確認してください。', 'error'); 
+      }
   };
 
   const handleGoSettings = (id: string) => { router.push(`/app/clients/${id}`); };
@@ -907,7 +1086,11 @@ export default function ClientsPage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
         <PeopleIcon sx={{ color: 'action.active', mr: 2 }} />
-        <Typography variant="h6" fontWeight="bold" color="text.primary">利用者管理</Typography>
+        <Typography variant="h6" fontWeight="bold" color="text.primary" sx={{ flexGrow: 1 }}>利用者管理</Typography>
+        <FormControlLabel 
+            control={<Switch checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />} 
+            label="アーカイブを表示" 
+        />
       </Box>
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
@@ -920,7 +1103,7 @@ export default function ClientsPage() {
             <TableHead sx={{ bgcolor: '#f8f9fa' }}>
                 <TableRow>
                 <TableCell sx={{ fontWeight: 'bold' }}>利用者氏名</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>登録日</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>状態</TableCell>
                 <TableCell align="right" sx={{ fontWeight: 'bold' }}>操作</TableCell>
                 </TableRow>
             </TableHead>
@@ -929,14 +1112,31 @@ export default function ClientsPage() {
                 <TableRow><TableCell colSpan={3} align="center" sx={{ py: 5, color: '#999' }}>登録がありません</TableCell></TableRow>
                 ) : (
                 clients.map((client) => (
-                    <TableRow key={client.id} hover>
+                    <TableRow key={client.id} hover sx={{ opacity: client.archived_at ? 0.6 : 1, bgcolor: client.archived_at ? '#f9f9f9' : 'inherit' }}>
                     <TableCell>{client.name}</TableCell>
-                    <TableCell>{new Date(client.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell>
+                        {client.archived_at ? 
+                            <Chip label="アーカイブ" size="small" /> : 
+                            <Chip label="有効" color="success" size="small" variant="outlined" />
+                        }
+                    </TableCell>
                     <TableCell align="right">
                         <Stack direction="row" justifyContent="flex-end" spacing={1}>
-                            <Tooltip title="氏名を編集"><IconButton size="small" onClick={() => handleOpenEdit(client)}><EditIcon fontSize="small" /></IconButton></Tooltip>
-                            <Tooltip title="詳細設定"><IconButton size="small" color="primary" onClick={() => handleGoSettings(client.id)}><SettingsIcon fontSize="small" /></IconButton></Tooltip>
-                            <Tooltip title="削除"><IconButton size="small" color="default" disabled><DeleteIcon fontSize="small" /></IconButton></Tooltip>
+                            {!client.archived_at && (
+                                <>
+                                    <Tooltip title="氏名を編集"><IconButton size="small" onClick={() => handleOpenEdit(client)}><EditIcon fontSize="small" /></IconButton></Tooltip>
+                                    <Tooltip title="詳細設定"><IconButton size="small" color="primary" onClick={() => handleGoSettings(client.id)}><SettingsIcon fontSize="small" /></IconButton></Tooltip>
+                                </>
+                            )}
+                            
+                            {client.archived_at ? (
+                                <>
+                                    <Tooltip title="復元"><IconButton size="small" onClick={() => handleArchive(client.id, false)}><UnarchiveIcon /></IconButton></Tooltip>
+                                    <Tooltip title="完全削除"><IconButton size="small" color="error" onClick={() => handleDelete(client.id)}><DeleteIcon /></IconButton></Tooltip>
+                                </>
+                            ) : (
+                                <Tooltip title="アーカイブ"><IconButton size="small" onClick={() => handleArchive(client.id, true)}><ArchiveIcon /></IconButton></Tooltip>
+                            )}
                         </Stack>
                     </TableCell>
                     </TableRow>
@@ -963,168 +1163,135 @@ export default function ClientsPage() {
 }
 
 
---- START OF FILE src/app/app/dashboard/page.tsx ---
-
-'use client';
-
-import { useEffect, useState, useCallback } from 'react';
-import { Box, Typography, Paper, Stack, CircularProgress } from '@mui/material';
-import DashboardIcon from '@mui/icons-material/Dashboard';
-import { supabase } from '@/lib/supabase';
-import { useWorkspace } from '@/context/WorkspaceContext';
-import { useRouter } from 'next/navigation';
-
-type ReportData = { helper_id: string; clients: { organization_id: string; }; };
-
-export default function DashboardPage() {
-    const { currentOrg, loading: wsLoading } = useWorkspace();
-    const router = useRouter();
-    const [stats, setStats] = useState({ todayVisits: 0, unapproved: 0, activeStaff: 0 });
-    const [loading, setLoading] = useState(true);
-
-    const fetchStats = useCallback(async () => {
-        if (!currentOrg) return;
-        try {
-            const now = new Date();
-            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-            const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
-
-            const { count: todayCount } = await supabase.from('reports').select('*, clients!inner(organization_id)', { count: 'exact', head: true }).eq('clients.organization_id', currentOrg.id).gte('start_at', todayStart).lte('start_at', todayEnd);
-            const { count: pendingCount } = await supabase.from('reports').select('*, clients!inner(organization_id)', { count: 'exact', head: true }).eq('clients.organization_id', currentOrg.id).eq('status', 'pending');
-            const { data } = await supabase.from('reports').select('helper_id, clients!inner(organization_id)').eq('clients.organization_id', currentOrg.id).gte('start_at', todayStart).lte('start_at', todayEnd);
-            const activeData = data as unknown as ReportData[] | null;
-            const uniqueHelpers = new Set(activeData?.map(d => d.helper_id)).size;
-
-            setStats({ todayVisits: todayCount || 0, unapproved: pendingCount || 0, activeStaff: uniqueHelpers });
-        } catch (error) { console.error(error); } finally { setLoading(false); }
-    }, [currentOrg]);
-
-    useEffect(() => {
-        if (!wsLoading && currentOrg) {
-            if (currentOrg.role === 'staff') { router.push('/app/record'); return; }
-            fetchStats();
-        }
-    }, [wsLoading, currentOrg, router, fetchStats]);
-
-    if (loading || wsLoading) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
-
-    return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-                <DashboardIcon sx={{ color: 'action.active', mr: 2 }} />
-                <Typography variant="h6" fontWeight="bold" color="text.primary">ダッシュボード</Typography>
-            </Box>
-
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
-                <Typography variant="h5" fontWeight="bold" gutterBottom sx={{ mb: 4 }}>本日の概況</Typography>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
-                    <Paper variant="outlined" sx={{ p: 3, flex: 1, borderRadius: 3 }}>
-                        <Typography variant="h6" color="primary.main" fontWeight="bold">本日の訪問予定</Typography>
-                        <Typography variant="h3" fontWeight="500">{stats.todayVisits} <span style={{ fontSize: '1.5rem', color: '#666' }}>件</span></Typography>
-                    </Paper>
-                    <Paper variant="outlined" sx={{ p: 3, flex: 1, borderRadius: 3 }}>
-                        <Typography variant="h6" color="error.main" fontWeight="bold">未承認の記録</Typography>
-                        <Typography variant="h3" fontWeight="500" color="error.main">{stats.unapproved} <span style={{ fontSize: '1.5rem', color: '#666' }}>件</span></Typography>
-                    </Paper>
-                    <Paper variant="outlined" sx={{ p: 3, flex: 1, borderRadius: 3 }}>
-                        <Typography variant="h6" color="text.secondary" fontWeight="bold">スタッフ稼働中</Typography>
-                        <Typography variant="h3" fontWeight="500">{stats.activeStaff} <span style={{ fontSize: '1.5rem', color: '#666' }}>名</span></Typography>
-                    </Paper>
-                </Stack>
-            </Box>
-        </Box>
-    );
-}
-
-
 --- START OF FILE src/app/app/history/page.tsx ---
 
 'use client';
 
 import { useEffect, useState } from 'react';
 import {
-    Box, Typography, Paper, Stack, Chip, TextField, MenuItem, Tabs, Tab, Card, CardActionArea, Divider
+    Box, Typography, Paper, Stack, Chip, TextField, Tabs, Tab, Card, CardActionArea, Divider,
+    Grid, IconButton, Tooltip
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ListIcon from '@mui/icons-material/List';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import HistoryIcon from '@mui/icons-material/History';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
 
-type Client = { id: string; name: string; };
-type ReportValueData = { _helpers?: string[]; [key: string]: unknown; };
-type ReportValueRow = { data: ReportValueData; };
 type Report = {
     id: string; start_at: string; status: 'pending' | 'approved' | 'remanded';
-    client_id: string; clients: { name: string; } | null; report_values: ReportValueRow[];
+    client_id: string; clients: { name: string; } | null;
+};
+
+// 簡易カレンダーコンポーネント
+const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month: number, events: Report[], onSelect: (report: Report) => void }) => {
+    const firstDay = new Date(year, month, 1).getDay(); // 0: Sun, 1: Mon...
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    // カレンダーのマス目作成
+    const days: (number | null)[] = [];
+    for (let i = 0; i < firstDay; i++) days.push(null);
+    for (let i = 1; i <= daysInMonth; i++) days.push(i);
+
+    return (
+        <Grid container spacing={1}>
+            {/* ★修正: Grid item を削除し、xs を size に変更 (MUI v6対応) */}
+            {['日','月','火','水','木','金','土'].map(d => (
+                <Grid size={{ xs: 12/7 }} key={d} textAlign="center" fontWeight="bold" fontSize={12} color="text.secondary" sx={{ py: 1 }}>{d}</Grid>
+            ))}
+            {days.map((d, i) => {
+                const dayEvents = d ? events.filter(e => new Date(e.start_at).getDate() === d) : [];
+                return (
+                    <Grid size={{ xs: 12/7 }} key={i}>
+                        <Box 
+                            sx={{ 
+                                height: 80, border: '1px solid #eee', borderRadius: 1, p: 0.5, 
+                                bgcolor: d ? 'white' : 'transparent',
+                                display: 'flex', flexDirection: 'column'
+                            }}
+                        >
+                            {d && (
+                                <>
+                                    <Typography variant="caption" fontWeight="bold" color={new Date().getDate() === d && year === new Date().getFullYear() && month === new Date().getMonth() ? 'primary' : 'textSecondary'}>
+                                        {d}
+                                    </Typography>
+                                    <Box sx={{ flexGrow: 1, overflowY: 'auto', '::-webkit-scrollbar': {width:0} }}>
+                                        {dayEvents.map(ev => (
+                                            <Tooltip key={ev.id} title={`${new Date(ev.start_at).getHours()}:${String(new Date(ev.start_at).getMinutes()).padStart(2,'0')} ${ev.clients?.name}`}>
+                                                <Box 
+                                                    onClick={() => onSelect(ev)}
+                                                    sx={{ 
+                                                        bgcolor: ev.status === 'approved' ? '#e8f5e9' : (ev.status === 'remanded' ? '#ffebee' : '#fff3e0'), 
+                                                        fontSize: 10, p: 0.2, borderRadius: 0.5, mb: 0.5, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+                                                        cursor: 'pointer',
+                                                        '&:hover': { filter: 'brightness(0.95)' }
+                                                    }}
+                                                >
+                                                    {ev.clients?.name}
+                                                </Box>
+                                            </Tooltip>
+                                        ))}
+                                    </Box>
+                                </>
+                            )}
+                        </Box>
+                    </Grid>
+                );
+            })}
+        </Grid>
+    );
 };
 
 export default function HistoryPage() {
     const router = useRouter();
     const { currentOrg, loading: wsLoading } = useWorkspace();
-    const [viewMode, setViewMode] = useState(0);
+    const [viewMode, setViewMode] = useState(0); // 0: List, 1: Calendar
     const [reports, setReports] = useState<Report[]>([]);
-    const [clients, setClients] = useState<Client[]>([]);
-    const [filterClient, setFilterClient] = useState('all');
     const [filterDate, setFilterDate] = useState('');
-    const [myProfileName, setMyProfileName] = useState('');
+    const [currentMonth, setCurrentMonth] = useState(new Date()); // カレンダー表示用
 
     useEffect(() => {
-        const fetchUserAndData = async () => {
+        const fetchData = async () => {
             if (!currentOrg) return;
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
 
-            const { data: profile } = await supabase.from('profiles').select('name').eq('id', user.id).single();
-            const myName = profile?.name || '';
-            setMyProfileName(myName);
+            let query = supabase.from('reports')
+                .select(`id, start_at, status, client_id, clients!inner(name, organization_id)`)
+                .eq('clients.organization_id', currentOrg.id)
+                .neq('status', 'draft')
+                .order('start_at', { ascending: false });
 
-            const { data: cl } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
-            if (cl) setClients(cl);
-
-            let query = supabase.from('reports').select(`
-                    id, start_at, status, client_id, clients!inner(name, organization_id), report_values(data)
-                `).eq('clients.organization_id', currentOrg.id).neq('status', 'draft').order('start_at', { ascending: false });
-
-            if (filterClient !== 'all') query = query.eq('client_id', filterClient);
-            if (filterDate) query = query.gte('start_at', `${filterDate}T00:00:00`).lte('start_at', `${filterDate}T23:59:59`);
-            else query = query.limit(200);
+            if (viewMode === 0 && filterDate) {
+                query = query.gte('start_at', `${filterDate}T00:00:00`).lte('start_at', `${filterDate}T23:59:59`);
+            } else if (viewMode === 1) {
+                const start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
+                const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59).toISOString();
+                query = query.gte('start_at', start).lte('start_at', end);
+            } else {
+                query = query.limit(100);
+            }
 
             const { data } = await query;
-            
             if (data) {
-                type RawReport = {
-                    id: string; start_at: string; status: 'pending' | 'approved' | 'remanded';
-                    client_id: string; clients: { name: string; } | null; 
-                    report_values: { data: unknown }[] | { data: unknown } | null;
-                };
-                const rawData = data as unknown as RawReport[];
-                
-                const myReports: Report[] = rawData.filter(r => {
-                    if (!r.report_values) return false;
-                    let valueData: ReportValueData | undefined;
-                    if (Array.isArray(r.report_values)) { if (r.report_values.length > 0) valueData = r.report_values[0].data as ReportValueData; } 
-                    else valueData = r.report_values.data as ReportValueData;
-                    if (!valueData) return false;
-                    const helpers = valueData._helpers;
-                    if (Array.isArray(helpers)) return helpers.includes(myName);
-                    return false;
-                }).map(d => {
-                    let normalizedValues: ReportValueRow[] = [];
-                    if (Array.isArray(d.report_values)) normalizedValues = d.report_values.map(v => ({ data: v.data as ReportValueData }));
-                    else if (d.report_values) normalizedValues = [{ data: d.report_values.data as ReportValueData }];
-                    return { id: d.id, start_at: d.start_at, status: d.status, client_id: d.client_id, clients: d.clients, report_values: normalizedValues };
-                });
-                setReports(myReports);
-            } else setReports([]);
+                const typedData = data as unknown as Report[];
+                setReports(typedData);
+            }
         };
-        if (!wsLoading && currentOrg) fetchUserAndData();
-    }, [wsLoading, currentOrg, filterClient, filterDate]);
+
+        if (!wsLoading) fetchData();
+    }, [wsLoading, currentOrg, filterDate, viewMode, currentMonth]);
 
     const handleEdit = (report: Report) => router.push(`/app/record/${report.client_id}?reportId=${report.id}`);
+
+    const handleMonthChange = (diff: number) => {
+        setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + diff, 1));
+    };
 
     if (wsLoading || !currentOrg) return null;
 
@@ -1132,61 +1299,74 @@ export default function HistoryPage() {
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
                 <HistoryIcon sx={{ color: 'action.active', mr: 2 }} />
-                <Typography variant="h6" fontWeight="bold" color="text.primary">自分の履歴</Typography>
+                <Typography variant="h6" fontWeight="bold" color="text.primary" flexGrow={1}>履歴</Typography>
+                <Tabs value={viewMode} onChange={(_, v) => setViewMode(v)} sx={{ minHeight: 0 }}>
+                    <Tab icon={<ListIcon />} label="リスト" sx={{ py: 1, minHeight: 0 }} />
+                    <Tab icon={<CalendarMonthIcon />} label="カレンダー" sx={{ py: 1, minHeight: 0 }} />
+                </Tabs>
             </Box>
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
-                <Paper sx={{ p: 2, mb: 2 }}>
-                    <Stack spacing={2}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                            <Tabs value={viewMode} onChange={(_, v) => setViewMode(v)} sx={{ minHeight: 0 }}>
-                                <Tab icon={<ListIcon />} label="リスト" sx={{ py: 1, minHeight: 0 }} />
-                                <Tab icon={<CalendarMonthIcon />} label="カレンダー" sx={{ py: 1, minHeight: 0 }} disabled />
-                            </Tabs>
-                            {myProfileName && <Typography variant="caption" color="text.secondary">担当者: {myProfileName}</Typography>}
+                {viewMode === 0 && (
+                    <>
+                        <Paper sx={{ p: 2, mb: 2 }}>
+                            <TextField 
+                                type="date" label="日付絞り込み" size="small" fullWidth 
+                                InputLabelProps={{ shrink: true }} 
+                                value={filterDate} onChange={(e) => setFilterDate(e.target.value)} 
+                            />
+                        </Paper>
+                        <Stack spacing={2}>
+                            {reports.map((report) => (
+                                <Card key={report.id} variant="outlined" sx={{ borderRadius: 2 }}>
+                                    <CardActionArea onClick={() => handleEdit(report)} sx={{ p: 2 }}>
+                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                            <Box>
+                                                <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                                                    <AccessTimeIcon fontSize="small" color="action" />
+                                                    <Typography variant="body2" fontWeight="bold">
+                                                        {new Date(report.start_at).toLocaleDateString()} {new Date(report.start_at).getHours()}:{String(new Date(report.start_at).getMinutes()).padStart(2,'0')}
+                                                    </Typography>
+                                                    <Chip 
+                                                        label={report.status === 'approved' ? '承認済' : report.status === 'remanded' ? '差戻し' : '未承認'} 
+                                                        color={report.status === 'approved' ? 'success' : report.status === 'remanded' ? 'error' : 'warning'} 
+                                                        size="small" sx={{ height: 20, fontSize: '0.7rem' }}
+                                                    />
+                                                </Box>
+                                                <Typography variant="h6" fontWeight="bold">{report.clients?.name} 様</Typography>
+                                            </Box>
+                                            <EditIcon color="action" />
+                                        </Stack>
+                                    </CardActionArea>
+                                </Card>
+                            ))}
+                            {reports.length === 0 && (
+                                <Box textAlign="center" py={5} color="text.secondary">
+                                    <Typography>記録がありません</Typography>
+                                </Box>
+                            )}
                         </Stack>
-                        <Divider />
-                        <Stack direction="row" spacing={1}>
-                            <TextField select label="利用者" size="small" fullWidth value={filterClient} onChange={(e) => setFilterClient(e.target.value)}>
-                                <MenuItem value="all">全員</MenuItem>
-                                {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
-                            </TextField>
-                            <TextField type="date" label="日付" size="small" fullWidth InputLabelProps={{ shrink: true }} value={filterDate} onChange={(e) => setFilterDate(e.target.value)} />
-                        </Stack>
-                    </Stack>
-                </Paper>
+                    </>
+                )}
 
-                <Stack spacing={2}>
-                    {reports.map((report) => (
-                        <Card key={report.id} variant="outlined" sx={{ borderRadius: 2 }}>
-                            <CardActionArea onClick={() => handleEdit(report)} sx={{ p: 2 }}>
-                                <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                    <Box>
-                                        <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-                                            <AccessTimeIcon fontSize="small" color="action" />
-                                            <Typography variant="body2" fontWeight="bold">
-                                                {new Date(report.start_at).toLocaleDateString()} {new Date(report.start_at).getHours()}:{String(new Date(report.start_at).getMinutes()).padStart(2,'0')}
-                                            </Typography>
-                                            <Chip 
-                                                label={report.status === 'approved' ? '承認済' : report.status === 'remanded' ? '差戻し' : '未承認'} 
-                                                color={report.status === 'approved' ? 'success' : report.status === 'remanded' ? 'error' : 'warning'} 
-                                                size="small" sx={{ height: 20, fontSize: '0.7rem' }}
-                                            />
-                                        </Box>
-                                        <Typography variant="h6" fontWeight="bold">{report.clients?.name} 様</Typography>
-                                    </Box>
-                                    <EditIcon color="action" />
-                                </Stack>
-                            </CardActionArea>
-                        </Card>
-                    ))}
-                    {reports.length === 0 && (
-                        <Box textAlign="center" py={5} color="text.secondary">
-                            <Typography>該当する記録がありません</Typography>
-                            <Typography variant="caption">※担当ヘルパーにあなたの名前が含まれる記録のみ表示されます</Typography>
+                {viewMode === 1 && (
+                    <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+                            <IconButton onClick={() => handleMonthChange(-1)}><ChevronLeftIcon /></IconButton>
+                            <Typography variant="h6" fontWeight="bold">
+                                {currentMonth.getFullYear()}年 {currentMonth.getMonth() + 1}月
+                            </Typography>
+                            <IconButton onClick={() => handleMonthChange(1)}><ChevronRightIcon /></IconButton>
                         </Box>
-                    )}
-                </Stack>
+                        <Divider sx={{ mb: 2 }} />
+                        <SimpleCalendar 
+                            year={currentMonth.getFullYear()} 
+                            month={currentMonth.getMonth()} 
+                            events={reports} 
+                            onSelect={handleEdit} 
+                        />
+                    </Paper>
+                )}
             </Box>
         </Box>
     );
@@ -1218,11 +1398,10 @@ export default function AppPage() {
   useEffect(() => {
     if (!loading) {
       if (!currentOrg) {
-        // 所属がない場合 -> LPかセットアップへ
+        // 所属がない場合 -> セットアップへ
         router.push('/setup');
-      } else if (['owner', 'manager'].includes(currentOrg.role)) {
-        router.push('/app/dashboard');
       } else {
+        // 所属がある場合 -> 記録画面へ (ダッシュボードは廃止)
         router.push('/app/record');
       }
     }
@@ -1239,7 +1418,7 @@ export default function AppPage() {
 import { useEffect, useState } from 'react';
 import {
     Box, Typography, Paper, TextField, Button, Alert, Stack, Divider,
-    Container, Chip, CircularProgress
+    Container, Chip, CircularProgress, Avatar, IconButton
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import LockIcon from '@mui/icons-material/Lock';
@@ -1247,8 +1426,12 @@ import PersonIcon from '@mui/icons-material/Person';
 import LinkIcon from '@mui/icons-material/Link';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { useToast } from '@/components/ui/ToastProvider';
+import { deleteUserAccount } from '@/app/actions/user';
 
 const GoogleLogo = () => (
     <svg width="20" height="20" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" /><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" /><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" /><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" /></svg>
@@ -1261,13 +1444,19 @@ type UserIdentity = { provider: string; };
 
 export default function ProfilePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
+    const { showToast } = useToast();
+    
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [uploading, setUploading] = useState(false);
 
     const [userId, setUserId] = useState('');
     const [email, setEmail] = useState('');
+    const [newEmail, setNewEmail] = useState('');
     const [name, setName] = useState('');
+    const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
     const [linkedProviders, setLinkedProviders] = useState<string[]>([]);
+    
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
@@ -1284,11 +1473,19 @@ export default function ProfilePage() {
                 const identities = user.identities as unknown as UserIdentity[];
                 setLinkedProviders(identities.map((id) => id.provider));
             }
-            const { data: profile } = await supabase.from('profiles').select('name').eq('id', user.id).single();
-            if (profile) setName(profile.name);
-        } catch (error) { console.error(error); } finally { setLoading(false); }
+            const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).single();
+            if (profile) {
+                setName(profile.name);
+                setAvatarUrl(profile.avatar_url);
+            }
+        } catch (error) { 
+            console.error(error); 
+        } finally { 
+            setLoading(false); 
+        }
     };
 
+    // ★修正: error handlingの型をunknownにし、明示的にキャスト
     const handleUpdateProfile = async () => {
         setMessage(null);
         if (!name.trim()) return setMessage({ type: 'error', text: '名前を入力してください' });
@@ -1305,8 +1502,59 @@ export default function ProfilePage() {
             }
             setMessage({ type: 'success', text: '更新しました' });
             setNewPassword(''); setConfirmPassword('');
-        } catch (e) { if (e instanceof Error) setMessage({ type: 'error', text: e.message }); } 
-        finally { setSaving(false); }
+        } catch (e: unknown) { 
+            if (e instanceof Error) setMessage({ type: 'error', text: e.message }); 
+        } finally { 
+            setSaving(false); 
+        }
+    };
+
+    const handleUpdateEmail = async () => {
+        if (!newEmail) return;
+        setMessage(null);
+        try {
+            const { error } = await supabase.auth.updateUser({ email: newEmail });
+            if (error) throw error;
+            setMessage({ type: 'success', text: '確認メールを送信しました。新しいメールアドレスを確認してください。' });
+            setNewEmail('');
+        } catch(e: unknown) {
+            if (e instanceof Error) setMessage({ type: 'error', text: e.message });
+        }
+    };
+
+    const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (!event.target.files || event.target.files.length === 0) return;
+        setUploading(true);
+        try {
+            const file = event.target.files[0];
+            const fileExt = file.name.split('.').pop();
+            const filePath = `${userId}/${Date.now()}.${fileExt}`;
+            
+            const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file);
+            if (uploadError) throw uploadError;
+
+            const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
+            
+            await supabase.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', userId);
+            setAvatarUrl(data.publicUrl);
+            showToast('プロフィール画像を更新しました');
+        } catch (e: unknown) { 
+            console.error(e);
+            if (e instanceof Error) showToast('アップロード失敗: ' + e.message, 'error'); 
+        } finally { 
+            setUploading(false); 
+        }
+    };
+
+    const handleDeleteAccount = async () => {
+        if (!confirm('本当に退会しますか？\nアカウントと関連データが完全に削除され、復元できません。')) return;
+        try {
+            await deleteUserAccount(userId);
+            await supabase.auth.signOut();
+            window.location.href = '/';
+        } catch(e: unknown) { 
+            if (e instanceof Error) setMessage({ type: 'error', text: e.message }); 
+        }
     };
 
     const handleLinkIdentity = async (provider: 'google' | 'azure') => {
@@ -1327,24 +1575,69 @@ export default function ProfilePage() {
                 <Container maxWidth="sm">
                     {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
-                    <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
-                        <Stack spacing={4}>
+                    <Stack spacing={3}>
+                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, textAlign: 'center' }}>
+                            <Box position="relative" display="inline-block" mb={2}>
+                                <Avatar 
+                                    src={avatarUrl || undefined} 
+                                    sx={{ width: 100, height: 100, mx: 'auto', fontSize: 40, bgcolor: 'primary.main' }}
+                                >
+                                    {name[0] || '?'}
+                                </Avatar>
+                                <IconButton 
+                                    color="primary" 
+                                    component="label" 
+                                    sx={{ position: 'absolute', bottom: 0, right: -10, bgcolor: 'white', boxShadow: 2, '&:hover': {bgcolor: '#f0f0f0'} }}
+                                >
+                                    <input hidden accept="image/*" type="file" onChange={handleAvatarUpload} />
+                                    {uploading ? <CircularProgress size={24} /> : <PhotoCamera />}
+                                </IconButton>
+                            </Box>
+
                             <Box>
                                 <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
                                     <PersonIcon color="primary" /> 基本情報
                                 </Typography>
                                 <Stack spacing={2} mt={1}>
-                                    <TextField label="メールアドレス" value={email} disabled fullWidth size="small" />
                                     <TextField label="氏名" value={name} onChange={(e) => setName(e.target.value)} fullWidth required />
                                     {currentOrg && (
                                         <TextField label="現在の事業所での権限" value={currentOrg.role} disabled fullWidth size="small" helperText={`事業所: ${currentOrg.name}`} />
                                     )}
                                 </Stack>
                             </Box>
-                            <Divider />
+                        </Paper>
+
+                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+                            <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
+                                <LockIcon color="primary" /> セキュリティ設定
+                            </Typography>
+                            
+                            <Stack spacing={3} mt={2}>
+                                <Box>
+                                    <Typography variant="caption" color="text.secondary" gutterBottom>メールアドレス変更</Typography>
+                                    <Typography variant="body2" mb={1}>現在のメール: {email}</Typography>
+                                    <Stack direction="row" spacing={1}>
+                                        <TextField label="新しいメールアドレス" fullWidth size="small" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
+                                        <Button variant="outlined" onClick={handleUpdateEmail}>変更確認を送信</Button>
+                                    </Stack>
+                                </Box>
+
+                                <Divider />
+
+                                <Box>
+                                    <Typography variant="caption" color="text.secondary" gutterBottom>パスワード変更</Typography>
+                                    <Stack spacing={2}>
+                                        <TextField label="新しいパスワード" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} fullWidth size="small" />
+                                        <TextField label="確認" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} fullWidth size="small" />
+                                    </Stack>
+                                </Box>
+                            </Stack>
+                        </Paper>
+
+                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
                             <Box>
                                 <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
-                                    <LinkIcon color="primary" /> 外部連携
+                                    <LinkIcon color="primary" /> 外部アカウント連携
                                 </Typography>
                                 <Stack spacing={2} mt={1}>
                                     {['google', 'azure'].map(p => (
@@ -1359,21 +1652,22 @@ export default function ProfilePage() {
                                     ))}
                                 </Stack>
                             </Box>
-                            <Divider />
-                            <Box>
-                                <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
-                                    <LockIcon color="primary" /> パスワード変更
-                                </Typography>
-                                <Stack spacing={2} mt={1}>
-                                    <TextField label="新しいパスワード" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} fullWidth />
-                                    <TextField label="確認" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} fullWidth />
-                                </Stack>
-                            </Box>
-                            <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleUpdateProfile} disabled={saving} sx={{ py: 1.5 }}>
-                                {saving ? '保存中...' : '設定を保存'}
-                            </Button>
-                        </Stack>
-                    </Paper>
+                        </Paper>
+
+                        <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleUpdateProfile} disabled={saving} sx={{ py: 1.5 }}>
+                            {saving ? '保存中...' : '設定を保存'}
+                        </Button>
+
+                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.main', bgcolor: '#fff5f5' }}>
+                            <Typography variant="h6" color="error" gutterBottom fontWeight="bold" display="flex" alignItems="center" gap={1}>
+                                <DeleteForeverIcon /> 退会エリア
+                            </Typography>
+                            <Typography variant="body2" mb={2}>
+                                アカウントを完全に削除します。参加している事業所の記録データは残りますが、あなたの個人情報は削除され、ログインできなくなります。
+                            </Typography>
+                            <Button color="error" variant="contained" onClick={handleDeleteAccount}>退会する</Button>
+                        </Paper>
+                    </Stack>
                 </Container>
             </Box>
         </Box>
@@ -1385,7 +1679,7 @@ export default function ProfilePage() {
 
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Box, Button, Container, Typography, TextField, Checkbox, FormControlLabel, Radio, RadioGroup,
   Paper, Stack, IconButton, CircularProgress,
@@ -1400,6 +1694,9 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
 import PersonIcon from '@mui/icons-material/Person';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import DeleteIcon from '@mui/icons-material/Delete';
+import PhotoCamera from '@mui/icons-material/PhotoCamera';
+
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
@@ -1479,6 +1776,7 @@ export default function RecordPage() {
   
   const [currentStatus, setCurrentStatus] = useState<ReportStatus | null>(null);
   const [isDirty, setIsDirty] = useState(false);
+  const [images, setImages] = useState<{id: string, url: string}[]>([]);
   
   const [openCloseDialog, setOpenCloseDialog] = useState(false);
   const [openApproveDialog, setOpenApproveDialog] = useState(false); 
@@ -1494,37 +1792,7 @@ export default function RecordPage() {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   };
 
-  useEffect(() => {
-    const init = async () => {
-      if (!reportId) {
-        const now = new Date();
-        setStartDateTime(formatDatetimeLocal(now));
-        setEndDateTime(formatDatetimeLocal(new Date(now.getTime() + 3600000)));
-        setCurrentStatus('draft');
-      }
-      await fetchBaseData();
-      if (reportId) await loadExistingData();
-      setLoading(false);
-    };
-
-    if (!wsLoading && currentOrg) {
-      init();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsLoading, currentOrg, reportId]);
-
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-        if (isDirty) {
-            e.preventDefault();
-            e.returnValue = '';
-        }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isDirty]);
-
-  const fetchBaseData = async () => {
+  const fetchBaseData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!currentOrg) return;
 
@@ -1560,9 +1828,10 @@ export default function RecordPage() {
         if (me) setSelectedHelpers([me.name]);
       }
     } catch (error) { console.error('Error fetching base data:', error); }
-  };
+  }, [clientId, currentOrg, reportId]);
 
-  const loadExistingData = async () => {
+  const loadExistingData = useCallback(async () => {
+    if (!reportId) return;
     try {
       const { data: r } = await supabase.from('reports').select('*').eq('id', reportId).single();
       const { data: v } = await supabase.from('report_values').select('data').eq('report_id', reportId).single();
@@ -1576,15 +1845,87 @@ export default function RecordPage() {
         setSelectedHelpers(data._helpers || []);
         setAnswers(data);
         setIsDirty(false);
+
+        const { data: imgData } = await supabase.from('report_images').select('*').eq('report_id', reportId);
+        if (imgData) {
+            setImages(imgData.map(i => ({ 
+                id: i.id, 
+                url: supabase.storage.from('report-images').getPublicUrl(i.storage_path).data.publicUrl 
+            })));
+        }
       }
     } catch (e) { console.error(e); }
-  };
+  }, [reportId]);
+
+  useEffect(() => {
+    const init = async () => {
+      if (!reportId) {
+        const now = new Date();
+        setStartDateTime(formatDatetimeLocal(now));
+        setEndDateTime(formatDatetimeLocal(new Date(now.getTime() + 3600000)));
+        setCurrentStatus('draft');
+      }
+      await fetchBaseData();
+      await loadExistingData();
+      setLoading(false);
+    };
+
+    if (!wsLoading && currentOrg) {
+      init();
+    }
+  }, [wsLoading, currentOrg, reportId, fetchBaseData, loadExistingData]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        if (isDirty) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
 
   const handleChange = (setter: (val: string) => void, val: string) => { setter(val); setIsDirty(true); };
   const handleAnswerChange = (id: string, value: string | number | boolean | string[]) => {
     setAnswers(prev => ({ ...prev, [id]: value }));
     setIsDirty(true);
     if (errors[id]) { const ne = { ...errors }; delete ne[id]; setErrors(ne); }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!reportId || !e.target.files || e.target.files.length === 0) return;
+    setSubmitting(true);
+    try {
+        const file = e.target.files[0];
+        const path = `${reportId}/${Date.now()}_${file.name}`;
+        const { error } = await supabase.storage.from('report-images').upload(path, file);
+        if (error) throw error;
+        
+        await supabase.from('report_images').insert({ report_id: reportId, storage_path: path });
+        
+        // リロードして反映
+        await loadExistingData();
+        showToast('画像をアップロードしました');
+    } catch(e) {
+        console.error(e);
+        showToast('アップロード失敗', 'error');
+    } finally {
+        setSubmitting(false);
+    }
+  };
+
+  const handleDeleteReport = async () => {
+      if(!confirm('本当に削除しますか？')) return;
+      if (currentStatus === 'approved') { showToast('承認済みの記録は削除できません', 'error'); return; }
+      try {
+        await supabase.from('reports').delete().eq('id', reportId);
+        showToast('削除しました');
+        router.back();
+      } catch(e) {
+          console.error(e);
+          showToast('削除に失敗しました', 'error');
+      }
   };
 
   const validate = () => {
@@ -1614,7 +1955,7 @@ export default function RecordPage() {
         updated_at: new Date().toISOString()
       };
 
-      // 新規作成時のみ helper_id を付与
+      let currentReportId = reportId;
       let payload;
       if (!reportId) {
           payload = { ...basePayload, helper_id: user?.id };
@@ -1627,15 +1968,25 @@ export default function RecordPage() {
         await supabase.from('report_values').update({ data: finalData }).eq('report_id', reportId);
       } else {
         const { data: nr } = await supabase.from('reports').insert(payload).select().single();
-        if (nr) await supabase.from('report_values').insert({ report_id: nr.id, data: finalData });
+        if (nr) {
+            await supabase.from('report_values').insert({ report_id: nr.id, data: finalData });
+            currentReportId = nr.id;
+        }
       }
       setIsDirty(false);
+      
+      // IDがなかった場合はURLを更新して、画像アップロードなどを可能にする
+      if (!reportId && currentReportId) {
+          const newUrl = `/app/record/${clientId}?reportId=${currentReportId}`;
+          router.replace(newUrl);
+      }
+
       return true;
     } catch (e) { console.error(e); showToast('エラーが発生しました', 'error'); return false; } 
     finally { setSubmitting(false); }
   };
 
-  const handleDraftSave = async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); router.push('/app/record'); } };
+  const handleDraftSave = async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); } };
   const handleSubmit = () => setOpenSubmitDialog(true);
   const executeSubmit = async () => { setOpenSubmitDialog(false); if (await saveReport('pending')) { showToast('記録を送信しました', 'success'); router.push('/app/record'); } };
   const handleApprove = () => setOpenApproveDialog(true);
@@ -1686,6 +2037,10 @@ export default function RecordPage() {
             </Typography>
             
             <Stack direction="row" spacing={1}>
+                {reportId && currentStatus !== 'approved' && (
+                    <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
+                )}
+                
                 {isAdmin && currentStatus === 'pending' && <Button variant="contained" color="success" size="small" startIcon={<CheckCircleIcon />} onClick={handleApprove} disabled={submitting}>承認</Button>}
                 {isAdmin && currentStatus === 'approved' && <Button variant="contained" color="warning" size="small" startIcon={<AssignmentReturnIcon />} onClick={handleRemand} disabled={submitting}>承認取消</Button>}
                 {(!isAdmin || currentStatus !== 'pending') && currentStatus !== 'approved' && (
@@ -1805,6 +2160,22 @@ export default function RecordPage() {
                 </Stack>
                 </Paper>
             ))}
+
+            <Paper variant="outlined" sx={{ p: 3, mt: 3, borderRadius: 3 }}>
+                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>画像添付</Typography>
+                <Stack direction="row" gap={2} flexWrap="wrap">
+                    {images.map(img => (
+                        <Box key={img.id} component="img" src={img.url} sx={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 1 }} />
+                    ))}
+                    <IconButton color="primary" component="label" sx={{ width: 100, height: 100, border: '1px dashed #ccc', borderRadius: 1, flexDirection: 'column' }}>
+                        <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!reportId} />
+                        <PhotoCamera />
+                        {!reportId && <Typography variant="caption" sx={{ fontSize: 9 }}>未保存</Typography>}
+                    </IconButton>
+                </Stack>
+                {!reportId && <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>※一度下書き保存すると画像を添付できます</Typography>}
+            </Paper>
+
             </Stack>
         </Container>
       </Box>
@@ -1982,6 +2353,9 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import TagIcon from '@mui/icons-material/Tag';
 import ArticleIcon from '@mui/icons-material/Article';
+import DeleteIcon from '@mui/icons-material/Delete';
+import RestoreIcon from '@mui/icons-material/Restore';
+
 import { supabase } from '@/lib/supabase';
 import { pdf } from '@react-pdf/renderer';
 import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRecordDocument';
@@ -1989,6 +2363,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
+import { useToast } from '@/components/ui/ToastProvider';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 type ReportValuesData = Record<string, FormValue>;
@@ -2007,6 +2382,8 @@ export default function ReportsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { currentOrg, loading: wsLoading } = useWorkspace();
+  const { showToast } = useToast();
+  
   const [reports, setReports] = useState<Report[]>([]);
   const [clients, setClients] = useState<ClientData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2097,7 +2474,44 @@ export default function ReportsPage() {
         await supabase.from('reports').update(updateData).in('id', selected);
         setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, ...updateData, approved_by_user: { name: 'あなた' } } : r));
         setSelected([]);
-      } catch (e) { console.error(e); alert('エラーが発生しました'); } finally { setProcessing(false); }
+        showToast('一括承認しました');
+      } catch (e) { console.error(e); showToast('エラーが発生しました', 'error'); } finally { setProcessing(false); }
+  };
+
+  const handleBulkRemand = async () => {
+    if (selected.length === 0 || !confirm(`${selected.length}件を一括で差戻ししますか？`)) return;
+    setProcessing(true);
+    try {
+        await supabase.from('reports').update({ status: 'remanded', approved_by: null, approved_at: null }).in('id', selected);
+        setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, status: 'remanded' as ReportStatus } : r));
+        setSelected([]);
+        showToast('差し戻しました');
+    } catch (e) { 
+        console.error(e);
+        showToast('エラーが発生しました', 'error'); 
+    } finally { setProcessing(false); }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selected.length === 0 || !confirm(`${selected.length}件を削除しますか？\nこの操作は取り消せません。`)) return;
+    
+    // 承認済みが含まれていないかチェック
+    const targets = reports.filter(r => selected.includes(r.id));
+    if (targets.some(r => r.status === 'approved')) {
+        alert('選択項目の中に「承認済み」の記録が含まれています。\n承認を取り消してから削除してください。');
+        return;
+    }
+
+    setProcessing(true);
+    try {
+        await supabase.from('reports').delete().in('id', selected);
+        setReports(prev => prev.filter(r => !selected.includes(r.id)));
+        setSelected([]);
+        showToast('削除しました');
+    } catch (e) { 
+        console.error(e);
+        showToast('エラーが発生しました', 'error'); 
+    } finally { setProcessing(false); }
   };
 
   const getReportData = (report: Report): ReportValuesData | null => {
@@ -2233,43 +2647,28 @@ export default function ReportsPage() {
       } catch (e) { console.error(e); alert('PDF作成中にエラーが発生しました'); }
   };
 
-  // --- GAS連携用のデータ加工関数 ---
-  // rawData (UUIDキー) を、スキーマに基づいて「日本語キー」かつ「全項目補完済み」のデータに変換する
   const preparePdfData = (
     rawData: ReportValuesData, 
     schema: HelperFormItem[], 
     keyMap: Record<string, string>
   ): Record<string, unknown> => {
     const result: Record<string, unknown> = {};
-
-    // 1. スキーマをループして、各項目について値を決定する
     schema.forEach(item => {
-        // 日本語のキー名を取得（例: "食事介助"）
         const labelKey = keyMap[item.id] || item.id;
-        
         const val = rawData[item.id];
-
         if (item.type === 'checkbox') {
-            // チェックボックス: 値がなければ明示的に false を入れる
-            // これによりGAS側で「☐」が表示される
             result[labelKey] = !!val; 
-            
-            // 詳細があればそれも追加
             if (item.hasDetail) {
                 const detailKey = `${labelKey}_詳細`;
-                // 詳細は入力がなければ空文字にしておく（あるいは送らなくてもGAS側で消える）
                 result[detailKey] = rawData[`${item.id}_detail`] || "";
             }
         } 
         else if (item.type === 'multicheckbox' || item.type === 'select') {
-            // 複数選択: 選択肢ごとにキーを展開する (例: 食事介助_朝: true)
             const selectedValues: string[] = Array.isArray(val) ? val : (val ? [String(val)] : []);
-            
             if (item.options) {
                 item.options.split(',').forEach((opt: string) => {
                     const cleanOpt = opt.trim();
                     const optKey = `${labelKey}_${cleanOpt}`;
-                    // 選択されていれば true, なければ false
                     result[optKey] = selectedValues.includes(cleanOpt);
                 });
             }
@@ -2279,15 +2678,12 @@ export default function ReportsPage() {
             }
         } 
         else {
-            // テキスト、数値など: 値がなければ空文字
             result[labelKey] = (val === null || val === undefined) ? "" : val;
         }
     });
-
     return result;
   };
 
-  // GASによる帳票作成処理
   const handleCreateGasPdf = async () => {
       const targetReports = getTargetReports();
       if (targetReports.length === 0) { alert('出力するデータがありません。'); return; }
@@ -2305,12 +2701,12 @@ export default function ReportsPage() {
       const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
 
       const schemaMap: Record<string, HelperFormItem[]> = {};
-      const keyMaps: Record<string, Record<string, string>> = {}; // クライアントごとのID->日本語マップ
+      const keyMaps: Record<string, Record<string, string>> = {};
 
       templates?.forEach(t => { 
           const s = t.schema as HelperFormItem[];
           schemaMap[t.client_id] = s;
-          keyMaps[t.client_id] = generateKeyMap(s); // utilsの関数を使ってマップ生成
+          keyMaps[t.client_id] = generateKeyMap(s);
       });
 
       const { data: orgInfo } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg!.id).single();
@@ -2319,13 +2715,10 @@ export default function ReportsPage() {
       if (!confirm(`${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）`)) return;
       setGasProgress({ total: targetReports.length, current: 0, currentName: '準備中...' });
 
-      // 最後に開くフォルダURLを保持する変数
       let lastOpenedFolderUrl: string | null = null;
 
       try {
           let processedCount = 0;
-          
-          // フォルダ名用のタイムスタンプ生成
           const now = new Date();
           const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
           const exportFolderName = `${timeStr}_出力分`;
@@ -2341,7 +2734,6 @@ export default function ReportsPage() {
 
               setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: フォルダ確認中...` }));
               
-              // クライアントのルートフォルダを確保
               const folderRes = await callGasApi({
                   action: 'manage_client_folder',
                   orgFolderId: orgInfo.google_folder_id,
@@ -2355,7 +2747,6 @@ export default function ReportsPage() {
               }
               const clientRootFolderId = folderRes.folderId;
 
-              // 出力用のサブフォルダを作成
               setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: サブフォルダ作成中...` }));
               const subFolderRes = await callGasApi({
                   action: 'create_sub_folder',
@@ -2363,8 +2754,6 @@ export default function ReportsPage() {
                   folderName: exportFolderName
               });
               const targetFolderId = subFolderRes.folderId; 
-              
-              // 最後に作成したフォルダのURLを保存（ループ終了後に開くため）
               lastOpenedFolderUrl = subFolderRes.folderUrl;
 
               const clientSchema = schemaMap[client.id] || [];
@@ -2385,13 +2774,10 @@ export default function ReportsPage() {
                   flatData['開始時刻'] = `${start.getHours()}:${String(start.getMinutes()).padStart(2,'0')}`;
                   flatData['終了日付'] = `${end.getFullYear()}/${end.getMonth()+1}/${end.getDate()}`;
                   flatData['終了時刻'] = `${end.getHours()}:${String(end.getMinutes()).padStart(2,'0')}`;
-                  
                   flatData['サービス時間'] = (data.service_time as string | number) || '0';
                   flatData['移動時間'] = (data.travel_time as string | number) || '0';
 
-                  // ★修正: 独自の変換関数を使って、不足しているfalseなどを補完したデータを生成
                   const readableData = preparePdfData(data, clientSchema, clientKeyMap);
-                  
                   const finalPayload = { ...flatData, ...readableData } as Record<string, unknown>;
 
                   await callGasApi({
@@ -2406,11 +2792,7 @@ export default function ReportsPage() {
               }
           }
           alert('作成が完了しました。保存先のフォルダを開きます。');
-          
-          // ★追加: 最後に処理したフォルダを開く
-          if (lastOpenedFolderUrl) {
-              window.open(lastOpenedFolderUrl, '_blank');
-          }
+          if (lastOpenedFolderUrl) window.open(lastOpenedFolderUrl, '_blank');
 
       } catch (e) { console.error(e); alert('エラーが発生しました: ' + e); } 
       finally { setGasProgress(null); }
@@ -2472,6 +2854,8 @@ export default function ReportsPage() {
                             {gasProgress ? '作成中...' : '帳票作成(GAS)'}
                         </Button>
                         <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>
+                        <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</Button>
+                        <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</Button>
                     </>
                  ) : (
                      <Button variant="outlined" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
@@ -2529,26 +2913,45 @@ export default function ReportsPage() {
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { 
   Box, Typography, Paper, TextField, Button, Alert, CircularProgress, Stack, Divider, 
-  Chip 
+  Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow, Dialog, 
+  DialogTitle, DialogContent, DialogContentText, DialogActions
 } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
 import LinkIcon from '@mui/icons-material/Link';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import WarningIcon from '@mui/icons-material/Warning';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import LinkOffIcon from '@mui/icons-material/LinkOff';
+
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
+import { deleteOrganization, leaveOrganization, getAuditLogs } from '@/app/actions/organization';
 import { useToast } from '@/components/ui/ToastProvider';
+
+// 監査ログデータの型定義
+type AuditLog = {
+    id: string;
+    created_at: string;
+    action_type: string;
+    target_resource: string | null;
+    details: Record<string, unknown> | null;
+    profiles: { name: string } | null; // Joinされたプロフィール情報
+};
 
 export default function SettingsPage() {
     const { currentOrg, loading: wsLoading, refreshWorkspace } = useWorkspace();
     const router = useRouter();
     const { showToast } = useToast();
 
+    // State
+    const [tabIndex, setTabIndex] = useState(0);
     const [orgName, setOrgName] = useState('');
     const [googleFolderId, setGoogleFolderId] = useState<string | null>(null);
     const [driveUrl, setDriveUrl] = useState('');
@@ -2556,18 +2959,16 @@ export default function SettingsPage() {
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+    
+    // ログの型を具体的に指定
+    const [logs, setLogs] = useState<AuditLog[]>([]);
 
-    useEffect(() => {
-        if (!wsLoading && currentOrg) {
-            if (currentOrg.role !== 'owner') {
-                router.push('/app'); 
-                return;
-            }
-            fetchOrgDetails();
-        }
-    }, [wsLoading, currentOrg, router]);
+    // Dialogs
+    const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+    const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
+    const [confirmInput, setConfirmInput] = useState('');
 
-    const fetchOrgDetails = async () => {
+    const fetchOrgDetails = useCallback(async () => {
         if (!currentOrg) return;
         const { data } = await supabase
             .from('organizations')
@@ -2582,16 +2983,37 @@ export default function SettingsPage() {
                 setDriveUrl(`https://drive.google.com/drive/folders/${data.google_folder_id}`);
             }
         }
-    };
+    }, [currentOrg]);
+
+    const fetchLogs = useCallback(async () => {
+        if (!currentOrg) return;
+        try {
+            const data = await getAuditLogs(currentOrg.id);
+            // 取得データをAuditLog[]型として扱う
+            setLogs((data as unknown as AuditLog[]) || []);
+        } catch (e) { console.error(e); }
+    }, [currentOrg]);
+
+    useEffect(() => {
+        if (!wsLoading && currentOrg) {
+            if (currentOrg.role === 'staff') {
+                router.push('/app');
+                return;
+            }
+            fetchOrgDetails();
+            fetchLogs();
+        }
+    }, [wsLoading, currentOrg, router, fetchOrgDetails, fetchLogs]);
 
     const handleSave = async () => {
         if (!orgName.trim() || !currentOrg) return;
         setSaving(true);
+        setMessage(null);
         try {
             const { error } = await supabase.from('organizations').update({ name: orgName }).eq('id', currentOrg.id);
             if (error) throw error;
             
-            // フォルダがある場合、GAS側の名前も更新を試みる
+            // GAS側のフォルダ名更新を試みる
             if (googleFolderId) {
                 const { data: { user } } = await supabase.auth.getUser();
                 await callGasApi({
@@ -2630,7 +3052,6 @@ export default function SettingsPage() {
 
             if (result.status === 'success') {
                 const newFolderId = result.folderId;
-                
                 await supabase
                     .from('organizations')
                     .update({ google_folder_id: newFolderId })
@@ -2654,80 +3075,249 @@ export default function SettingsPage() {
         }
     };
 
+    const handleDisconnectDrive = async () => {
+        if (!confirm('連携を解除しますか？\n（Googleドライブ上のフォルダは削除されません。アプリからの参照のみ解除されます。）')) return;
+        if (!currentOrg) return;
+        try {
+            await supabase.from('organizations').update({ google_folder_id: null }).eq('id', currentOrg.id);
+            setGoogleFolderId(null);
+            showToast('連携を解除しました');
+        } catch(e) { 
+            console.error(e);
+            showToast('解除に失敗しました', 'error'); 
+        }
+    };
+
+    const handleDeleteOrg = async () => {
+        if (!currentOrg || confirmInput !== currentOrg.name) return;
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if(!user) return;
+            await deleteOrganization(currentOrg.id, user.id);
+            showToast('事業所を削除しました');
+            window.location.href = '/setup';
+        } catch (e: unknown) { 
+            console.error(e); 
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast('削除失敗: ' + msg, 'error'); 
+        }
+    };
+
+    const handleLeaveOrg = async () => {
+        if (!currentOrg) return;
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if(!user) return;
+            await leaveOrganization(currentOrg.id, user.id);
+            showToast('事業所から脱退しました');
+            window.location.href = '/setup';
+        } catch (e: unknown) { 
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast(msg, 'error'); 
+        }
+    };
+
     if (wsLoading || !currentOrg) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
+    const isOwner = currentOrg.role === 'owner';
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-                <SettingsIcon sx={{ color: 'action.active', mr: 2 }} />
-                <Typography variant="h6" fontWeight="bold" color="text.primary">事業所設定</Typography>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 3, bgcolor: 'background.paper' }}>
+                <Stack direction="row" alignItems="center" height={64} spacing={2}>
+                    <SettingsIcon sx={{ color: 'action.active' }} />
+                    <Typography variant="h6" fontWeight="bold" color="text.primary">事業所設定</Typography>
+                </Stack>
+                <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
+                    <Tab label="基本設定" />
+                    {currentOrg.role !== 'staff' && <Tab label="操作ログ" icon={<ListAltIcon fontSize="small" />} iconPosition="start" />}
+                </Tabs>
             </Box>
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
                 <Box sx={{ maxWidth: 800, mx: 'auto' }}>
                     {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
-                    <Stack spacing={3}>
-                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
-                            <Typography variant="h6" fontWeight="bold" gutterBottom>基本情報</Typography>
-                            <Stack spacing={4}>
-                                <Box>
-                                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom>事業所名</Typography>
-                                    <TextField fullWidth value={orgName} onChange={(e) => setOrgName(e.target.value)} />
-                                </Box>
-                                <Divider />
-                                <Box textAlign="right">
-                                    <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving}>
-                                        {saving ? '保存中...' : '変更を保存'}
-                                    </Button>
-                                </Box>
-                            </Stack>
-                        </Paper>
+                    {tabIndex === 0 && (
+                        <Stack spacing={3}>
+                            {/* 基本情報 */}
+                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+                                <Typography variant="h6" fontWeight="bold" gutterBottom>基本情報</Typography>
+                                <Stack spacing={4}>
+                                    <Box>
+                                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>事業所名</Typography>
+                                        <TextField fullWidth value={orgName} onChange={(e) => setOrgName(e.target.value)} disabled={!isOwner} />
+                                    </Box>
+                                    <Divider />
+                                    {isOwner && (
+                                        <Box textAlign="right">
+                                            <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving}>
+                                                {saving ? '保存中...' : '変更を保存'}
+                                            </Button>
+                                        </Box>
+                                    )}
+                                </Stack>
+                            </Paper>
 
-                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? '#F0F5FF' : '#fff' }}>
-                            <Stack direction="row" alignItems="center" gap={2} mb={2}>
-                                <CloudQueueIcon color="primary" fontSize="large" />
-                                <Box>
-                                    <Typography variant="h6" fontWeight="bold">Googleドライブ連携</Typography>
-                                    <Typography variant="body2" color="text.secondary">帳票の保存先フォルダを管理します</Typography>
-                                </Box>
-                                {googleFolderId ? (
-                                    <Chip label="連携済み" color="success" size="small" icon={<LinkIcon />} sx={{ ml: 'auto' }} />
-                                ) : (
-                                    <Chip label="未連携" color="default" size="small" sx={{ ml: 'auto' }} />
-                                )}
-                            </Stack>
-                            
-                            <Box sx={{ mt: 2, p: 2, bgcolor: '#fff', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-                                {googleFolderId ? (
-                                    <Stack spacing={2}>
-                                        <Typography variant="body2">
-                                            連携中のフォルダID: <code>{googleFolderId}</code>
+                            {/* Google Drive連携 */}
+                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? '#F0F5FF' : '#fff' }}>
+                                <Stack direction="row" alignItems="center" gap={2} mb={2}>
+                                    <CloudQueueIcon color="primary" fontSize="large" />
+                                    <Box>
+                                        <Typography variant="h6" fontWeight="bold">Googleドライブ連携</Typography>
+                                        <Typography variant="body2" color="text.secondary">帳票の保存先フォルダを管理します</Typography>
+                                    </Box>
+                                    <Chip label={googleFolderId ? "連携済み" : "未連携"} color={googleFolderId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: 'auto' }} />
+                                </Stack>
+                                
+                                <Box sx={{ mt: 2, p: 2, bgcolor: '#fff', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                                    {isOwner ? (
+                                        googleFolderId ? (
+                                            <Stack spacing={2}>
+                                                <Typography variant="body2">
+                                                    連携中のフォルダID: <code>{googleFolderId}</code>
+                                                </Typography>
+                                                <Stack direction="row" spacing={2}>
+                                                    <Button variant="outlined" href={driveUrl} target="_blank" startIcon={<LinkIcon />}>
+                                                        フォルダを開く
+                                                    </Button>
+                                                    <Button color="error" startIcon={<LinkOffIcon />} onClick={handleDisconnectDrive}>
+                                                        連携を解除
+                                                    </Button>
+                                                    <Button color="warning" onClick={handleConnectDrive} disabled={connecting}>
+                                                        フォルダを再作成/修復
+                                                    </Button>
+                                                </Stack>
+                                            </Stack>
+                                        ) : (
+                                            <Stack spacing={2}>
+                                                <Alert severity="info">
+                                                    まだ連携フォルダがありません。ボタンを押すと、管理者のGoogleドライブ内にこの事業所用のフォルダが自動作成されます。
+                                                </Alert>
+                                                <Button variant="contained" onClick={handleConnectDrive} disabled={connecting}>
+                                                    {connecting ? '作成中...' : '連携フォルダを作成する'}
+                                                </Button>
+                                            </Stack>
+                                        )
+                                    ) : (
+                                        <Typography variant="caption" color="text.secondary">
+                                            管理者のみ設定を変更できます。
                                         </Typography>
-                                        <Stack direction="row" spacing={2}>
-                                            <Button variant="outlined" href={driveUrl} target="_blank" startIcon={<LinkIcon />}>
-                                                フォルダを開く
-                                            </Button>
-                                            <Button color="warning" onClick={handleConnectDrive} disabled={connecting}>
-                                                フォルダを再作成/修復
-                                            </Button>
-                                        </Stack>
-                                    </Stack>
-                                ) : (
-                                    <Stack spacing={2}>
-                                        <Alert severity="info">
-                                            まだ連携フォルダがありません。ボタンを押すと、管理者のGoogleドライブ内にこの事業所用のフォルダが自動作成されます。
-                                        </Alert>
-                                        <Button variant="contained" onClick={handleConnectDrive} disabled={connecting}>
-                                            {connecting ? '作成中...' : '連携フォルダを作成する'}
+                                    )}
+                                </Box>
+                            </Paper>
+
+                            {/* 危険な設定 */}
+                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.light', bgcolor: '#fff5f5' }}>
+                                <Stack direction="row" alignItems="center" gap={1} mb={2}>
+                                    <WarningIcon color="error" />
+                                    <Typography variant="h6" fontWeight="bold" color="error">危険な設定</Typography>
+                                </Stack>
+                                <Stack spacing={2}>
+                                    <Box display="flex" justifyContent="space-between" alignItems="center">
+                                        <Box>
+                                            <Typography fontWeight="bold">事業所から脱退</Typography>
+                                            <Typography variant="caption" color="text.secondary">この事業所のメンバーから外れます</Typography>
+                                        </Box>
+                                        <Button variant="outlined" color="warning" startIcon={<ExitToAppIcon />} onClick={() => setOpenLeaveDialog(true)}>
+                                            脱退する
                                         </Button>
-                                    </Stack>
-                                )}
-                            </Box>
+                                    </Box>
+                                    {isOwner && (
+                                        <>
+                                            <Divider />
+                                            <Box display="flex" justifyContent="space-between" alignItems="center">
+                                                <Box>
+                                                    <Typography fontWeight="bold" color="error">事業所を削除</Typography>
+                                                    <Typography variant="caption" color="text.secondary">
+                                                        全てのデータ（利用者、記録、スタッフ情報）が永久に削除されます。<br/>
+                                                        この操作は取り消せません。
+                                                    </Typography>
+                                                </Box>
+                                                <Button variant="contained" color="error" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
+                                                    削除する
+                                                </Button>
+                                            </Box>
+                                        </>
+                                    )}
+                                </Stack>
+                            </Paper>
+                        </Stack>
+                    )}
+
+                    {tabIndex === 1 && (
+                        <Paper variant="outlined">
+                            <Table>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell>日時</TableCell>
+                                        <TableCell>操作者</TableCell>
+                                        <TableCell>操作内容</TableCell>
+                                        <TableCell>対象</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {logs.length === 0 ? (
+                                        <TableRow><TableCell colSpan={4} align="center">ログはありません</TableCell></TableRow>
+                                    ) : (
+                                        logs.map((log) => (
+                                            <TableRow key={log.id}>
+                                                <TableCell>{new Date(log.created_at).toLocaleString()}</TableCell>
+                                                <TableCell>{log.profiles?.name || '不明'}</TableCell>
+                                                <TableCell>{log.action_type}</TableCell>
+                                                <TableCell>{log.target_resource || '-'}</TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
                         </Paper>
-                    </Stack>
+                    )}
                 </Box>
             </Box>
+
+            {/* 削除確認ダイアログ */}
+            <Dialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)}>
+                <DialogTitle>事業所の完全削除</DialogTitle>
+                <DialogContent>
+                    <DialogContentText color="error" sx={{ mb: 2 }}>
+                        本当に削除しますか？この操作は取り消せません。<br/>
+                        確認のため、事業所名 <b>{currentOrg.name}</b> を入力してください。
+                    </DialogContentText>
+                    <TextField 
+                        fullWidth 
+                        size="small" 
+                        value={confirmInput} 
+                        onChange={e => setConfirmInput(e.target.value)} 
+                        placeholder={currentOrg.name} 
+                    />
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setOpenDeleteDialog(false)}>キャンセル</Button>
+                    <Button 
+                        onClick={handleDeleteOrg} 
+                        color="error" 
+                        variant="contained" 
+                        disabled={confirmInput !== currentOrg.name}
+                    >
+                        削除実行
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* 脱退確認ダイアログ */}
+            <Dialog open={openLeaveDialog} onClose={() => setOpenLeaveDialog(false)}>
+                <DialogTitle>脱退の確認</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        本当にこの事業所から脱退しますか？<br/>
+                        オーナー権限を持っている場合は、事前に他のメンバーへ権限を譲渡する必要があります。
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setOpenLeaveDialog(false)}>キャンセル</Button>
+                    <Button onClick={handleLeaveOrg} color="warning" variant="contained">脱退する</Button>
+                </DialogActions>
+            </Dialog>
         </Box>
     );
 }
@@ -2741,7 +3331,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { 
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
   Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Stack, 
-  IconButton, Select, MenuItem, FormControl, InputLabel, Tooltip
+  IconButton, Select, MenuItem, FormControl, InputLabel, Tooltip, Menu, Alert,
+  ListItemIcon // ★追加
 } from '@mui/material';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -2750,9 +3341,13 @@ import BadgeIcon from '@mui/icons-material/Badge';
 import EditIcon from '@mui/icons-material/Edit';
 import ShareIcon from '@mui/icons-material/Share';
 import BadgeIconOutline from '@mui/icons-material/Badge';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import KeyIcon from '@mui/icons-material/Key';
+
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
+import { transferOwner } from '@/app/actions/organization';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -2763,12 +3358,14 @@ type ProfileRow = { id: string; name: string; };
 type InvitationRow = { id: string; target_name: string | null; role: string; code: string; };
 
 export default function StaffPage() {
-  const { currentOrg, loading: wsLoading } = useWorkspace();
+  const { currentOrg, loading: wsLoading } = useWorkspace(); // refreshWorkspace削除
   const { showToast } = useToast();
+  
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
   const [ghostStaffList, setGhostStaffList] = useState<GhostStaff[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>('');
   
+  // Modal States
   const [openInvite, setOpenInvite] = useState(false);
   const [generatedLink, setGeneratedLink] = useState('');
   const [newInviteName, setNewInviteName] = useState('');
@@ -2778,6 +3375,11 @@ export default function StaffPage() {
   const [ghostMode, setGhostMode] = useState<'add' | 'edit'>('add');
   const [ghostId, setGhostId] = useState('');
   const [ghostName, setGhostName] = useState('');
+
+  // Transfer Owner States
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+  const [selectedStaff, setSelectedStaff] = useState<StaffProfile | null>(null);
+  const [openTransferConfirm, setOpenTransferConfirm] = useState(false);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -2812,6 +3414,15 @@ export default function StaffPage() {
       membersList.forEach((m) => {
         mergedList.push({ id: m.user_id, name: profilesMap[m.user_id] || '名前未設定', role: m.role, status: 'active' });
       });
+      
+      // Sort: Owner first, then joined, then invited
+      mergedList.sort((a, b) => {
+          if (a.role === 'owner') return -1;
+          if (b.role === 'owner') return 1;
+          if (a.status === 'active' && b.status !== 'active') return -1;
+          return 0;
+      });
+
       setStaffList(mergedList);
 
       const { data: ghosts, error: ghostError } = await supabase
@@ -2845,7 +3456,7 @@ export default function StaffPage() {
 
   const handleDelete = async (staff: StaffProfile) => {
     if (!currentOrg) return;
-    const message = staff.status === 'active' ? `本当に「${staff.name}」さんをメンバーから削除しますか？` : `「${staff.name}」さんへの招待を取り消しますか？`;
+    const message = staff.status === 'active' ? `本当に「${staff.name}」さんをメンバーから削除（脱退）させますか？` : `「${staff.name}」さんへの招待を取り消しますか？`;
     if (!confirm(message)) return;
     try {
         if (staff.status === 'active') {
@@ -2887,7 +3498,34 @@ export default function StaffPage() {
       } else { navigator.clipboard.writeText(generatedLink); showToast('リンクをコピーしました'); }
   };
 
+  // Transfer Owner Logic
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>, staff: StaffProfile) => {
+      setMenuAnchor(event.currentTarget);
+      setSelectedStaff(staff);
+  };
+  const handleMenuClose = () => { setMenuAnchor(null); setSelectedStaff(null); };
+  
+  const handleTransferOwnerClick = () => {
+      setMenuAnchor(null);
+      setOpenTransferConfirm(true);
+  };
+
+  const executeTransferOwner = async () => {
+      if (!currentOrg || !selectedStaff) return;
+      try {
+          await transferOwner(currentOrg.id, currentUserId, selectedStaff.id);
+          showToast(`オーナー権限を ${selectedStaff.name} さんに譲渡しました`);
+          setOpenTransferConfirm(false);
+          // 権限が変わるためリロード推奨
+          setTimeout(() => window.location.reload(), 1000);
+      } catch(e: unknown) { // ★修正: any -> unknown
+          const msg = e instanceof Error ? e.message : String(e);
+          showToast(`譲渡に失敗しました: ${msg}`, 'error');
+      }
+  };
+
   if (wsLoading || !currentOrg) return null;
+  const isOwner = currentOrg.role === 'owner';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -2898,6 +3536,7 @@ export default function StaffPage() {
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
         <Stack direction={{ xs: 'column', lg: 'row' }} spacing={4}>
+            {/* メンバー一覧 */}
             <Box sx={{ width: { xs: '100%', lg: '60%' }, flex: { lg: 7 } }}>
                 <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8f9fa' }}>
                     <Box>
@@ -2913,42 +3552,59 @@ export default function StaffPage() {
                             <TableCell>氏名</TableCell>
                             <TableCell width="140">権限</TableCell>
                             <TableCell width="100">ステータス</TableCell>
-                            <TableCell align="center" width="120">操作</TableCell>
+                            <TableCell align="center" width="100">操作</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
                         {staffList.map((staff) => (
                         <TableRow key={staff.id} sx={{ height: 60 }}>
-                            <TableCell>{staff.name}</TableCell>
                             <TableCell>
-                            {staff.id === currentUserId ? <Chip label={staff.role} size="small" /> : (
-                                currentOrg.role === 'owner' && staff.status === 'active' ? (
-                                    <FormControl size="small" fullWidth>
-                                        <Select value={staff.role} onChange={(e) => handleChangeRole(staff.id, e.target.value)} sx={{ fontSize: '0.875rem', py: 0, height: 32 }}>
+                                <Typography variant="body2" fontWeight={staff.id === currentUserId ? 'bold' : 'normal'}>
+                                    {staff.name} {staff.id === currentUserId && '(あなた)'}
+                                </Typography>
+                            </TableCell>
+                            <TableCell>
+                            {staff.status === 'invited' ? (
+                                <Chip label={staff.role} size="small" variant="outlined" />
+                            ) : (
+                                isOwner && staff.id !== currentUserId ? (
+                                    <FormControl size="small" fullWidth variant="standard">
+                                        <Select 
+                                            value={staff.role} 
+                                            onChange={(e) => handleChangeRole(staff.id, e.target.value)} 
+                                            disableUnderline
+                                            sx={{ fontSize: '0.8125rem' }}
+                                        >
                                             <MenuItem value="staff">ヘルパー</MenuItem>
                                             <MenuItem value="manager">管理者</MenuItem>
-                                            <MenuItem value="owner">共同代表</MenuItem>
+                                            <MenuItem value="owner" disabled>オーナー</MenuItem>
                                         </Select>
                                     </FormControl>
-                                ) : <Chip label={staff.role} size="small" />
+                                ) : (
+                                    <Chip 
+                                        label={staff.role === 'owner' ? 'オーナー' : (staff.role === 'manager' ? '管理者' : 'ヘルパー')} 
+                                        size="small" 
+                                        color={staff.role === 'owner' ? 'primary' : 'default'} 
+                                    />
+                                )
                             )}
                             </TableCell>
                             <TableCell><Chip label={staff.status === 'active' ? '有効' : '招待中'} color={staff.status === 'active' ? 'success' : 'warning'} size="small" /></TableCell>
                             <TableCell align="center">
-                                <Stack direction="row" justifyContent="center" spacing={1}>
-                                    {staff.status === 'invited' && staff.invitation_code && (
-                                    <Tooltip title="招待リンクをコピー">
-                                        <IconButton size="small" onClick={() => { navigator.clipboard.writeText(`${BASE_URL}/join?code=${staff.invitation_code}`); showToast('コピーしました'); }}>
-                                            <ContentCopyIcon fontSize="small" />
+                                {staff.status === 'invited' && (
+                                    <Tooltip title="招待取消 / 削除">
+                                        <IconButton size="small" color="error" onClick={() => handleDelete(staff)}>
+                                            <DeleteIcon fontSize="small" />
                                         </IconButton>
                                     </Tooltip>
-                                    )}
-                                    {currentOrg.role === 'owner' && staff.id !== currentUserId && (
-                                        <Tooltip title="削除 / 招待取消">
-                                            <IconButton size="small" color="error" onClick={() => handleDelete(staff)}><DeleteIcon fontSize="small" /></IconButton>
-                                        </Tooltip>
-                                    )}
-                                </Stack>
+                                )}
+                                {staff.status === 'active' && staff.id !== currentUserId && isOwner && (
+                                    <>
+                                        <IconButton size="small" onClick={(e) => handleMenuOpen(e, staff)}>
+                                            <MoreVertIcon fontSize="small" />
+                                        </IconButton>
+                                    </>
+                                )}
                             </TableCell>
                         </TableRow>
                         ))}
@@ -2957,6 +3613,7 @@ export default function StaffPage() {
                 </TableContainer>
             </Box>
 
+            {/* ゴーストスタッフ */}
             <Box sx={{ width: { xs: '100%', lg: '40%' }, flex: { lg: 5 } }}>
                 <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#fff3e0', borderColor: '#ffe0b2' }}>
                     <Box>
@@ -2989,6 +3646,7 @@ export default function StaffPage() {
         </Stack>
       </Box>
 
+      {/* 招待ダイアログ */}
       <Dialog open={openInvite} onClose={() => setOpenInvite(false)} maxWidth="xs" fullWidth>
         <DialogTitle>スタッフ招待</DialogTitle>
         <DialogContent dividers>
@@ -3018,6 +3676,7 @@ export default function StaffPage() {
         <DialogActions><Button onClick={() => setOpenInvite(false)}>閉じる</Button></DialogActions>
       </Dialog>
 
+      {/* ゴースト追加・編集ダイアログ */}
       <Dialog open={openGhost} onClose={() => setOpenGhost(false)}>
           <DialogTitle>{ghostMode === 'add' ? 'スタッフ追加' : '名前の変更'}</DialogTitle>
           <DialogContent>
@@ -3027,6 +3686,36 @@ export default function StaffPage() {
               </Box>
           </DialogContent>
           <DialogActions><Button onClick={() => setOpenGhost(false)}>キャンセル</Button><Button onClick={handleSaveGhost} variant="contained" disabled={!ghostName.trim()}>保存</Button></DialogActions>
+      </Dialog>
+
+      {/* 操作メニュー (オーナー用) */}
+      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={handleMenuClose}>
+          <MenuItem onClick={handleTransferOwnerClick} sx={{ color: 'warning.main' }}>
+              <ListItemIcon><KeyIcon fontSize="small" color="warning" /></ListItemIcon>
+              オーナー権限を譲渡
+          </MenuItem>
+          <MenuItem onClick={() => { if(selectedStaff) handleDelete(selectedStaff); handleMenuClose(); }} sx={{ color: 'error.main' }}>
+              <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
+              メンバーから削除
+          </MenuItem>
+      </Menu>
+
+      {/* オーナー権限譲渡確認ダイアログ */}
+      <Dialog open={openTransferConfirm} onClose={() => setOpenTransferConfirm(false)}>
+          <DialogTitle>オーナー権限の譲渡</DialogTitle>
+          <DialogContent>
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                  この操作は取り消せません！
+              </Alert>
+              <Typography variant="body1">
+                  本当に <b>{selectedStaff?.name}</b> さんにオーナー権限を譲渡しますか？<br/>
+                  譲渡後、あなたは「管理者」権限に降格し、事業所の削除や決済などの全権限を失います。
+              </Typography>
+          </DialogContent>
+          <DialogActions>
+              <Button onClick={() => setOpenTransferConfirm(false)}>キャンセル</Button>
+              <Button onClick={executeTransferOwner} variant="contained" color="warning">権限を譲渡する</Button>
+          </DialogActions>
       </Dialog>
     </Box>
   );
@@ -4335,9 +5024,9 @@ export const TermsAgreementModal = () => {
 import { useState, useEffect } from 'react';
 import {
   Box, Avatar, Tooltip, IconButton, Divider, List, ListItem, ListItemButton,
-  ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse
+  ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge, Popover, CircularProgress
 } from '@mui/material';
-import { useTheme, alpha } from '@mui/material/styles';
+import { useTheme } from '@mui/material/styles';
 import MenuIcon from '@mui/icons-material/Menu';
 import AddIcon from '@mui/icons-material/Add';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -4352,6 +5041,9 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import LogoutIcon from '@mui/icons-material/Logout';
 import BusinessIcon from '@mui/icons-material/Business';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -4360,9 +5052,85 @@ import { supabase } from '@/lib/supabase';
 const RAIL_WIDTH = 72;
 const SIDEBAR_WIDTH = 240;
 
+// 型定義
+type Notification = {
+    id: string;
+    content: string;
+    is_read: boolean;
+    created_at: string;
+    type: string;
+    link_url?: string;
+};
+
+// Notifications Component
+const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | null, onClose: () => void }) => {
+    const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [loading, setLoading] = useState(true);
+    const router = useRouter();
+
+    useEffect(() => {
+        const fetchNotifications = async () => {
+            setLoading(true);
+            const { data } = await supabase.from('notifications')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(20);
+            setNotifications((data as Notification[]) || []);
+            setLoading(false);
+        };
+
+        if (anchorEl) fetchNotifications();
+    }, [anchorEl]);
+
+    const handleRead = async (n: Notification) => {
+        if (!n.is_read) {
+            await supabase.from('notifications').update({ is_read: true }).eq('id', n.id);
+        }
+        if (n.link_url) {
+            router.push(n.link_url);
+            onClose();
+        }
+    };
+
+    const open = Boolean(anchorEl);
+
+    return (
+        <Popover
+            open={open}
+            anchorEl={anchorEl}
+            onClose={onClose}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            PaperProps={{ sx: { width: 320, maxHeight: 400 } }}
+        >
+            <Box p={2} borderBottom="1px solid #eee">
+                <Typography fontWeight="bold">通知</Typography>
+            </Box>
+            {loading ? <Box p={2} textAlign="center"><CircularProgress size={20} /></Box> : (
+                <List sx={{ p: 0 }}>
+                    {notifications.length === 0 && <Box p={2} textAlign="center" color="text.secondary">通知はありません</Box>}
+                    {notifications.map(n => (
+                        <ListItemButton key={n.id} onClick={() => handleRead(n)} sx={{ bgcolor: n.is_read ? 'white' : '#f0f7ff', borderBottom: '1px solid #f5f5f5' }}>
+                            <ListItemIcon sx={{ minWidth: 32 }}>
+                                {n.type === 'approve' ? <CheckCircleIcon color="success" fontSize="small" /> : <ErrorOutlineIcon color="error" fontSize="small" />}
+                            </ListItemIcon>
+                            <ListItemText 
+                                primary={n.content} 
+                                secondary={new Date(n.created_at).toLocaleString()} 
+                                primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: n.is_read ? 'normal' : 'bold' }}
+                                secondaryTypographyProps={{ fontSize: '0.75rem' }}
+                            />
+                        </ListItemButton>
+                    ))}
+                </List>
+            )}
+        </Popover>
+    );
+};
+
 // 1. 左端レール (事業所切り替え)
 const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], currentOrg: Workspace | null, switchOrg: (id: string) => void }) => {
-  const router = useRouter(); // ★追加: ルーターを使用
+  const router = useRouter();
 
   return (
     <Box sx={{
@@ -4423,7 +5191,7 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
             transition: 'all 0.2s',
             '&:hover': { bgcolor: '#23A559', color: '#fff' }
           }}
-          onClick={() => router.push('/setup')} // ★修正: セットアップ画面へ遷移
+          onClick={() => router.push('/setup')}
         >
           <AddIcon />
         </IconButton>
@@ -4432,12 +5200,6 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
   );
 };
 
-// ... (以下、ChannelSidebar, UserPanel, AppLayout は変更なし。以前のコードを維持)
-// 省略せずに記述する場合は、前回のAppLayout.tsxの残りの部分（ChannelSidebar以降）をここに続けてください。
-// ここでは変更点のある ServerRail 部分のみ抜粋して解説していますが、
-// 実際にはファイル全体を書き換える形になります。
-
-// --- 以下、既存コードのまま ---
 const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onClose?: () => void }) => {
   const router = useRouter();
   const pathname = usePathname();
@@ -4591,13 +5353,35 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
 const UserPanel = ({ onClose }: { onClose?: () => void }) => {
   const router = useRouter();
   const [userName, setUserName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+  
+  // Notification State
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifAnchor, setNotifAnchor] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
     const fetchUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data: profile } = await supabase.from('profiles').select('name').eq('id', user.id).single();
-        if (profile) setUserName(profile.name);
+        // Profile
+        const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).single();
+        if (profile) {
+            setUserName(profile.name);
+            setAvatarUrl(profile.avatar_url);
+        }
+        
+        // Notifications Check
+        const { count } = await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_read', false);
+        setUnreadCount(count || 0);
+
+        // Realtime Subscription
+        const channel = supabase.channel('notifications')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
+                setUnreadCount(prev => prev + 1);
+            })
+            .subscribe();
+            
+        return () => { supabase.removeChannel(channel); };
       }
     };
     fetchUser();
@@ -4616,7 +5400,10 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
       flexShrink: 0,
       width: '100%'
     }}>
-      <Avatar sx={{ width: 32, height: 32, bgcolor: '#2255CC', fontSize: '0.8rem', mr: 1.5 }}>
+      <Avatar 
+        src={avatarUrl}
+        sx={{ width: 32, height: 32, bgcolor: '#2255CC', fontSize: '0.8rem', mr: 1.5 }}
+      >
         {userName ? userName.slice(0, 1) : 'U'}
       </Avatar>
       
@@ -4628,6 +5415,15 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
           オンライン
         </Typography>
       </Box>
+
+      <Tooltip title="通知">
+        <IconButton size="small" onClick={(e) => setNotifAnchor(e.currentTarget)}>
+          <Badge badgeContent={unreadCount} color="error" variant="dot">
+            <NotificationsIcon fontSize="small" />
+          </Badge>
+        </IconButton>
+      </Tooltip>
+      <NotificationsPopover anchorEl={notifAnchor} onClose={() => setNotifAnchor(null)} />
 
       <Tooltip title="設定">
         <IconButton size="small" onClick={() => handleNav('/app/profile')}>
@@ -5479,20 +6275,18 @@ export async function updateSession(request: NextRequest) {
                 getAll() {
                     return request.cookies.getAll();
                 },
+                // optionsを使用しない場合は _options とするか、削除
                 setAll(cookiesToSet) {
-                    // リクエスト側のCookieを更新
-                    cookiesToSet.forEach(({ name, value, options }) =>
+                    cookiesToSet.forEach(({ name, value }) => // options削除
                         request.cookies.set(name, value),
                     );
                     
-                    // レスポンスを再作成して最新の状態にする（これが重要）
                     response = NextResponse.next({
                         request: {
                             headers: request.headers,
                         },
                     });
                     
-                    // ★修正点: 手動でのオプション上書きをやめ、Supabaseのoptionsをそのまま使う
                     cookiesToSet.forEach(({ name, value, options }) =>
                         response.cookies.set(name, value, options),
                     );
@@ -5501,7 +6295,6 @@ export async function updateSession(request: NextRequest) {
         }
     );
 
-    // セッションをリフレッシュ
     await supabase.auth.getUser();
 
     return response;

@@ -16,20 +16,18 @@ export async function updateSession(request: NextRequest) {
                 getAll() {
                     return request.cookies.getAll();
                 },
+                // optionsを使用しない場合は _options とするか、削除
                 setAll(cookiesToSet) {
-                    // リクエスト側のCookieを更新
-                    cookiesToSet.forEach(({ name, value, options }) =>
+                    cookiesToSet.forEach(({ name, value }) => // options削除
                         request.cookies.set(name, value),
                     );
                     
-                    // レスポンスを再作成して最新の状態にする（これが重要）
                     response = NextResponse.next({
                         request: {
                             headers: request.headers,
                         },
                     });
                     
-                    // ★修正点: 手動でのオプション上書きをやめ、Supabaseのoptionsをそのまま使う
                     cookiesToSet.forEach(({ name, value, options }) =>
                         response.cookies.set(name, value, options),
                     );
@@ -38,7 +36,6 @@ export async function updateSession(request: NextRequest) {
         }
     );
 
-    // セッションをリフレッシュ
     await supabase.auth.getUser();
 
     return response;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Box, Button, Container, Typography, TextField, Checkbox, FormControlLabel, Radio, RadioGroup,
   Paper, Stack, IconButton, CircularProgress,
@@ -15,6 +15,9 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
 import PersonIcon from '@mui/icons-material/Person';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import DeleteIcon from '@mui/icons-material/Delete';
+import PhotoCamera from '@mui/icons-material/PhotoCamera';
+
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
@@ -94,6 +97,7 @@ export default function RecordPage() {
   
   const [currentStatus, setCurrentStatus] = useState<ReportStatus | null>(null);
   const [isDirty, setIsDirty] = useState(false);
+  const [images, setImages] = useState<{id: string, url: string}[]>([]);
   
   const [openCloseDialog, setOpenCloseDialog] = useState(false);
   const [openApproveDialog, setOpenApproveDialog] = useState(false); 
@@ -109,37 +113,7 @@ export default function RecordPage() {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   };
 
-  useEffect(() => {
-    const init = async () => {
-      if (!reportId) {
-        const now = new Date();
-        setStartDateTime(formatDatetimeLocal(now));
-        setEndDateTime(formatDatetimeLocal(new Date(now.getTime() + 3600000)));
-        setCurrentStatus('draft');
-      }
-      await fetchBaseData();
-      if (reportId) await loadExistingData();
-      setLoading(false);
-    };
-
-    if (!wsLoading && currentOrg) {
-      init();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsLoading, currentOrg, reportId]);
-
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-        if (isDirty) {
-            e.preventDefault();
-            e.returnValue = '';
-        }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isDirty]);
-
-  const fetchBaseData = async () => {
+  const fetchBaseData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!currentOrg) return;
 
@@ -175,9 +149,10 @@ export default function RecordPage() {
         if (me) setSelectedHelpers([me.name]);
       }
     } catch (error) { console.error('Error fetching base data:', error); }
-  };
+  }, [clientId, currentOrg, reportId]);
 
-  const loadExistingData = async () => {
+  const loadExistingData = useCallback(async () => {
+    if (!reportId) return;
     try {
       const { data: r } = await supabase.from('reports').select('*').eq('id', reportId).single();
       const { data: v } = await supabase.from('report_values').select('data').eq('report_id', reportId).single();
@@ -191,15 +166,87 @@ export default function RecordPage() {
         setSelectedHelpers(data._helpers || []);
         setAnswers(data);
         setIsDirty(false);
+
+        const { data: imgData } = await supabase.from('report_images').select('*').eq('report_id', reportId);
+        if (imgData) {
+            setImages(imgData.map(i => ({ 
+                id: i.id, 
+                url: supabase.storage.from('report-images').getPublicUrl(i.storage_path).data.publicUrl 
+            })));
+        }
       }
     } catch (e) { console.error(e); }
-  };
+  }, [reportId]);
+
+  useEffect(() => {
+    const init = async () => {
+      if (!reportId) {
+        const now = new Date();
+        setStartDateTime(formatDatetimeLocal(now));
+        setEndDateTime(formatDatetimeLocal(new Date(now.getTime() + 3600000)));
+        setCurrentStatus('draft');
+      }
+      await fetchBaseData();
+      await loadExistingData();
+      setLoading(false);
+    };
+
+    if (!wsLoading && currentOrg) {
+      init();
+    }
+  }, [wsLoading, currentOrg, reportId, fetchBaseData, loadExistingData]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        if (isDirty) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
 
   const handleChange = (setter: (val: string) => void, val: string) => { setter(val); setIsDirty(true); };
   const handleAnswerChange = (id: string, value: string | number | boolean | string[]) => {
     setAnswers(prev => ({ ...prev, [id]: value }));
     setIsDirty(true);
     if (errors[id]) { const ne = { ...errors }; delete ne[id]; setErrors(ne); }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!reportId || !e.target.files || e.target.files.length === 0) return;
+    setSubmitting(true);
+    try {
+        const file = e.target.files[0];
+        const path = `${reportId}/${Date.now()}_${file.name}`;
+        const { error } = await supabase.storage.from('report-images').upload(path, file);
+        if (error) throw error;
+        
+        await supabase.from('report_images').insert({ report_id: reportId, storage_path: path });
+        
+        // リロードして反映
+        await loadExistingData();
+        showToast('画像をアップロードしました');
+    } catch(e) {
+        console.error(e);
+        showToast('アップロード失敗', 'error');
+    } finally {
+        setSubmitting(false);
+    }
+  };
+
+  const handleDeleteReport = async () => {
+      if(!confirm('本当に削除しますか？')) return;
+      if (currentStatus === 'approved') { showToast('承認済みの記録は削除できません', 'error'); return; }
+      try {
+        await supabase.from('reports').delete().eq('id', reportId);
+        showToast('削除しました');
+        router.back();
+      } catch(e) {
+          console.error(e);
+          showToast('削除に失敗しました', 'error');
+      }
   };
 
   const validate = () => {
@@ -229,7 +276,7 @@ export default function RecordPage() {
         updated_at: new Date().toISOString()
       };
 
-      // 新規作成時のみ helper_id を付与
+      let currentReportId = reportId;
       let payload;
       if (!reportId) {
           payload = { ...basePayload, helper_id: user?.id };
@@ -242,15 +289,25 @@ export default function RecordPage() {
         await supabase.from('report_values').update({ data: finalData }).eq('report_id', reportId);
       } else {
         const { data: nr } = await supabase.from('reports').insert(payload).select().single();
-        if (nr) await supabase.from('report_values').insert({ report_id: nr.id, data: finalData });
+        if (nr) {
+            await supabase.from('report_values').insert({ report_id: nr.id, data: finalData });
+            currentReportId = nr.id;
+        }
       }
       setIsDirty(false);
+      
+      // IDがなかった場合はURLを更新して、画像アップロードなどを可能にする
+      if (!reportId && currentReportId) {
+          const newUrl = `/app/record/${clientId}?reportId=${currentReportId}`;
+          router.replace(newUrl);
+      }
+
       return true;
     } catch (e) { console.error(e); showToast('エラーが発生しました', 'error'); return false; } 
     finally { setSubmitting(false); }
   };
 
-  const handleDraftSave = async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); router.push('/app/record'); } };
+  const handleDraftSave = async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); } };
   const handleSubmit = () => setOpenSubmitDialog(true);
   const executeSubmit = async () => { setOpenSubmitDialog(false); if (await saveReport('pending')) { showToast('記録を送信しました', 'success'); router.push('/app/record'); } };
   const handleApprove = () => setOpenApproveDialog(true);
@@ -301,6 +358,10 @@ export default function RecordPage() {
             </Typography>
             
             <Stack direction="row" spacing={1}>
+                {reportId && currentStatus !== 'approved' && (
+                    <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
+                )}
+                
                 {isAdmin && currentStatus === 'pending' && <Button variant="contained" color="success" size="small" startIcon={<CheckCircleIcon />} onClick={handleApprove} disabled={submitting}>承認</Button>}
                 {isAdmin && currentStatus === 'approved' && <Button variant="contained" color="warning" size="small" startIcon={<AssignmentReturnIcon />} onClick={handleRemand} disabled={submitting}>承認取消</Button>}
                 {(!isAdmin || currentStatus !== 'pending') && currentStatus !== 'approved' && (
@@ -420,6 +481,22 @@ export default function RecordPage() {
                 </Stack>
                 </Paper>
             ))}
+
+            <Paper variant="outlined" sx={{ p: 3, mt: 3, borderRadius: 3 }}>
+                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>画像添付</Typography>
+                <Stack direction="row" gap={2} flexWrap="wrap">
+                    {images.map(img => (
+                        <Box key={img.id} component="img" src={img.url} sx={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 1 }} />
+                    ))}
+                    <IconButton color="primary" component="label" sx={{ width: 100, height: 100, border: '1px dashed #ccc', borderRadius: 1, flexDirection: 'column' }}>
+                        <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!reportId} />
+                        <PhotoCamera />
+                        {!reportId && <Typography variant="caption" sx={{ fontSize: 9 }}>未保存</Typography>}
+                    </IconButton>
+                </Stack>
+                {!reportId && <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>※一度下書き保存すると画像を添付できます</Typography>}
+            </Paper>
+
             </Stack>
         </Container>
       </Box>

@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import {
   Box, Avatar, Tooltip, IconButton, Divider, List, ListItem, ListItemButton,
-  ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse
+  ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge, Popover, CircularProgress
 } from '@mui/material';
-import { useTheme, alpha } from '@mui/material/styles';
+import { useTheme } from '@mui/material/styles';
 import MenuIcon from '@mui/icons-material/Menu';
 import AddIcon from '@mui/icons-material/Add';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -20,6 +20,9 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import LogoutIcon from '@mui/icons-material/Logout';
 import BusinessIcon from '@mui/icons-material/Business';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -28,9 +31,85 @@ import { supabase } from '@/lib/supabase';
 const RAIL_WIDTH = 72;
 const SIDEBAR_WIDTH = 240;
 
+// 型定義
+type Notification = {
+    id: string;
+    content: string;
+    is_read: boolean;
+    created_at: string;
+    type: string;
+    link_url?: string;
+};
+
+// Notifications Component
+const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | null, onClose: () => void }) => {
+    const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [loading, setLoading] = useState(true);
+    const router = useRouter();
+
+    useEffect(() => {
+        const fetchNotifications = async () => {
+            setLoading(true);
+            const { data } = await supabase.from('notifications')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(20);
+            setNotifications((data as Notification[]) || []);
+            setLoading(false);
+        };
+
+        if (anchorEl) fetchNotifications();
+    }, [anchorEl]);
+
+    const handleRead = async (n: Notification) => {
+        if (!n.is_read) {
+            await supabase.from('notifications').update({ is_read: true }).eq('id', n.id);
+        }
+        if (n.link_url) {
+            router.push(n.link_url);
+            onClose();
+        }
+    };
+
+    const open = Boolean(anchorEl);
+
+    return (
+        <Popover
+            open={open}
+            anchorEl={anchorEl}
+            onClose={onClose}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            PaperProps={{ sx: { width: 320, maxHeight: 400 } }}
+        >
+            <Box p={2} borderBottom="1px solid #eee">
+                <Typography fontWeight="bold">通知</Typography>
+            </Box>
+            {loading ? <Box p={2} textAlign="center"><CircularProgress size={20} /></Box> : (
+                <List sx={{ p: 0 }}>
+                    {notifications.length === 0 && <Box p={2} textAlign="center" color="text.secondary">通知はありません</Box>}
+                    {notifications.map(n => (
+                        <ListItemButton key={n.id} onClick={() => handleRead(n)} sx={{ bgcolor: n.is_read ? 'white' : '#f0f7ff', borderBottom: '1px solid #f5f5f5' }}>
+                            <ListItemIcon sx={{ minWidth: 32 }}>
+                                {n.type === 'approve' ? <CheckCircleIcon color="success" fontSize="small" /> : <ErrorOutlineIcon color="error" fontSize="small" />}
+                            </ListItemIcon>
+                            <ListItemText 
+                                primary={n.content} 
+                                secondary={new Date(n.created_at).toLocaleString()} 
+                                primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: n.is_read ? 'normal' : 'bold' }}
+                                secondaryTypographyProps={{ fontSize: '0.75rem' }}
+                            />
+                        </ListItemButton>
+                    ))}
+                </List>
+            )}
+        </Popover>
+    );
+};
+
 // 1. 左端レール (事業所切り替え)
 const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], currentOrg: Workspace | null, switchOrg: (id: string) => void }) => {
-  const router = useRouter(); // ★追加: ルーターを使用
+  const router = useRouter();
 
   return (
     <Box sx={{
@@ -91,7 +170,7 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
             transition: 'all 0.2s',
             '&:hover': { bgcolor: '#23A559', color: '#fff' }
           }}
-          onClick={() => router.push('/setup')} // ★修正: セットアップ画面へ遷移
+          onClick={() => router.push('/setup')}
         >
           <AddIcon />
         </IconButton>
@@ -100,12 +179,6 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
   );
 };
 
-// ... (以下、ChannelSidebar, UserPanel, AppLayout は変更なし。以前のコードを維持)
-// 省略せずに記述する場合は、前回のAppLayout.tsxの残りの部分（ChannelSidebar以降）をここに続けてください。
-// ここでは変更点のある ServerRail 部分のみ抜粋して解説していますが、
-// 実際にはファイル全体を書き換える形になります。
-
-// --- 以下、既存コードのまま ---
 const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onClose?: () => void }) => {
   const router = useRouter();
   const pathname = usePathname();
@@ -259,13 +332,35 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
 const UserPanel = ({ onClose }: { onClose?: () => void }) => {
   const router = useRouter();
   const [userName, setUserName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+  
+  // Notification State
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifAnchor, setNotifAnchor] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
     const fetchUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data: profile } = await supabase.from('profiles').select('name').eq('id', user.id).single();
-        if (profile) setUserName(profile.name);
+        // Profile
+        const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).single();
+        if (profile) {
+            setUserName(profile.name);
+            setAvatarUrl(profile.avatar_url);
+        }
+        
+        // Notifications Check
+        const { count } = await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_read', false);
+        setUnreadCount(count || 0);
+
+        // Realtime Subscription
+        const channel = supabase.channel('notifications')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
+                setUnreadCount(prev => prev + 1);
+            })
+            .subscribe();
+            
+        return () => { supabase.removeChannel(channel); };
       }
     };
     fetchUser();
@@ -284,7 +379,10 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
       flexShrink: 0,
       width: '100%'
     }}>
-      <Avatar sx={{ width: 32, height: 32, bgcolor: '#2255CC', fontSize: '0.8rem', mr: 1.5 }}>
+      <Avatar 
+        src={avatarUrl}
+        sx={{ width: 32, height: 32, bgcolor: '#2255CC', fontSize: '0.8rem', mr: 1.5 }}
+      >
         {userName ? userName.slice(0, 1) : 'U'}
       </Avatar>
       
@@ -296,6 +394,15 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
           オンライン
         </Typography>
       </Box>
+
+      <Tooltip title="通知">
+        <IconButton size="small" onClick={(e) => setNotifAnchor(e.currentTarget)}>
+          <Badge badgeContent={unreadCount} color="error" variant="dot">
+            <NotificationsIcon fontSize="small" />
+          </Badge>
+        </IconButton>
+      </Tooltip>
+      <NotificationsPopover anchorEl={notifAnchor} onClose={() => setNotifAnchor(null)} />
 
       <Tooltip title="設定">
         <IconButton size="small" onClick={() => handleNav('/app/profile')}>

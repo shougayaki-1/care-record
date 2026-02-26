@@ -12,11 +12,10 @@ export default function AppPage() {
   useEffect(() => {
     if (!loading) {
       if (!currentOrg) {
-        // 所属がない場合 -> LPかセットアップへ
+        // 所属がない場合 -> セットアップへ
         router.push('/setup');
-      } else if (['owner', 'manager'].includes(currentOrg.role)) {
-        router.push('/app/dashboard');
       } else {
+        // 所属がある場合 -> 記録画面へ (ダッシュボードは廃止)
         router.push('/app/record');
       }
     }

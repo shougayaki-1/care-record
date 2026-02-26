@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { 
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
   Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Stack, 
-  IconButton, Select, MenuItem, FormControl, InputLabel, Tooltip
+  IconButton, Select, MenuItem, FormControl, InputLabel, Tooltip, Menu, Alert,
+  ListItemIcon // ★追加
 } from '@mui/material';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -13,9 +14,13 @@ import BadgeIcon from '@mui/icons-material/Badge';
 import EditIcon from '@mui/icons-material/Edit';
 import ShareIcon from '@mui/icons-material/Share';
 import BadgeIconOutline from '@mui/icons-material/Badge';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import KeyIcon from '@mui/icons-material/Key';
+
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
+import { transferOwner } from '@/app/actions/organization';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -26,12 +31,14 @@ type ProfileRow = { id: string; name: string; };
 type InvitationRow = { id: string; target_name: string | null; role: string; code: string; };
 
 export default function StaffPage() {
-  const { currentOrg, loading: wsLoading } = useWorkspace();
+  const { currentOrg, loading: wsLoading } = useWorkspace(); // refreshWorkspace削除
   const { showToast } = useToast();
+  
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
   const [ghostStaffList, setGhostStaffList] = useState<GhostStaff[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>('');
   
+  // Modal States
   const [openInvite, setOpenInvite] = useState(false);
   const [generatedLink, setGeneratedLink] = useState('');
   const [newInviteName, setNewInviteName] = useState('');
@@ -41,6 +48,11 @@ export default function StaffPage() {
   const [ghostMode, setGhostMode] = useState<'add' | 'edit'>('add');
   const [ghostId, setGhostId] = useState('');
   const [ghostName, setGhostName] = useState('');
+
+  // Transfer Owner States
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+  const [selectedStaff, setSelectedStaff] = useState<StaffProfile | null>(null);
+  const [openTransferConfirm, setOpenTransferConfirm] = useState(false);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -75,6 +87,15 @@ export default function StaffPage() {
       membersList.forEach((m) => {
         mergedList.push({ id: m.user_id, name: profilesMap[m.user_id] || '名前未設定', role: m.role, status: 'active' });
       });
+      
+      // Sort: Owner first, then joined, then invited
+      mergedList.sort((a, b) => {
+          if (a.role === 'owner') return -1;
+          if (b.role === 'owner') return 1;
+          if (a.status === 'active' && b.status !== 'active') return -1;
+          return 0;
+      });
+
       setStaffList(mergedList);
 
       const { data: ghosts, error: ghostError } = await supabase
@@ -108,7 +129,7 @@ export default function StaffPage() {
 
   const handleDelete = async (staff: StaffProfile) => {
     if (!currentOrg) return;
-    const message = staff.status === 'active' ? `本当に「${staff.name}」さんをメンバーから削除しますか？` : `「${staff.name}」さんへの招待を取り消しますか？`;
+    const message = staff.status === 'active' ? `本当に「${staff.name}」さんをメンバーから削除（脱退）させますか？` : `「${staff.name}」さんへの招待を取り消しますか？`;
     if (!confirm(message)) return;
     try {
         if (staff.status === 'active') {
@@ -150,7 +171,34 @@ export default function StaffPage() {
       } else { navigator.clipboard.writeText(generatedLink); showToast('リンクをコピーしました'); }
   };
 
+  // Transfer Owner Logic
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>, staff: StaffProfile) => {
+      setMenuAnchor(event.currentTarget);
+      setSelectedStaff(staff);
+  };
+  const handleMenuClose = () => { setMenuAnchor(null); setSelectedStaff(null); };
+  
+  const handleTransferOwnerClick = () => {
+      setMenuAnchor(null);
+      setOpenTransferConfirm(true);
+  };
+
+  const executeTransferOwner = async () => {
+      if (!currentOrg || !selectedStaff) return;
+      try {
+          await transferOwner(currentOrg.id, currentUserId, selectedStaff.id);
+          showToast(`オーナー権限を ${selectedStaff.name} さんに譲渡しました`);
+          setOpenTransferConfirm(false);
+          // 権限が変わるためリロード推奨
+          setTimeout(() => window.location.reload(), 1000);
+      } catch(e: unknown) { // ★修正: any -> unknown
+          const msg = e instanceof Error ? e.message : String(e);
+          showToast(`譲渡に失敗しました: ${msg}`, 'error');
+      }
+  };
+
   if (wsLoading || !currentOrg) return null;
+  const isOwner = currentOrg.role === 'owner';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -161,6 +209,7 @@ export default function StaffPage() {
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
         <Stack direction={{ xs: 'column', lg: 'row' }} spacing={4}>
+            {/* メンバー一覧 */}
             <Box sx={{ width: { xs: '100%', lg: '60%' }, flex: { lg: 7 } }}>
                 <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8f9fa' }}>
                     <Box>
@@ -176,42 +225,59 @@ export default function StaffPage() {
                             <TableCell>氏名</TableCell>
                             <TableCell width="140">権限</TableCell>
                             <TableCell width="100">ステータス</TableCell>
-                            <TableCell align="center" width="120">操作</TableCell>
+                            <TableCell align="center" width="100">操作</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
                         {staffList.map((staff) => (
                         <TableRow key={staff.id} sx={{ height: 60 }}>
-                            <TableCell>{staff.name}</TableCell>
                             <TableCell>
-                            {staff.id === currentUserId ? <Chip label={staff.role} size="small" /> : (
-                                currentOrg.role === 'owner' && staff.status === 'active' ? (
-                                    <FormControl size="small" fullWidth>
-                                        <Select value={staff.role} onChange={(e) => handleChangeRole(staff.id, e.target.value)} sx={{ fontSize: '0.875rem', py: 0, height: 32 }}>
+                                <Typography variant="body2" fontWeight={staff.id === currentUserId ? 'bold' : 'normal'}>
+                                    {staff.name} {staff.id === currentUserId && '(あなた)'}
+                                </Typography>
+                            </TableCell>
+                            <TableCell>
+                            {staff.status === 'invited' ? (
+                                <Chip label={staff.role} size="small" variant="outlined" />
+                            ) : (
+                                isOwner && staff.id !== currentUserId ? (
+                                    <FormControl size="small" fullWidth variant="standard">
+                                        <Select 
+                                            value={staff.role} 
+                                            onChange={(e) => handleChangeRole(staff.id, e.target.value)} 
+                                            disableUnderline
+                                            sx={{ fontSize: '0.8125rem' }}
+                                        >
                                             <MenuItem value="staff">ヘルパー</MenuItem>
                                             <MenuItem value="manager">管理者</MenuItem>
-                                            <MenuItem value="owner">共同代表</MenuItem>
+                                            <MenuItem value="owner" disabled>オーナー</MenuItem>
                                         </Select>
                                     </FormControl>
-                                ) : <Chip label={staff.role} size="small" />
+                                ) : (
+                                    <Chip 
+                                        label={staff.role === 'owner' ? 'オーナー' : (staff.role === 'manager' ? '管理者' : 'ヘルパー')} 
+                                        size="small" 
+                                        color={staff.role === 'owner' ? 'primary' : 'default'} 
+                                    />
+                                )
                             )}
                             </TableCell>
                             <TableCell><Chip label={staff.status === 'active' ? '有効' : '招待中'} color={staff.status === 'active' ? 'success' : 'warning'} size="small" /></TableCell>
                             <TableCell align="center">
-                                <Stack direction="row" justifyContent="center" spacing={1}>
-                                    {staff.status === 'invited' && staff.invitation_code && (
-                                    <Tooltip title="招待リンクをコピー">
-                                        <IconButton size="small" onClick={() => { navigator.clipboard.writeText(`${BASE_URL}/join?code=${staff.invitation_code}`); showToast('コピーしました'); }}>
-                                            <ContentCopyIcon fontSize="small" />
+                                {staff.status === 'invited' && (
+                                    <Tooltip title="招待取消 / 削除">
+                                        <IconButton size="small" color="error" onClick={() => handleDelete(staff)}>
+                                            <DeleteIcon fontSize="small" />
                                         </IconButton>
                                     </Tooltip>
-                                    )}
-                                    {currentOrg.role === 'owner' && staff.id !== currentUserId && (
-                                        <Tooltip title="削除 / 招待取消">
-                                            <IconButton size="small" color="error" onClick={() => handleDelete(staff)}><DeleteIcon fontSize="small" /></IconButton>
-                                        </Tooltip>
-                                    )}
-                                </Stack>
+                                )}
+                                {staff.status === 'active' && staff.id !== currentUserId && isOwner && (
+                                    <>
+                                        <IconButton size="small" onClick={(e) => handleMenuOpen(e, staff)}>
+                                            <MoreVertIcon fontSize="small" />
+                                        </IconButton>
+                                    </>
+                                )}
                             </TableCell>
                         </TableRow>
                         ))}
@@ -220,6 +286,7 @@ export default function StaffPage() {
                 </TableContainer>
             </Box>
 
+            {/* ゴーストスタッフ */}
             <Box sx={{ width: { xs: '100%', lg: '40%' }, flex: { lg: 5 } }}>
                 <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#fff3e0', borderColor: '#ffe0b2' }}>
                     <Box>
@@ -252,6 +319,7 @@ export default function StaffPage() {
         </Stack>
       </Box>
 
+      {/* 招待ダイアログ */}
       <Dialog open={openInvite} onClose={() => setOpenInvite(false)} maxWidth="xs" fullWidth>
         <DialogTitle>スタッフ招待</DialogTitle>
         <DialogContent dividers>
@@ -281,6 +349,7 @@ export default function StaffPage() {
         <DialogActions><Button onClick={() => setOpenInvite(false)}>閉じる</Button></DialogActions>
       </Dialog>
 
+      {/* ゴースト追加・編集ダイアログ */}
       <Dialog open={openGhost} onClose={() => setOpenGhost(false)}>
           <DialogTitle>{ghostMode === 'add' ? 'スタッフ追加' : '名前の変更'}</DialogTitle>
           <DialogContent>
@@ -290,6 +359,36 @@ export default function StaffPage() {
               </Box>
           </DialogContent>
           <DialogActions><Button onClick={() => setOpenGhost(false)}>キャンセル</Button><Button onClick={handleSaveGhost} variant="contained" disabled={!ghostName.trim()}>保存</Button></DialogActions>
+      </Dialog>
+
+      {/* 操作メニュー (オーナー用) */}
+      <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={handleMenuClose}>
+          <MenuItem onClick={handleTransferOwnerClick} sx={{ color: 'warning.main' }}>
+              <ListItemIcon><KeyIcon fontSize="small" color="warning" /></ListItemIcon>
+              オーナー権限を譲渡
+          </MenuItem>
+          <MenuItem onClick={() => { if(selectedStaff) handleDelete(selectedStaff); handleMenuClose(); }} sx={{ color: 'error.main' }}>
+              <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon>
+              メンバーから削除
+          </MenuItem>
+      </Menu>
+
+      {/* オーナー権限譲渡確認ダイアログ */}
+      <Dialog open={openTransferConfirm} onClose={() => setOpenTransferConfirm(false)}>
+          <DialogTitle>オーナー権限の譲渡</DialogTitle>
+          <DialogContent>
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                  この操作は取り消せません！
+              </Alert>
+              <Typography variant="body1">
+                  本当に <b>{selectedStaff?.name}</b> さんにオーナー権限を譲渡しますか？<br/>
+                  譲渡後、あなたは「管理者」権限に降格し、事業所の削除や決済などの全権限を失います。
+              </Typography>
+          </DialogContent>
+          <DialogActions>
+              <Button onClick={() => setOpenTransferConfirm(false)}>キャンセル</Button>
+              <Button onClick={executeTransferOwner} variant="contained" color="warning">権限を譲渡する</Button>
+          </DialogActions>
       </Dialog>
     </Box>
   );
