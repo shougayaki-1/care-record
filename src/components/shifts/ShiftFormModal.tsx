@@ -5,14 +5,14 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Button, TextField, Stack, FormControl, InputLabel,
     Select, MenuItem, Box, Typography, Switch, FormControlLabel,
-    Checkbox, FormGroup, CircularProgress
+    Checkbox, FormGroup, CircularProgress, Chip, OutlinedInput,
+    SelectChangeEvent
 } from '@mui/material';
 import { ShiftPayload } from '@/app/actions/shift';
 
 export type ClientData = { id: string; name: string };
 export type StaffData = { id: string; name: string; type: 'member' | 'ghost' };
 
-// 既存のシフトデータを受け取るための型
 export type ShiftData = {
     id: string;
     organization_id: string;
@@ -51,10 +51,20 @@ const WEEKS_OF_MONTH = [
     { label: '第4', value: '4' }, { label: '第5', value: '5' }
 ];
 
+const ITEM_HEIGHT = 48;
+const ITEM_PADDING_TOP = 8;
+const MenuProps = {
+    PaperProps: {
+        style: {
+            maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP,
+            width: 250,
+        },
+    },
+};
+
 export const ShiftFormModal = ({ open, onClose, onSave, onCancelShift, clients, staffs, organizationId, initialData }: Props) => {
     const [loading, setLoading] = useState(false);
     
-    // フォームステート
     const [clientId, setClientId] = useState('');
     const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
     const [startAt, setStartAt] = useState('');
@@ -62,7 +72,6 @@ export const ShiftFormModal = ({ open, onClose, onSave, onCancelShift, clients, 
     const [isRecurring, setIsRecurring] = useState(false);
     const [cancelReason, setCancelReason] = useState('');
     
-    // 繰り返しルールのステート
     const [freq, setFreq] = useState<'WEEKLY' | 'MONTHLY'>('WEEKLY');
     const [selectedDays, setSelectedDays] = useState<string[]>([]);
     const [selectedWeeks, setSelectedWeeks] = useState<string[]>([]);
@@ -70,9 +79,8 @@ export const ShiftFormModal = ({ open, onClose, onSave, onCancelShift, clients, 
     useEffect(() => {
         if (open) {
             if (initialData) {
-                // 編集時の初期化
                 setClientId(initialData.client_id);
-                setStartAt(initialData.start_at.slice(0, 16)); // YYYY-MM-DDThh:mm にフォーマット
+                setStartAt(initialData.start_at.slice(0, 16)); 
                 setEndAt(initialData.end_at.slice(0, 16));
                 setIsRecurring(initialData.is_recurring);
                 setCancelReason(initialData.cancel_reason || '');
@@ -80,13 +88,11 @@ export const ShiftFormModal = ({ open, onClose, onSave, onCancelShift, clients, 
                 const staffIds = initialData.shift_staffs.map(s => s.user_id || s.ghost_staff_id).filter((id): id is string => id !== null);
                 setSelectedStaffIds(staffIds);
 
-                // RRULEのパース (簡易版: 複雑なUI復元は今回は省略し、基本情報のみ復元)
                 if (initialData.rrule) {
                     if (initialData.rrule.includes('FREQ=MONTHLY')) setFreq('MONTHLY');
                     else setFreq('WEEKLY');
                 }
             } else {
-                // 新規作成時の初期化
                 setClientId('');
                 setSelectedStaffIds([]);
                 setStartAt('');
@@ -116,13 +122,11 @@ export const ShiftFormModal = ({ open, onClose, onSave, onCancelShift, clients, 
             const staffIds = staffs.filter(s => selectedStaffIds.includes(s.id) && s.type === 'member').map(s => s.id);
             const ghostStaffIds = staffs.filter(s => selectedStaffIds.includes(s.id) && s.type === 'ghost').map(s => s.id);
 
-            // RRULE文字列の生成
             let rruleStr: string | undefined = undefined;
             if (isRecurring) {
                 if (freq === 'WEEKLY' && selectedDays.length > 0) {
                     rruleStr = `FREQ=WEEKLY;BYDAY=${selectedDays.join(',')}`;
                 } else if (freq === 'MONTHLY' && selectedDays.length > 0 && selectedWeeks.length > 0) {
-                    // 例: 第1,3土曜日 -> BYDAY=1SA,3SA
                     const byDayParams = selectedWeeks.flatMap(week => selectedDays.map(day => `${week}${day}`));
                     rruleStr = `FREQ=MONTHLY;BYDAY=${byDayParams.join(',')}`;
                 }
@@ -171,6 +175,11 @@ export const ShiftFormModal = ({ open, onClose, onSave, onCancelShift, clients, 
         else setArray([...array, item]);
     };
 
+    const handleStaffChange = (event: SelectChangeEvent<typeof selectedStaffIds>) => {
+        const { target: { value } } = event;
+        setSelectedStaffIds(typeof value === 'string' ? value.split(',') : value);
+    };
+
     return (
         <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth disableEscapeKeyDown>
             <DialogTitle fontWeight="bold">
@@ -197,10 +206,24 @@ export const ShiftFormModal = ({ open, onClose, onSave, onCancelShift, clients, 
                         <Select 
                             multiple 
                             value={selectedStaffIds} 
-                            onChange={(e) => setSelectedStaffIds(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)} 
-                            label="担当スタッフ（複数選択可）"
+                            onChange={handleStaffChange} 
+                            input={<OutlinedInput label="担当スタッフ（複数選択可）" />}
+                            renderValue={(selected) => (
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                    {selected.map((value) => {
+                                        const staff = staffs.find(s => s.id === value);
+                                        return <Chip key={value} label={staff?.name || ''} size="small" />;
+                                    })}
+                                </Box>
+                            )}
+                            MenuProps={MenuProps}
                         >
-                            {staffs.map(s => <MenuItem key={s.id} value={s.id}>{s.name} {s.type === 'ghost' ? '(転記)' : ''}</MenuItem>)}
+                            {staffs.map(s => (
+                                <MenuItem key={s.id} value={s.id}>
+                                    <Checkbox checked={selectedStaffIds.indexOf(s.id) > -1} size="small" />
+                                    <Typography variant="body2">{s.name}</Typography>
+                                </MenuItem>
+                            ))}
                         </Select>
                     </FormControl>
 
@@ -277,7 +300,7 @@ export const ShiftFormModal = ({ open, onClose, onSave, onCancelShift, clients, 
                                     value={cancelReason}
                                     onChange={(e) => setCancelReason(e.target.value)}
                                 />
-                                <Button variant="outlined" color="error" onClick={handleCancelShift} disabled={loading}>
+                                <Button variant="outlined" color="error" onClick={handleCancelShift} disabled={loading} sx={{ minWidth: 140 }}>
                                     キャンセルにする
                                 </Button>
                             </Stack>
@@ -287,7 +310,7 @@ export const ShiftFormModal = ({ open, onClose, onSave, onCancelShift, clients, 
             </DialogContent>
             <DialogActions sx={{ p: 2 }}>
                 <Button onClick={onClose} color="inherit" disabled={loading}>閉じる</Button>
-                <Button variant="contained" onClick={handleSave} disabled={loading}>
+                <Button variant="contained" onClick={handleSave} disabled={loading} sx={{ boxShadow: 'none' }}>
                     {loading ? <CircularProgress size={24} color="inherit" /> : '保存する'}
                 </Button>
             </DialogActions>

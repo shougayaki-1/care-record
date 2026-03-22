@@ -24,6 +24,7 @@ import NotificationsIcon from '@mui/icons-material/Notifications';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import KeyIcon from '@mui/icons-material/Key';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -335,12 +336,21 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
                   <ListItemText primary="利用者管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
                 </ListItemButton>
               </ListItem>
-              <ListItem disablePadding>
+                       <ListItem disablePadding>
                 <ListItemButton onClick={() => handleNav('/app/staff')} sx={itemStyle(isActive('/app/staff'))}>
                   <ListItemIcon><BadgeIcon fontSize="small" /></ListItemIcon>
-                  <ListItemText primary="スタッフ管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+                  <ListItemText primary="スタッフ(名簿)管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
                 </ListItemButton>
               </ListItem>
+
+              {isAdmin && (
+                <ListItem disablePadding>
+                  <ListItemButton onClick={() => handleNav('/app/accounts')} sx={itemStyle(isActive('/app/accounts'))}>
+                    <ListItemIcon><KeyIcon fontSize="small" /></ListItemIcon>
+                    <ListItemText primary="アカウント(権限)管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+                  </ListItemButton>
+                </ListItem>
+              )}
                <ListItem disablePadding>
                 <ListItemButton onClick={() => handleNav('/app/statistics')} sx={itemStyle(isActive('/app/statistics'))}>
                   <ListItemIcon><AssessmentIcon fontSize="small" /></ListItemIcon>

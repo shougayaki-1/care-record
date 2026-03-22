@@ -20,6 +20,7 @@ import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 
 type MemberProfileData = { user_id: string; profiles: { name: string } | null; };
+type GhostData = { id: string; name: string; }; // ★追加：any排除用
 
 export default function ShiftListPage() {
     const router = useRouter();
@@ -53,14 +54,31 @@ export default function ShiftListPage() {
         const { data: clientData } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
         if (clientData) setClients(clientData as ClientData[]);
 
-        const { data: memberData } = await supabase.from('organization_members').select('user_id, profiles(name)').eq('organization_id', currentOrg.id);
+        const { data: memberData } = await supabase
+            .from('organization_members')
+            .select(`user_id, profiles (name)`)
+            .eq('organization_id', currentOrg.id);
+
         const { data: ghostData } = await supabase.from('ghost_staffs').select('id, name').eq('organization_id', currentOrg.id);
         
         const staffList: StaffData[] = [];
-        (memberData as unknown as MemberProfileData[])?.forEach((m) => { 
-            if (m.profiles) staffList.push({ id: m.user_id, name: m.profiles.name, type: 'member' }); 
-        });
-        ghostData?.forEach(g => { staffList.push({ id: g.id, name: g.name, type: 'ghost' }); });
+        
+        if (memberData) {
+            (memberData as unknown as MemberProfileData[]).forEach((m) => { 
+                const profileName = Array.isArray(m.profiles) ? m.profiles[0]?.name : m.profiles?.name;
+                if (profileName) {
+                    staffList.push({ id: m.user_id, name: profileName, type: 'member' }); 
+                }
+            });
+        }
+
+        if (ghostData) {
+            // ★修正：anyを排除
+            (ghostData as GhostData[]).forEach((g) => { 
+                staffList.push({ id: g.id, name: g.name, type: 'ghost' }); 
+            });
+        }
+        
         setStaffs(staffList);
     }, [currentOrg]);
 
@@ -107,7 +125,6 @@ export default function ShiftListPage() {
             return true;
         });
 
-        // 共通関数でEventInputを生成 (isListView = true)
         setEvents(convertToCalendarEvents(filtered, true));
     }, [rawShifts, tabIndex, selectedStaffId, selectedClientId, currentUserId]);
 
