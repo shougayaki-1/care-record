@@ -35,6 +35,30 @@ type ShiftUpdateData = {
     updated_at?: string; google_event_id?: string;
 };
 
+/**
+ * 日本時間のISO文字列を生成する補助関数
+ * サーバー(UTC)で実行されても確実にJSTの時刻を作る
+ */
+function toJSTISOString(date: Date | string, timeStr?: string) {
+    const d = new Date(date);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const yy = d.getFullYear();
+    const mm = pad(d.getMonth() + 1);
+    const dd = pad(d.getDate());
+    
+    // timeStrがあればそれを使用、なければdateから取得
+    let hh, min;
+    if (timeStr) {
+        [hh, min] = timeStr.split(':');
+    } else {
+        hh = pad(d.getHours());
+        min = pad(d.getMinutes());
+    }
+    
+    // タイムゾーン+09:00を明示的に付与
+    return `${yy}-${mm}-${dd}T${hh}:${min}:00+09:00`;
+}
+
 async function syncToGoogleCalendarDirect(organizationId: string, shiftId: string, action: 'sync' | 'delete') {
     try {
         const { data: orgData } = await supabaseAdmin.from('organizations').select('google_calendar_id, google_refresh_token').eq('id', organizationId).single();
@@ -71,11 +95,19 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
         }
 
         const eventTitle = shiftData.status === 'cancelled' ? `【休】${shiftData.title}` : shiftData.title;
+        
+        // ★修正: Google APIに送る日時に確実にタイムゾーン(Asia/Tokyo)とオフセットを含める
         const eventBody: calendar_v3.Schema$Event = {
             summary: eventTitle,
             description: shiftData.cancel_reason ? `キャンセル理由: ${shiftData.cancel_reason}` : '',
-            start: { dateTime: shiftData.start_at, timeZone: 'Asia/Tokyo' },
-            end: { dateTime: shiftData.end_at, timeZone: 'Asia/Tokyo' },
+            start: { 
+                dateTime: new Date(shiftData.start_at).toISOString(), // DBのUTCをそのまま送る(Z付)
+                timeZone: 'Asia/Tokyo' 
+            },
+            end: { 
+                dateTime: new Date(shiftData.end_at).toISOString(), 
+                timeZone: 'Asia/Tokyo' 
+            },
             colorId: colorId
         };
 
@@ -102,7 +134,6 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
     } catch (error) { console.error('Google Calendar Direct Sync Error:', error); }
 }
 
-// ★修正: 第2引数（awaitSync: デフォルトtrue）を追加し、自動生成時は同期を待たないようにする
 export async function createShift(payload: ShiftPayload, awaitSync: boolean = true) {
     try {
         const { data: shift, error: shiftError } = await supabaseAdmin.from('shifts').insert({
@@ -118,7 +149,6 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean = tr
             await supabaseAdmin.from('shift_staffs').insert(staffInserts);
         }
 
-        // awaitSyncがfalseなら、プロミスを待たずに（裏側で）実行する
         if (awaitSync) {
             await syncToGoogleCalendarDirect(payload.organizationId, shift.id, 'sync');
         } else {
@@ -216,8 +246,12 @@ export async function deleteShiftPattern(patternId: string) {
 
 export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
     const [year, month] = yearMonth.split('-').map(Number);
-    const startDateUTC = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
-    const endDateUTC = new Date(Date.UTC(year, month, 0, 23, 59, 59));
+    
+    // ★重要: 月の開始・終了を「JSTの午前0時」として定義
+    // 文字列から作ることで環境のタイムゾーンに左右されないようにする
+    const startDateJST = new Date(`${year}-${String(month).padStart(2, '0')}-01T00:00:00+09:00`);
+    const endDateJST = new Date(year, month, 0, 23, 59, 59); // 月末
+    const endDateISO = toJSTISOString(endDateJST, "23:59");
 
     try {
         const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
@@ -229,63 +263,69 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         let createdCount = 0;
 
         for (const p of patterns) {
-            const dtStartStr = startDateUTC.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+            // RRULEの基準日をJSTの開始日に設定
+            const dtStartStr = startDateJST.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
             const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
             const rule = rrulestr(ruleStr);
-            const occurrences = rule.between(startDateUTC, endDateUTC, true);
+            
+            // 指定期間内の該当日を取得（念のため余裕を持たせて前後数時間含めて判定）
+            const occurrences = rule.between(startDateJST, new Date(endDateISO), true);
 
-            // ★修正: 1件ごとにawaitで待たず、作成用のPromiseを配列にためる
             const createPromises = [];
 
-            for (const dateUTC of occurrences) {
-                const yy = dateUTC.getUTCFullYear();
-                const mm = dateUTC.getUTCMonth() + 1;
-                const dd = dateUTC.getUTCDate();
+            for (const dateJST of occurrences) {
+                // dateJSTはrruleライブラリによって生成されたDateオブジェクト
+                const yy = dateJST.getFullYear();
+                const mm = dateJST.getMonth() + 1;
+                const dd = dateJST.getDate();
 
                 const [sHour, sMin] = p.start_time.split(':').map(Number);
                 const [eHour, eMin] = p.end_time.split(':').map(Number);
                 
                 const pad = (n: number) => String(n).padStart(2, '0');
 
-                const startIsoStr = `${yy}-${pad(mm)}-${pad(dd)}T${pad(sHour)}:${pad(sMin)}:00+09:00`;
-                const startAt = new Date(startIsoStr);
-
-                const endDay = new Date(Date.UTC(yy, mm - 1, dd)); 
-                if (eHour < sHour) endDay.setUTCDate(endDay.getUTCDate() + 1); 
+                // ★修正: 日本時間 (+09:00) を強制して日時文字列を作成
+                const startAtStr = `${yy}-${pad(mm)}-${pad(dd)}T${pad(sHour)}:${pad(sMin)}:00+09:00`;
                 
-                const endIsoStr = `${endDay.getUTCFullYear()}-${pad(endDay.getUTCMonth() + 1)}-${pad(endDay.getUTCDate())}T${pad(eHour)}:${pad(eMin)}:00+09:00`;
-                const endAt = new Date(endIsoStr);
+                // 終了日の判定（夜勤対応）
+                let endYY = yy, endMM = mm, endDD = dd;
+                if (eHour < sHour) {
+                    const nextDay = new Date(dateJST);
+                    nextDay.setDate(nextDay.getDate() + 1);
+                    endYY = nextDay.getFullYear();
+                    endMM = nextDay.getMonth() + 1;
+                    endDD = nextDay.getDate();
+                }
+                const endAtStr = `${endYY}-${pad(endMM)}-${pad(endDD)}T${pad(eHour)}:${pad(eMin)}:00+09:00`;
 
-                const targetDayStartStr = new Date(`${yy}-${pad(mm)}-${pad(dd)}T00:00:00+09:00`).toISOString();
-                const targetDayEndStr = new Date(`${yy}-${pad(mm)}-${pad(dd)}T23:59:59+09:00`).toISOString();
+                // 重複チェック用の範囲設定
+                const dayStart = `${yy}-${pad(mm)}-${pad(dd)}T00:00:00+09:00`;
+                const dayEnd = `${yy}-${pad(mm)}-${pad(dd)}T23:59:59+09:00`;
 
                 const { data: existing } = await supabaseAdmin.from('shifts')
                     .select('id').eq('pattern_id', p.id)
-                    .gte('start_at', targetDayStartStr)
-                    .lte('start_at', targetDayEndStr)
+                    .gte('start_at', new Date(dayStart).toISOString())
+                    .lte('start_at', new Date(dayEnd).toISOString())
                     .maybeSingle();
 
                 if (!existing) {
                     const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
                     
-                    // ★修正: 登録処理(Promise)を配列に追加するだけ。同期フラグは false に。
                     createPromises.push(
                         createShift({
                             organizationId,
                             clientId: p.client_id,
                             title: p.title,
-                            startAt: startAt.toISOString(), 
-                            endAt: endAt.toISOString(),
+                            startAt: new Date(startAtStr).toISOString(), 
+                            endAt: new Date(endAtStr).toISOString(),
                             staffIds: staffIds,
                             status: 'published',
                             patternId: p.id
-                        }, false) // <- 第2引数をfalseにしてGoogle同期を待たない
+                        }, false) 
                     );
                     createdCount++;
                 }
             }
-            
-            // ★修正: そのパターンの分を並列で一気にDBへ書き込む（圧倒的に速い）
             await Promise.all(createPromises);
         }
         return { success: true, count: createdCount };
@@ -328,12 +368,10 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
             .in('id', shiftIds);
 
         if (shiftsData) {
-            // ★修正: 一括削除時もGoogle同期を並列で実行して待たせない
             const deletePromises = shiftsData.map(shift => 
                 syncToGoogleCalendarDirect(shift.organization_id, shift.id, 'delete')
                     .catch(e => console.error('Bulk Delete Sync Error:', e))
             );
-            // 削除リクエストを投げるだけ投げて待たない（非同期実行）
             Promise.all(deletePromises);
         }
 
