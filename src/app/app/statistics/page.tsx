@@ -7,14 +7,13 @@ import {
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import AssessmentIcon from '@mui/icons-material/Assessment';
-import { rrulestr } from 'rrule';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
 
-type ShiftStaffData = { user_id: string | null; ghost_staff_id: string | null; profiles: { name: string } | null; ghost_staffs: { name: string } | null; };
-type ShiftData = { id: string; start_at: string; end_at: string; is_recurring: boolean; rrule: string | null; status: string; client_id: string; clients: { name: string } | null; shift_staffs: ShiftStaffData[]; };
+type ShiftStaffData = { staff_id: string; staffs: { name: string } | null; };
+type ShiftData = { id: string; start_at: string; end_at: string; status: string; client_id: string; clients: { name: string } | null; shift_staffs: ShiftStaffData[]; };
 type ReportData = { id: string; start_at: string; end_at: string; status: string; client_id: string; clients: { name: string } | null; report_values: { data: { _helpers?: string[] } }[] | null; };
 type AggregatedRow = { name: string; plannedHours: number; actualHours: number; };
 
@@ -24,18 +23,6 @@ function getOverlappingHours(start: Date, end: Date, monthStart: Date, monthEnd:
     if (overlapStart >= overlapEnd) return 0;
     return (overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60);
 }
-
-// ★追加：UTCズレを防ぐローカルタイムの DTSTART 生成関数
-const getLocalDTSTART = (date: Date) => {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const yyyy = date.getFullYear();
-    const mm = pad(date.getMonth() + 1);
-    const dd = pad(date.getDate());
-    const hh = pad(date.getHours());
-    const min = pad(date.getMinutes());
-    const ss = pad(date.getSeconds());
-    return `${yyyy}${mm}${dd}T${hh}${min}${ss}`;
-};
 
 export default function StatisticsPage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
@@ -63,15 +50,21 @@ export default function StatisticsPage() {
             const monthStart = new Date(year, month, 1, 0, 0, 0);
             const monthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
+            // ★ 新設計：実体化された単発シフトを、月をまたぐ可能性があるため前後数日余裕を持って取得するだけ
+            const shiftStartRange = new Date(monthStart.getTime() - (24 * 60 * 60 * 1000)).toISOString();
+            const shiftEndRange = new Date(monthEnd.getTime() + (24 * 60 * 60 * 1000)).toISOString();
+
             const { data: shiftsData, error: shiftsError } = await supabase
                 .from('shifts')
                 .select(`
-                    id, start_at, end_at, is_recurring, rrule, status, client_id,
+                    id, start_at, end_at, status, client_id,
                     clients (name),
-                    shift_staffs (user_id, ghost_staff_id, profiles(name), ghost_staffs(name))
+                    shift_staffs (staff_id, staffs(name))
                 `)
                 .eq('organization_id', currentOrg.id)
-                .neq('status', 'cancelled');
+                .neq('status', 'cancelled')
+                .gte('end_at', shiftStartRange)
+                .lte('start_at', shiftEndRange);
 
             if (shiftsError) throw shiftsError;
 
@@ -84,8 +77,8 @@ export default function StatisticsPage() {
                 `)
                 .eq('clients.organization_id', currentOrg.id)
                 .in('status', ['pending', 'approved']) 
-                .gte('end_at', monthStart.toISOString())
-                .lte('start_at', monthEnd.toISOString());
+                .gte('end_at', shiftStartRange)
+                .lte('start_at', shiftEndRange);
 
             if (reportsError) throw reportsError;
 
@@ -114,51 +107,30 @@ export default function StatisticsPage() {
 
         const addHours = (name: string, type: 'planned' | 'actual', hours: number) => {
             if (!name) return;
-            if (!statsMap[name]) {
-                statsMap[name] = { name, plannedHours: 0, actualHours: 0 };
-            }
+            if (!statsMap[name]) statsMap[name] = { name, plannedHours: 0, actualHours: 0 };
             if (type === 'planned') statsMap[name].plannedHours += hours;
             else statsMap[name].actualHours += hours;
         };
 
+        // ① 単発シフトの集計 (超シンプル)
         rawShifts.forEach(shift => {
             const shiftStart = new Date(shift.start_at);
             const shiftEnd = new Date(shift.end_at);
-            const durationMs = shiftEnd.getTime() - shiftStart.getTime();
-
-            let occurrences: Date[] = [];
-            if (shift.is_recurring && shift.rrule) {
-                try {
-                    // ★修正：UTCズレ防止のためローカル時間でDTSTARTを生成
-                    const dtStartStr = getLocalDTSTART(shiftStart);
-                    const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${shift.rrule}`;
-                    const rule = rrulestr(ruleStr);
-                    occurrences = rule.between(monthStart, monthEnd, true);
-                } catch (e) {
-                    console.warn('RRULE Parse error', e);
-                }
-            } else {
-                occurrences = [shiftStart];
-            }
-
-            occurrences.forEach(occStart => {
-                const occEnd = new Date(occStart.getTime() + durationMs);
-                const hours = getOverlappingHours(occStart, occEnd, monthStart, monthEnd);
+            const hours = getOverlappingHours(shiftStart, shiftEnd, monthStart, monthEnd);
                 
-                if (hours > 0) {
-                    if (tabIndex === 1 && shift.clients?.name) {
-                        addHours(shift.clients.name, 'planned', hours);
-                    }
-                    if (tabIndex === 0) {
-                        shift.shift_staffs.forEach(staff => {
-                            const sName = staff.profiles?.name || staff.ghost_staffs?.name;
-                            if (sName) addHours(sName, 'planned', hours);
-                        });
-                    }
+            if (hours > 0) {
+                if (tabIndex === 1 && shift.clients?.name) {
+                    addHours(shift.clients.name, 'planned', hours);
                 }
-            });
+                if (tabIndex === 0) {
+                    shift.shift_staffs.forEach(staff => {
+                        if (staff.staffs?.name) addHours(staff.staffs.name, 'planned', hours);
+                    });
+                }
+            }
         });
 
+        // ② 実績（記録）の集計
         rawReports.forEach(report => {
             const rStart = new Date(report.start_at);
             const rEnd = new Date(report.end_at);
@@ -169,12 +141,7 @@ export default function StatisticsPage() {
                     addHours(report.clients.name, 'actual', hours);
                 }
                 if (tabIndex === 0) {
-                    const reportValuesData = report.report_values && report.report_values.length > 0 
-                        ? report.report_values[0].data 
-                        : null;
-                    
-                    const actualHelpers = reportValuesData?._helpers || [];
-                    
+                    const actualHelpers = (report.report_values && report.report_values.length > 0) ? report.report_values[0].data?._helpers || [] : [];
                     actualHelpers.forEach(helperName => {
                         if (helperName) addHours(helperName, 'actual', hours);
                     });
@@ -196,12 +163,9 @@ export default function StatisticsPage() {
 
         const csvContent = '\uFEFF' + [header.join(','), ...rows.map(r => r.join(','))].join('\n');
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        
         const link = document.createElement('a');
-        link.href = url;
-        const typeStr = tabIndex === 0 ? 'スタッフ別' : '利用者別';
-        link.setAttribute('download', `稼働集計_${targetMonth}_${typeStr}.csv`);
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', `稼働集計_${targetMonth}_${tabIndex === 0 ? 'スタッフ別' : '利用者別'}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -224,33 +188,12 @@ export default function StatisticsPage() {
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: '#f5f5f5' }}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={3} spacing={2}>
-                    <TextField
-                        type="month"
-                        label="対象月"
-                        size="small"
-                        InputLabelProps={{ shrink: true }}
-                        value={targetMonth}
-                        onChange={(e) => setTargetMonth(e.target.value)}
-                        sx={{ bgcolor: 'white', minWidth: 200 }}
-                    />
-                    <Button 
-                        variant="outlined" 
-                        color="primary" 
-                        startIcon={<DownloadIcon />} 
-                        onClick={handleExportCSV}
-                        disabled={loading || aggregatedData.length === 0}
-                        sx={{ bgcolor: 'white' }}
-                    >
-                        CSVダウンロード
-                    </Button>
+                    <TextField type="month" label="対象月" size="small" InputLabelProps={{ shrink: true }} value={targetMonth} onChange={(e) => setTargetMonth(e.target.value)} sx={{ bgcolor: 'white', minWidth: 200 }} />
+                    <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || aggregatedData.length === 0} sx={{ bgcolor: 'white' }}>CSVダウンロード</Button>
                 </Stack>
 
                 <Paper sx={{ p: 0, minHeight: 400, borderRadius: 3, overflow: 'hidden', boxShadow: 'none', border: '1px solid #E3E5E8' }}>
-                    {loading ? (
-                        <Box display="flex" justifyContent="center" alignItems="center" height={300}>
-                            <CircularProgress />
-                        </Box>
-                    ) : (
+                    {loading ? <Box display="flex" justifyContent="center" alignItems="center" height={300}><CircularProgress /></Box> : (
                         <TableContainer>
                             <Table>
                                 <TableHead sx={{ bgcolor: '#F0F5FF' }}>
@@ -262,13 +205,7 @@ export default function StatisticsPage() {
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                    {aggregatedData.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={4} align="center" sx={{ py: 5, color: '#666' }}>
-                                                データがありません
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : (
+                                    {aggregatedData.length === 0 ? <TableRow><TableCell colSpan={4} align="center" sx={{ py: 5, color: '#666' }}>データがありません</TableCell></TableRow> : (
                                         aggregatedData.map((row, i) => {
                                             const diff = row.actualHours - row.plannedHours;
                                             const isAlert = diff < -2 || diff > 2;
@@ -276,12 +213,8 @@ export default function StatisticsPage() {
                                                 <TableRow key={i} hover>
                                                     <TableCell sx={{ fontWeight: 'bold' }}>{row.name}</TableCell>
                                                     <TableCell align="right">{row.plannedHours.toFixed(2)}</TableCell>
-                                                    <TableCell align="right" sx={{ fontWeight: 'bold', color: '#2255CC' }}>
-                                                        {row.actualHours.toFixed(2)}
-                                                    </TableCell>
-                                                    <TableCell align="right" sx={{ color: isAlert ? '#d32f2f' : 'inherit', fontWeight: isAlert ? 'bold' : 'normal' }}>
-                                                        {diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}
-                                                    </TableCell>
+                                                    <TableCell align="right" sx={{ fontWeight: 'bold', color: '#2255CC' }}>{row.actualHours.toFixed(2)}</TableCell>
+                                                    <TableCell align="right" sx={{ color: isAlert ? '#d32f2f' : 'inherit', fontWeight: isAlert ? 'bold' : 'normal' }}>{diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}</TableCell>
                                                 </TableRow>
                                             );
                                         })

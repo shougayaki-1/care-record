@@ -56,7 +56,6 @@ type Props = {
 export const ShiftCalendarDocument = ({ title, monthStr, weeks }: Props) => {
     return (
         <Document>
-            {/* カレンダーは横向き (landscape) で出力 */}
             <Page size="A4" orientation="landscape" style={styles.page}>
                 <View style={styles.header}>
                     <Text style={styles.title}>{title}</Text>
@@ -73,21 +72,25 @@ export const ShiftCalendarDocument = ({ title, monthStr, weeks }: Props) => {
                             {week.map((day, dIdx) => (
                                 <View key={dIdx} style={styles.dayCell}>
                                     <Text style={styles.dateNumber}>{day.dayNumber}</Text>
-                                    {day.events.map((ev, eIdx) => (
-                                        <View key={eIdx} style={[styles.eventBox, ev.isCancelled ? styles.eventBoxCancelled : {}]}>
-                                            <Text style={[styles.eventTime, ev.isCancelled ? styles.eventTextCancelled : {}]}>
-                                                {ev.timeStr}
-                                            </Text>
-                                            <Text style={[styles.eventText, ev.isCancelled ? styles.eventTextCancelled : {}]}>
-                                                {ev.clientName}
-                                            </Text>
-                                            {ev.staffNames && (
-                                                <Text style={[styles.eventText, ev.isCancelled ? styles.eventTextCancelled : {}]}>
-                                                    ({ev.staffNames})
+                                    {day.events.map((ev, eIdx) => {
+                                        // ★修正: 「様」がついていなければ付与
+                                        const displayName = ev.clientName.endsWith('様') ? ev.clientName : `${ev.clientName} 様`;
+                                        return (
+                                            <View key={eIdx} style={[styles.eventBox, ev.isCancelled ? styles.eventBoxCancelled : {}]}>
+                                                <Text style={[styles.eventTime, ev.isCancelled ? styles.eventTextCancelled : {}]}>
+                                                    {ev.timeStr}
                                                 </Text>
-                                            )}
-                                        </View>
-                                    ))}
+                                                <Text style={[styles.eventText, ev.isCancelled ? styles.eventTextCancelled : {}]}>
+                                                    {displayName}
+                                                </Text>
+                                                {ev.staffNames && (
+                                                    <Text style={[styles.eventText, ev.isCancelled ? styles.eventTextCancelled : {}]}>
+                                                        ({ev.staffNames})
+                                                    </Text>
+                                                )}
+                                            </View>
+                                        );
+                                    })}
                                 </View>
                             ))}
                         </View>

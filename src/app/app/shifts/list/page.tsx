@@ -15,9 +15,11 @@ import { pdf } from '@react-pdf/renderer';
 
 import { ShiftScheduleDocument, PdfShiftData } from '@/components/pdf/ShiftScheduleDocument';
 import { ShiftCalendarDocument, PdfCalendarEvent, PdfCalendarDay } from '@/components/pdf/ShiftCalendarDocument';
-import { ClientData, StaffData } from '@/components/shifts/ShiftFormModal';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
+
+type StaffData = { id: string; name: string; type: 'member' | 'ghost' };
+type ClientData = { id: string; name: string };
 
 export default function ShiftListPage() {
     const router = useRouter();
@@ -29,9 +31,7 @@ export default function ShiftListPage() {
     const [rawShifts, setRawShifts] = useState<FetchedShiftData[]>([]);
     const [events, setEvents] = useState<EventInput[]>([]);
     
-    // アカウントのID
     const [currentUserId, setCurrentUserId] = useState<string>('');
-    // アカウントと紐付くスタッフのID (これが新設計の要)
     const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
 
     const [tabIndex, setTabIndex] = useState(0); 
@@ -59,8 +59,6 @@ export default function ShiftListPage() {
         if (staffData) {
             const parsed = staffData.map(item => ({ id: item.id, name: item.name, type: item.user_id ? 'member' : 'ghost' } as StaffData));
             setStaffs(parsed);
-
-            // ログイン中のユーザーIDと紐付くスタッフIDを取得
             if (currentUserId) {
                 const me = parsed.find(s => staffData.find(sd => sd.id === s.id)?.user_id === currentUserId);
                 if (me) setCurrentStaffId(me.id);
@@ -74,6 +72,7 @@ export default function ShiftListPage() {
         try {
             const start = new Date(); start.setMonth(start.getMonth() - 1);
             const end = new Date(); end.setMonth(end.getMonth() + 2);
+            // 新設計の getShifts は実体化された単発シフトのみを返すため、非常にシンプルに取得できます
             const shifts = await getShifts(currentOrg.id, start.toISOString(), end.toISOString());
             setRawShifts((shifts as unknown as FetchedShiftData[]) || []);
         } catch (error) {
@@ -92,15 +91,14 @@ export default function ShiftListPage() {
     }, [wsLoading, currentOrg, fetchMasterData, fetchShiftData]);
 
     useEffect(() => {
-        if (rawShifts.length === 0) {
+        if (!currentUserId || rawShifts.length === 0) {
             setEvents([]);
             return;
         }
 
         const filtered = rawShifts.filter(shift => {
             if (tabIndex === 0) {
-                // 自分のシフト（自分のスタッフIDが含まれているか）
-                if (!currentStaffId) return false; // スタッフ登録されていないアカウントは自分のシフトがない
+                if (!currentStaffId) return false;
                 return shift.shift_staffs.some(s => s.staff_id === currentStaffId);
             }
             if (tabIndex === 1) {
@@ -114,8 +112,9 @@ export default function ShiftListPage() {
             return true;
         });
 
+        // 共通関数で変換
         setEvents(convertToCalendarEvents(filtered, true));
-    }, [rawShifts, tabIndex, selectedStaffId, selectedClientId, currentStaffId]);
+    }, [rawShifts, tabIndex, selectedStaffId, selectedClientId, currentStaffId, currentUserId]);
 
     const handleDownloadPdf = async () => {
         if (!calendarRef.current) return;
@@ -127,11 +126,9 @@ export default function ShiftListPage() {
             const monthStr = api.view.title;
 
             let entityName = '私のシフト';
-            if (tabIndex === 1) {
-                entityName = selectedStaffId !== 'all' ? `${staffs.find(s => s.id === selectedStaffId)?.name}様` : '全スタッフ';
-            } else if (tabIndex === 2) {
-                entityName = selectedClientId !== 'all' ? `${clients.find(c => c.id === selectedClientId)?.name}様` : '全利用者';
-            }
+            if (tabIndex === 1) entityName = selectedStaffId !== 'all' ? `${staffs.find(s => s.id === selectedStaffId)?.name}様` : '全スタッフ';
+            else if (tabIndex === 2) entityName = selectedClientId !== 'all' ? `${clients.find(c => c.id === selectedClientId)?.name}様` : '全利用者';
+            
             const docTitle = `${entityName} シフト表`;
             const fileName = `${entityName}_シフト表_${monthStr.replace(/\s+/g, '')}.pdf`;
 
@@ -247,10 +244,7 @@ export default function ShiftListPage() {
                         noEventsText="表示するシフトはありません"
                         onEventClick={(info) => {
                             const { clientId, shiftId, isCancelled } = info.event.extendedProps;
-                            if (isCancelled) {
-                                showToast('このシフトはキャンセルされています', 'info');
-                                return;
-                            }
+                            if (isCancelled) { showToast('このシフトはキャンセルされています', 'info'); return; }
                             router.push(`/app/record/${clientId}?shiftId=${shiftId}`);
                         }}
                     />

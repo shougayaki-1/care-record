@@ -7,7 +7,6 @@ const getFontUrl = (filename: string) => {
         : `/fonts/${filename}`;
 };
 
-// 日本語フォントの読み込み
 Font.register({
     family: 'NotoSansJP',
     fonts: [
@@ -71,16 +70,19 @@ export const ShiftScheduleDocument = ({ title, monthStr, shifts }: Props) => {
                             <Text style={{ width: '100%', padding: 10, textAlign: 'center', color: '#666' }}>予定はありません</Text>
                         </View>
                     ) : (
-                        shifts.map((shift, i) => (
-                            // エラー解消：配列内に boolean を直接入れず、三項演算子で空オブジェクトを渡すように修正
-                            <View key={i} style={[styles.tableRow, shift.isCancelled ? styles.tableRowCancelled : {}]}>
-                                <Text style={styles.colDate}>{shift.dateStr}</Text>
-                                <Text style={styles.colTime}>{shift.startTime} - {shift.endTime}</Text>
-                                <Text style={styles.colClient}>{shift.clientName}</Text>
-                                <Text style={styles.colStaff}>{shift.staffNames}</Text>
-                                <Text style={styles.colStatus}>{shift.isCancelled ? 'お休み' : ''}</Text>
-                            </View>
-                        ))
+                        shifts.map((shift, i) => {
+                            // ★修正: 「様」がついていなければ付与
+                            const displayName = shift.clientName.endsWith('様') ? shift.clientName : `${shift.clientName} 様`;
+                            return (
+                                <View key={i} style={[styles.tableRow, shift.isCancelled ? styles.tableRowCancelled : {}]}>
+                                    <Text style={styles.colDate}>{shift.dateStr}</Text>
+                                    <Text style={styles.colTime}>{shift.startTime} - {shift.endTime}</Text>
+                                    <Text style={styles.colClient}>{displayName}</Text>
+                                    <Text style={styles.colStaff}>{shift.staffNames}</Text>
+                                    <Text style={styles.colStatus}>{shift.isCancelled ? 'お休み' : ''}</Text>
+                                </View>
+                            );
+                        })
                     )}
                 </View>
             </Page>

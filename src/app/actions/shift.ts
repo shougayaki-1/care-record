@@ -3,6 +3,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { google, calendar_v3 } from 'googleapis';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
+import { rrulestr } from 'rrule'; 
 
 const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -11,32 +12,26 @@ const supabaseAdmin = createClient(
 );
 
 export type ShiftPayload = {
-    organizationId: string;
-    clientId: string;
-    title: string;
-    startAt: string; 
-    endAt: string;   
-    isRecurring: boolean;
-    rrule?: string;
+    organizationId: string; clientId: string; title: string;
+    startAt: string; endAt: string;
     staffIds: string[]; 
     status?: 'published' | 'cancelled';
     cancelReason?: string;
-    baseShiftId?: string;
 };
 
-type ShiftStaffInsert = {
-    shift_id: string;
-    staff_id: string; 
+export type ShiftPatternPayload = {
+    organizationId: string; clientId: string; title: string;
+    startTime: string; endTime: string; rrule: string;
+    staffIds: string[];
 };
+
+type ShiftStaffInsert = { shift_id: string; staff_id: string; };
+type PatternStaffInsert = { pattern_id: string; staff_id: string; };
 
 type ShiftUpdateData = {
-    title?: string;
-    start_at?: string;
-    end_at?: string;
-    status?: 'published' | 'cancelled';
-    cancel_reason?: string;
-    updated_at?: string;
-    google_event_id?: string;
+    title?: string; start_at?: string; end_at?: string;
+    status?: 'published' | 'cancelled'; cancel_reason?: string | null;
+    updated_at?: string; google_event_id?: string;
 };
 
 async function syncToGoogleCalendarDirect(organizationId: string, shiftId: string, action: 'sync' | 'delete') {
@@ -44,7 +39,7 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
         const { data: orgData } = await supabaseAdmin.from('organizations').select('google_calendar_id, google_refresh_token').eq('id', organizationId).single();
         if (!orgData?.google_calendar_id || !orgData?.google_refresh_token) return;
 
-        const { data: shiftData } = await supabaseAdmin.from('shifts').select('id, title, start_at, end_at, status, cancel_reason, google_event_id, rrule, shift_staffs(staff_id)').eq('id', shiftId).single();
+        const { data: shiftData } = await supabaseAdmin.from('shifts').select('id, title, start_at, end_at, status, cancel_reason, google_event_id, shift_staffs(staff_id)').eq('id', shiftId).single();
         if (!shiftData) return;
 
         const oauth2Client = getGoogleOAuthClient();
@@ -66,9 +61,8 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
         const staffIds = (shiftData.shift_staffs || []).map(s => s.staff_id).filter(Boolean);
         let colorId: string | undefined = undefined;
         
-        if (shiftData.status === 'cancelled') {
-            colorId = '8'; 
-        } else if (staffIds.length > 0 && staffIds[0]) {
+        if (shiftData.status === 'cancelled') colorId = '8'; 
+        else if (staffIds.length > 0 && staffIds[0]) {
             const staffId = staffIds[0];
             let hash = 0;
             for (let i = 0; i < staffId.length; i++) hash = staffId.charCodeAt(i) + ((hash << 5) - hash);
@@ -84,16 +78,8 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
             colorId: colorId
         };
 
-        // ★修正: rruleが存在する場合、Googleカレンダーの recurrence フォーマットに合わせてセットする
-        if (shiftData.rrule) {
-            // Google APIは配列形式で "RRULE:FREQ=WEEKLY;BYDAY=MO" のように渡す仕様
-            eventBody.recurrence = [`RRULE:${shiftData.rrule}`];
-        } else {
-            // 繰り返しから単発に変更された場合の解除処理
-            eventBody.recurrence = null; 
-        }
-
         let newEventId = shiftData.google_event_id;
+
         if (shiftData.google_event_id) {
             try {
                 await calendarApi.events.update({ calendarId: orgData.google_calendar_id, eventId: shiftData.google_event_id, requestBody: eventBody });
@@ -112,28 +98,26 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
         if (newEventId && newEventId !== shiftData.google_event_id) {
             await supabaseAdmin.from('shifts').update({ google_event_id: newEventId }).eq('id', shiftId);
         }
-    } catch (error) {
-        console.error('Google Calendar Direct Sync Error:', error);
-    }
+    } catch (error) { console.error('Google Calendar Direct Sync Error:', error); }
 }
 
 export async function createShift(payload: ShiftPayload) {
     try {
         const { data: shift, error: shiftError } = await supabaseAdmin.from('shifts').insert({
             organization_id: payload.organizationId, client_id: payload.clientId, title: payload.title,
-            start_at: payload.startAt, end_at: payload.endAt, is_recurring: payload.isRecurring, rrule: payload.rrule || null, status: payload.status || 'published'
+            start_at: payload.startAt, end_at: payload.endAt, status: payload.status || 'published'
         }).select('id').single();
 
         if (shiftError || !shift) throw new Error(shiftError?.message);
 
         if (payload.staffIds.length > 0) {
-            const staffInserts = payload.staffIds.map(sid => ({ shift_id: shift.id, staff_id: sid }));
+            const staffInserts: ShiftStaffInsert[] = payload.staffIds.map(sid => ({ shift_id: shift.id, staff_id: sid }));
             await supabaseAdmin.from('shift_staffs').insert(staffInserts);
         }
 
         await syncToGoogleCalendarDirect(payload.organizationId, shift.id, 'sync');
         return { success: true, shiftId: shift.id };
-    } catch (error) { console.error('Create Shift Error:', error); throw error; }
+    } catch (error) { console.error(error); throw error; }
 }
 
 export async function updateShift(shiftId: string, payload: Partial<ShiftPayload>) {
@@ -152,39 +136,132 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
 
         if (payload.staffIds !== undefined) {
             await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
-            const staffInserts = payload.staffIds.map(sid => ({ shift_id: shiftId, staff_id: sid }));
+            const staffInserts: ShiftStaffInsert[] = payload.staffIds.map(sid => ({ shift_id: shiftId, staff_id: sid }));
             if (staffInserts.length > 0) await supabaseAdmin.from('shift_staffs').insert(staffInserts);
         }
 
         const targetOrgId = payload.organizationId || (await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single()).data?.organization_id;
         if (targetOrgId) await syncToGoogleCalendarDirect(targetOrgId, shiftId, 'sync');
-
         return { success: true };
-    } catch (error) { console.error('Update Shift Error:', error); throw error; }
+    } catch (error) { console.error(error); throw error; }
 }
 
-export async function cancelShift(shiftId: string, reason: string = '') {
+export async function updateShiftTimeOnly(shiftId: string, startAt: string, endAt: string) {
     try {
-        await supabaseAdmin.from('shifts').update({ status: 'cancelled', cancel_reason: reason, updated_at: new Date().toISOString() }).eq('id', shiftId);
+        await supabaseAdmin.from('shifts').update({ start_at: startAt, end_at: endAt, updated_at: new Date().toISOString() }).eq('id', shiftId);
         const { data } = await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single();
         if (data) await syncToGoogleCalendarDirect(data.organization_id, shiftId, 'sync');
         return { success: true };
-    } catch (error) { console.error('Cancel Shift Error:', error); throw error; }
+    } catch (error) { console.error(error); throw error; }
+}
+
+export async function toggleCancelShift(shiftId: string, isCancel: boolean, reason: string = '') {
+    try {
+        const status = isCancel ? 'cancelled' : 'published';
+        const cancelReason = isCancel ? reason : null;
+        await supabaseAdmin.from('shifts').update({ status, cancel_reason: cancelReason, updated_at: new Date().toISOString() }).eq('id', shiftId);
+        const { data } = await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single();
+        if (data) await syncToGoogleCalendarDirect(data.organization_id, shiftId, 'sync');
+        return { success: true };
+    } catch (error) { console.error(error); throw error; }
 }
 
 export async function getShifts(organizationId: string, startDate: string, endDate: string) {
     try {
         const { data, error } = await supabaseAdmin.from('shifts').select(`
-            *,
-            clients (id, name),
-            shift_staffs (
-                staff_id,
-                staffs (name)
-            )
+            *, clients (id, name), shift_staffs (staff_id, staffs (name))
         `).eq('organization_id', organizationId)
-          .or(`rrule.not.is.null,and(start_at.gte.${startDate},start_at.lte.${endDate})`);
-
+          .gte('start_at', startDate).lte('start_at', endDate); 
         if (error) throw error;
         return data;
-    } catch (error) { console.error('Get Shifts Error:', error); throw error; }
+    } catch (error) { console.error(error); throw error; }
+}
+
+export async function getShiftPatterns(organizationId: string) {
+    const { data, error } = await supabaseAdmin.from('shift_patterns').select(`
+        *, clients (id, name), shift_pattern_staffs (staff_id, staffs (name))
+    `).eq('organization_id', organizationId);
+    if (error) throw error;
+    return data;
+}
+
+export async function createShiftPattern(payload: ShiftPatternPayload) {
+    const { data: pattern, error } = await supabaseAdmin.from('shift_patterns').insert({
+        organization_id: payload.organizationId, client_id: payload.clientId, title: payload.title,
+        start_time: payload.startTime, end_time: payload.endTime, rrule: payload.rrule
+    }).select('id').single();
+    if (error || !pattern) throw error;
+    
+    if (payload.staffIds.length > 0) {
+        const inserts: PatternStaffInsert[] = payload.staffIds.map(sid => ({ pattern_id: pattern.id, staff_id: sid }));
+        await supabaseAdmin.from('shift_pattern_staffs').insert(inserts);
+    }
+    return { success: true };
+}
+
+export async function deleteShiftPattern(patternId: string) {
+    const { error } = await supabaseAdmin.from('shift_patterns').delete().eq('id', patternId);
+    if (error) throw error;
+    return { success: true };
+}
+
+export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
+    const [year, month] = yearMonth.split('-').map(Number);
+    const startDate = new Date(year, month - 1, 1, 0, 0, 0);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+
+    try {
+        const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
+            *, shift_pattern_staffs(staff_id)
+        `).eq('organization_id', organizationId);
+
+        if (!patterns || patterns.length === 0) return { success: true, count: 0 };
+
+        let createdCount = 0;
+
+        for (const p of patterns) {
+            const dtStartStr = startDate.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+            const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
+            const rule = rrulestr(ruleStr);
+            const occurrences = rule.between(startDate, endDate, true);
+
+            for (const date of occurrences) {
+                const [sHour, sMin] = p.start_time.split(':').map(Number);
+                const [eHour, eMin] = p.end_time.split(':').map(Number);
+                
+                const startAt = new Date(date);
+                startAt.setHours(sHour, sMin, 0, 0);
+                
+                const endAt = new Date(date);
+                endAt.setHours(eHour, eMin, 0, 0);
+                if (eHour < sHour) endAt.setDate(endAt.getDate() + 1);
+
+                const { data: existing } = await supabaseAdmin.from('shifts')
+                    .select('id').eq('pattern_id', p.id)
+                    .gte('start_at', new Date(date.setHours(0,0,0,0)).toISOString())
+                    .lt('start_at', new Date(date.setHours(23,59,59,999)).toISOString())
+                    .maybeSingle();
+
+                if (!existing) {
+                    // ★修正：any排除のため、明確な型を指定
+                    const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
+                    // ★修正: isRecurring を削除（単発シフトなので）
+                    await createShift({
+                        organizationId,
+                        clientId: p.client_id,
+                        title: p.title,
+                        startAt: startAt.toISOString(),
+                        endAt: endAt.toISOString(),
+                        staffIds: staffIds,
+                        status: 'published'
+                    });
+                    createdCount++;
+                }
+            }
+        }
+        return { success: true, count: createdCount };
+    } catch (error) {
+        console.error('Generate Shifts Error:', error);
+        throw error;
+    }
 }
