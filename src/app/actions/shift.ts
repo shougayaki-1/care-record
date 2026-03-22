@@ -2,7 +2,8 @@
 'use server';
 
 import { createClient } from '@supabase/supabase-js';
-import { callGasApi } from './gas'; // GAS呼び出し用の関数をインポート
+import { google, calendar_v3 } from 'googleapis';
+import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 
 const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -40,68 +41,131 @@ type ShiftUpdateData = {
     status?: 'published' | 'cancelled';
     cancel_reason?: string;
     updated_at?: string;
-    google_event_id?: string; // カレンダー連携用に追加
+    google_event_id?: string;
 };
 
-// --- Googleカレンダー同期用のヘルパー関数 ---
-// 組織のgoogle_calendar_idを取得し、GASを叩いて同期する
-async function syncToGoogleCalendar(organizationId: string, shiftId: string, action: 'sync' | 'delete') {
+// --- Google Calendar API 直接同期用のヘルパー関数 ---
+async function syncToGoogleCalendarDirect(organizationId: string, shiftId: string, action: 'sync' | 'delete') {
     try {
-        // 1. 組織のカレンダーIDと、シフトのイベントIDを取得
+        // 1. 組織の連携情報（カレンダーIDとリフレッシュトークン）を取得
         const { data: orgData } = await supabaseAdmin
             .from('organizations')
-            .select('google_calendar_id')
+            .select('google_calendar_id, google_refresh_token')
             .eq('id', organizationId)
             .single();
 
-        if (!orgData?.google_calendar_id) return; // カレンダー連携されていない場合はスキップ
+        if (!orgData?.google_calendar_id || !orgData?.google_refresh_token) {
+            return; // 連携されていない場合はスキップ
+        }
 
+        // 2. シフト情報を取得
         const { data: shiftData } = await supabaseAdmin
             .from('shifts')
-            .select('id, title, start_at, end_at, status, cancel_reason, google_event_id, rrule')
+            .select(`
+                id, title, start_at, end_at, status, cancel_reason, google_event_id, rrule,
+                shift_staffs ( user_id, ghost_staff_id )
+            `)
             .eq('id', shiftId)
             .single();
 
         if (!shiftData) return;
 
-        // 2. 削除（物理削除）の場合
+        // 3. OAuth クライアントの準備
+        const oauth2Client = getGoogleOAuthClient();
+        oauth2Client.setCredentials({ refresh_token: orgData.google_refresh_token });
+        const calendarApi = google.calendar({ version: 'v3', auth: oauth2Client });
+
+        // 4. 削除（物理削除）の場合
         if (action === 'delete') {
             if (shiftData.google_event_id) {
-                await callGasApi({
-                    action: 'delete_calendar_event',
-                    calendarId: orgData.google_calendar_id,
-                    eventId: shiftData.google_event_id
-                });
+                try {
+                    await calendarApi.events.delete({
+                        calendarId: orgData.google_calendar_id,
+                        eventId: shiftData.google_event_id
+                    });
+                } catch (e: unknown) {
+                    // ★修正: anyを排除。すでに削除されていた場合のエラー(404, 410)は無視
+                    const err = e as { code?: number };
+                    if (err.code !== 404 && err.code !== 410) throw e;
+                }
             }
             return;
         }
 
-        // 3. 作成・更新・キャンセルの場合（sync）
-        // ※今回はSaaS初期リリースとして、複雑なRRULEはカレンダー側に渡さず「単発の予定」として同期する前提のコードにしています
-        const res = await callGasApi({
-            action: 'sync_calendar_event',
-            calendarId: orgData.google_calendar_id,
-            eventId: shiftData.google_event_id || null, // 新規の場合はnull
-            title: shiftData.title || '予定',
-            startAt: shiftData.start_at,
-            endAt: shiftData.end_at,
-            isCancelled: shiftData.status === 'cancelled',
-            description: shiftData.cancel_reason ? `キャンセル理由: ${shiftData.cancel_reason}` : ''
-        });
+        // 5. 作成・更新・キャンセルの場合（sync）
+        
+        // 色分けのロジック: 担当スタッフのIDから 1〜11 の colorId を決定する
+        const staffIds = (shiftData.shift_staffs || []).map(s => s.user_id || s.ghost_staff_id).filter(Boolean);
+        let colorId: string | undefined = undefined;
+        
+        if (shiftData.status === 'cancelled') {
+            colorId = '8'; // キャンセルはグレー(8)に固定
+        } else if (staffIds.length > 0 && staffIds[0]) {
+            const staffId = staffIds[0];
+            let hash = 0;
+            for (let i = 0; i < staffId.length; i++) {
+                hash = staffId.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            colorId = ((Math.abs(hash) % 11) + 1).toString();
+        }
 
-        // 4. 新規作成でGASからeventIdが返ってきたらDBに保存
-        if (res.status === 'success' && res.eventId && !shiftData.google_event_id) {
+        const eventTitle = shiftData.status === 'cancelled' ? `【休】${shiftData.title}` : shiftData.title;
+        const description = shiftData.cancel_reason ? `キャンセル理由: ${shiftData.cancel_reason}` : '';
+
+        // ★修正: anyを排除し、Google API公式の型を使用
+        const eventBody: calendar_v3.Schema$Event = {
+            summary: eventTitle,
+            description: description,
+            start: { dateTime: shiftData.start_at, timeZone: 'Asia/Tokyo' },
+            end: { dateTime: shiftData.end_at, timeZone: 'Asia/Tokyo' },
+            colorId: colorId
+        };
+
+        let newEventId = shiftData.google_event_id;
+
+        if (shiftData.google_event_id) {
+            // 更新
+            try {
+                await calendarApi.events.update({
+                    calendarId: orgData.google_calendar_id,
+                    eventId: shiftData.google_event_id,
+                    requestBody: eventBody
+                });
+            } catch (e: unknown) {
+                // ★修正: anyを排除。万が一Google側で消されていた場合は新規作成にフォールバック
+                const err = e as { code?: number };
+                if (err.code === 404) {
+                    const res = await calendarApi.events.insert({
+                        calendarId: orgData.google_calendar_id,
+                        requestBody: eventBody
+                    });
+                    if (res.data.id) newEventId = res.data.id;
+                } else {
+                    throw e;
+                }
+            }
+        } else {
+            // 新規作成
+            const res = await calendarApi.events.insert({
+                calendarId: orgData.google_calendar_id,
+                requestBody: eventBody
+            });
+            if (res.data.id) newEventId = res.data.id;
+        }
+
+        // 6. 新しく作成されて EventID が発行・変更された場合はDBに保存
+        if (newEventId && newEventId !== shiftData.google_event_id) {
             await supabaseAdmin
                 .from('shifts')
-                .update({ google_event_id: res.eventId })
+                .update({ google_event_id: newEventId })
                 .eq('id', shiftId);
         }
+        
     } catch (error) {
-        console.error('Google Calendar Sync Error:', error);
-        // 同期エラーでシフト自体の保存を止めないため、ログ出力のみとする
+        console.error('Google Calendar Direct Sync Error:', error);
+        // エラーになってもシフト保存自体は止めない
     }
 }
-
 
 // ==========================================
 // 1. シフトの新規作成
@@ -140,8 +204,8 @@ export async function createShift(payload: ShiftPayload) {
             if (staffError) throw new Error(staffError.message);
         }
 
-        // ★ Googleカレンダーへ同期
-        await syncToGoogleCalendar(organizationId, shift.id, 'sync');
+        // API経由でGoogleカレンダーへ同期
+        await syncToGoogleCalendarDirect(organizationId, shift.id, 'sync');
 
         return { success: true, shiftId: shift.id };
     } catch (error) {
@@ -187,13 +251,13 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
             }
         }
 
-        // ★ Googleカレンダーへ同期（organizationIdが必要なため、既存データから取得）
+        // API経由でGoogleカレンダーへ同期
         let targetOrgId = organizationId;
         if (!targetOrgId) {
             const { data } = await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single();
             if (data) targetOrgId = data.organization_id;
         }
-        if (targetOrgId) await syncToGoogleCalendar(targetOrgId, shiftId, 'sync');
+        if (targetOrgId) await syncToGoogleCalendarDirect(targetOrgId, shiftId, 'sync');
 
         return { success: true };
     } catch (error) {
@@ -218,9 +282,9 @@ export async function cancelShift(shiftId: string, reason: string = '') {
 
         if (error) throw error;
 
-        // ★ Googleカレンダーへ同期
+        // API経由でGoogleカレンダーへ同期
         const { data } = await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single();
-        if (data) await syncToGoogleCalendar(data.organization_id, shiftId, 'sync');
+        if (data) await syncToGoogleCalendarDirect(data.organization_id, shiftId, 'sync');
 
         return { success: true };
     } catch (error) {

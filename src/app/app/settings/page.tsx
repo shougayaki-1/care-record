@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import { 
   Box, Typography, Paper, TextField, Button, Alert, CircularProgress, Stack, Divider, 
   Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow, Dialog, 
@@ -14,14 +14,15 @@ import ListAltIcon from '@mui/icons-material/ListAlt';
 import WarningIcon from '@mui/icons-material/Warning';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'; // 追加
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { deleteOrganization, leaveOrganization, getAuditLogs } from '@/app/actions/organization';
 import { useToast } from '@/components/ui/ToastProvider';
+import { getGoogleAuthUrlAction } from '@/app/actions/google';
 
 type AuditLog = {
     id: string;
@@ -42,20 +43,22 @@ type GasResponse = {
     shareMessage?: string;
 };
 
-export default function SettingsPage() {
+// URLパラメータを扱うコンポーネントはSuspenseで囲む必要があるため、中身を分離
+function SettingsContent() {
     const { currentOrg, loading: wsLoading, refreshWorkspace } = useWorkspace();
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { showToast } = useToast();
 
     const [tabIndex, setTabIndex] = useState(0);
     const [orgName, setOrgName] = useState('');
     const [googleFolderId, setGoogleFolderId] = useState<string | null>(null);
-    const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null); // 追加
+    const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null);
     const [driveUrl, setDriveUrl] = useState('');
     
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
-    const [connectingCal, setConnectingCal] = useState(false); // 追加
+    const [connectingCal, setConnectingCal] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
     const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -68,7 +71,6 @@ export default function SettingsPage() {
         if (!currentOrg) return;
         const { data } = await supabase
             .from('organizations')
-            // カレンダーIDも取得
             .select('name, google_folder_id, google_calendar_id')
             .eq('id', currentOrg.id)
             .single();
@@ -101,6 +103,21 @@ export default function SettingsPage() {
             fetchLogs();
         }
     }, [wsLoading, currentOrg, router, fetchOrgDetails, fetchLogs]);
+
+    // Google OAuth コールバック後のトースト表示
+    useEffect(() => {
+        const successMsg = searchParams.get('success');
+        const errorMsg = searchParams.get('error');
+        
+        if (successMsg === 'calendar_connected') {
+            showToast('Googleカレンダーを作成し連携しました！', 'success');
+            // パラメータを消去（replaceはエラーを防ぐため今回はシンプルにURLを上書き）
+            window.history.replaceState(null, '', '/app/settings');
+        } else if (errorMsg) {
+            showToast(`連携に失敗しました (${errorMsg})`, 'error');
+            window.history.replaceState(null, '', '/app/settings');
+        }
+    }, [searchParams, showToast]);
 
     const handleSave = async () => {
         if (!orgName.trim() || !currentOrg) return;
@@ -180,43 +197,29 @@ export default function SettingsPage() {
         }
     };
 
-    // ★追加: Googleカレンダー連携処理
+    // OAuth認証によるカレンダー作成（Googleへ遷移）
     const handleConnectCalendar = async () => {
         if (!currentOrg) return;
         setConnectingCal(true);
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            
-            const result = await callGasApi({
-                action: 'create_org_calendar',
-                orgName: orgName,
-                userEmail: user?.email
-            }) as GasResponse;
-
-            if (result.status === 'success' && result.calendarId) {
-                await supabase
-                    .from('organizations')
-                    .update({ google_calendar_id: result.calendarId })
-                    .eq('id', currentOrg.id);
-
-                setGoogleCalendarId(result.calendarId);
-                showToast('Googleカレンダーを作成し連携しました');
-            } else {
-                throw new Error(result.message || 'Unknown error');
-            }
+            const url = await getGoogleAuthUrlAction(currentOrg.id);
+            // Googleのログイン画面へリダイレクト
+            window.location.href = url;
         } catch (e) {
             console.error(e);
-            showToast('カレンダーの作成に失敗しました', 'error');
-        } finally {
+            showToast('認証URLの取得に失敗しました', 'error');
             setConnectingCal(false);
         }
     };
 
     const handleDisconnectCalendar = async () => {
-        if (!confirm('カレンダーの連携を解除しますか？（作成されたカレンダー自体はGoogleに残ります）')) return;
+        if (!confirm('カレンダーの連携を解除しますか？\n（作成されたカレンダー自体はGoogleに残り、トークンのみ破棄されます）')) return;
         if (!currentOrg) return;
         try {
-            await supabase.from('organizations').update({ google_calendar_id: null }).eq('id', currentOrg.id);
+            await supabase.from('organizations').update({ 
+                google_calendar_id: null,
+                google_refresh_token: null // トークンも破棄
+            }).eq('id', currentOrg.id);
             setGoogleCalendarId(null);
             showToast('連携を解除しました');
         } catch(e) { 
@@ -301,7 +304,7 @@ export default function SettingsPage() {
                                     <CloudQueueIcon color="primary" fontSize="large" />
                                     <Box>
                                         <Typography variant="h6" fontWeight="bold">Googleドライブ連携</Typography>
-                                        <Typography variant="body2" color="text.secondary">帳票の保存先フォルダを管理します</Typography>
+                                        <Typography variant="body2" color="text.secondary">帳票の保存先フォルダを管理します（GAS経由）</Typography>
                                     </Box>
                                     <Chip label={googleFolderId ? "連携済み" : "未連携"} color={googleFolderId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: 'auto' }} />
                                 </Stack>
@@ -343,13 +346,13 @@ export default function SettingsPage() {
                                 </Box>
                             </Paper>
 
-                            {/* ★追加: Googleカレンダー連携 */}
+                            {/* Googleカレンダー連携 (OAuth方式) */}
                             <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleCalendarId ? '#4caf50' : 'divider', bgcolor: googleCalendarId ? '#f1f8e9' : '#fff' }}>
                                 <Stack direction="row" alignItems="center" gap={2} mb={2}>
                                     <CalendarMonthIcon color="success" fontSize="large" />
                                     <Box>
                                         <Typography variant="h6" fontWeight="bold">Googleカレンダー連携</Typography>
-                                        <Typography variant="body2" color="text.secondary">シフトを自動でカレンダーに同期します</Typography>
+                                        <Typography variant="body2" color="text.secondary">事業所ごとの専用カレンダーを自動作成し、シフトを同期します（OAuth直接連携）</Typography>
                                     </Box>
                                     <Chip label={googleCalendarId ? "連携済み" : "未連携"} color={googleCalendarId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: 'auto' }} />
                                 </Stack>
@@ -373,10 +376,10 @@ export default function SettingsPage() {
                                         ) : (
                                             <Stack spacing={2}>
                                                 <Alert severity="info">
-                                                    ボタンを押すと、事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
+                                                    ボタンを押すとGoogleの認証画面へ移動します。許可すると、あなたのアカウントに事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
                                                 </Alert>
                                                 <Button variant="contained" color="success" onClick={handleConnectCalendar} disabled={connectingCal}>
-                                                    {connectingCal ? '作成中...' : 'シフト用カレンダーを作成・連携する'}
+                                                    {connectingCal ? 'Googleへ移動中...' : 'シフト用カレンダーを作成・連携する'}
                                                 </Button>
                                             </Stack>
                                         )
@@ -499,5 +502,14 @@ export default function SettingsPage() {
                 </DialogActions>
             </Dialog>
         </Box>
+    );
+}
+
+// メインのエクスポート（Suspenseでラップ）
+export default function SettingsPage() {
+    return (
+        <Suspense fallback={<Box p={5} textAlign="center"><CircularProgress /></Box>}>
+            <SettingsContent />
+        </Suspense>
     );
 }
