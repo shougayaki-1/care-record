@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Box, Typography, CircularProgress, Tabs, Tab, Stack, TextField, MenuItem, Button } from '@mui/material';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import GridOnIcon from '@mui/icons-material/GridOn'; // ★追加: マトリックス表用アイコン
 import FullCalendar from '@fullcalendar/react';
 import { EventInput } from '@fullcalendar/core';
 
@@ -15,6 +16,8 @@ import { pdf } from '@react-pdf/renderer';
 
 import { ShiftScheduleDocument, PdfShiftData } from '@/components/pdf/ShiftScheduleDocument';
 import { ShiftCalendarDocument, PdfCalendarEvent, PdfCalendarDay } from '@/components/pdf/ShiftCalendarDocument';
+// ★追加: マトリックス表コンポーネントをインポート
+import { ShiftMatrixDocument, MatrixStaffData } from '@/components/pdf/ShiftMatrixDocument';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 
@@ -72,7 +75,6 @@ export default function ShiftListPage() {
         try {
             const start = new Date(); start.setMonth(start.getMonth() - 1);
             const end = new Date(); end.setMonth(end.getMonth() + 2);
-            // 新設計の getShifts は実体化された単発シフトのみを返すため、非常にシンプルに取得できます
             const shifts = await getShifts(currentOrg.id, start.toISOString(), end.toISOString());
             setRawShifts((shifts as unknown as FetchedShiftData[]) || []);
         } catch (error) {
@@ -112,7 +114,6 @@ export default function ShiftListPage() {
             return true;
         });
 
-        // 共通関数で変換
         setEvents(convertToCalendarEvents(filtered, true));
     }, [rawShifts, tabIndex, selectedStaffId, selectedClientId, currentStaffId, currentUserId]);
 
@@ -198,6 +199,68 @@ export default function ShiftListPage() {
         }
     };
 
+    // ★追加: スタッフ横断（マトリックス）PDFの作成処理
+    const handleDownloadMatrixPdf = async () => {
+        if (!calendarRef.current) return;
+        setPdfGenerating(true);
+
+        try {
+            const api = calendarRef.current.getApi();
+            const currentMonthStart = api.view.currentStart; 
+            const year = currentMonthStart.getFullYear();
+            const month = currentMonthStart.getMonth();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const monthStr = `${year}年 ${month + 1}月`;
+
+            const docTitle = `全体シフト表 (スタッフ横断)`;
+            const fileName = `全体シフト表_${year}${String(month+1).padStart(2,'0')}.pdf`;
+
+            const matrixMap = new Map<string, MatrixStaffData>();
+            staffs.forEach(s => matrixMap.set(s.id, { staffName: s.name, shiftsByDay: {} }));
+
+            rawShifts.forEach(shift => {
+                if (shift.status === 'cancelled') return;
+                const start = new Date(shift.start_at);
+                if (start.getFullYear() !== year || start.getMonth() !== month) return;
+                
+                const day = start.getDate();
+                const end = new Date(shift.end_at);
+                const timeStr = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}\n~\n${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+
+                shift.shift_staffs.forEach(ss => {
+                    const sData = matrixMap.get(ss.staff_id);
+                    if (sData) {
+                        if (!sData.shiftsByDay[day]) sData.shiftsByDay[day] = [];
+                        sData.shiftsByDay[day].push(timeStr);
+                    }
+                });
+            });
+
+            // 名前順にソートして配列化
+            const staffDataArray = Array.from(matrixMap.values()).sort((a, b) => a.staffName.localeCompare(b.staffName));
+
+            const blob = await pdf(
+                <ShiftMatrixDocument 
+                    title={docTitle} 
+                    monthStr={monthStr} 
+                    daysInMonth={daysInMonth} 
+                    staffData={staffDataArray} 
+                />
+            ).toBlob();
+
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            link.click();
+
+        } catch (error) {
+            console.error(error);
+            showToast('PDFの生成に失敗しました', 'error');
+        } finally {
+            setPdfGenerating(false);
+        }
+    };
+
     if (wsLoading || !currentOrg) return null;
 
     return (
@@ -212,7 +275,7 @@ export default function ShiftListPage() {
             </Box>
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: '#f5f5f5' }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+                <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={2} spacing={2}>
                     <Box>
                         {tabIndex === 1 && (
                             <TextField select size="small" label="スタッフを選択" value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} sx={{ minWidth: 200, bgcolor: 'white' }}>
@@ -227,9 +290,16 @@ export default function ShiftListPage() {
                             </TextField>
                         )}
                     </Box>
-                    <Button variant="outlined" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleDownloadPdf} disabled={pdfGenerating || loading} sx={{ bgcolor: 'white' }}>
-                        {pdfGenerating ? '作成中...' : 'PDFで出力'}
-                    </Button>
+                    <Stack direction="row" spacing={1}>
+                        {tabIndex === 1 && selectedStaffId === 'all' && (
+                            <Button variant="outlined" color="primary" startIcon={<GridOnIcon />} onClick={handleDownloadMatrixPdf} disabled={pdfGenerating || loading} sx={{ bgcolor: 'white' }}>
+                                {pdfGenerating ? '作成中...' : '全体シフト表(マトリックス) PDF'}
+                            </Button>
+                        )}
+                        <Button variant="outlined" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleDownloadPdf} disabled={pdfGenerating || loading} sx={{ bgcolor: 'white' }}>
+                            {pdfGenerating ? '作成中...' : '表示中の形式でPDF出力'}
+                        </Button>
+                    </Stack>
                 </Stack>
 
                 {loading ? (

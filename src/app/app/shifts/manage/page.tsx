@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Box, Typography, Paper, CircularProgress, Tabs, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Button, Chip, IconButton, Tooltip, Stack, TextField } from '@mui/material';
+import { Box, Typography, Paper, CircularProgress, Tabs, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Button, Chip, IconButton, Tooltip, Stack, TextField, Checkbox } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -12,8 +12,8 @@ import { EventResizeDoneArg } from '@fullcalendar/interaction';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
-// ★修正: deleteShiftCompletely をインポートに追加
-import { getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely, ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, generateShiftsForMonth, ShiftPatternPayload } from '@/app/actions/shift';
+// ★追加: deleteShiftsBulk をインポート
+import { getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely, deleteShiftsBulk, ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, generateShiftsForMonth, ShiftPatternPayload } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { ShiftFormModal, ClientData, StaffData, ShiftData } from '@/components/shifts/ShiftFormModal';
 import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
@@ -45,6 +45,9 @@ export default function ShiftManagePage() {
     const [patternModalOpen, setPatternModalOpen] = useState(false);
     const [selectedShift, setSelectedShift] = useState<ShiftData | null>(null);
 
+    // ★追加: 一括削除用のState
+    const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
+
     const fetchMasterData = useCallback(async () => {
         if (!currentOrg) return;
         try {
@@ -75,6 +78,9 @@ export default function ShiftManagePage() {
             const fetchedShifts = await getShifts(currentOrg.id, start.toISOString(), end.toISOString());
             const typedShifts = (fetchedShifts as unknown as FetchedShiftData[]) || [];
             
+            // 一覧表示用にソート（直近から）
+            typedShifts.sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+            
             setRawShifts(typedShifts);
             setEvents(convertToCalendarEvents(typedShifts, false));
 
@@ -89,6 +95,7 @@ export default function ShiftManagePage() {
         } finally { 
             setInitialLoading(false); 
             setIsFetching(false);
+            setSelectedShiftIds([]); // 取得し直したら選択解除
         }
     }, [currentOrg, showToast]);
 
@@ -123,7 +130,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // ★追加: 誤登録シフトの完全削除ハンドラ
     const handleDeleteShift = async (shiftId: string) => {
         try {
             await deleteShiftCompletely(shiftId);
@@ -132,6 +138,24 @@ export default function ShiftManagePage() {
         } catch(error) {
             console.error(error);
             showToast('削除に失敗しました', 'error'); 
+        }
+    };
+
+    // ★追加: 一括削除処理
+    const handleBulkDeleteShifts = async () => {
+        if (selectedShiftIds.length === 0) return;
+        if (!confirm(`${selectedShiftIds.length}件のシフトを完全に削除しますか？\n（※Googleカレンダーからも削除されます）`)) return;
+
+        setGenerating(true);
+        try {
+            await deleteShiftsBulk(selectedShiftIds);
+            showToast('一括削除しました');
+            fetchData(true);
+        } catch (error) {
+            console.error(error);
+            showToast('一括削除に失敗しました', 'error');
+        } finally {
+            setGenerating(false);
         }
     };
 
@@ -196,6 +220,20 @@ export default function ShiftManagePage() {
             desc += days.join(', ');
         }
         return desc;
+    };
+
+    // ★追加: チェックボックス操作
+    const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.checked) {
+            // 一覧に表示されている分だけ（ここでは100件まで表示とする）
+            setSelectedShiftIds(rawShifts.slice(0, 100).map(s => s.id));
+        } else {
+            setSelectedShiftIds([]);
+        }
+    };
+    
+    const handleSelectOne = (id: string) => {
+        setSelectedShiftIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
     };
 
     if (wsLoading || !currentOrg) return null;
@@ -268,11 +306,22 @@ export default function ShiftManagePage() {
                                 </Table>
                             </TableContainer>
 
-                            <Typography variant="subtitle1" fontWeight="bold" mb={2}>展開済みの単発シフト一覧 (直近の予定)</Typography>
+                            {/* ★修正: 一括削除機能付きの単発シフト一覧 */}
+                            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+                                <Typography variant="subtitle1" fontWeight="bold">展開済みの単発シフト一覧 (直近の予定100件)</Typography>
+                                {selectedShiftIds.length > 0 && (
+                                    <Button variant="contained" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDeleteShifts} disabled={generating} size="small" sx={{ boxShadow: 'none' }}>
+                                        選択した {selectedShiftIds.length} 件を削除
+                                    </Button>
+                                )}
+                            </Stack>
                             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3 }}>
                                 <Table>
                                     <TableHead sx={{ bgcolor: '#F0F5FF' }}>
                                         <TableRow>
+                                            <TableCell padding="checkbox">
+                                                <Checkbox onChange={handleSelectAll} checked={selectedShiftIds.length > 0 && selectedShiftIds.length === Math.min(rawShifts.length, 100)} />
+                                            </TableCell>
                                             <TableCell sx={{ fontWeight: 'bold' }}>利用者</TableCell>
                                             <TableCell sx={{ fontWeight: 'bold' }}>担当スタッフ</TableCell>
                                             <TableCell sx={{ fontWeight: 'bold' }}>時間</TableCell>
@@ -282,10 +331,13 @@ export default function ShiftManagePage() {
                                     </TableHead>
                                     <TableBody>
                                         {rawShifts.length === 0 ? (
-                                            <TableRow><TableCell colSpan={5} align="center" sx={{ py: 5, color: '#666' }}>登録されているシフトはありません</TableCell></TableRow>
+                                            <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: '#666' }}>登録されているシフトはありません</TableCell></TableRow>
                                         ) : (
-                                            rawShifts.slice(0, 50).map((shift) => (
-                                                <TableRow key={shift.id} hover sx={{ opacity: shift.status === 'cancelled' ? 0.6 : 1 }}>
+                                            rawShifts.slice(0, 100).map((shift) => (
+                                                <TableRow key={shift.id} hover sx={{ opacity: shift.status === 'cancelled' ? 0.6 : 1 }} selected={selectedShiftIds.includes(shift.id)}>
+                                                    <TableCell padding="checkbox">
+                                                        <Checkbox checked={selectedShiftIds.includes(shift.id)} onChange={() => handleSelectOne(shift.id)} />
+                                                    </TableCell>
                                                     <TableCell sx={{ fontWeight: 'bold' }}>{shift.clients?.name}</TableCell>
                                                     <TableCell>{shift.shift_staffs.map(s => s.staffs?.name).filter(Boolean).join(', ')}</TableCell>
                                                     <TableCell>{new Date(shift.start_at).toLocaleDateString()} {new Date(shift.start_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 〜 {new Date(shift.end_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</TableCell>
@@ -333,7 +385,7 @@ export default function ShiftManagePage() {
                 onClose={() => setShiftModalOpen(false)} 
                 onSave={handleSaveShift} 
                 onToggleCancel={handleToggleCancel} 
-                onDelete={handleDeleteShift} // ★追加: 削除ハンドラを渡す
+                onDelete={handleDeleteShift}
                 clients={clients} 
                 staffs={staffs} 
                 organizationId={currentOrg.id} 
