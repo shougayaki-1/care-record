@@ -26,8 +26,8 @@ export default function ShiftManagePage() {
     const { showToast } = useToast();
     const calendarRef = useRef<FullCalendar>(null);
 
-    const [initialLoading, setInitialLoading] = useState(true); // 初回ロード用
-    const [isFetching, setIsFetching] = useState(false);        // バックグラウンド更新用
+    const [initialLoading, setInitialLoading] = useState(true); 
+    const [isFetching, setIsFetching] = useState(false);        
     const [generating, setGenerating] = useState(false);
     
     const [rawShifts, setRawShifts] = useState<FetchedShiftData[]>([]);
@@ -48,31 +48,40 @@ export default function ShiftManagePage() {
         if (!currentOrg) return;
         try {
             const { data: c } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
-            if (c) setClients(c);
-            const { data: s } = await supabase.from('staffs').select('id, name').eq('organization_id', currentOrg.id);
-            if (s) setStaffs(s);
+            if (c) setClients(c as ClientData[]);
+
+            const { data: s } = await supabase.from('staffs').select('id, name, user_id').eq('organization_id', currentOrg.id);
+            if (s) setStaffs(s.map(item => ({ id: item.id, name: item.name, type: item.user_id ? 'member' : 'ghost' })));
         } catch (error) { 
             console.error(error); 
         }
     }, [currentOrg]);
 
-    // 引数 isBackground を追加：D&Dや保存時は画面を白くせず裏で更新する
     const fetchData = useCallback(async (isBackground = false) => {
         if (!currentOrg) return;
         if (!isBackground) setInitialLoading(true);
         setIsFetching(true);
-        
+
+        const calendarApi = calendarRef.current?.getApi();
+        const currentCalendarDate = calendarApi?.getDate();
+
         try {
             const fetchedPatterns = await getShiftPatterns(currentOrg.id);
             setPatterns((fetchedPatterns as unknown as FetchedPatternData[]) || []);
 
             const start = new Date(); start.setMonth(start.getMonth() - 2);
-            const end = new Date(); end.setMonth(end.getMonth() + 3);
+            const end = new Date(); end.setMonth(end.getMonth() + 6);
             const fetchedShifts = await getShifts(currentOrg.id, start.toISOString(), end.toISOString());
             const typedShifts = (fetchedShifts as unknown as FetchedShiftData[]) || [];
             
             setRawShifts(typedShifts);
             setEvents(convertToCalendarEvents(typedShifts, false));
+
+            if (calendarApi && currentCalendarDate) {
+                setTimeout(() => {
+                    calendarApi.gotoDate(currentCalendarDate);
+                }, 10);
+            }
         } catch (error) { 
             console.error(error); 
             showToast('データの取得に失敗しました', 'error'); 
@@ -83,7 +92,10 @@ export default function ShiftManagePage() {
     }, [currentOrg, showToast]);
 
     useEffect(() => {
-        if (!wsLoading && currentOrg) { fetchMasterData(); fetchData(); }
+        if (!wsLoading && currentOrg) {
+            fetchMasterData();
+            fetchData();
+        }
     }, [wsLoading, currentOrg, fetchMasterData, fetchData]);
 
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
@@ -91,7 +103,7 @@ export default function ShiftManagePage() {
             if (shiftId) await updateShift(shiftId, payload);
             else await createShift(payload);
             showToast('保存しました'); 
-            fetchData(true); // 裏側でカレンダーを更新（表示月は維持される）
+            fetchData(true); 
         } catch(error) { 
             console.error(error);
             showToast('保存に失敗しました', 'error'); 
@@ -109,17 +121,19 @@ export default function ShiftManagePage() {
         }
     };
 
+    // ★修正箇所：フィードバックの通り、D&D後はfetchDataを呼ばない
     const handleEventChange = async (info: EventDropArg | EventResizeDoneArg) => {
         const shiftId = info.event.extendedProps.shiftId;
         const start = info.event.start?.toISOString() || '';
         const end = info.event.end ? info.event.end.toISOString() : new Date(info.event.start!.getTime() + 3600000).toISOString();
+        
         try {
             await updateShiftTimeOnly(shiftId, start, end);
-            showToast('時間を変更しました'); 
-            fetchData(true); // D&D成功時も裏側でデータ同期を行う
+            showToast('時間を変更しました');
+            // fetchData(true) を削除
         } catch (error) { 
             console.error(error);
-            info.revert(); 
+            info.revert(); // 失敗時だけ元の位置に戻す
             showToast('変更に失敗しました', 'error'); 
         }
     };
@@ -189,18 +203,16 @@ export default function ShiftManagePage() {
             </Box>
             
             <Box sx={{ position: 'relative', flexGrow: 1, p: 3, bgcolor: '#f5f5f5', overflowY: 'auto' }}>
+                {isFetching && !initialLoading && (
+                    <Box sx={{ position: 'absolute', top: 16, right: 30, zIndex: 10 }}>
+                        <CircularProgress size={24} />
+                    </Box>
+                )}
+
                 {initialLoading ? (
                     <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>
                 ) : (
                     <>
-                        {/* 裏側でデータ更新中の時は、画面右上に小さくインジケーターを表示 */}
-                        {isFetching && (
-                            <Box sx={{ position: 'absolute', top: 20, right: 30, zIndex: 10 }}>
-                                <CircularProgress size={20} />
-                            </Box>
-                        )}
-
-                        {/* タブ切り替え時にコンポーネントを破棄せず、display: none で隠すことでカレンダーの「月」状態を維持する */}
                         <Box sx={{ display: tabIndex === 0 ? 'block' : 'none' }}>
                             <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: '#F0F5FF', borderColor: '#D0E0FF' }}>
                                 <Typography variant="body2">登録したひな形から、対象月のカレンダーにシフトを一括で実体化（展開）させます。</Typography>
