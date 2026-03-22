@@ -14,6 +14,7 @@ import ListAltIcon from '@mui/icons-material/ListAlt';
 import WarningIcon from '@mui/icons-material/Warning';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'; // 追加
 
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
@@ -22,14 +23,23 @@ import { callGasApi } from '@/app/actions/gas';
 import { deleteOrganization, leaveOrganization, getAuditLogs } from '@/app/actions/organization';
 import { useToast } from '@/components/ui/ToastProvider';
 
-// 監査ログデータの型定義
 type AuditLog = {
     id: string;
     created_at: string;
     action_type: string;
     target_resource: string | null;
     details: Record<string, unknown> | null;
-    profiles: { name: string } | null; // Joinされたプロフィール情報
+    profiles: { name: string } | null; 
+};
+
+type GasResponse = {
+    status: string;
+    folderId?: string;
+    folderUrl?: string;
+    calendarId?: string;
+    message?: string;
+    shareStatus?: string;
+    shareMessage?: string;
 };
 
 export default function SettingsPage() {
@@ -37,20 +47,19 @@ export default function SettingsPage() {
     const router = useRouter();
     const { showToast } = useToast();
 
-    // State
     const [tabIndex, setTabIndex] = useState(0);
     const [orgName, setOrgName] = useState('');
     const [googleFolderId, setGoogleFolderId] = useState<string | null>(null);
+    const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null); // 追加
     const [driveUrl, setDriveUrl] = useState('');
     
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
+    const [connectingCal, setConnectingCal] = useState(false); // 追加
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
-    // ログの型を具体的に指定
     const [logs, setLogs] = useState<AuditLog[]>([]);
 
-    // Dialogs
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
     const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
     const [confirmInput, setConfirmInput] = useState('');
@@ -59,13 +68,15 @@ export default function SettingsPage() {
         if (!currentOrg) return;
         const { data } = await supabase
             .from('organizations')
-            .select('name, google_folder_id')
+            // カレンダーIDも取得
+            .select('name, google_folder_id, google_calendar_id')
             .eq('id', currentOrg.id)
             .single();
         
         if (data) {
             setOrgName(data.name);
             setGoogleFolderId(data.google_folder_id);
+            setGoogleCalendarId(data.google_calendar_id);
             if(data.google_folder_id) {
                 setDriveUrl(`https://drive.google.com/drive/folders/${data.google_folder_id}`);
             }
@@ -76,7 +87,6 @@ export default function SettingsPage() {
         if (!currentOrg) return;
         try {
             const data = await getAuditLogs(currentOrg.id);
-            // 取得データをAuditLog[]型として扱う
             setLogs((data as unknown as AuditLog[]) || []);
         } catch (e) { console.error(e); }
     }, [currentOrg]);
@@ -100,7 +110,6 @@ export default function SettingsPage() {
             const { error } = await supabase.from('organizations').update({ name: orgName }).eq('id', currentOrg.id);
             if (error) throw error;
             
-            // GAS側のフォルダ名更新を試みる
             if (googleFolderId) {
                 const { data: { user } } = await supabase.auth.getUser();
                 await callGasApi({
@@ -135,9 +144,9 @@ export default function SettingsPage() {
                 orgId: currentOrg.id,
                 userEmail: user?.email,
                 currentFolderId: googleFolderId
-            });
+            }) as GasResponse;
 
-            if (result.status === 'success') {
+            if (result.status === 'success' && result.folderId) {
                 const newFolderId = result.folderId;
                 await supabase
                     .from('organizations')
@@ -145,14 +154,10 @@ export default function SettingsPage() {
                     .eq('id', currentOrg.id);
 
                 setGoogleFolderId(newFolderId);
-                setDriveUrl(result.folderUrl);
+                if (result.folderUrl) setDriveUrl(result.folderUrl);
                 showToast('Googleドライブと連携しました');
-
-                if (result.shareStatus === 'failed') {
-                    alert(`フォルダは作成されましたが、権限付与に失敗しました。\nGoogleアカウントではない可能性があります。\nフォルダURLから手動でアクセス権を確認してください。\n\n${result.shareMessage}`);
-                }
             } else {
-                throw new Error(result.message);
+                throw new Error(result.message || 'Unknown error');
             }
         } catch (e) {
             console.error(e);
@@ -168,6 +173,51 @@ export default function SettingsPage() {
         try {
             await supabase.from('organizations').update({ google_folder_id: null }).eq('id', currentOrg.id);
             setGoogleFolderId(null);
+            showToast('連携を解除しました');
+        } catch(e) { 
+            console.error(e);
+            showToast('解除に失敗しました', 'error'); 
+        }
+    };
+
+    // ★追加: Googleカレンダー連携処理
+    const handleConnectCalendar = async () => {
+        if (!currentOrg) return;
+        setConnectingCal(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            
+            const result = await callGasApi({
+                action: 'create_org_calendar',
+                orgName: orgName,
+                userEmail: user?.email
+            }) as GasResponse;
+
+            if (result.status === 'success' && result.calendarId) {
+                await supabase
+                    .from('organizations')
+                    .update({ google_calendar_id: result.calendarId })
+                    .eq('id', currentOrg.id);
+
+                setGoogleCalendarId(result.calendarId);
+                showToast('Googleカレンダーを作成し連携しました');
+            } else {
+                throw new Error(result.message || 'Unknown error');
+            }
+        } catch (e) {
+            console.error(e);
+            showToast('カレンダーの作成に失敗しました', 'error');
+        } finally {
+            setConnectingCal(false);
+        }
+    };
+
+    const handleDisconnectCalendar = async () => {
+        if (!confirm('カレンダーの連携を解除しますか？（作成されたカレンダー自体はGoogleに残ります）')) return;
+        if (!currentOrg) return;
+        try {
+            await supabase.from('organizations').update({ google_calendar_id: null }).eq('id', currentOrg.id);
+            setGoogleCalendarId(null);
             showToast('連携を解除しました');
         } catch(e) { 
             console.error(e);
@@ -293,6 +343,51 @@ export default function SettingsPage() {
                                 </Box>
                             </Paper>
 
+                            {/* ★追加: Googleカレンダー連携 */}
+                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleCalendarId ? '#4caf50' : 'divider', bgcolor: googleCalendarId ? '#f1f8e9' : '#fff' }}>
+                                <Stack direction="row" alignItems="center" gap={2} mb={2}>
+                                    <CalendarMonthIcon color="success" fontSize="large" />
+                                    <Box>
+                                        <Typography variant="h6" fontWeight="bold">Googleカレンダー連携</Typography>
+                                        <Typography variant="body2" color="text.secondary">シフトを自動でカレンダーに同期します</Typography>
+                                    </Box>
+                                    <Chip label={googleCalendarId ? "連携済み" : "未連携"} color={googleCalendarId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: 'auto' }} />
+                                </Stack>
+                                
+                                <Box sx={{ mt: 2, p: 2, bgcolor: '#fff', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                                    {isOwner ? (
+                                        googleCalendarId ? (
+                                            <Stack spacing={2}>
+                                                <Typography variant="body2">
+                                                    連携中のカレンダーID: <code>{googleCalendarId}</code>
+                                                </Typography>
+                                                <Typography variant="caption" color="text.secondary">
+                                                    ※Googleカレンダーアプリから「CareRecord_{orgName}」という名前のカレンダーを確認してください。
+                                                </Typography>
+                                                <Stack direction="row" spacing={2}>
+                                                    <Button color="error" startIcon={<LinkOffIcon />} onClick={handleDisconnectCalendar}>
+                                                        連携を解除
+                                                    </Button>
+                                                </Stack>
+                                            </Stack>
+                                        ) : (
+                                            <Stack spacing={2}>
+                                                <Alert severity="info">
+                                                    ボタンを押すと、事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
+                                                </Alert>
+                                                <Button variant="contained" color="success" onClick={handleConnectCalendar} disabled={connectingCal}>
+                                                    {connectingCal ? '作成中...' : 'シフト用カレンダーを作成・連携する'}
+                                                </Button>
+                                            </Stack>
+                                        )
+                                    ) : (
+                                        <Typography variant="caption" color="text.secondary">
+                                            管理者のみ設定を変更できます。
+                                        </Typography>
+                                    )}
+                                </Box>
+                            </Paper>
+
                             {/* 危険な設定 */}
                             <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.light', bgcolor: '#fff5f5' }}>
                                 <Stack direction="row" alignItems="center" gap={1} mb={2}>
@@ -362,7 +457,6 @@ export default function SettingsPage() {
                 </Box>
             </Box>
 
-            {/* 削除確認ダイアログ */}
             <Dialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)}>
                 <DialogTitle>事業所の完全削除</DialogTitle>
                 <DialogContent>
@@ -391,7 +485,6 @@ export default function SettingsPage() {
                 </DialogActions>
             </Dialog>
 
-            {/* 脱退確認ダイアログ */}
             <Dialog open={openLeaveDialog} onClose={() => setOpenLeaveDialog(false)}>
                 <DialogTitle>脱退の確認</DialogTitle>
                 <DialogContent>

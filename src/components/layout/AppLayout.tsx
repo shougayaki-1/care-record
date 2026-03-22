@@ -23,6 +23,7 @@ import BusinessIcon from '@mui/icons-material/Business';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import AssessmentIcon from '@mui/icons-material/Assessment';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -269,6 +270,25 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
           </ListItem>
         </List>
 
+        <Typography sx={categoryStyle}>シフト</Typography>
+        <List disablePadding>
+          <ListItem disablePadding>
+            <ListItemButton onClick={() => handleNav('/app/shifts/list')} sx={itemStyle(isActive('/app/shifts/list'))}>
+              <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
+              <ListItemText primary="シフト一覧" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+            </ListItemButton>
+          </ListItem>
+          
+          {isAdmin && (
+            <ListItem disablePadding>
+              <ListItemButton onClick={() => handleNav('/app/shifts/manage')} sx={itemStyle(isActive('/app/shifts/manage'))}>
+                <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
+                <ListItemText primary="全体シフト管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+              </ListItemButton>
+            </ListItem>
+          )}
+        </List>
+
         {isAdmin && (
           <>
             <Box onClick={() => setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: 'pointer', '&:hover': { color: '#060607' } }}>
@@ -319,6 +339,12 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
                 <ListItemButton onClick={() => handleNav('/app/staff')} sx={itemStyle(isActive('/app/staff'))}>
                   <ListItemIcon><BadgeIcon fontSize="small" /></ListItemIcon>
                   <ListItemText primary="スタッフ管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+                </ListItemButton>
+              </ListItem>
+               <ListItem disablePadding>
+                <ListItemButton onClick={() => handleNav('/app/statistics')} sx={itemStyle(isActive('/app/statistics'))}>
+                  <ListItemIcon><AssessmentIcon fontSize="small" /></ListItemIcon>
+                  <ListItemText primary="統計・予実管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
                 </ListItemButton>
               </ListItem>
             </List>
