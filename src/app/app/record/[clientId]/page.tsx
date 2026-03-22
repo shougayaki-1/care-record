@@ -76,12 +76,10 @@ type FormAnswers = Record<string, string | number | boolean | string[]>;
 type HelperProfile = { id: string; name: string };
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 
-// 型定義追加：シフトから取得するスタッフ情報
+// シフトスタッフ取得用
 type ShiftStaffData = {
-    user_id: string | null;
-    ghost_staff_id: string | null;
-    profiles: { name: string } | null;
-    ghost_staffs: { name: string } | null;
+    staff_id: string;
+    staffs: { name: string } | null;
 };
 
 export default function RecordPage() {
@@ -91,17 +89,18 @@ export default function RecordPage() {
   const { showToast } = useToast();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   
-  // URLパラメータの取得
   const paramReportId = searchParams.get('reportId');
   const shiftId = searchParams.get('shiftId');
 
-  // 動的に変化する実際の reportId を管理（シフトからの連携時に自動発見したIDもここに入れる）
   const [currentReportId, setCurrentReportId] = useState<string | null>(paramReportId);
 
   const [clientName, setClientName] = useState('');
   const [template, setTemplate] = useState<FormItem[]>([]);
   const [answers, setAnswers] = useState<FormAnswers>({});
+  
+  // 選択肢用
   const [selectableStaffs, setSelectableStaffs] = useState<HelperProfile[]>([]);
+  // 選択中
   const [selectedHelpers, setSelectedHelpers] = useState<string[]>([]);
   
   const [startDateTime, setStartDateTime] = useState('');
@@ -140,28 +139,22 @@ export default function RecordPage() {
         setTemplate(schema.filter(i => i.id !== 'service_time' && i.id !== 'travel_time'));
       }
 
-      let allStaffs: HelperProfile[] = [];
-      const { data: members } = await supabase.from('organization_members').select('user_id').eq('organization_id', currentOrg.id);
-      if (members) {
-        const userIds = members.map((m) => m.user_id);
-        const { data: profiles } = await supabase.from('profiles').select('id, name').in('id', userIds);
-        if(profiles) allStaffs = [...allStaffs, ...profiles];
-      }
-      const { data: ghosts } = await supabase.from('ghost_staffs').select('id, name').eq('organization_id', currentOrg.id);
-      if(ghosts) allStaffs = [...allStaffs, ...ghosts];
+      // ★修正: 担当スタッフの選択肢を「スタッフ(名簿)管理(staffsテーブル)」から取得するように変更
+      const { data: staffsData } = await supabase
+        .from('staffs')
+        .select('id, name, user_id')
+        .eq('organization_id', currentOrg.id)
+        .order('name', { ascending: true });
 
-      const { data: assignments } = await supabase.from('assignments').select('helper_id, ghost_staff_id').eq('client_id', clientId);
-      let finalStaffList = allStaffs;
-      if (assignments && assignments.length > 0) {
-          const validIds = new Set(assignments.map(a => a.helper_id || a.ghost_staff_id).filter((id): id is string => id !== null));
-          if (validIds.size > 0) finalStaffList = allStaffs.filter(s => validIds.has(s.id));
-      }
-      setSelectableStaffs(finalStaffList);
+      const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id }));
+      setSelectableStaffs(allStaffs);
 
-      // ★修正：既存の記録もシフト指定もない場合のみ、自分を初期セット
+      // 新規入力（記録なし＆シフトからでもない）場合、自分の名簿アカウントを自動選択
       if (!currentReportId && !shiftId && user) {
-        const me = finalStaffList.find((p) => p.id === user.id);
-        if (me) setSelectedHelpers([me.name]);
+        const myStaffRecord = allStaffs.find(s => s.user_id === user.id);
+        if (myStaffRecord) {
+            setSelectedHelpers([myStaffRecord.name]);
+        }
       }
     } catch (error) { console.error('Error fetching base data:', error); }
   }, [clientId, currentOrg, currentReportId, shiftId]);
@@ -197,9 +190,7 @@ export default function RecordPage() {
     const init = async () => {
       let targetId = paramReportId;
 
-      // ★追加：URLにシフトIDがある場合の処理
       if (shiftId && !paramReportId) {
-          // 1. このシフトに紐づく記録がすでに存在するかチェック
           const { data: existingReport } = await supabase
               .from('reports')
               .select('id')
@@ -207,17 +198,21 @@ export default function RecordPage() {
               .maybeSingle();
           
           if (existingReport) {
-              // すでに記録がある場合は、それを開く（二重入力防止）
               targetId = existingReport.id;
               setCurrentReportId(targetId);
-              // URLも書き換えておく
               router.replace(`/app/record/${clientId}?reportId=${targetId}`);
               showToast('このシフトには既に記録が存在します。該当する記録を開きました。', 'info');
           } else {
-              // 2. 記録が存在しない場合、シフトの「時間」と「担当者」を取得して初期値にセット（プレフィル）
+              // ★修正: シフトから「時間」と「名簿スタッフ名」を取得して自動入力
               const { data: shiftData } = await supabase
                   .from('shifts')
-                  .select('start_at, end_at, shift_staffs(user_id, ghost_staff_id, profiles(name), ghost_staffs(name))')
+                  .select(`
+                      start_at, end_at, 
+                      shift_staffs (
+                          staff_id, 
+                          staffs (name)
+                      )
+                  `)
                   .eq('id', shiftId)
                   .single();
               
@@ -225,20 +220,29 @@ export default function RecordPage() {
                   setStartDateTime(formatDatetimeLocal(new Date(shiftData.start_at)));
                   setEndDateTime(formatDatetimeLocal(new Date(shiftData.end_at)));
                   
+                  // 提供時間(h)も時間差から自動計算してプレフィル
+                  const sTime = new Date(shiftData.start_at).getTime();
+                  const eTime = new Date(shiftData.end_at).getTime();
+                  if (eTime > sTime) {
+                      const diffHours = (eTime - sTime) / (1000 * 60 * 60);
+                      setServiceTime(diffHours.toString());
+                  }
+
                   const staffNames: string[] = [];
                   const typedShiftStaffs = (shiftData.shift_staffs as unknown as ShiftStaffData[]) || [];
                   
                   typedShiftStaffs.forEach(s => {
-                      if (s.profiles?.name) staffNames.push(s.profiles.name);
-                      if (s.ghost_staffs?.name) staffNames.push(s.ghost_staffs.name);
+                      // 配列で返ってくるケースも考慮
+                      const name = Array.isArray(s.staffs) ? s.staffs[0]?.name : s.staffs?.name;
+                      if (name) staffNames.push(name);
                   });
+
                   setSelectedHelpers(staffNames);
                   setCurrentStatus('draft');
               }
           }
       }
 
-      // 何も指定がない完全新規の場合
       if (!targetId && !shiftId) {
         const now = new Date();
         setStartDateTime(formatDatetimeLocal(now));
@@ -286,8 +290,6 @@ export default function RecordPage() {
         if (error) throw error;
         
         await supabase.from('report_images').insert({ report_id: currentReportId, storage_path: path });
-        
-        // リロードして反映
         await loadExistingData(currentReportId);
         showToast('画像をアップロードしました');
     } catch(e) {
@@ -335,7 +337,7 @@ export default function RecordPage() {
         start_at: new Date(startDateTime).toISOString(),
         end_at: new Date(endDateTime).toISOString(),
         status: status,
-        shift_id: shiftId || null, // ★追加：シフトから作成された場合はヒモ付ける
+        shift_id: shiftId || null, 
         updated_at: new Date().toISOString()
       };
 
@@ -450,12 +452,12 @@ export default function RecordPage() {
                         options={Array.from(new Set(selectableStaffs.map(h => h.name)))}
                         value={selectedHelpers}
                         onChange={(_, v) => {
-                        setSelectedHelpers(v as string[]);
-                        setIsDirty(true);
-                        if (v.length > 0 && errors.helpers) { const newErrors = { ...errors }; delete newErrors.helpers; setErrors(newErrors); }
+                            setSelectedHelpers(v as string[]);
+                            setIsDirty(true);
+                            if (v.length > 0 && errors.helpers) { const newErrors = { ...errors }; delete newErrors.helpers; setErrors(newErrors); }
                         }}
                         renderTags={(value, getTagProps) => value.map((option, index) => { const { key, ...tagProps } = getTagProps({ index }); return <Chip key={key} variant="outlined" label={option} size="small" {...tagProps} />; })}
-                        renderInput={(params) => <TextField {...params} placeholder={selectedHelpers.length === 0 ? "スタッフを選択" : ""} error={!!errors.helpers} helperText={errors.helpers} fullWidth />}
+                        renderInput={(params) => <TextField {...params} placeholder={selectedHelpers.length === 0 ? "スタッフ名簿から選択" : ""} error={!!errors.helpers} helperText={errors.helpers} fullWidth />}
                     />
                 </Box>
 
@@ -564,7 +566,6 @@ export default function RecordPage() {
         </Container>
       </Box>
 
-      {/* Dialogs */}
       <Dialog open={openCloseDialog} onClose={() => setOpenCloseDialog(false)}>
           <DialogTitle>保存されていない変更があります</DialogTitle>
           <DialogContent><DialogContentText>入力内容が保存されていません。<br/>下書きとして保存しますか？</DialogContentText></DialogContent>
