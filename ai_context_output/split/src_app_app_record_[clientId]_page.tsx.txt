@@ -76,13 +76,27 @@ type FormAnswers = Record<string, string | number | boolean | string[]>;
 type HelperProfile = { id: string; name: string };
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 
+// 型定義追加：シフトから取得するスタッフ情報
+type ShiftStaffData = {
+    user_id: string | null;
+    ghost_staff_id: string | null;
+    profiles: { name: string } | null;
+    ghost_staffs: { name: string } | null;
+};
+
 export default function RecordPage() {
   const router = useRouter();
   const { clientId } = useParams();
   const searchParams = useSearchParams();
   const { showToast } = useToast();
   const { currentOrg, loading: wsLoading } = useWorkspace();
-  const reportId = searchParams.get('reportId');
+  
+  // URLパラメータの取得
+  const paramReportId = searchParams.get('reportId');
+  const shiftId = searchParams.get('shiftId');
+
+  // 動的に変化する実際の reportId を管理（シフトからの連携時に自動発見したIDもここに入れる）
+  const [currentReportId, setCurrentReportId] = useState<string | null>(paramReportId);
 
   const [clientName, setClientName] = useState('');
   const [template, setTemplate] = useState<FormItem[]>([]);
@@ -139,23 +153,24 @@ export default function RecordPage() {
       const { data: assignments } = await supabase.from('assignments').select('helper_id, ghost_staff_id').eq('client_id', clientId);
       let finalStaffList = allStaffs;
       if (assignments && assignments.length > 0) {
-          const validIds = new Set(assignments.map(a => a.helper_id || a.ghost_staff_id).filter(id => id !== null));
+          const validIds = new Set(assignments.map(a => a.helper_id || a.ghost_staff_id).filter((id): id is string => id !== null));
           if (validIds.size > 0) finalStaffList = allStaffs.filter(s => validIds.has(s.id));
       }
       setSelectableStaffs(finalStaffList);
 
-      if (!reportId && user) {
+      // ★修正：既存の記録もシフト指定もない場合のみ、自分を初期セット
+      if (!currentReportId && !shiftId && user) {
         const me = finalStaffList.find((p) => p.id === user.id);
         if (me) setSelectedHelpers([me.name]);
       }
     } catch (error) { console.error('Error fetching base data:', error); }
-  }, [clientId, currentOrg, reportId]);
+  }, [clientId, currentOrg, currentReportId, shiftId]);
 
-  const loadExistingData = useCallback(async () => {
-    if (!reportId) return;
+  const loadExistingData = useCallback(async (targetId: string) => {
+    if (!targetId) return;
     try {
-      const { data: r } = await supabase.from('reports').select('*').eq('id', reportId).single();
-      const { data: v } = await supabase.from('report_values').select('data').eq('report_id', reportId).single();
+      const { data: r } = await supabase.from('reports').select('*').eq('id', targetId).single();
+      const { data: v } = await supabase.from('report_values').select('data').eq('report_id', targetId).single();
       if (r && v) {
         setStartDateTime(formatDatetimeLocal(new Date(r.start_at)));
         setEndDateTime(formatDatetimeLocal(new Date(r.end_at)));
@@ -167,7 +182,7 @@ export default function RecordPage() {
         setAnswers(data);
         setIsDirty(false);
 
-        const { data: imgData } = await supabase.from('report_images').select('*').eq('report_id', reportId);
+        const { data: imgData } = await supabase.from('report_images').select('*').eq('report_id', targetId);
         if (imgData) {
             setImages(imgData.map(i => ({ 
                 id: i.id, 
@@ -176,25 +191,72 @@ export default function RecordPage() {
         }
       }
     } catch (e) { console.error(e); }
-  }, [reportId]);
+  }, []);
 
   useEffect(() => {
     const init = async () => {
-      if (!reportId) {
+      let targetId = paramReportId;
+
+      // ★追加：URLにシフトIDがある場合の処理
+      if (shiftId && !paramReportId) {
+          // 1. このシフトに紐づく記録がすでに存在するかチェック
+          const { data: existingReport } = await supabase
+              .from('reports')
+              .select('id')
+              .eq('shift_id', shiftId)
+              .maybeSingle();
+          
+          if (existingReport) {
+              // すでに記録がある場合は、それを開く（二重入力防止）
+              targetId = existingReport.id;
+              setCurrentReportId(targetId);
+              // URLも書き換えておく
+              router.replace(`/app/record/${clientId}?reportId=${targetId}`);
+              showToast('このシフトには既に記録が存在します。該当する記録を開きました。', 'info');
+          } else {
+              // 2. 記録が存在しない場合、シフトの「時間」と「担当者」を取得して初期値にセット（プレフィル）
+              const { data: shiftData } = await supabase
+                  .from('shifts')
+                  .select('start_at, end_at, shift_staffs(user_id, ghost_staff_id, profiles(name), ghost_staffs(name))')
+                  .eq('id', shiftId)
+                  .single();
+              
+              if (shiftData) {
+                  setStartDateTime(formatDatetimeLocal(new Date(shiftData.start_at)));
+                  setEndDateTime(formatDatetimeLocal(new Date(shiftData.end_at)));
+                  
+                  const staffNames: string[] = [];
+                  const typedShiftStaffs = (shiftData.shift_staffs as unknown as ShiftStaffData[]) || [];
+                  
+                  typedShiftStaffs.forEach(s => {
+                      if (s.profiles?.name) staffNames.push(s.profiles.name);
+                      if (s.ghost_staffs?.name) staffNames.push(s.ghost_staffs.name);
+                  });
+                  setSelectedHelpers(staffNames);
+                  setCurrentStatus('draft');
+              }
+          }
+      }
+
+      // 何も指定がない完全新規の場合
+      if (!targetId && !shiftId) {
         const now = new Date();
         setStartDateTime(formatDatetimeLocal(now));
         setEndDateTime(formatDatetimeLocal(new Date(now.getTime() + 3600000)));
         setCurrentStatus('draft');
       }
+
       await fetchBaseData();
-      await loadExistingData();
+      if (targetId) {
+          await loadExistingData(targetId);
+      }
       setLoading(false);
     };
 
     if (!wsLoading && currentOrg) {
       init();
     }
-  }, [wsLoading, currentOrg, reportId, fetchBaseData, loadExistingData]);
+  }, [wsLoading, currentOrg, paramReportId, shiftId, clientId, router, showToast, fetchBaseData, loadExistingData]);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -215,18 +277,18 @@ export default function RecordPage() {
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!reportId || !e.target.files || e.target.files.length === 0) return;
+    if (!currentReportId || !e.target.files || e.target.files.length === 0) return;
     setSubmitting(true);
     try {
         const file = e.target.files[0];
-        const path = `${reportId}/${Date.now()}_${file.name}`;
+        const path = `${currentReportId}/${Date.now()}_${file.name}`;
         const { error } = await supabase.storage.from('report-images').upload(path, file);
         if (error) throw error;
         
-        await supabase.from('report_images').insert({ report_id: reportId, storage_path: path });
+        await supabase.from('report_images').insert({ report_id: currentReportId, storage_path: path });
         
         // リロードして反映
-        await loadExistingData();
+        await loadExistingData(currentReportId);
         showToast('画像をアップロードしました');
     } catch(e) {
         console.error(e);
@@ -240,7 +302,7 @@ export default function RecordPage() {
       if(!confirm('本当に削除しますか？')) return;
       if (currentStatus === 'approved') { showToast('承認済みの記録は削除できません', 'error'); return; }
       try {
-        await supabase.from('reports').delete().eq('id', reportId);
+        await supabase.from('reports').delete().eq('id', currentReportId);
         showToast('削除しました');
         router.back();
       } catch(e) {
@@ -273,32 +335,33 @@ export default function RecordPage() {
         start_at: new Date(startDateTime).toISOString(),
         end_at: new Date(endDateTime).toISOString(),
         status: status,
+        shift_id: shiftId || null, // ★追加：シフトから作成された場合はヒモ付ける
         updated_at: new Date().toISOString()
       };
 
-      let currentReportId = reportId;
+      let targetReportId = currentReportId;
       let payload;
-      if (!reportId) {
+      if (!currentReportId) {
           payload = { ...basePayload, helper_id: user?.id };
       } else {
           payload = basePayload;
       }
 
-      if (reportId) {
-        await supabase.from('reports').update(payload).eq('id', reportId);
-        await supabase.from('report_values').update({ data: finalData }).eq('report_id', reportId);
+      if (currentReportId) {
+        await supabase.from('reports').update(payload).eq('id', currentReportId);
+        await supabase.from('report_values').update({ data: finalData }).eq('report_id', currentReportId);
       } else {
         const { data: nr } = await supabase.from('reports').insert(payload).select().single();
         if (nr) {
             await supabase.from('report_values').insert({ report_id: nr.id, data: finalData });
-            currentReportId = nr.id;
+            targetReportId = nr.id;
+            setCurrentReportId(nr.id);
         }
       }
       setIsDirty(false);
       
-      // IDがなかった場合はURLを更新して、画像アップロードなどを可能にする
-      if (!reportId && currentReportId) {
-          const newUrl = `/app/record/${clientId}?reportId=${currentReportId}`;
+      if (!currentReportId && targetReportId) {
+          const newUrl = `/app/record/${clientId}?reportId=${targetReportId}`;
           router.replace(newUrl);
       }
 
@@ -315,7 +378,7 @@ export default function RecordPage() {
       setOpenApproveDialog(false);
       if (await saveReport('approved')) {
           const { data: { user } } = await supabase.auth.getUser();
-          if (reportId && user) await supabase.from('reports').update({ approved_by: user.id, approved_at: new Date().toISOString() }).eq('id', reportId);
+          if (currentReportId && user) await supabase.from('reports').update({ approved_by: user.id, approved_at: new Date().toISOString() }).eq('id', currentReportId);
           showToast('承認しました', 'success');
           router.push('/app/reports');
       }
@@ -324,7 +387,7 @@ export default function RecordPage() {
   const executeRemand = async () => {
       setOpenRemandDialog(false);
       if (await saveReport('remanded')) {
-          if (reportId) await supabase.from('reports').update({ approved_by: null, approved_at: null }).eq('id', reportId);
+          if (currentReportId) await supabase.from('reports').update({ approved_by: null, approved_at: null }).eq('id', currentReportId);
           showToast('記録を差し戻しました', 'info');
           router.push('/app/reports');
       }
@@ -354,11 +417,11 @@ export default function RecordPage() {
        <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
             <IconButton edge="start" onClick={handleClose} sx={{ mr: 1, color: 'action.active' }}><CloseIcon /></IconButton>
             <Typography variant="h6" fontWeight="bold" sx={{ color: 'text.primary', flexGrow: 1 }}>
-                {reportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済みの記録' : '記録を修正')) : `${clientName} 様`}
+                {currentReportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済みの記録' : '記録を修正')) : `${clientName} 様`}
             </Typography>
             
             <Stack direction="row" spacing={1}>
-                {reportId && currentStatus !== 'approved' && (
+                {currentReportId && currentStatus !== 'approved' && (
                     <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
                 )}
                 
@@ -489,12 +552,12 @@ export default function RecordPage() {
                         <Box key={img.id} component="img" src={img.url} sx={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 1 }} />
                     ))}
                     <IconButton color="primary" component="label" sx={{ width: 100, height: 100, border: '1px dashed #ccc', borderRadius: 1, flexDirection: 'column' }}>
-                        <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!reportId} />
+                        <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!currentReportId} />
                         <PhotoCamera />
-                        {!reportId && <Typography variant="caption" sx={{ fontSize: 9 }}>未保存</Typography>}
+                        {!currentReportId && <Typography variant="caption" sx={{ fontSize: 9 }}>未保存</Typography>}
                     </IconButton>
                 </Stack>
-                {!reportId && <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>※一度下書き保存すると画像を添付できます</Typography>}
+                {!currentReportId && <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>※一度下書き保存すると画像を添付できます</Typography>}
             </Paper>
 
             </Stack>

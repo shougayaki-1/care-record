@@ -19,14 +19,10 @@ import { useToast } from '@/components/ui/ToastProvider';
 type StaffData = { id: string; name: string; user_id: string | null; profiles?: { name: string } | null; };
 type AccountData = { id: string; name: string; };
 
-// ★追加：any排除のための型定義
-type MemberProfileData = { user_id: string; profiles: { name: string } | null; };
-
 export default function StaffPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   
-  // ★修正：未使用だった loading を削除（親の wsLoading と初期データ取得状態だけでUIを制御）
   const [isFetching, setIsFetching] = useState(true);
   const [staffList, setStaffList] = useState<StaffData[]>([]);
   const [accountList, setAccountList] = useState<AccountData[]>([]);
@@ -40,6 +36,7 @@ export default function StaffPage() {
     if (!currentOrg) return;
     setIsFetching(true);
     try {
+      // 1. スタッフ一覧の取得
       const { data: staffsData, error: staffsError } = await supabase
         .from('staffs')
         .select(`id, name, user_id, profiles(name)`)
@@ -49,18 +46,25 @@ export default function StaffPage() {
       if (staffsError) throw staffsError;
       setStaffList((staffsData as unknown as StaffData[]) || []);
 
+      // 2. メンバーのアカウント一覧を安全に取得 (2段階クエリ)
       const { data: membersData } = await supabase
         .from('organization_members')
-        .select(`user_id, profiles(name)`)
+        .select('user_id')
         .eq('organization_id', currentOrg.id);
         
       const accounts: AccountData[] = [];
-      if (membersData) {
-          // ★修正：anyを排除し、定義した型でキャスト
-          (membersData as unknown as MemberProfileData[]).forEach(m => {
-              const pName = Array.isArray(m.profiles) ? m.profiles[0]?.name : m.profiles?.name;
-              if (pName) accounts.push({ id: m.user_id, name: pName });
-          });
+      if (membersData && membersData.length > 0) {
+          const userIds = membersData.map(m => m.user_id);
+          const { data: profilesData } = await supabase
+              .from('profiles')
+              .select('id, name')
+              .in('id', userIds);
+              
+          if (profilesData) {
+              profilesData.forEach(p => {
+                  accounts.push({ id: p.id, name: p.name });
+              });
+          }
       }
       setAccountList(accounts);
     } catch (e) { 
@@ -133,27 +137,31 @@ export default function StaffPage() {
                         ) : staffList.length === 0 ? (
                             <TableRow><TableCell colSpan={3} align="center" sx={{ py: 4, color: 'text.secondary' }}>登録がありません</TableCell></TableRow>
                         ) : (
-                            staffList.map((staff) => (
-                            <TableRow key={staff.id} hover sx={{ height: 60 }}>
-                                <TableCell sx={{ fontWeight: 'bold' }}>{staff.name}</TableCell>
-                                <TableCell>
-                                    {staff.user_id ? (
-                                        <Box display="flex" alignItems="center" gap={1} color="text.secondary">
-                                            <LinkIcon fontSize="small" />
-                                            <Typography variant="body2">{staff.profiles?.name || '不明なアカウント'}</Typography>
-                                        </Box>
-                                    ) : (
-                                        <Typography variant="body2" color="text.disabled">なし (転記・代理入力用)</Typography>
-                                    )}
-                                </TableCell>
-                                <TableCell align="center">
-                                    <Stack direction="row" justifyContent="center" spacing={1}>
-                                        <Tooltip title="編集"><IconButton size="small" onClick={() => handleOpenEdit(staff)}><EditIcon fontSize="small" /></IconButton></Tooltip>
-                                        <Tooltip title="削除"><IconButton size="small" color="error" onClick={() => handleDelete(staff.id, staff.name)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
-                                    </Stack>
-                                </TableCell>
-                            </TableRow>
-                            ))
+                            staffList.map((staff) => {
+                                // プロフィール名も安全に抽出
+                                const profileName = Array.isArray(staff.profiles) ? staff.profiles[0]?.name : staff.profiles?.name;
+                                return (
+                                    <TableRow key={staff.id} hover sx={{ height: 60 }}>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>{staff.name}</TableCell>
+                                        <TableCell>
+                                            {staff.user_id ? (
+                                                <Box display="flex" alignItems="center" gap={1} color="text.secondary">
+                                                    <LinkIcon fontSize="small" />
+                                                    <Typography variant="body2">{profileName || '不明なアカウント'}</Typography>
+                                                </Box>
+                                            ) : (
+                                                <Typography variant="body2" color="text.disabled">なし (転記・代理入力用)</Typography>
+                                            )}
+                                        </TableCell>
+                                        <TableCell align="center">
+                                            <Stack direction="row" justifyContent="center" spacing={1}>
+                                                <Tooltip title="編集"><IconButton size="small" onClick={() => handleOpenEdit(staff)}><EditIcon fontSize="small" /></IconButton></Tooltip>
+                                                <Tooltip title="削除"><IconButton size="small" color="error" onClick={() => handleDelete(staff.id, staff.name)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
+                                            </Stack>
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })
                         )}
                     </TableBody>
                 </Table>

@@ -1,0 +1,175 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import {
+    Dialog, DialogTitle, DialogContent, DialogActions,
+    Button, TextField, Stack, FormControl, InputLabel,
+    Select, MenuItem, Box, Typography, Checkbox, FormGroup, 
+    FormControlLabel, CircularProgress, Chip, OutlinedInput, SelectChangeEvent
+} from '@mui/material';
+import { ShiftPatternPayload } from '@/app/actions/shift';
+import { ClientData, StaffData } from './ShiftFormModal';
+
+type Props = {
+    open: boolean;
+    onClose: () => void;
+    onSave: (payload: ShiftPatternPayload) => Promise<void>;
+    clients: ClientData[];
+    staffs: StaffData[];
+    organizationId: string;
+};
+
+const DAYS_OF_WEEK = [
+    { label: '月', value: 'MO' }, { label: '火', value: 'TU' }, { label: '水', value: 'WE' },
+    { label: '木', value: 'TH' }, { label: '金', value: 'FR' }, { label: '土', value: 'SA' }, { label: '日', value: 'SU' }
+];
+
+const WEEKS_OF_MONTH = [
+    { label: '第1', value: '1' }, { label: '第2', value: '2' }, { label: '第3', value: '3' },
+    { label: '第4', value: '4' }, { label: '第5', value: '5' }
+];
+
+const ITEM_HEIGHT = 48;
+const ITEM_PADDING_TOP = 8;
+const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
+
+export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, organizationId }: Props) => {
+    const [loading, setLoading] = useState(false);
+    const [clientId, setClientId] = useState('');
+    const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
+    const [startTime, setStartTime] = useState('10:00');
+    const [endTime, setEndTime] = useState('12:00');
+    
+    const [freq, setFreq] = useState<'WEEKLY' | 'MONTHLY'>('WEEKLY');
+    const [interval, setIntervalCount] = useState<number>(1); // ★追加：○週間に1回
+    const [selectedDays, setSelectedDays] = useState<string[]>([]);
+    const [selectedWeeks, setSelectedWeeks] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (open) {
+            setClientId(''); setSelectedStaffIds([]); setStartTime('10:00'); setEndTime('12:00');
+            setFreq('WEEKLY'); setIntervalCount(1); setSelectedDays([]); setSelectedWeeks([]);
+        }
+    }, [open]);
+
+    const handleSave = async () => {
+        if (!clientId || !startTime || !endTime || selectedStaffIds.length === 0 || selectedDays.length === 0) {
+            alert('必須項目（利用者、スタッフ、時間、曜日）を入力してください'); return;
+        }
+
+        let rruleStr = '';
+        if (freq === 'WEEKLY') {
+            // ★修正：INTERVALを追加（例：2週間に1回の月曜 -> FREQ=WEEKLY;INTERVAL=2;BYDAY=MO）
+            rruleStr = `FREQ=WEEKLY;INTERVAL=${interval};BYDAY=${selectedDays.join(',')}`;
+        } else {
+            if (selectedWeeks.length === 0) { alert('週を選択してください'); return; }
+            const byDayParams = selectedWeeks.flatMap(week => selectedDays.map(day => `${week}${day}`));
+            rruleStr = `FREQ=MONTHLY;BYDAY=${byDayParams.join(',')}`;
+        }
+
+        setLoading(true);
+        try {
+            const clientName = clients.find(c => c.id === clientId)?.name || '';
+            const staffNames = staffs.filter(s => selectedStaffIds.includes(s.id)).map(s => s.name).join(', ');
+            
+            await onSave({
+                organizationId, clientId, title: `${clientName} (${staffNames})`,
+                startTime: `${startTime}:00`, endTime: `${endTime}:00`,
+                rrule: rruleStr, staffIds: selectedStaffIds
+            });
+            onClose();
+        } catch (e) { console.error(e); alert('保存に失敗しました'); } finally { setLoading(false); }
+    };
+
+    const handleStaffChange = (event: SelectChangeEvent<typeof selectedStaffIds>) => {
+        const { target: { value } } = event;
+        setSelectedStaffIds(typeof value === 'string' ? value.split(',') : value);
+    };
+
+    const toggleArrayItem = (array: string[], setArray: (val: string[]) => void, item: string) => {
+        if (array.includes(item)) setArray(array.filter(i => i !== item));
+        else setArray([...array, item]);
+    };
+
+    return (
+        <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth disableEscapeKeyDown>
+            <DialogTitle fontWeight="bold">基本パターン（ひな形）の登録</DialogTitle>
+            <DialogContent dividers>
+                <Stack spacing={3}>
+                    <FormControl fullWidth size="small" required>
+                        <InputLabel>利用者</InputLabel>
+                        <Select value={clientId} onChange={(e) => setClientId(e.target.value)} label="利用者">
+                            {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
+                        </Select>
+                    </FormControl>
+
+                    {/* ★修正：担当スタッフをチェックボックス付きの複数選択UIに変更 */}
+                    <FormControl fullWidth size="small" required>
+                        <InputLabel>担当スタッフ（複数選択可）</InputLabel>
+                        <Select multiple value={selectedStaffIds} onChange={handleStaffChange} input={<OutlinedInput label="担当スタッフ（複数選択可）" />} renderValue={(selected) => (
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                {selected.map((value) => { const staff = staffs.find(s => s.id === value); return <Chip key={value} label={staff?.name || ''} size="small" />; })}
+                            </Box>
+                        )} MenuProps={MenuProps}>
+                            {staffs.map(s => (
+                                <MenuItem key={s.id} value={s.id}>
+                                    <Checkbox checked={selectedStaffIds.indexOf(s.id) > -1} size="small" />
+                                    <Typography variant="body2" sx={{ fontWeight: selectedStaffIds.includes(s.id) ? 'bold' : 'normal' }}>{s.name}</Typography>
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+
+                    <Stack direction="row" spacing={2}>
+                        <TextField label="開始時間" type="time" fullWidth size="small" required InputLabelProps={{ shrink: true }} value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+                        <TextField label="終了時間" type="time" fullWidth size="small" required InputLabelProps={{ shrink: true }} value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                    </Stack>
+
+                    <Box p={2} border="1px solid #e0e0e0" borderRadius={2}>
+                        <Typography fontWeight="bold" mb={2}>繰り返しのロジック</Typography>
+                        <Stack spacing={2}>
+                            <Stack direction="row" spacing={2}>
+                                <FormControl size="small" sx={{ flexGrow: 1 }}>
+                                    <Select value={freq} onChange={(e) => setFreq(e.target.value as 'WEEKLY' | 'MONTHLY')}>
+                                        <MenuItem value="WEEKLY">毎週</MenuItem>
+                                        <MenuItem value="MONTHLY">毎月（第○曜日指定）</MenuItem>
+                                    </Select>
+                                </FormControl>
+                                {/* ★追加：○週間に1回の設定 */}
+                                {freq === 'WEEKLY' && (
+                                    <FormControl size="small" sx={{ width: 120 }}>
+                                        <Select value={interval} onChange={(e) => setIntervalCount(Number(e.target.value))}>
+                                            <MenuItem value={1}>1週間に1回</MenuItem>
+                                            <MenuItem value={2}>2週間に1回</MenuItem>
+                                            <MenuItem value={3}>3週間に1回</MenuItem>
+                                            <MenuItem value={4}>4週間に1回</MenuItem>
+                                        </Select>
+                                    </FormControl>
+                                )}
+                            </Stack>
+
+                            {freq === 'MONTHLY' && (
+                                <Box>
+                                    <Typography variant="caption" color="text.secondary">週を選択</Typography>
+                                    <FormGroup row>
+                                        {WEEKS_OF_MONTH.map(w => <FormControlLabel key={w.value} control={<Checkbox size="small" checked={selectedWeeks.includes(w.value)} onChange={() => toggleArrayItem(selectedWeeks, setSelectedWeeks, w.value)} />} label={w.label} />)}
+                                    </FormGroup>
+                                </Box>
+                            )}
+                            <Box>
+                                <Typography variant="caption" color="text.secondary">曜日を選択</Typography>
+                                <FormGroup row>
+                                    {DAYS_OF_WEEK.map(d => <FormControlLabel key={d.value} control={<Checkbox size="small" checked={selectedDays.includes(d.value)} onChange={() => toggleArrayItem(selectedDays, setSelectedDays, d.value)} />} label={d.label} />)}
+                                </FormGroup>
+                            </Box>
+                        </Stack>
+                    </Box>
+                </Stack>
+            </DialogContent>
+            <DialogActions sx={{ p: 2 }}>
+                <Button onClick={onClose} color="inherit" disabled={loading}>閉じる</Button>
+                <Button variant="contained" onClick={handleSave} disabled={loading} sx={{ boxShadow: 'none' }}>{loading ? <CircularProgress size={24} color="inherit" /> : '登録する'}</Button>
+            </DialogActions>
+        </Dialog>
+    );
+};

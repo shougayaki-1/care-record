@@ -17,7 +17,6 @@ export type ShiftPayload = {
     staffIds: string[]; 
     status?: 'published' | 'cancelled';
     cancelReason?: string;
-    patternId?: string; // ★追加: ひな形から展開されたシフトを紐付けるためのID
 };
 
 export type ShiftPatternPayload = {
@@ -106,8 +105,7 @@ export async function createShift(payload: ShiftPayload) {
     try {
         const { data: shift, error: shiftError } = await supabaseAdmin.from('shifts').insert({
             organization_id: payload.organizationId, client_id: payload.clientId, title: payload.title,
-            start_at: payload.startAt, end_at: payload.endAt, status: payload.status || 'published',
-            pattern_id: payload.patternId || null // ★追加: 二重作成防止用
+            start_at: payload.startAt, end_at: payload.endAt, status: payload.status || 'published'
         }).select('id').single();
 
         if (shiftError || !shift) throw new Error(shiftError?.message);
@@ -207,12 +205,10 @@ export async function deleteShiftPattern(patternId: string) {
     return { success: true };
 }
 
-// ★修正: サーバー環境（UTC）での時差ズレを防ぐため、日本時間（JST）基準で計算を行う
 export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
     const [year, month] = yearMonth.split('-').map(Number);
-    // rruleの計算を簡単にするため、UTCの月初・月末を利用して回す
-    const startDateUTC = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
-    const endDateUTC = new Date(Date.UTC(year, month, 0, 23, 59, 59));
+    const startDate = new Date(year, month - 1, 1, 0, 0, 0);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
 
     try {
         const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
@@ -224,54 +220,40 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         let createdCount = 0;
 
         for (const p of patterns) {
-            const dtStartStr = startDateUTC.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+            const dtStartStr = startDate.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
             const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
             const rule = rrulestr(ruleStr);
-            const occurrences = rule.between(startDateUTC, endDateUTC, true);
+            const occurrences = rule.between(startDate, endDate, true);
 
-            for (const dateUTC of occurrences) {
-                // UTCから「年・月・日」を取り出す
-                const yy = dateUTC.getUTCFullYear();
-                const mm = dateUTC.getUTCMonth() + 1;
-                const dd = dateUTC.getUTCDate();
-
+            for (const date of occurrences) {
                 const [sHour, sMin] = p.start_time.split(':').map(Number);
                 const [eHour, eMin] = p.end_time.split(':').map(Number);
                 
-                const pad = (n: number) => String(n).padStart(2, '0');
-
-                // 日本時間 (+09:00) を明示して開始日時文字列を作成
-                const startIsoStr = `${yy}-${pad(mm)}-${pad(dd)}T${pad(sHour)}:${pad(sMin)}:00+09:00`;
-                const startAt = new Date(startIsoStr);
-
-                // 終了日時の計算（日またぎ対応）
-                const endDay = new Date(Date.UTC(yy, mm - 1, dd)); 
-                if (eHour < sHour) endDay.setUTCDate(endDay.getUTCDate() + 1); // 終了時間が開始より早い場合は翌日扱い
+                const startAt = new Date(date);
+                startAt.setHours(sHour, sMin, 0, 0);
                 
-                const endIsoStr = `${endDay.getUTCFullYear()}-${pad(endDay.getUTCMonth() + 1)}-${pad(endDay.getUTCDate())}T${pad(eHour)}:${pad(eMin)}:00+09:00`;
-                const endAt = new Date(endIsoStr);
-
-                // 重複防止: 同じひな形から同じ日のシフトがすでに作られていないかチェック
-                const targetDayStartStr = new Date(`${yy}-${pad(mm)}-${pad(dd)}T00:00:00+09:00`).toISOString();
-                const targetDayEndStr = new Date(`${yy}-${pad(mm)}-${pad(dd)}T23:59:59+09:00`).toISOString();
+                const endAt = new Date(date);
+                endAt.setHours(eHour, eMin, 0, 0);
+                if (eHour < sHour) endAt.setDate(endAt.getDate() + 1);
 
                 const { data: existing } = await supabaseAdmin.from('shifts')
                     .select('id').eq('pattern_id', p.id)
-                    .gte('start_at', targetDayStartStr)
-                    .lte('start_at', targetDayEndStr)
+                    .gte('start_at', new Date(date.setHours(0,0,0,0)).toISOString())
+                    .lt('start_at', new Date(date.setHours(23,59,59,999)).toISOString())
                     .maybeSingle();
 
                 if (!existing) {
+                    // ★修正：any排除のため、明確な型を指定
                     const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
+                    // ★修正: isRecurring を削除（単発シフトなので）
                     await createShift({
                         organizationId,
                         clientId: p.client_id,
                         title: p.title,
-                        startAt: startAt.toISOString(), // UTCフォーマットに自動変換されて保存される
+                        startAt: startAt.toISOString(),
                         endAt: endAt.toISOString(),
                         staffIds: staffIds,
-                        status: 'published',
-                        patternId: p.id // 重複チェックの目印としてセット
+                        status: 'published'
                     });
                     createdCount++;
                 }
@@ -284,9 +266,12 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
     }
 }
 
-// 単発シフトの完全削除（誤登録時など）
+// ==========================================
+// 5. 単発シフトの完全削除（誤登録時など）
+// ==========================================
 export async function deleteShiftCompletely(shiftId: string) {
     try {
+        // 1. 削除前に organization_id を取得（Googleカレンダー同期用）
         const { data: shiftData } = await supabaseAdmin
             .from('shifts')
             .select('organization_id')
@@ -294,9 +279,11 @@ export async function deleteShiftCompletely(shiftId: string) {
             .single();
 
         if (shiftData) {
+            // 2. Googleカレンダーから予定を削除
             await syncToGoogleCalendarDirect(shiftData.organization_id, shiftId, 'delete');
         }
 
+        // 3. データベースからシフトを完全に削除 (関連する shift_staffs も CASCADE で消えます)
         const { error } = await supabaseAdmin
             .from('shifts')
             .delete()
