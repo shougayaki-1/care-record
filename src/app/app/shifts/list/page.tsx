@@ -19,9 +19,6 @@ import { ClientData, StaffData } from '@/components/shifts/ShiftFormModal';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 
-type MemberProfileData = { user_id: string; profiles: { name: string } | null; };
-type GhostData = { id: string; name: string; }; // ★追加：any排除用
-
 export default function ShiftListPage() {
     const router = useRouter();
     const { currentOrg, loading: wsLoading } = useWorkspace();
@@ -32,7 +29,11 @@ export default function ShiftListPage() {
     const [rawShifts, setRawShifts] = useState<FetchedShiftData[]>([]);
     const [events, setEvents] = useState<EventInput[]>([]);
     
+    // アカウントのID
     const [currentUserId, setCurrentUserId] = useState<string>('');
+    // アカウントと紐付くスタッフのID (これが新設計の要)
+    const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
+
     const [tabIndex, setTabIndex] = useState(0); 
     const [selectedStaffId, setSelectedStaffId] = useState<string>('all');
     const [selectedClientId, setSelectedClientId] = useState<string>('all');
@@ -54,33 +55,18 @@ export default function ShiftListPage() {
         const { data: clientData } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
         if (clientData) setClients(clientData as ClientData[]);
 
-        const { data: memberData } = await supabase
-            .from('organization_members')
-            .select(`user_id, profiles (name)`)
-            .eq('organization_id', currentOrg.id);
+        const { data: staffData } = await supabase.from('staffs').select('id, name, user_id').eq('organization_id', currentOrg.id);
+        if (staffData) {
+            const parsed = staffData.map(item => ({ id: item.id, name: item.name, type: item.user_id ? 'member' : 'ghost' } as StaffData));
+            setStaffs(parsed);
 
-        const { data: ghostData } = await supabase.from('ghost_staffs').select('id, name').eq('organization_id', currentOrg.id);
-        
-        const staffList: StaffData[] = [];
-        
-        if (memberData) {
-            (memberData as unknown as MemberProfileData[]).forEach((m) => { 
-                const profileName = Array.isArray(m.profiles) ? m.profiles[0]?.name : m.profiles?.name;
-                if (profileName) {
-                    staffList.push({ id: m.user_id, name: profileName, type: 'member' }); 
-                }
-            });
+            // ログイン中のユーザーIDと紐付くスタッフIDを取得
+            if (currentUserId) {
+                const me = parsed.find(s => staffData.find(sd => sd.id === s.id)?.user_id === currentUserId);
+                if (me) setCurrentStaffId(me.id);
+            }
         }
-
-        if (ghostData) {
-            // ★修正：anyを排除
-            (ghostData as GhostData[]).forEach((g) => { 
-                staffList.push({ id: g.id, name: g.name, type: 'ghost' }); 
-            });
-        }
-        
-        setStaffs(staffList);
-    }, [currentOrg]);
+    }, [currentOrg, currentUserId]);
 
     const fetchShiftData = useCallback(async () => {
         if (!currentOrg) return;
@@ -88,7 +74,6 @@ export default function ShiftListPage() {
         try {
             const start = new Date(); start.setMonth(start.getMonth() - 1);
             const end = new Date(); end.setMonth(end.getMonth() + 2);
-
             const shifts = await getShifts(currentOrg.id, start.toISOString(), end.toISOString());
             setRawShifts((shifts as unknown as FetchedShiftData[]) || []);
         } catch (error) {
@@ -107,16 +92,20 @@ export default function ShiftListPage() {
     }, [wsLoading, currentOrg, fetchMasterData, fetchShiftData]);
 
     useEffect(() => {
-        if (!currentUserId || rawShifts.length === 0) {
+        if (rawShifts.length === 0) {
             setEvents([]);
             return;
         }
 
         const filtered = rawShifts.filter(shift => {
-            if (tabIndex === 0) return shift.shift_staffs.some(s => s.user_id === currentUserId);
+            if (tabIndex === 0) {
+                // 自分のシフト（自分のスタッフIDが含まれているか）
+                if (!currentStaffId) return false; // スタッフ登録されていないアカウントは自分のシフトがない
+                return shift.shift_staffs.some(s => s.staff_id === currentStaffId);
+            }
             if (tabIndex === 1) {
                 if (selectedStaffId === 'all') return true;
-                return shift.shift_staffs.some(s => s.user_id === selectedStaffId || s.ghost_staff_id === selectedStaffId);
+                return shift.shift_staffs.some(s => s.staff_id === selectedStaffId);
             }
             if (tabIndex === 2) {
                 if (selectedClientId === 'all') return true;
@@ -126,7 +115,7 @@ export default function ShiftListPage() {
         });
 
         setEvents(convertToCalendarEvents(filtered, true));
-    }, [rawShifts, tabIndex, selectedStaffId, selectedClientId, currentUserId]);
+    }, [rawShifts, tabIndex, selectedStaffId, selectedClientId, currentStaffId]);
 
     const handleDownloadPdf = async () => {
         if (!calendarRef.current) return;

@@ -15,9 +15,6 @@ import { ShiftFormModal, ClientData, StaffData, ShiftData } from '@/components/s
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 
-type MemberProfileData = { user_id: string; profiles: { name: string } | null; };
-type GhostData = { id: string; name: string; }; // ★追加：any排除用
-
 export default function ShiftManagePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
@@ -26,7 +23,6 @@ export default function ShiftManagePage() {
     const [loading, setLoading] = useState(true);
     const [rawShifts, setRawShifts] = useState<FetchedShiftData[]>([]);
     const [events, setEvents] = useState<EventInput[]>([]);
-    
     const [clients, setClients] = useState<ClientData[]>([]);
     const [staffs, setStaffs] = useState<StaffData[]>([]);
 
@@ -36,35 +32,13 @@ export default function ShiftManagePage() {
 
     const fetchMasterData = useCallback(async () => {
         if (!currentOrg) return;
-        const { data: clientData } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
-        if (clientData) setClients(clientData as ClientData[]);
+        try {
+            const { data: c } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
+            if (c) setClients(c);
 
-        const { data: memberData } = await supabase
-            .from('organization_members')
-            .select(`user_id, profiles (name)`)
-            .eq('organization_id', currentOrg.id);
-
-        const { data: ghostData } = await supabase.from('ghost_staffs').select('id, name').eq('organization_id', currentOrg.id);
-        
-        const staffList: StaffData[] = [];
-        
-        if (memberData) {
-            (memberData as unknown as MemberProfileData[]).forEach((m) => { 
-                const profileName = Array.isArray(m.profiles) ? m.profiles[0]?.name : m.profiles?.name;
-                if (profileName) {
-                    staffList.push({ id: m.user_id, name: profileName, type: 'member' }); 
-                }
-            });
-        }
-
-        if (ghostData) {
-            // ★修正：anyを排除
-            (ghostData as GhostData[]).forEach((g) => { 
-                staffList.push({ id: g.id, name: g.name, type: 'ghost' }); 
-            });
-        }
-        
-        setStaffs(staffList);
+            const { data: s } = await supabase.from('staffs').select('id, name, user_id').eq('organization_id', currentOrg.id);
+            if (s) setStaffs(s.map(item => ({ id: item.id, name: item.name, type: item.user_id ? 'member' : 'ghost' })));
+        } catch (e) { console.error(e); }
     }, [currentOrg]);
 
     const fetchShiftData = useCallback(async () => {
@@ -73,7 +47,6 @@ export default function ShiftManagePage() {
         try {
             const start = new Date(); start.setMonth(start.getMonth() - 2);
             const end = new Date(); end.setMonth(end.getMonth() + 3);
-
             const fetched = await getShifts(currentOrg.id, start.toISOString(), end.toISOString());
             const typedShifts = (fetched as unknown as FetchedShiftData[]) || [];
             
@@ -82,9 +55,7 @@ export default function ShiftManagePage() {
         } catch (error) {
             console.error(error);
             showToast('シフトの取得に失敗しました', 'error');
-        } finally {
-            setLoading(false);
-        }
+        } finally { setLoading(false); }
     }, [currentOrg, showToast]);
 
     useEffect(() => {
@@ -95,20 +66,25 @@ export default function ShiftManagePage() {
     }, [wsLoading, currentOrg, fetchMasterData, fetchShiftData]);
 
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
-        if (shiftId) { await updateShift(shiftId, payload); showToast('シフトを更新しました'); } 
-        else { await createShift(payload); showToast('シフトを作成しました'); }
-        fetchShiftData();
+        try {
+            if (shiftId) await updateShift(shiftId, payload);
+            else await createShift(payload);
+            showToast('保存しました');
+            fetchShiftData();
+        } catch(e) { showToast('保存に失敗しました', 'error'); }
     };
 
     const handleCancelShift = async (shiftId: string, reason: string) => {
-        await cancelShift(shiftId, reason); showToast('シフトをキャンセルにしました'); fetchShiftData();
+        await cancelShift(shiftId, reason);
+        showToast('キャンセルしました');
+        fetchShiftData();
     };
 
     const formatRule = (shift: FetchedShiftData) => {
         if (!shift.is_recurring || !shift.rrule) return '単発';
         let desc = '繰り返し: ';
         if (shift.rrule.includes('FREQ=WEEKLY')) desc += '毎週 ';
-        if (shift.rrule.includes('FREQ=MONTHLY')) desc += '毎月 ';
+        else if (shift.rrule.includes('FREQ=MONTHLY')) desc += '毎月 ';
         const daysMap: Record<string, string> = { 'MO':'月', 'TU':'火', 'WE':'水', 'TH':'木', 'FR':'金', 'SA':'土', 'SU':'日' };
         const match = shift.rrule.match(/BYDAY=([^;]+)/);
         if (match) {
@@ -133,92 +109,56 @@ export default function ShiftManagePage() {
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
             <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, pt: 2, flexShrink: 0 }}>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                    <Typography variant="h6" fontWeight="bold" color="text.primary">全体シフト管理</Typography>
-                    <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setModalOpen(true); }} sx={{ boxShadow: 'none' }}>
-                        シフトを追加
-                    </Button>
+                    <Typography variant="h6" fontWeight="bold">全体シフト管理</Typography>
+                    <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setModalOpen(true); }} sx={{ boxShadow: 'none' }}>追加</Button>
                 </Box>
                 <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
-                    <Tab label="シフト設定一覧" />
-                    <Tab label="カレンダービュー" />
+                    <Tab label="一覧" /><Tab label="カレンダー" />
                 </Tabs>
             </Box>
-
             <Box sx={{ flexGrow: 1, p: 3, bgcolor: '#f5f5f5', overflowY: 'auto' }}>
-                {loading ? (
-                    <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>
-                ) : (
-                    <>
-                        {tabIndex === 0 && (
-                            <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, boxShadow: 'none' }}>
-                                <Table>
-                                    <TableHead sx={{ bgcolor: '#F0F5FF' }}>
-                                        <TableRow>
-                                            <TableCell sx={{ fontWeight: 'bold' }}>利用者</TableCell>
-                                            <TableCell sx={{ fontWeight: 'bold' }}>担当スタッフ</TableCell>
-                                            <TableCell sx={{ fontWeight: 'bold' }}>時間</TableCell>
-                                            <TableCell sx={{ fontWeight: 'bold' }}>ロジック (ルール)</TableCell>
-                                            <TableCell sx={{ fontWeight: 'bold' }}>ステータス</TableCell>
-                                            <TableCell align="center" sx={{ fontWeight: 'bold' }}>編集</TableCell>
+                {loading ? <Box textAlign="center" mt={5}><CircularProgress /></Box> : (
+                    tabIndex === 0 ? (
+                        <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3 }}>
+                            <Table>
+                                <TableHead sx={{ bgcolor: '#F0F5FF' }}>
+                                    <TableRow>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>利用者</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>スタッフ</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>時間</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>ロジック</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>状態</TableCell>
+                                        <TableCell align="center" sx={{ fontWeight: 'bold' }}>編集</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {rawShifts.map((shift) => (
+                                        <TableRow key={shift.id} hover sx={{ opacity: shift.status === 'cancelled' ? 0.6 : 1 }}>
+                                            <TableCell sx={{ fontWeight: 'bold' }}>{shift.clients?.name}</TableCell>
+                                            <TableCell>{shift.shift_staffs.map(s => s.staffs?.name).join(', ')}</TableCell>
+                                            <TableCell>{formatTime(shift.start_at)} 〜 {formatTime(shift.end_at)}</TableCell>
+                                            <TableCell><Chip label={formatRule(shift)} size="small" variant="outlined" /></TableCell>
+                                            <TableCell><Chip label={shift.status === 'cancelled' ? '休' : '稼働'} size="small" color={shift.status === 'cancelled' ? 'default' : 'success'} /></TableCell>
+                                            <TableCell align="center">
+                                                <IconButton size="small" onClick={() => {
+                                                    const shiftDataForModal: ShiftData = {
+                                                        ...shift,
+                                                        shift_staffs: shift.shift_staffs.map(s => ({ staff_id: s.staff_id }))
+                                                    };
+                                                    setSelectedShift(shiftDataForModal); setModalOpen(true);
+                                                }}><EditIcon fontSize="small" /></IconButton>
+                                            </TableCell>
                                         </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {rawShifts.length === 0 ? (
-                                            <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: '#666' }}>登録されているシフトはありません</TableCell></TableRow>
-                                        ) : (
-                                            rawShifts.map((shift) => (
-                                                <TableRow key={shift.id} hover sx={{ opacity: shift.status === 'cancelled' ? 0.6 : 1 }}>
-                                                    <TableCell sx={{ fontWeight: 'bold' }}>{shift.clients?.name}</TableCell>
-                                                    <TableCell>{shift.shift_staffs.map(s => s.profiles?.name || s.ghost_staffs?.name).filter(Boolean).join(', ')}</TableCell>
-                                                    <TableCell>{formatTime(shift.start_at)} 〜 {formatTime(shift.end_at)}</TableCell>
-                                                    <TableCell><Chip label={formatRule(shift)} size="small" variant="outlined" color={shift.is_recurring ? "primary" : "default"} /></TableCell>
-                                                    <TableCell><Chip label={shift.status === 'cancelled' ? 'キャンセル' : '稼働中'} size="small" color={shift.status === 'cancelled' ? 'default' : 'success'} /></TableCell>
-                                                    <TableCell align="center">
-                                                        <Tooltip title="設定を編集">
-                                                            <IconButton size="small" onClick={() => {
-                                                                const shiftDataForModal: ShiftData = {
-                                                                    id: shift.id, organization_id: shift.organization_id, client_id: shift.client_id,
-                                                                    title: shift.title, start_at: shift.start_at, end_at: shift.end_at,
-                                                                    is_recurring: shift.is_recurring, rrule: shift.rrule, status: shift.status,
-                                                                    cancel_reason: shift.cancel_reason,
-                                                                    shift_staffs: shift.shift_staffs.map(s => ({ user_id: s.user_id, ghost_staff_id: s.ghost_staff_id }))
-                                                                };
-                                                                setSelectedShift(shiftDataForModal); setModalOpen(true);
-                                                            }}>
-                                                                <EditIcon fontSize="small" />
-                                                            </IconButton>
-                                                        </Tooltip>
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                        )}
-
-                        {tabIndex === 1 && (
-                            <ShiftCalendarViewer
-                                ref={calendarRef}
-                                events={events}
-                                initialView="dayGridMonth"
-                                headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek' }}
-                                selectable={true}
-                                onDateSelect={() => { setSelectedShift(null); setModalOpen(true); }}
-                                onEventClick={(info) => {
-                                    const data = info.event.extendedProps.shiftData as ShiftData;
-                                    setSelectedShift(data); setModalOpen(true);
-                                }}
-                            />
-                        )}
-                    </>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    ) : (
+                        <ShiftCalendarViewer ref={calendarRef} events={events} initialView="dayGridMonth" headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek' }} selectable onDateSelect={() => { setSelectedShift(null); setModalOpen(true); }} onEventClick={(i) => { setSelectedShift(i.event.extendedProps.shiftData); setModalOpen(true); }} />
+                    )
                 )}
             </Box>
-
-            <ShiftFormModal
-                open={modalOpen} onClose={() => setModalOpen(false)} onSave={handleSaveShift} onCancelShift={handleCancelShift}
-                clients={clients} staffs={staffs} organizationId={currentOrg.id} initialData={selectedShift}
-            />
+            <ShiftFormModal open={modalOpen} onClose={() => setModalOpen(false)} onSave={handleSaveShift} onCancelShift={handleCancelShift} clients={clients} staffs={staffs} organizationId={currentOrg.id} initialData={selectedShift} />
         </Box>
     );
 }
