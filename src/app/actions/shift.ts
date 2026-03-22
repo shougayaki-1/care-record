@@ -265,3 +265,34 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         throw error;
     }
 }
+
+// ==========================================
+// 5. 単発シフトの完全削除（誤登録時など）
+// ==========================================
+export async function deleteShiftCompletely(shiftId: string) {
+    try {
+        // 1. 削除前に organization_id を取得（Googleカレンダー同期用）
+        const { data: shiftData } = await supabaseAdmin
+            .from('shifts')
+            .select('organization_id')
+            .eq('id', shiftId)
+            .single();
+
+        if (shiftData) {
+            // 2. Googleカレンダーから予定を削除
+            await syncToGoogleCalendarDirect(shiftData.organization_id, shiftId, 'delete');
+        }
+
+        // 3. データベースからシフトを完全に削除 (関連する shift_staffs も CASCADE で消えます)
+        const { error } = await supabaseAdmin
+            .from('shifts')
+            .delete()
+            .eq('id', shiftId);
+
+        if (error) throw error;
+        return { success: true };
+    } catch (error) {
+        console.error('Delete Shift Completely Error:', error);
+        throw error;
+    }
+}

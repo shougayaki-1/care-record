@@ -12,7 +12,8 @@ import { EventResizeDoneArg } from '@fullcalendar/interaction';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
-import { getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, generateShiftsForMonth, ShiftPatternPayload } from '@/app/actions/shift';
+// ★修正: deleteShiftCompletely をインポートに追加
+import { getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely, ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, generateShiftsForMonth, ShiftPatternPayload } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { ShiftFormModal, ClientData, StaffData, ShiftData } from '@/components/shifts/ShiftFormModal';
 import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
@@ -98,6 +99,7 @@ export default function ShiftManagePage() {
         }
     }, [wsLoading, currentOrg, fetchMasterData, fetchData]);
 
+    // --- シフト操作 ---
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
         try {
             if (shiftId) await updateShift(shiftId, payload);
@@ -121,7 +123,18 @@ export default function ShiftManagePage() {
         }
     };
 
-    // ★修正箇所：フィードバックの通り、D&D後はfetchDataを呼ばない
+    // ★追加: 誤登録シフトの完全削除ハンドラ
+    const handleDeleteShift = async (shiftId: string) => {
+        try {
+            await deleteShiftCompletely(shiftId);
+            showToast('シフトを完全に削除しました');
+            fetchData(true); 
+        } catch(error) {
+            console.error(error);
+            showToast('削除に失敗しました', 'error'); 
+        }
+    };
+
     const handleEventChange = async (info: EventDropArg | EventResizeDoneArg) => {
         const shiftId = info.event.extendedProps.shiftId;
         const start = info.event.start?.toISOString() || '';
@@ -129,15 +142,16 @@ export default function ShiftManagePage() {
         
         try {
             await updateShiftTimeOnly(shiftId, start, end);
-            showToast('時間を変更しました');
-            // fetchData(true) を削除
+            showToast('時間を変更しました'); 
+            fetchData(true); 
         } catch (error) { 
             console.error(error);
-            info.revert(); // 失敗時だけ元の位置に戻す
+            info.revert(); 
             showToast('変更に失敗しました', 'error'); 
         }
     };
 
+    // --- ひな形操作 ---
     const handleSavePattern = async (payload: ShiftPatternPayload) => {
         try { await createShiftPattern(payload); showToast('ひな形を登録しました'); fetchData(true); } 
         catch(error) { console.error(error); showToast('登録に失敗しました', 'error'); }
@@ -314,7 +328,17 @@ export default function ShiftManagePage() {
                     </>
                 )}
             </Box>
-            <ShiftFormModal open={shiftModalOpen} onClose={() => setShiftModalOpen(false)} onSave={handleSaveShift} onToggleCancel={handleToggleCancel} clients={clients} staffs={staffs} organizationId={currentOrg.id} initialData={selectedShift} />
+            <ShiftFormModal 
+                open={shiftModalOpen} 
+                onClose={() => setShiftModalOpen(false)} 
+                onSave={handleSaveShift} 
+                onToggleCancel={handleToggleCancel} 
+                onDelete={handleDeleteShift} // ★追加: 削除ハンドラを渡す
+                clients={clients} 
+                staffs={staffs} 
+                organizationId={currentOrg.id} 
+                initialData={selectedShift} 
+            />
             <ShiftPatternModal open={patternModalOpen} onClose={() => setPatternModalOpen(false)} onSave={handleSavePattern} clients={clients} staffs={staffs} organizationId={currentOrg.id} />
         </Box>
     );

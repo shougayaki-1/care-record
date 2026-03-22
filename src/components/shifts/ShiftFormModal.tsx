@@ -5,8 +5,9 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Button, TextField, Stack, FormControl, InputLabel,
     Select, MenuItem, Box, Typography, CircularProgress, Chip, OutlinedInput,
-    SelectChangeEvent
+    SelectChangeEvent, IconButton, Tooltip // ★追加：IconButton, Tooltip
 } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete'; // ★追加：DeleteIcon
 import { ShiftPayload } from '@/app/actions/shift';
 
 export type ClientData = { id: string; name: string };
@@ -28,6 +29,7 @@ type Props = {
     onClose: () => void;
     onSave: (payload: ShiftPayload, shiftId?: string) => Promise<void>;
     onToggleCancel?: (shiftId: string, isCancel: boolean, reason: string) => Promise<void>;
+    onDelete?: (shiftId: string) => Promise<void>; // ★追加：完全削除用のコールバック
     clients: ClientData[];
     staffs: StaffData[];
     organizationId: string;
@@ -38,7 +40,7 @@ const ITEM_HEIGHT = 48;
 const ITEM_PADDING_TOP = 8;
 const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
 
-export const ShiftFormModal = ({ open, onClose, onSave, onToggleCancel, clients, staffs, organizationId, initialData }: Props) => {
+export const ShiftFormModal = ({ open, onClose, onSave, onToggleCancel, onDelete, clients, staffs, organizationId, initialData }: Props) => {
     const [loading, setLoading] = useState(false);
     
     const [clientId, setClientId] = useState('');
@@ -91,6 +93,18 @@ export const ShiftFormModal = ({ open, onClose, onSave, onToggleCancel, clients,
         } catch (error) { console.error(error); alert('処理に失敗しました'); } finally { setLoading(false); }
     };
 
+    // ★追加：完全削除ハンドラ
+    const handleDelete = async () => {
+        if (!initialData || !onDelete) return;
+        if (!confirm('このシフトを完全に削除しますか？\n（※Googleカレンダーからも削除されます。お休みの場合は「休みにする」ボタンを使用してください）')) return;
+        
+        setLoading(true);
+        try {
+            await onDelete(initialData.id);
+            onClose();
+        } catch (error) { console.error(error); alert('削除に失敗しました'); } finally { setLoading(false); }
+    };
+
     const handleStaffChange = (event: SelectChangeEvent<typeof selectedStaffIds>) => {
         const { target: { value } } = event;
         setSelectedStaffIds(typeof value === 'string' ? value.split(',') : value);
@@ -98,7 +112,18 @@ export const ShiftFormModal = ({ open, onClose, onSave, onToggleCancel, clients,
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth disableEscapeKeyDown>
-            <DialogTitle fontWeight="bold">{initialData ? '単発シフトの編集' : '単発シフトの追加'}</DialogTitle>
+            {/* ★修正：タイトルの右端に削除（ゴミ箱）ボタンを配置 */}
+            <DialogTitle fontWeight="bold" sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                {initialData ? '単発シフトの編集' : '単発シフトの追加'}
+                {initialData && (
+                    <Tooltip title="このシフトを完全に削除">
+                        <IconButton color="error" onClick={handleDelete} disabled={loading} size="small">
+                            <DeleteIcon />
+                        </IconButton>
+                    </Tooltip>
+                )}
+            </DialogTitle>
+
             <DialogContent dividers>
                 <Stack spacing={3}>
                     {initialData?.status === 'cancelled' && (
@@ -138,6 +163,9 @@ export const ShiftFormModal = ({ open, onClose, onSave, onToggleCancel, clients,
                     {initialData && (
                         <Box p={2} border="1px solid #ffcdd2" borderRadius={2} bgcolor="#fffafb">
                             <Typography variant="subtitle2" color="error" gutterBottom fontWeight="bold">休みの管理</Typography>
+                            <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                                ※間違えて登録した場合は、右上のゴミ箱アイコンから削除してください。
+                            </Typography>
                             {initialData.status === 'cancelled' ? (
                                 <Button variant="contained" color="success" onClick={() => handleToggleCancel(false)} disabled={loading} fullWidth sx={{ boxShadow: 'none' }}>
                                     キャンセルを取り消す（復元）
