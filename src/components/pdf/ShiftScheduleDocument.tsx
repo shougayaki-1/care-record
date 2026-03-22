@@ -16,7 +16,7 @@ Font.register({
 });
 
 const styles = StyleSheet.create({
-    page: { padding: 30, fontFamily: 'NotoSansJP', fontSize: 10, color: '#333' },
+    page: { padding: 30, paddingBottom: 40, fontFamily: 'NotoSansJP', fontSize: 10, color: '#333' },
     header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, borderBottomWidth: 1, borderColor: '#2255CC', paddingBottom: 10 },
     title: { fontSize: 16, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 12 },
@@ -29,6 +29,7 @@ const styles = StyleSheet.create({
     colClient: { width: '25%', padding: 5, borderRightWidth: 1, borderColor: '#ddd' },
     colStaff: { width: '25%', padding: 5, borderRightWidth: 1, borderColor: '#ddd' },
     colStatus: { width: '15%', padding: 5, textAlign: 'center' },
+    footer: { position: 'absolute', bottom: 20, left: 30, right: 30, textAlign: 'right', fontSize: 9, color: '#666', borderTopWidth: 1, borderColor: '#ccc', paddingTop: 5 }
 });
 
 export type PdfShiftData = {
@@ -45,9 +46,10 @@ type Props = {
     title: string;
     monthStr: string;
     shifts: PdfShiftData[];
+    orgName: string; 
 };
 
-export const ShiftScheduleDocument = ({ title, monthStr, shifts }: Props) => {
+export const ShiftScheduleDocument = ({ title, monthStr, shifts, orgName }: Props) => {
     return (
         <Document>
             <Page size="A4" style={styles.page}>
@@ -71,7 +73,6 @@ export const ShiftScheduleDocument = ({ title, monthStr, shifts }: Props) => {
                         </View>
                     ) : (
                         shifts.map((shift, i) => {
-                            // ★修正: 「様」がついていなければ付与
                             const displayName = shift.clientName.endsWith('様') ? shift.clientName : `${shift.clientName} 様`;
                             return (
                                 <View key={i} style={[styles.tableRow, shift.isCancelled ? styles.tableRowCancelled : {}]}>
@@ -85,6 +86,10 @@ export const ShiftScheduleDocument = ({ title, monthStr, shifts }: Props) => {
                         })
                     )}
                 </View>
+
+                <Text style={styles.footer} fixed>
+                    {orgName}
+                </Text>
             </Page>
         </Document>
     );

@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Box, Typography, CircularProgress, Tabs, Tab, Stack, TextField, MenuItem, Button } from '@mui/material';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import GridOnIcon from '@mui/icons-material/GridOn'; // ★追加: マトリックス表用アイコン
+import GridOnIcon from '@mui/icons-material/GridOn'; 
 import FullCalendar from '@fullcalendar/react';
 import { EventInput } from '@fullcalendar/core';
 
@@ -16,7 +16,6 @@ import { pdf } from '@react-pdf/renderer';
 
 import { ShiftScheduleDocument, PdfShiftData } from '@/components/pdf/ShiftScheduleDocument';
 import { ShiftCalendarDocument, PdfCalendarEvent, PdfCalendarDay } from '@/components/pdf/ShiftCalendarDocument';
-// ★追加: マトリックス表コンポーネントをインポート
 import { ShiftMatrixDocument, MatrixStaffData } from '@/components/pdf/ShiftMatrixDocument';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
@@ -118,7 +117,7 @@ export default function ShiftListPage() {
     }, [rawShifts, tabIndex, selectedStaffId, selectedClientId, currentStaffId, currentUserId]);
 
     const handleDownloadPdf = async () => {
-        if (!calendarRef.current) return;
+        if (!calendarRef.current || !currentOrg) return;
         setPdfGenerating(true);
         try {
             const api = calendarRef.current.getApi();
@@ -151,7 +150,7 @@ export default function ShiftListPage() {
                     };
                 });
                 pdfShifts.sort((a, b) => a.timestamp - b.timestamp);
-                blob = await pdf(<ShiftScheduleDocument title={docTitle} monthStr={monthStr} shifts={pdfShifts} />).toBlob();
+                blob = await pdf(<ShiftScheduleDocument title={docTitle} monthStr={monthStr} shifts={pdfShifts} orgName={currentOrg.name} />).toBlob();
             } else {
                 const activeStart = api.view.activeStart;
                 const activeEnd = api.view.activeEnd;
@@ -184,7 +183,7 @@ export default function ShiftListPage() {
                     if (currentWeek.length === 7) { weeks.push(currentWeek); currentWeek = []; }
                 }
                 if (currentWeek.length > 0) weeks.push(currentWeek);
-                blob = await pdf(<ShiftCalendarDocument title={docTitle} monthStr={monthStr} weeks={weeks} />).toBlob();
+                blob = await pdf(<ShiftCalendarDocument title={docTitle} monthStr={monthStr} weeks={weeks} orgName={currentOrg.name} />).toBlob();
             }
 
             const link = document.createElement('a');
@@ -199,9 +198,8 @@ export default function ShiftListPage() {
         }
     };
 
-    // ★追加: スタッフ横断（マトリックス）PDFの作成処理
     const handleDownloadMatrixPdf = async () => {
-        if (!calendarRef.current) return;
+        if (!calendarRef.current || !currentOrg) return;
         setPdfGenerating(true);
 
         try {
@@ -225,7 +223,11 @@ export default function ShiftListPage() {
                 
                 const day = start.getDate();
                 const end = new Date(shift.end_at);
-                const timeStr = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}\n~\n${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+                
+                // ★修正: 時間だけでなく「利用者名」も含めたテキストを作成
+                const cName = shift.clients?.name || '不明';
+                const displayName = cName.endsWith('様') ? cName.replace('様', '') : cName; // セルが狭いので「様」は省く
+                const timeStr = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}-${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}\n${displayName}`;
 
                 shift.shift_staffs.forEach(ss => {
                     const sData = matrixMap.get(ss.staff_id);
@@ -236,7 +238,6 @@ export default function ShiftListPage() {
                 });
             });
 
-            // 名前順にソートして配列化
             const staffDataArray = Array.from(matrixMap.values()).sort((a, b) => a.staffName.localeCompare(b.staffName));
 
             const blob = await pdf(
@@ -245,6 +246,7 @@ export default function ShiftListPage() {
                     monthStr={monthStr} 
                     daysInMonth={daysInMonth} 
                     staffData={staffDataArray} 
+                    orgName={currentOrg.name}
                 />
             ).toBlob();
 
