@@ -4,7 +4,8 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Box, Button, Container, Typography, TextField, Checkbox, FormControlLabel, Radio, RadioGroup,
   Paper, Stack, IconButton, CircularProgress,
-  FormGroup, Switch, Autocomplete, FormHelperText, Chip, Divider, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions
+  FormGroup, Switch, FormHelperText, Chip, Divider, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
+  FormControl, InputLabel, Select, MenuItem, OutlinedInput, SelectChangeEvent
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
@@ -82,6 +83,11 @@ type ShiftStaffData = {
     staffs: { name: string } | null;
 };
 
+// ★ Select用のMenuProps定義
+const ITEM_HEIGHT = 48;
+const ITEM_PADDING_TOP = 8;
+const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
+
 export default function RecordPage() {
   const router = useRouter();
   const { clientId } = useParams();
@@ -98,9 +104,9 @@ export default function RecordPage() {
   const [template, setTemplate] = useState<FormItem[]>([]);
   const [answers, setAnswers] = useState<FormAnswers>({});
   
-  // 選択肢用
+  // 選択肢用 (スタッフ名簿一覧)
   const [selectableStaffs, setSelectableStaffs] = useState<HelperProfile[]>([]);
-  // 選択中
+  // 選択中のスタッフ名配列
   const [selectedHelpers, setSelectedHelpers] = useState<string[]>([]);
   
   const [startDateTime, setStartDateTime] = useState('');
@@ -139,7 +145,7 @@ export default function RecordPage() {
         setTemplate(schema.filter(i => i.id !== 'service_time' && i.id !== 'travel_time'));
       }
 
-      // ★修正: 担当スタッフの選択肢を「スタッフ(名簿)管理(staffsテーブル)」から取得するように変更
+      // スタッフ名簿一覧を取得
       const { data: staffsData } = await supabase
         .from('staffs')
         .select('id, name, user_id')
@@ -149,7 +155,6 @@ export default function RecordPage() {
       const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id }));
       setSelectableStaffs(allStaffs);
 
-      // 新規入力（記録なし＆シフトからでもない）場合、自分の名簿アカウントを自動選択
       if (!currentReportId && !shiftId && user) {
         const myStaffRecord = allStaffs.find(s => s.user_id === user.id);
         if (myStaffRecord) {
@@ -203,7 +208,6 @@ export default function RecordPage() {
               router.replace(`/app/record/${clientId}?reportId=${targetId}`);
               showToast('このシフトには既に記録が存在します。該当する記録を開きました。', 'info');
           } else {
-              // ★修正: シフトから「時間」と「名簿スタッフ名」を取得して自動入力
               const { data: shiftData } = await supabase
                   .from('shifts')
                   .select(`
@@ -220,7 +224,6 @@ export default function RecordPage() {
                   setStartDateTime(formatDatetimeLocal(new Date(shiftData.start_at)));
                   setEndDateTime(formatDatetimeLocal(new Date(shiftData.end_at)));
                   
-                  // 提供時間(h)も時間差から自動計算してプレフィル
                   const sTime = new Date(shiftData.start_at).getTime();
                   const eTime = new Date(shiftData.end_at).getTime();
                   if (eTime > sTime) {
@@ -232,7 +235,6 @@ export default function RecordPage() {
                   const typedShiftStaffs = (shiftData.shift_staffs as unknown as ShiftStaffData[]) || [];
                   
                   typedShiftStaffs.forEach(s => {
-                      // 配列で返ってくるケースも考慮
                       const name = Array.isArray(s.staffs) ? s.staffs[0]?.name : s.staffs?.name;
                       if (name) staffNames.push(name);
                   });
@@ -316,7 +318,7 @@ export default function RecordPage() {
   const validate = () => {
     const ne: Record<string, string> = {};
     if (!serviceTime) ne['serviceTime'] = '必須項目です';
-    if (selectedHelpers.length === 0) ne['helpers'] = '担当ヘルパーを選択してください';
+    if (selectedHelpers.length === 0) ne['helpers'] = '担当スタッフを選択してください';
     template.forEach(item => {
       const val = answers[item.id];
       if (item.required && (!val || (Array.isArray(val) && val.length === 0))) ne[item.id] = '必須項目です';
@@ -412,6 +414,18 @@ export default function RecordPage() {
 
   const isAdmin = currentOrg && ['owner', 'manager'].includes(currentOrg.role);
 
+  // ★ Selectの変更ハンドラ
+  const handleStaffChange = (event: SelectChangeEvent<typeof selectedHelpers>) => {
+      const { target: { value } } = event;
+      setSelectedHelpers(typeof value === 'string' ? value.split(',') : value);
+      setIsDirty(true);
+      if (errors.helpers) {
+          const newErrors = { ...errors };
+          delete newErrors.helpers;
+          setErrors(newErrors);
+      }
+  };
+
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}><CircularProgress /></Box>;
 
   return (
@@ -443,22 +457,42 @@ export default function RecordPage() {
             <Stack spacing={4}>
             <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, bgcolor: '#fff' }}>
                 <Stack spacing={3}>
+                
+                {/* ★修正: 担当スタッフをチェックボックス付きのSelectに変更 */}
                 <Box>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
                     </Typography>
-                    <Autocomplete
-                        multiple
-                        options={Array.from(new Set(selectableStaffs.map(h => h.name)))}
-                        value={selectedHelpers}
-                        onChange={(_, v) => {
-                            setSelectedHelpers(v as string[]);
-                            setIsDirty(true);
-                            if (v.length > 0 && errors.helpers) { const newErrors = { ...errors }; delete newErrors.helpers; setErrors(newErrors); }
-                        }}
-                        renderTags={(value, getTagProps) => value.map((option, index) => { const { key, ...tagProps } = getTagProps({ index }); return <Chip key={key} variant="outlined" label={option} size="small" {...tagProps} />; })}
-                        renderInput={(params) => <TextField {...params} placeholder={selectedHelpers.length === 0 ? "スタッフ名簿から選択" : ""} error={!!errors.helpers} helperText={errors.helpers} fullWidth />}
-                    />
+                    <FormControl fullWidth error={!!errors.helpers}>
+                        <Select
+                            multiple
+                            displayEmpty
+                            value={selectedHelpers}
+                            onChange={handleStaffChange}
+                            input={<OutlinedInput />}
+                            renderValue={(selected) => {
+                                if (selected.length === 0) {
+                                    return <Typography color="text.disabled">スタッフ名簿から選択</Typography>;
+                                }
+                                return (
+                                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                        {selected.map((value) => (
+                                            <Chip key={value} label={value} size="small" variant="outlined" />
+                                        ))}
+                                    </Box>
+                                );
+                            }}
+                            MenuProps={MenuProps}
+                        >
+                            {Array.from(new Set(selectableStaffs.map(h => h.name))).map((name) => (
+                                <MenuItem key={name} value={name}>
+                                    <Checkbox checked={selectedHelpers.indexOf(name) > -1} size="small" />
+                                    <Typography variant="body2" sx={{ fontWeight: selectedHelpers.includes(name) ? 'bold' : 'normal' }}>{name}</Typography>
+                                </MenuItem>
+                            ))}
+                        </Select>
+                        {errors.helpers && <FormHelperText>{errors.helpers}</FormHelperText>}
+                    </FormControl>
                 </Box>
 
                 <Box>
