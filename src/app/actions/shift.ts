@@ -18,7 +18,7 @@ export type ShiftPayload = {
     endAt: string;   
     isRecurring: boolean;
     rrule?: string;
-    staffIds: string[]; // ★新設計：staffsテーブルのIDのみの配列
+    staffIds: string[]; 
     status?: 'published' | 'cancelled';
     cancelReason?: string;
     baseShiftId?: string;
@@ -26,7 +26,7 @@ export type ShiftPayload = {
 
 type ShiftStaffInsert = {
     shift_id: string;
-    staff_id: string; // ★新設計
+    staff_id: string; 
 };
 
 type ShiftUpdateData = {
@@ -44,7 +44,6 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
         const { data: orgData } = await supabaseAdmin.from('organizations').select('google_calendar_id, google_refresh_token').eq('id', organizationId).single();
         if (!orgData?.google_calendar_id || !orgData?.google_refresh_token) return;
 
-        // ★新設計のテーブル構造で取得
         const { data: shiftData } = await supabaseAdmin.from('shifts').select('id, title, start_at, end_at, status, cancel_reason, google_event_id, rrule, shift_staffs(staff_id)').eq('id', shiftId).single();
         if (!shiftData) return;
 
@@ -85,8 +84,16 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
             colorId: colorId
         };
 
-        let newEventId = shiftData.google_event_id;
+        // ★修正: rruleが存在する場合、Googleカレンダーの recurrence フォーマットに合わせてセットする
+        if (shiftData.rrule) {
+            // Google APIは配列形式で "RRULE:FREQ=WEEKLY;BYDAY=MO" のように渡す仕様
+            eventBody.recurrence = [`RRULE:${shiftData.rrule}`];
+        } else {
+            // 繰り返しから単発に変更された場合の解除処理
+            eventBody.recurrence = null; 
+        }
 
+        let newEventId = shiftData.google_event_id;
         if (shiftData.google_event_id) {
             try {
                 await calendarApi.events.update({ calendarId: orgData.google_calendar_id, eventId: shiftData.google_event_id, requestBody: eventBody });
@@ -119,9 +126,8 @@ export async function createShift(payload: ShiftPayload) {
 
         if (shiftError || !shift) throw new Error(shiftError?.message);
 
-        // ★新設計のインサート
         if (payload.staffIds.length > 0) {
-            const staffInserts: ShiftStaffInsert[] = payload.staffIds.map(sid => ({ shift_id: shift.id, staff_id: sid }));
+            const staffInserts = payload.staffIds.map(sid => ({ shift_id: shift.id, staff_id: sid }));
             await supabaseAdmin.from('shift_staffs').insert(staffInserts);
         }
 
@@ -146,7 +152,7 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
 
         if (payload.staffIds !== undefined) {
             await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
-            const staffInserts: ShiftStaffInsert[] = payload.staffIds.map(sid => ({ shift_id: shiftId, staff_id: sid }));
+            const staffInserts = payload.staffIds.map(sid => ({ shift_id: shiftId, staff_id: sid }));
             if (staffInserts.length > 0) await supabaseAdmin.from('shift_staffs').insert(staffInserts);
         }
 
@@ -168,7 +174,6 @@ export async function cancelShift(shiftId: string, reason: string = '') {
 
 export async function getShifts(organizationId: string, startDate: string, endDate: string) {
     try {
-        // ★新設計の取得クエリ (shift_staffs -> staffs)
         const { data, error } = await supabaseAdmin.from('shifts').select(`
             *,
             clients (id, name),
