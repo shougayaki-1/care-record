@@ -13,10 +13,47 @@ import { ClientData, StaffData } from './ShiftFormModal';
 type Props = {
     open: boolean;
     onClose: () => void;
-    onSave: (payload: ShiftPatternPayload) => Promise<void>;
+    onSave: (payload: ShiftPatternPayload, patternId?: string) => Promise<void>;
     clients: ClientData[];
     staffs: StaffData[];
     organizationId: string;
+    initialData?: any;
+};
+
+const parseRrule = (rruleStr: string) => {
+    let freq: 'WEEKLY' | 'MONTHLY' = 'WEEKLY';
+    let interval = 1;
+    let selectedDays: string[] = [];
+    let selectedWeeks: string[] = [];
+
+    const parts = rruleStr.split(';');
+    for (const part of parts) {
+        const [key, val] = part.split('=');
+        if (!key || !val) continue;
+
+        if (key === 'FREQ') {
+            freq = val as 'WEEKLY' | 'MONTHLY';
+        } else if (key === 'INTERVAL') {
+            interval = parseInt(val, 10) || 1;
+        } else if (key === 'BYDAY') {
+            const days = val.split(',');
+            if (freq === 'WEEKLY') {
+                selectedDays = days;
+            } else {
+                const daysSet = new Set<string>();
+                const weeksSet = new Set<string>();
+                for (const d of days) {
+                    const week = d.match(/^[0-9]+/)?.[0] || '';
+                    const day = d.replace(/^[0-9]+/, '');
+                    if (week) weeksSet.add(week);
+                    if (day) daysSet.add(day);
+                }
+                selectedDays = Array.from(daysSet);
+                selectedWeeks = Array.from(weeksSet);
+            }
+        }
+    }
+    return { freq, interval, selectedDays, selectedWeeks };
 };
 
 const DAYS_OF_WEEK = [
@@ -33,7 +70,7 @@ const ITEM_HEIGHT = 48;
 const ITEM_PADDING_TOP = 8;
 const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
 
-export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, organizationId }: Props) => {
+export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, organizationId, initialData }: Props) => {
     const [loading, setLoading] = useState(false);
     const [clientId, setClientId] = useState('');
     const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
@@ -47,10 +84,23 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
 
     useEffect(() => {
         if (open) {
-            setClientId(''); setSelectedStaffIds([]); setStartTime('10:00'); setEndTime('12:00');
-            setFreq('WEEKLY'); setIntervalCount(1); setSelectedDays([]); setSelectedWeeks([]);
+            if (initialData) {
+                setClientId(initialData.client_id || '');
+                setSelectedStaffIds((initialData.shift_pattern_staffs || []).map((s: any) => s.staff_id));
+                setStartTime(initialData.start_time ? initialData.start_time.slice(0, 5) : '10:00');
+                setEndTime(initialData.end_time ? initialData.end_time.slice(0, 5) : '12:00');
+                
+                const parsed = parseRrule(initialData.rrule || '');
+                setFreq(parsed.freq);
+                setIntervalCount(parsed.interval);
+                setSelectedDays(parsed.selectedDays);
+                setSelectedWeeks(parsed.selectedWeeks);
+            } else {
+                setClientId(''); setSelectedStaffIds([]); setStartTime('10:00'); setEndTime('12:00');
+                setFreq('WEEKLY'); setIntervalCount(1); setSelectedDays([]); setSelectedWeeks([]);
+            }
         }
-    }, [open]);
+    }, [open, initialData]);
 
     const handleSave = async () => {
         if (!clientId || !startTime || !endTime || selectedStaffIds.length === 0 || selectedDays.length === 0) {
@@ -76,7 +126,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 organizationId, clientId, title: `${clientName} (${staffNames})`,
                 startTime: `${startTime}:00`, endTime: `${endTime}:00`,
                 rrule: rruleStr, staffIds: selectedStaffIds
-            });
+            }, initialData?.id);
             onClose();
         } catch (e) { console.error(e); alert('保存に失敗しました'); } finally { setLoading(false); }
     };
@@ -93,7 +143,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth disableEscapeKeyDown>
-            <DialogTitle fontWeight="bold">基本パターン（ひな形）の登録</DialogTitle>
+            <DialogTitle fontWeight="bold">{initialData ? '基本パターン（ひな形）の編集' : '基本パターン（ひな形）の登録'}</DialogTitle>
             <DialogContent dividers>
                 <Stack spacing={3}>
                     <FormControl fullWidth size="small" required>
@@ -168,7 +218,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
             </DialogContent>
             <DialogActions sx={{ p: 2 }}>
                 <Button onClick={onClose} color="inherit" disabled={loading}>閉じる</Button>
-                <Button variant="contained" onClick={handleSave} disabled={loading} sx={{ boxShadow: 'none' }}>{loading ? <CircularProgress size={24} color="inherit" /> : '登録する'}</Button>
+                <Button variant="contained" onClick={handleSave} disabled={loading} sx={{ boxShadow: 'none' }}>{loading ? <CircularProgress size={24} color="inherit" /> : (initialData ? '保存する' : '登録する')}</Button>
             </DialogActions>
         </Dialog>
     );

@@ -12,8 +12,8 @@ import { EventResizeDoneArg } from '@fullcalendar/interaction';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
-// ★追加: deleteShiftsBulk をインポート
-import { getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely, deleteShiftsBulk, ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, generateShiftsForMonth, ShiftPatternPayload } from '@/app/actions/shift';
+// ★追加: deleteShiftsBulk, updateShiftPattern, clearGeneratedShiftsForMonth をインポート
+import { getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely, deleteShiftsBulk, ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, updateShiftPattern, clearGeneratedShiftsForMonth, generateShiftsForMonth, ShiftPatternPayload } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { ShiftFormModal, ClientData, StaffData, ShiftData } from '@/components/shifts/ShiftFormModal';
 import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
@@ -44,6 +44,7 @@ export default function ShiftManagePage() {
     const [shiftModalOpen, setShiftModalOpen] = useState(false);
     const [patternModalOpen, setPatternModalOpen] = useState(false);
     const [selectedShift, setSelectedShift] = useState<ShiftData | null>(null);
+    const [selectedPattern, setSelectedPattern] = useState<FetchedPatternData | null>(null); // ★追加
 
     // ★追加: 一括削除用のState
     const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
@@ -78,8 +79,8 @@ export default function ShiftManagePage() {
             const fetchedShifts = await getShifts(currentOrg.id, start.toISOString(), end.toISOString());
             const typedShifts = (fetchedShifts as unknown as FetchedShiftData[]) || [];
             
-            // 一覧表示用にソート（直近から）
-            typedShifts.sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+            // 一覧表示用にソート（直近から - 新しい順に降順）
+            typedShifts.sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime());
             
             setRawShifts(typedShifts);
             setEvents(convertToCalendarEvents(typedShifts, false));
@@ -176,9 +177,36 @@ export default function ShiftManagePage() {
     };
 
     // --- ひな形操作 ---
-    const handleSavePattern = async (payload: ShiftPatternPayload) => {
-        try { await createShiftPattern(payload); showToast('ひな形を登録しました'); fetchData(true); } 
-        catch(error) { console.error(error); showToast('登録に失敗しました', 'error'); }
+    const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {
+        try {
+            if (patternId) {
+                await updateShiftPattern(patternId, payload);
+                showToast('ひな形を更新しました');
+            } else {
+                await createShiftPattern(payload);
+                showToast('ひな形を登録しました');
+            }
+            fetchData(true);
+        } catch(error) {
+            console.error(error);
+            showToast('保存に失敗しました', 'error');
+        }
+    };
+
+    const handleClearMonthShifts = async () => {
+        if (!currentOrg) return;
+        if (!confirm(`※${targetMonth}月にひな形から展開されたシフトをすべて消去しますか？\n（※Googleカレンダーからも削除されます）`)) return;
+        setGenerating(true);
+        try {
+            const res = await clearGeneratedShiftsForMonth(currentOrg.id, targetMonth);
+            showToast(`${targetMonth}月の展開済みシフトを ${res.count} 件削除しました！`, 'success');
+            fetchData(true);
+        } catch (error) {
+            console.error(error);
+            showToast('消去に失敗しました', 'error');
+        } finally {
+            setGenerating(false);
+        }
     };
 
     const handleDeletePattern = async (id: string) => {
@@ -244,7 +272,7 @@ export default function ShiftManagePage() {
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                     <Typography variant="h6" fontWeight="bold">全体シフト管理</Typography>
                     {tabIndex === 0 ? (
-                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setPatternModalOpen(true)} sx={{ boxShadow: 'none' }}>ひな形を追加</Button>
+                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none' }}>ひな形を追加</Button>
                     ) : (
                         <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setShiftModalOpen(true); }} sx={{ boxShadow: 'none' }}>単発シフトを追加</Button>
                     )}
@@ -273,6 +301,9 @@ export default function ShiftManagePage() {
                                     <Button variant="contained" color="secondary" startIcon={<PlayArrowIcon />} onClick={handleGenerate} disabled={generating || patterns.length === 0} sx={{ boxShadow: 'none' }}>
                                         {generating ? '生成中...' : '対象月のカレンダーに一括展開'}
                                     </Button>
+                                    <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={handleClearMonthShifts} disabled={generating || patterns.length === 0}>
+                                        {generating ? '消去中...' : '展開したものを一旦消去'}
+                                    </Button>
                                 </Stack>
                             </Paper>
 
@@ -297,6 +328,7 @@ export default function ShiftManagePage() {
                                                     <TableCell>{p.start_time.slice(0,5)} 〜 {p.end_time.slice(0,5)}</TableCell>
                                                     <TableCell><Chip label={formatRule(p.rrule)} size="small" color="primary" variant="outlined" /></TableCell>
                                                     <TableCell align="center">
+                                                        <Tooltip title="編集"><IconButton size="small" color="primary" onClick={() => { setSelectedPattern(p); setPatternModalOpen(true); }} sx={{ mr: 1 }}><EditIcon fontSize="small" /></IconButton></Tooltip>
                                                         <Tooltip title="削除"><IconButton size="small" color="error" onClick={() => handleDeletePattern(p.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
                                                     </TableCell>
                                                 </TableRow>
@@ -391,7 +423,7 @@ export default function ShiftManagePage() {
                 organizationId={currentOrg.id} 
                 initialData={selectedShift} 
             />
-            <ShiftPatternModal open={patternModalOpen} onClose={() => setPatternModalOpen(false)} onSave={handleSavePattern} clients={clients} staffs={staffs} organizationId={currentOrg.id} />
+            <ShiftPatternModal open={patternModalOpen} onClose={() => setPatternModalOpen(false)} onSave={handleSavePattern} clients={clients} staffs={staffs} organizationId={currentOrg.id} initialData={selectedPattern} />
         </Box>
     );
 }

@@ -159,7 +159,7 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean = tr
     } catch (error) { console.error(error); throw error; }
 }
 
-export async function updateShift(shiftId: string, payload: Partial<ShiftPayload>) {
+export async function updateShift(shiftId: string, payload: Partial<ShiftPayload>, awaitSync: boolean = true) {
     try {
         const updateData: ShiftUpdateData = {};
         if (payload.title !== undefined) updateData.title = payload.title;
@@ -180,7 +180,13 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
         }
 
         const targetOrgId = payload.organizationId || (await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single()).data?.organization_id;
-        if (targetOrgId) await syncToGoogleCalendarDirect(targetOrgId, shiftId, 'sync');
+        if (targetOrgId) {
+            if (awaitSync) {
+                await syncToGoogleCalendarDirect(targetOrgId, shiftId, 'sync');
+            } else {
+                syncToGoogleCalendarDirect(targetOrgId, shiftId, 'sync').catch(e => console.error('Async Sync Error:', e));
+            }
+        }
         return { success: true };
     } catch (error) { console.error(error); throw error; }
 }
@@ -238,6 +244,69 @@ export async function createShiftPattern(payload: ShiftPatternPayload) {
     return { success: true };
 }
 
+export async function updateShiftPattern(patternId: string, payload: ShiftPatternPayload) {
+    try {
+        const { error } = await supabaseAdmin.from('shift_patterns').update({
+            client_id: payload.clientId,
+            title: payload.title,
+            start_time: payload.startTime,
+            end_time: payload.endTime,
+            rrule: payload.rrule,
+            updated_at: new Date().toISOString()
+        }).eq('id', patternId);
+        if (error) throw error;
+
+        await supabaseAdmin.from('shift_pattern_staffs').delete().eq('pattern_id', patternId);
+
+        if (payload.staffIds.length > 0) {
+            const inserts: PatternStaffInsert[] = payload.staffIds.map(sid => ({ pattern_id: patternId, staff_id: sid }));
+            await supabaseAdmin.from('shift_pattern_staffs').insert(inserts);
+        }
+        return { success: true };
+    } catch (error) {
+        console.error('Update Shift Pattern Error:', error);
+        throw error;
+    }
+}
+
+export async function clearGeneratedShiftsForMonth(organizationId: string, yearMonth: string) {
+    const [year, month] = yearMonth.split('-').map(Number);
+    const startDateJST = new Date(`${year}-${String(month).padStart(2, '0')}-01T00:00:00+09:00`);
+    const endDateJST = new Date(year, month, 0, 23, 59, 59); // 月末
+    const endDateISO = toJSTISOString(endDateJST, "23:59");
+
+    try {
+        const { data: shifts, error } = await supabaseAdmin.from('shifts')
+            .select('id')
+            .eq('organization_id', organizationId)
+            .not('pattern_id', 'is', null)
+            .gte('start_at', startDateJST.toISOString())
+            .lte('start_at', new Date(endDateISO).toISOString());
+
+        if (error) throw error;
+        if (!shifts || shifts.length === 0) return { success: true, count: 0 };
+
+        const shiftIds = shifts.map(s => s.id);
+
+        const deletePromises = shifts.map(shift => 
+            syncToGoogleCalendarDirect(organizationId, shift.id, 'delete')
+                .catch(e => console.error('Clear Month Sync Error:', e))
+        );
+        await Promise.all(deletePromises);
+
+        const { error: deleteError } = await supabaseAdmin.from('shifts')
+            .delete()
+            .in('id', shiftIds);
+
+        if (deleteError) throw deleteError;
+
+        return { success: true, count: shifts.length };
+    } catch (error) {
+        console.error('Clear Deployed Shifts Error:', error);
+        throw error;
+    }
+}
+
 export async function deleteShiftPattern(patternId: string) {
     const { error } = await supabaseAdmin.from('shift_patterns').delete().eq('id', patternId);
     if (error) throw error;
@@ -261,6 +330,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         if (!patterns || patterns.length === 0) return { success: true, count: 0 };
 
         let createdCount = 0;
+        const promises: Promise<any>[] = [];
 
         for (const p of patterns) {
             // RRULEの基準日をJSTの開始日に設定
@@ -270,8 +340,6 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
             
             // 指定期間内の該当日を取得（念のため余裕を持たせて前後数時間含めて判定）
             const occurrences = rule.between(startDateJST, new Date(endDateISO), true);
-
-            const createPromises = [];
 
             for (const dateJST of occurrences) {
                 // dateJSTはrruleライブラリによって生成されたDateオブジェクト
@@ -283,51 +351,114 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 const [eHour, eMin] = p.end_time.split(':').map(Number);
                 
                 const pad = (n: number) => String(n).padStart(2, '0');
+                const isOvernight = eHour < sHour;
+                const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
 
-                // ★修正: 日本時間 (+09:00) を強制して日時文字列を作成
-                const startAtStr = `${yy}-${pad(mm)}-${pad(dd)}T${pad(sHour)}:${pad(sMin)}:00+09:00`;
-                
-                // 終了日の判定（夜勤対応）
-                let endYY = yy, endMM = mm, endDD = dd;
-                if (eHour < sHour) {
+                if (isOvernight) {
+                    // overnight split: Part 1 and Part 2
+                    // --- Part 1 (Day 1: p.start_time to 00:00 of nextDay) ---
+                    const startAtStr1 = `${yy}-${pad(mm)}-${pad(dd)}T${pad(sHour)}:${pad(sMin)}:00+09:00`;
+                    
                     const nextDay = new Date(dateJST);
                     nextDay.setDate(nextDay.getDate() + 1);
-                    endYY = nextDay.getFullYear();
-                    endMM = nextDay.getMonth() + 1;
-                    endDD = nextDay.getDate();
-                }
-                const endAtStr = `${endYY}-${pad(endMM)}-${pad(endDD)}T${pad(eHour)}:${pad(eMin)}:00+09:00`;
+                    const nextYY = nextDay.getFullYear();
+                    const nextMM = nextDay.getMonth() + 1;
+                    const nextDD = nextDay.getDate();
+                    const endAtStr1 = `${nextYY}-${pad(nextMM)}-${pad(nextDD)}T00:00:00+09:00`;
 
-                // 重複チェック用の範囲設定
-                const dayStart = `${yy}-${pad(mm)}-${pad(dd)}T00:00:00+09:00`;
-                const dayEnd = `${yy}-${pad(mm)}-${pad(dd)}T23:59:59+09:00`;
+                    // Check duplicate on Day 1
+                    const dayStart = `${yy}-${pad(mm)}-${pad(dd)}T00:00:00+09:00`;
+                    const dayEnd = `${yy}-${pad(mm)}-${pad(dd)}T23:59:59+09:00`;
 
-                const { data: existing } = await supabaseAdmin.from('shifts')
-                    .select('id').eq('pattern_id', p.id)
-                    .gte('start_at', new Date(dayStart).toISOString())
-                    .lte('start_at', new Date(dayEnd).toISOString())
-                    .maybeSingle();
+                    const { data: existingPart1 } = await supabaseAdmin.from('shifts')
+                        .select('id')
+                        .eq('pattern_id', p.id)
+                        .gte('start_at', new Date(dayStart).toISOString())
+                        .lte('start_at', new Date(dayEnd).toISOString())
+                        .maybeSingle();
 
-                if (!existing) {
-                    const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
-                    
-                    createPromises.push(
-                        createShift({
-                            organizationId,
-                            clientId: p.client_id,
-                            title: p.title,
-                            startAt: new Date(startAtStr).toISOString(), 
-                            endAt: new Date(endAtStr).toISOString(),
-                            staffIds: staffIds,
-                            status: 'published',
-                            patternId: p.id
-                        }, false) 
-                    );
-                    createdCount++;
+                    const part1Payload = {
+                        organizationId,
+                        clientId: p.client_id,
+                        title: p.title,
+                        startAt: new Date(startAtStr1).toISOString(),
+                        endAt: new Date(endAtStr1).toISOString(),
+                        staffIds: staffIds,
+                        status: 'published' as const,
+                    };
+
+                    if (existingPart1) {
+                        promises.push(updateShift(existingPart1.id, part1Payload, false));
+                    } else {
+                        promises.push(createShift({ ...part1Payload, patternId: p.id }, false));
+                        createdCount++;
+                    }
+
+                    // --- Part 2 (Day 2: 00:00 to p.end_time) ---
+                    const startAtStr2 = `${nextYY}-${pad(nextMM)}-${pad(nextDD)}T00:00:00+09:00`;
+                    const endAtStr2 = `${nextYY}-${pad(nextMM)}-${pad(nextDD)}T${pad(eHour)}:${pad(eMin)}:00+09:00`;
+
+                    // Check duplicate starting exactly at 00:00 of nextDay JST
+                    const targetStart2 = new Date(startAtStr2).toISOString();
+                    const { data: existingPart2 } = await supabaseAdmin.from('shifts')
+                        .select('id')
+                        .eq('pattern_id', p.id)
+                        .eq('start_at', targetStart2)
+                        .maybeSingle();
+
+                    const part2Payload = {
+                        organizationId,
+                        clientId: p.client_id,
+                        title: p.title,
+                        startAt: new Date(startAtStr2).toISOString(),
+                        endAt: new Date(endAtStr2).toISOString(),
+                        staffIds: staffIds,
+                        status: 'published' as const,
+                    };
+
+                    if (existingPart2) {
+                        promises.push(updateShift(existingPart2.id, part2Payload, false));
+                    } else {
+                        promises.push(createShift({ ...part2Payload, patternId: p.id }, false));
+                        createdCount++;
+                    }
+
+                } else {
+                    // standard shift
+                    const startAtStr = `${yy}-${pad(mm)}-${pad(dd)}T${pad(sHour)}:${pad(sMin)}:00+09:00`;
+                    const endAtStr = `${yy}-${pad(mm)}-${pad(dd)}T${pad(eHour)}:${pad(eMin)}:00+09:00`;
+
+                    // Check duplicate on Day 1
+                    const dayStart = `${yy}-${pad(mm)}-${pad(dd)}T00:00:00+09:00`;
+                    const dayEnd = `${yy}-${pad(mm)}-${pad(dd)}T23:59:59+09:00`;
+
+                    const { data: existing } = await supabaseAdmin.from('shifts')
+                        .select('id')
+                        .eq('pattern_id', p.id)
+                        .gte('start_at', new Date(dayStart).toISOString())
+                        .lte('start_at', new Date(dayEnd).toISOString())
+                        .maybeSingle();
+
+                    const payload = {
+                        organizationId,
+                        clientId: p.client_id,
+                        title: p.title,
+                        startAt: new Date(startAtStr).toISOString(),
+                        endAt: new Date(endAtStr).toISOString(),
+                        staffIds: staffIds,
+                        status: 'published' as const,
+                    };
+
+                    if (existing) {
+                        promises.push(updateShift(existing.id, payload, false));
+                    } else {
+                        promises.push(createShift({ ...payload, patternId: p.id }, false));
+                        createdCount++;
+                    }
                 }
             }
-            await Promise.all(createPromises);
         }
+        await Promise.all(promises);
         return { success: true, count: createdCount };
     } catch (error) {
         console.error('Generate Shifts Error:', error);
