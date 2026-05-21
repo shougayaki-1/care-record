@@ -33,90 +33,87 @@ import { supabase } from '@/lib/supabase';
 const RAIL_WIDTH = 72;
 const SIDEBAR_WIDTH = 240;
 
-// 型定義
 type Notification = {
-    id: string;
-    content: string;
-    is_read: boolean;
-    created_at: string;
-    type: string;
-    link_url?: string;
+  id: string;
+  content: string;
+  is_read: boolean;
+  created_at: string;
+  type: string;
+  link_url?: string;
 };
 
-// Notifications Component
 const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | null, onClose: () => void }) => {
-    const [notifications, setNotifications] = useState<Notification[]>([]);
-    const [loading, setLoading] = useState(true);
-    const router = useRouter();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
-    useEffect(() => {
-        const fetchNotifications = async () => {
-            setLoading(true);
-            const { data } = await supabase.from('notifications')
-                .select('*')
-                .order('created_at', { ascending: false })
-                .limit(20);
-            setNotifications((data as Notification[]) || []);
-            setLoading(false);
-        };
-
-        if (anchorEl) fetchNotifications();
-    }, [anchorEl]);
-
-    const handleRead = async (n: Notification) => {
-        if (!n.is_read) {
-            await supabase.from('notifications').update({ is_read: true }).eq('id', n.id);
-        }
-        if (n.link_url) {
-            router.push(n.link_url);
-            onClose();
-        }
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      setLoading(true);
+      const { data } = await supabase.from('notifications')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(20);
+      setNotifications((data as Notification[]) || []);
+      setLoading(false);
     };
 
-    const open = Boolean(anchorEl);
+    if (anchorEl) fetchNotifications();
+  }, [anchorEl]);
 
-    return (
-        <Popover
-            open={open}
-            anchorEl={anchorEl}
-            onClose={onClose}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-            PaperProps={{ sx: { width: 320, maxHeight: 400 } }}
-        >
-            <Box p={2} borderBottom="1px solid #eee">
-                <Typography fontWeight="bold">通知</Typography>
-            </Box>
-            {loading ? <Box p={2} textAlign="center"><CircularProgress size={20} /></Box> : (
-                <List sx={{ p: 0 }}>
-                    {notifications.length === 0 && <Box p={2} textAlign="center" color="text.secondary">通知はありません</Box>}
-                    {notifications.map(n => (
-                        <ListItemButton key={n.id} onClick={() => handleRead(n)} sx={{ bgcolor: n.is_read ? 'white' : '#f0f7ff', borderBottom: '1px solid #f5f5f5' }}>
-                            <ListItemIcon sx={{ minWidth: 32 }}>
-                                {n.type === 'approve' ? <CheckCircleIcon color="success" fontSize="small" /> : <ErrorOutlineIcon color="error" fontSize="small" />}
-                            </ListItemIcon>
-                            <ListItemText 
-                                primary={n.content} 
-                                secondary={new Date(n.created_at).toLocaleString()} 
-                                primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: n.is_read ? 'normal' : 'bold' }}
-                                secondaryTypographyProps={{ fontSize: '0.75rem' }}
-                            />
-                        </ListItemButton>
-                    ))}
-                </List>
-            )}
-        </Popover>
-    );
+  const handleRead = async (n: Notification) => {
+    if (!n.is_read) {
+      await supabase.from('notifications').update({ is_read: true }).eq('id', n.id);
+    }
+    if (n.link_url) {
+      router.push(n.link_url);
+      onClose();
+    }
+  };
+
+  const open = Boolean(anchorEl);
+
+  return (
+    <Popover
+      open={open}
+      anchorEl={anchorEl}
+      onClose={onClose}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      PaperProps={{ sx: { width: 320, maxHeight: 400 } }}
+    >
+      <Box p={2} borderBottom="1px solid #eee">
+        <Typography fontWeight="bold">通知</Typography>
+      </Box>
+      {loading ? <Box p={2} textAlign="center"><CircularProgress size={20} /></Box> : (
+        <List sx={{ p: 0 }}>
+          {notifications.length === 0 && <Box p={2} textAlign="center" color="text.secondary">通知はありません</Box>}
+          {notifications.map(n => (
+            <ListItemButton key={n.id} onClick={() => handleRead(n)} sx={{ bgcolor: n.is_read ? 'white' : '#f0f7ff', borderBottom: '1px solid #f5f5f5' }}>
+              <ListItemIcon sx={{ minWidth: 32 }}>
+                {n.type === 'approve' ? <CheckCircleIcon color="success" fontSize="small" /> : <ErrorOutlineIcon color="error" fontSize="small" />}
+              </ListItemIcon>
+              <ListItemText
+                primary={n.content}
+                secondary={new Date(n.created_at).toLocaleString()}
+                primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: n.is_read ? 'normal' : 'bold' }}
+                secondaryTypographyProps={{ fontSize: '0.75rem' }}
+              />
+            </ListItemButton>
+          ))}
+        </List>
+      )}
+    </Popover>
+  );
 };
 
-// 1. 左端レール (事業所切り替え)
 const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], currentOrg: Workspace | null, switchOrg: (id: string) => void }) => {
   const router = useRouter();
 
   return (
     <Box sx={{
       width: RAIL_WIDTH,
-      bgcolor: '#E3E5E8', 
+      bgcolor: '#E3E5E8',
       borderRight: 'none',
       display: 'flex',
       flexDirection: 'column',
@@ -131,15 +128,15 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
         const isSelected = currentOrg?.id === org.id;
         return (
           <Tooltip key={org.id} title={org.name} placement="right">
-            <IconButton 
+            <IconButton
               onClick={() => switchOrg(org.id)}
-              sx={{ 
+              sx={{
                 p: 0,
                 border: isSelected ? `2px solid #2255CC` : '2px solid transparent',
                 borderRadius: '50%',
                 transition: 'all 0.2s',
                 '&:hover': {
-                   borderColor: isSelected ? '#2255CC' : 'rgba(0,0,0,0.1)'
+                  borderColor: isSelected ? '#2255CC' : 'rgba(0,0,0,0.1)'
                 }
               }}
             >
@@ -161,13 +158,13 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
           </Tooltip>
         );
       })}
-      
+
       <Divider flexItem sx={{ mx: 2, borderColor: 'rgba(0,0,0,0.06)' }} />
-      
+
       <Tooltip title="事業所を追加 / 参加" placement="right">
-        <IconButton 
-          sx={{ 
-            width: 48, height: 48, 
+        <IconButton
+          sx={{
+            width: 48, height: 48,
             bgcolor: '#F2F3F5', color: '#23A559',
             transition: 'all 0.2s',
             '&:hover': { bgcolor: '#23A559', color: '#fff' }
@@ -208,7 +205,7 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
     px: 2, pt: 2.5, pb: 1,
     fontSize: '0.75rem',
     fontWeight: 'bold',
-    color: '#6D6F78', 
+    color: '#6D6F78',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
     ml: 1
@@ -232,19 +229,19 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
   });
 
   return (
-    <Box sx={{ 
-      width: SIDEBAR_WIDTH, 
+    <Box sx={{
+      width: SIDEBAR_WIDTH,
       bgcolor: '#F2F3F5',
-      display: 'flex', 
-      flexDirection: 'column', 
-      height: '100%', 
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
       borderRight: 'none'
     }}>
-      <Box sx={{ 
-        height: 48, 
-        display: 'flex', 
-        alignItems: 'center', 
-        px: 2, 
+      <Box sx={{
+        height: 48,
+        display: 'flex',
+        alignItems: 'center',
+        px: 2,
         flexShrink: 0,
         boxShadow: '0 1px 0 rgba(0,0,0,0.05)',
         cursor: 'default'
@@ -273,21 +270,13 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
 
         <Typography sx={categoryStyle}>シフト</Typography>
         <List disablePadding>
+          {/* 旧「シフト一覧(list)」と「全体シフト管理(manage)」への分岐を廃止し、統合された1つのシフトカレンダーに一本化 */}
           <ListItem disablePadding>
-            <ListItemButton onClick={() => handleNav('/app/shifts/list')} sx={itemStyle(isActive('/app/shifts/list'))}>
+            <ListItemButton onClick={() => handleNav('/app/shifts/manage')} sx={itemStyle(isActive('/app/shifts/manage'))}>
               <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
-              <ListItemText primary="シフト一覧" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+              <ListItemText primary="シフト管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
             </ListItemButton>
           </ListItem>
-          
-          {isAdmin && (
-            <ListItem disablePadding>
-              <ListItemButton onClick={() => handleNav('/app/shifts/manage')} sx={itemStyle(isActive('/app/shifts/manage'))}>
-                <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
-                <ListItemText primary="全体シフト管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-              </ListItemButton>
-            </ListItem>
-          )}
         </List>
 
         {isAdmin && (
@@ -329,14 +318,14 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
                   </ListItemButton>
                 </ListItem>
               )}
-              
+
               <ListItem disablePadding>
                 <ListItemButton onClick={() => handleNav('/app/clients')} sx={itemStyle(isActive('/app/clients'))}>
                   <ListItemIcon><PeopleIcon fontSize="small" /></ListItemIcon>
                   <ListItemText primary="利用者管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
                 </ListItemButton>
               </ListItem>
-                       <ListItem disablePadding>
+              <ListItem disablePadding>
                 <ListItemButton onClick={() => handleNav('/app/staff')} sx={itemStyle(isActive('/app/staff'))}>
                   <ListItemIcon><BadgeIcon fontSize="small" /></ListItemIcon>
                   <ListItemText primary="スタッフ(名簿)管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
@@ -351,7 +340,7 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
                   </ListItemButton>
                 </ListItem>
               )}
-               <ListItem disablePadding>
+              <ListItem disablePadding>
                 <ListItemButton onClick={() => handleNav('/app/statistics')} sx={itemStyle(isActive('/app/statistics'))}>
                   <ListItemIcon><AssessmentIcon fontSize="small" /></ListItemIcon>
                   <ListItemText primary="統計・予実管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
@@ -369,8 +358,7 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
   const router = useRouter();
   const [userName, setUserName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
-  
-  // Notification State
+
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifAnchor, setNotifAnchor] = useState<null | HTMLElement>(null);
 
@@ -378,24 +366,21 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
     const fetchUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // Profile
         const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).single();
         if (profile) {
-            setUserName(profile.name);
-            setAvatarUrl(profile.avatar_url);
+          setUserName(profile.name);
+          setAvatarUrl(profile.avatar_url);
         }
-        
-        // Notifications Check
+
         const { count } = await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_read', false);
         setUnreadCount(count || 0);
 
-        // Realtime Subscription
         const channel = supabase.channel('notifications')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
-                setUnreadCount(prev => prev + 1);
-            })
-            .subscribe();
-            
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
+            setUnreadCount(prev => prev + 1);
+          })
+          .subscribe();
+
         return () => { supabase.removeChannel(channel); };
       }
     };
@@ -406,22 +391,22 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
   const handleLogout = async () => { await supabase.auth.signOut(); router.push('/'); };
 
   return (
-    <Box sx={{ 
-      height: 52, 
-      bgcolor: '#EBEDEF', 
-      display: 'flex', 
-      alignItems: 'center', 
+    <Box sx={{
+      height: 52,
+      bgcolor: '#EBEDEF',
+      display: 'flex',
+      alignItems: 'center',
       px: 1.5,
       flexShrink: 0,
       width: '100%'
     }}>
-      <Avatar 
+      <Avatar
         src={avatarUrl}
         sx={{ width: 32, height: 32, bgcolor: '#2255CC', fontSize: '0.8rem', mr: 1.5 }}
       >
         {userName ? userName.slice(0, 1) : 'U'}
       </Avatar>
-      
+
       <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
         <Typography variant="caption" fontWeight="bold" noWrap sx={{ display: 'block', color: '#060607', fontSize: '0.85rem' }}>
           {userName || 'アカウント'}
@@ -462,7 +447,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', bgcolor: '#ffffff' }}>
-      
+
       {isMobile && (
         <Box sx={{ position: 'fixed', top: 0, left: 0, right: 0, height: 48, bgcolor: '#F2F3F5', borderBottom: '1px solid #E3E5E8', display: 'flex', alignItems: 'center', px: 2, zIndex: 1200 }}>
           <IconButton edge="start" onClick={() => setMobileOpen(true)} size="small" sx={{ mr: 2 }}><MenuIcon /></IconButton>
@@ -475,7 +460,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         display: { xs: 'none', md: 'flex' },
         flexDirection: 'column',
         height: '100%',
-        bgcolor: '#E3E5E8' 
+        bgcolor: '#E3E5E8'
       }}>
         <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
           <ServerRail orgList={orgList} currentOrg={currentOrg} switchOrg={switchOrg} />
@@ -506,7 +491,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           flexGrow: 1,
           bgcolor: '#FFFFFF',
           height: '100vh',
-          display: 'flex', 
+          display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
           pt: { xs: 6, md: 0 }

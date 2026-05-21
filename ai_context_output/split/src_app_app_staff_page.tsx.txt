@@ -36,6 +36,7 @@ export default function StaffPage() {
     if (!currentOrg) return;
     setIsFetching(true);
     try {
+      // 1. スタッフ一覧の取得
       const { data: staffsData, error: staffsError } = await supabase
         .from('staffs')
         .select(`id, name, user_id, profiles(name)`)
@@ -45,23 +46,25 @@ export default function StaffPage() {
       if (staffsError) throw staffsError;
       setStaffList((staffsData as unknown as StaffData[]) || []);
 
-      // ★修正：結合したprofilesを正しく取得するため、クエリとパースを明確化
+      // 2. メンバーのアカウント一覧を安全に取得 (2段階クエリ)
       const { data: membersData } = await supabase
         .from('organization_members')
-        .select(`
-            user_id,
-            profiles (name)
-        `)
+        .select('user_id')
         .eq('organization_id', currentOrg.id);
         
       const accounts: AccountData[] = [];
-      if (membersData) {
-          // anyを避けつつ安全にパース
-          membersData.forEach((m: unknown) => {
-              const member = m as { user_id: string; profiles: { name: string } | { name: string }[] | null };
-              const pName = Array.isArray(member.profiles) ? member.profiles[0]?.name : member.profiles?.name;
-              if (pName) accounts.push({ id: member.user_id, name: pName });
-          });
+      if (membersData && membersData.length > 0) {
+          const userIds = membersData.map(m => m.user_id);
+          const { data: profilesData } = await supabase
+              .from('profiles')
+              .select('id, name')
+              .in('id', userIds);
+              
+          if (profilesData) {
+              profilesData.forEach(p => {
+                  accounts.push({ id: p.id, name: p.name });
+              });
+          }
       }
       setAccountList(accounts);
     } catch (e) { 

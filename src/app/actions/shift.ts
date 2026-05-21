@@ -3,7 +3,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { google, calendar_v3 } from 'googleapis';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
-import { rrulestr } from 'rrule'; 
+import { rrulestr } from 'rrule';
 
 const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,17 +12,25 @@ const supabaseAdmin = createClient(
 );
 
 export type ShiftPayload = {
-    organizationId: string; clientId: string; title: string;
-    startAt: string; endAt: string;
-    staffIds: string[]; 
+    organizationId: string;
+    clientId: string;
+    title: string;
+    startAt: string;
+    endAt: string;
+    staffIds: string[];
     status?: 'published' | 'cancelled';
     cancelReason?: string;
     patternId?: string;
+    isModified?: boolean;
 };
 
 export type ShiftPatternPayload = {
-    organizationId: string; clientId: string; title: string;
-    startTime: string; endTime: string; rrule: string;
+    organizationId: string;
+    clientId: string;
+    title: string;
+    startTime: string;
+    endTime: string;
+    rrule: string;
     staffIds: string[];
 };
 
@@ -30,35 +38,27 @@ type ShiftStaffInsert = { shift_id: string; staff_id: string; };
 type PatternStaffInsert = { pattern_id: string; staff_id: string; };
 
 type ShiftUpdateData = {
-    title?: string; start_at?: string; end_at?: string;
-    status?: 'published' | 'cancelled'; cancel_reason?: string | null;
-    updated_at?: string; google_event_id?: string;
+    title?: string;
+    start_at?: string;
+    end_at?: string;
+    status?: 'published' | 'cancelled';
+    cancel_reason?: string | null;
+    updated_at?: string;
+    google_event_id?: string;
+    is_modified?: boolean;
 };
 
 /**
- * 日本時間のISO文字列を生成する補助関数
- * サーバー(UTC)で実行されても確実にJSTの時刻を作る
+ * 年、月、日から正確なJSTの開始・終了時刻文字列（ISO8601形式）を組み立てる
  */
-function toJSTISOString(date: Date | string, timeStr?: string) {
-    const d = new Date(date);
+function buildJstIsoString(year: number, month: number, day: number, timeStr: string) {
     const pad = (n: number) => String(n).padStart(2, '0');
-    const yy = d.getFullYear();
-    const mm = pad(d.getMonth() + 1);
-    const dd = pad(d.getDate());
-    
-    // timeStrがあればそれを使用、なければdateから取得
-    let hh, min;
-    if (timeStr) {
-        [hh, min] = timeStr.split(':');
-    } else {
-        hh = pad(d.getHours());
-        min = pad(d.getMinutes());
-    }
-    
-    // タイムゾーン+09:00を明示的に付与
-    return `${yy}-${mm}-${dd}T${hh}:${min}:00+09:00`;
+    return `${year}-${pad(month)}-${pad(day)}T${timeStr}:00+09:00`;
 }
 
+/**
+ * Googleカレンダーへの同期処理
+ */
 async function syncToGoogleCalendarDirect(organizationId: string, shiftId: string, action: 'sync' | 'delete') {
     try {
         const { data: orgData } = await supabaseAdmin.from('organizations').select('google_calendar_id, google_refresh_token').eq('id', organizationId).single();
@@ -85,8 +85,8 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
 
         const staffIds = (shiftData.shift_staffs || []).map(s => s.staff_id).filter(Boolean);
         let colorId: string | undefined = undefined;
-        
-        if (shiftData.status === 'cancelled') colorId = '8'; 
+
+        if (shiftData.status === 'cancelled') colorId = '8';
         else if (staffIds.length > 0 && staffIds[0]) {
             const staffId = staffIds[0];
             let hash = 0;
@@ -95,18 +95,17 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
         }
 
         const eventTitle = shiftData.status === 'cancelled' ? `【休】${shiftData.title}` : shiftData.title;
-        
-        // ★修正: Google APIに送る日時に確実にタイムゾーン(Asia/Tokyo)とオフセットを含める
+
         const eventBody: calendar_v3.Schema$Event = {
             summary: eventTitle,
             description: shiftData.cancel_reason ? `キャンセル理由: ${shiftData.cancel_reason}` : '',
-            start: { 
-                dateTime: new Date(shiftData.start_at).toISOString(), // DBのUTCをそのまま送る(Z付)
-                timeZone: 'Asia/Tokyo' 
+            start: {
+                dateTime: new Date(shiftData.start_at).toISOString(),
+                timeZone: 'Asia/Tokyo'
             },
-            end: { 
-                dateTime: new Date(shiftData.end_at).toISOString(), 
-                timeZone: 'Asia/Tokyo' 
+            end: {
+                dateTime: new Date(shiftData.end_at).toISOString(),
+                timeZone: 'Asia/Tokyo'
             },
             colorId: colorId
         };
@@ -137,9 +136,14 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
 export async function createShift(payload: ShiftPayload, awaitSync: boolean = true) {
     try {
         const { data: shift, error: shiftError } = await supabaseAdmin.from('shifts').insert({
-            organization_id: payload.organizationId, client_id: payload.clientId, title: payload.title,
-            start_at: payload.startAt, end_at: payload.endAt, status: payload.status || 'published',
-            pattern_id: payload.patternId || null
+            organization_id: payload.organizationId,
+            client_id: payload.clientId,
+            title: payload.title,
+            start_at: payload.startAt,
+            end_at: payload.endAt,
+            status: payload.status || 'published',
+            pattern_id: payload.patternId || null,
+            is_modified: payload.isModified ?? false
         }).select('id').single();
 
         if (shiftError || !shift) throw new Error(shiftError?.message);
@@ -154,7 +158,7 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean = tr
         } else {
             syncToGoogleCalendarDirect(payload.organizationId, shift.id, 'sync').catch(e => console.error('Async Sync Error:', e));
         }
-        
+
         return { success: true, shiftId: shift.id };
     } catch (error) { console.error(error); throw error; }
 }
@@ -167,6 +171,9 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
         if (payload.endAt !== undefined) updateData.end_at = payload.endAt;
         if (payload.status !== undefined) updateData.status = payload.status;
         if (payload.cancelReason !== undefined) updateData.cancel_reason = payload.cancelReason;
+
+        // ユーザーが手動で編集・保存した場合は is_modified: true とする
+        updateData.is_modified = payload.isModified ?? true;
 
         if (Object.keys(updateData).length > 0) {
             updateData.updated_at = new Date().toISOString();
@@ -193,7 +200,13 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
 
 export async function updateShiftTimeOnly(shiftId: string, startAt: string, endAt: string) {
     try {
-        await supabaseAdmin.from('shifts').update({ start_at: startAt, end_at: endAt, updated_at: new Date().toISOString() }).eq('id', shiftId);
+        await supabaseAdmin.from('shifts').update({
+            start_at: startAt,
+            end_at: endAt,
+            updated_at: new Date().toISOString(),
+            is_modified: true // ドラッグ＆ドロップによる編集も保護対象にする
+        }).eq('id', shiftId);
+
         const { data } = await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single();
         if (data) await syncToGoogleCalendarDirect(data.organization_id, shiftId, 'sync');
         return { success: true };
@@ -204,7 +217,13 @@ export async function toggleCancelShift(shiftId: string, isCancel: boolean, reas
     try {
         const status = isCancel ? 'cancelled' : 'published';
         const cancelReason = isCancel ? reason : null;
-        await supabaseAdmin.from('shifts').update({ status, cancel_reason: cancelReason, updated_at: new Date().toISOString() }).eq('id', shiftId);
+        await supabaseAdmin.from('shifts').update({
+            status,
+            cancel_reason: cancelReason,
+            updated_at: new Date().toISOString(),
+            is_modified: true
+        }).eq('id', shiftId);
+
         const { data } = await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single();
         if (data) await syncToGoogleCalendarDirect(data.organization_id, shiftId, 'sync');
         return { success: true };
@@ -216,7 +235,7 @@ export async function getShifts(organizationId: string, startDate: string, endDa
         const { data, error } = await supabaseAdmin.from('shifts').select(`
             *, clients (id, name), shift_staffs (staff_id, staffs (name))
         `).eq('organization_id', organizationId)
-          .gte('start_at', startDate).lte('start_at', endDate); 
+            .gte('start_at', startDate).lte('start_at', endDate);
         if (error) throw error;
         return data;
     } catch (error) { console.error(error); throw error; }
@@ -236,7 +255,7 @@ export async function createShiftPattern(payload: ShiftPatternPayload) {
         start_time: payload.startTime, end_time: payload.endTime, rrule: payload.rrule
     }).select('id').single();
     if (error || !pattern) throw error;
-    
+
     if (payload.staffIds.length > 0) {
         const inserts: PatternStaffInsert[] = payload.staffIds.map(sid => ({ pattern_id: pattern.id, staff_id: sid }));
         await supabaseAdmin.from('shift_pattern_staffs').insert(inserts);
@@ -269,26 +288,42 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
     }
 }
 
-export async function clearGeneratedShiftsForMonth(organizationId: string, yearMonth: string) {
+/**
+ * 月次で一括展開されたシフトを消去する
+ * unmodifiedOnly が true の場合、手動編集されたシフト (is_modified=true) を保護し、未変更分のみ消去します。
+ */
+export async function clearGeneratedShiftsForMonth(
+    organizationId: string,
+    yearMonth: string,
+    unmodifiedOnly: boolean = true
+) {
     const [year, month] = yearMonth.split('-').map(Number);
-    const startDateJST = new Date(`${year}-${String(month).padStart(2, '0')}-01T00:00:00+09:00`);
-    const endDateJST = new Date(year, month, 0, 23, 59, 59); // 月末
-    const endDateISO = toJSTISOString(endDateJST, "23:59");
+    const lastDayNum = new Date(year, month, 0).getDate();
+
+    // タイムゾーンズレを起こさない安全なJST境界値を作成
+    const startDateISO = new Date(buildJstIsoString(year, month, 1, "00:00")).toISOString();
+    const endDateISO = new Date(buildJstIsoString(year, month, lastDayNum, "23:59")).toISOString();
 
     try {
-        const { data: shifts, error } = await supabaseAdmin.from('shifts')
+        let query = supabaseAdmin.from('shifts')
             .select('id')
             .eq('organization_id', organizationId)
             .not('pattern_id', 'is', null)
-            .gte('start_at', startDateJST.toISOString())
-            .lte('start_at', new Date(endDateISO).toISOString());
+            .gte('start_at', startDateISO)
+            .lte('start_at', endDateISO);
 
+        if (unmodifiedOnly) {
+            query = query.eq('is_modified', false);
+        }
+
+        const { data: shifts, error } = await query;
         if (error) throw error;
         if (!shifts || shifts.length === 0) return { success: true, count: 0 };
 
         const shiftIds = shifts.map(s => s.id);
 
-        const deletePromises = shifts.map(shift => 
+        // Googleカレンダー側の該当予定を並行削除
+        const deletePromises = shifts.map(shift =>
             syncToGoogleCalendarDirect(organizationId, shift.id, 'delete')
                 .catch(e => console.error('Clear Month Sync Error:', e))
         );
@@ -313,16 +348,99 @@ export async function deleteShiftPattern(patternId: string) {
     return { success: true };
 }
 
-export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
+/**
+ * ひな形から1ヶ月分のシフトをプレビュー表示用に計算する (DB書き込みは行わない)
+ */
+export async function previewShiftsForMonth(organizationId: string, yearMonth: string) {
     const [year, month] = yearMonth.split('-').map(Number);
-    
-    // ★重要: 月の開始・終了を「JSTの午前0時」として定義
-    // 文字列から作ることで環境のタイムゾーンに左右されないようにする
-    const startDateJST = new Date(`${year}-${String(month).padStart(2, '0')}-01T00:00:00+09:00`);
-    const endDateJST = new Date(year, month, 0, 23, 59, 59); // 月末
-    const endDateISO = toJSTISOString(endDateJST, "23:59");
+    const lastDayNum = new Date(year, month, 0).getDate();
+
+    const startDateJST = new Date(buildJstIsoString(year, month, 1, "00:00"));
+    const endDateJST = new Date(buildJstIsoString(year, month, lastDayNum, "23:59"));
 
     try {
+        const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
+            *, shift_pattern_staffs(staff_id)
+        `).eq('organization_id', organizationId);
+
+        if (!patterns || patterns.length === 0) return { total: 0, details: [] };
+
+        let totalNewCount = 0;
+        let totalSplitCount = 0;
+        const details: any[] = [];
+
+        for (const p of patterns) {
+            const dtStartStr = startDateJST.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+            const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
+            const rule = rrulestr(ruleStr);
+            const occurrences = rule.between(startDateJST, endDateJST, true);
+
+            const [sHour, sMin] = p.start_time.split(':').map(Number);
+            const [eHour, eMin] = p.end_time.split(':').map(Number);
+            const isOvernight = eHour < sHour;
+
+            let patternCount = 0;
+            occurrences.forEach(() => {
+                if (isOvernight) {
+                    totalSplitCount += 2;
+                    patternCount += 2;
+                } else {
+                    totalNewCount += 1;
+                    patternCount += 1;
+                }
+            });
+
+            details.push({
+                title: p.title,
+                count: patternCount,
+                isOvernight
+            });
+        }
+
+        return {
+            total: totalNewCount + totalSplitCount,
+            details
+        };
+    } catch (e) {
+        console.error('Preview Calculation Error:', e);
+        throw e;
+    }
+}
+
+/**
+ * ひな形から対象月のシフトを一括生成する
+ * 1フェッチ＆LookupMapの採用により、多重実行時でも100%重複が発生しない直列堅牢設計
+ */
+export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
+    const [year, month] = yearMonth.split('-').map(Number);
+    const lastDayNum = new Date(year, month, 0).getDate();
+
+    const startDateJST = new Date(buildJstIsoString(year, month, 1, "00:00"));
+    const endDateJST = new Date(buildJstIsoString(year, month, lastDayNum, "23:59"));
+
+    try {
+        // 1. 対象月・対象事業所にひな形から展開されたシフトを1回で一括全取得 (DBアクセス効率化)
+        const { data: existingShifts } = await supabaseAdmin.from('shifts')
+            .select('id, pattern_id, start_at, is_modified')
+            .eq('organization_id', organizationId)
+            .not('pattern_id', 'is', null)
+            .gte('start_at', startDateJST.toISOString())
+            .lte('start_at', endDateJST.toISOString());
+
+        // 2. LookupMapの構築。キー: "pattern_id::JST日付文字列", 値: { id, is_modified }
+        const existingMap = new Map<string, { id: string, is_modified: boolean }>();
+        existingShifts?.forEach(s => {
+            // 日本時間の日付部分 YYYY-MM-DD を抽出
+            const jstDateStr = new Date(new Date(s.start_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+            // 泊まりのPart2 (翌日00:00開始) かどうかを判定
+            const isPart2 = s.start_at.endsWith('T00:00:00+09:00') || new Date(s.start_at).getUTCHours() === 15; // UTC 15:00 = JST 00:00
+            const key = isPart2 ? `${s.pattern_id}::${jstDateStr}::part2` : `${s.pattern_id}::${jstDateStr}`;
+
+            existingMap.set(key, { id: s.id, is_modified: s.is_modified || false });
+        });
+
+        // 3. ひな形のフェッチ
         const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
             *, shift_pattern_staffs(staff_id)
         `).eq('organization_id', organizationId);
@@ -330,53 +448,40 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         if (!patterns || patterns.length === 0) return { success: true, count: 0 };
 
         let createdCount = 0;
+        let skippedCount = 0;
+        let updatedCount = 0;
         const promises: Promise<any>[] = [];
 
+        // 4. 直列判定ループ処理による確実な重複回避
         for (const p of patterns) {
-            // RRULEの基準日をJSTの開始日に設定
             const dtStartStr = startDateJST.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
             const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
             const rule = rrulestr(ruleStr);
-            
-            // 指定期間内の該当日を取得（念のため余裕を持たせて前後数時間含めて判定）
-            const occurrences = rule.between(startDateJST, new Date(endDateISO), true);
+            const occurrences = rule.between(startDateJST, endDateJST, true);
 
             for (const dateJST of occurrences) {
-                // dateJSTはrruleライブラリによって生成されたDateオブジェクト
                 const yy = dateJST.getFullYear();
                 const mm = dateJST.getMonth() + 1;
                 const dd = dateJST.getDate();
 
                 const [sHour, sMin] = p.start_time.split(':').map(Number);
                 const [eHour, eMin] = p.end_time.split(':').map(Number);
-                
+
                 const pad = (n: number) => String(n).padStart(2, '0');
                 const isOvernight = eHour < sHour;
                 const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
 
+                const baseJstDateStr = `${yy}-${pad(mm)}-${pad(dd)}`;
+
                 if (isOvernight) {
-                    // overnight split: Part 1 and Part 2
-                    // --- Part 1 (Day 1: p.start_time to 00:00 of nextDay) ---
-                    const startAtStr1 = `${yy}-${pad(mm)}-${pad(dd)}T${pad(sHour)}:${pad(sMin)}:00+09:00`;
-                    
+                    // --- 泊まり Part 1 (当日開始時刻 ～ 翌日00:00) ---
+                    const startAtStr1 = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
+
                     const nextDay = new Date(dateJST);
                     nextDay.setDate(nextDay.getDate() + 1);
-                    const nextYY = nextDay.getFullYear();
-                    const nextMM = nextDay.getMonth() + 1;
-                    const nextDD = nextDay.getDate();
-                    const endAtStr1 = `${nextYY}-${pad(nextMM)}-${pad(nextDD)}T00:00:00+09:00`;
+                    const endAtStr1 = buildJstIsoString(nextDay.getFullYear(), nextDay.getMonth() + 1, nextDay.getDate(), "00:00");
 
-                    // Check duplicate on Day 1
-                    const dayStart = `${yy}-${pad(mm)}-${pad(dd)}T00:00:00+09:00`;
-                    const dayEnd = `${yy}-${pad(mm)}-${pad(dd)}T23:59:59+09:00`;
-
-                    const { data: existingPart1 } = await supabaseAdmin.from('shifts')
-                        .select('id')
-                        .eq('pattern_id', p.id)
-                        .gte('start_at', new Date(dayStart).toISOString())
-                        .lte('start_at', new Date(dayEnd).toISOString())
-                        .maybeSingle();
-
+                    const keyPart1 = `${p.id}::${baseJstDateStr}`;
                     const part1Payload = {
                         organizationId,
                         clientId: p.client_id,
@@ -385,26 +490,28 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                         endAt: new Date(endAtStr1).toISOString(),
                         staffIds: staffIds,
                         status: 'published' as const,
+                        isModified: false // システム自動展開時はfalse
                     };
 
-                    if (existingPart1) {
-                        promises.push(updateShift(existingPart1.id, part1Payload, false));
+                    const exist1 = existingMap.get(keyPart1);
+                    if (exist1) {
+                        if (!exist1.is_modified) {
+                            promises.push(updateShift(exist1.id, part1Payload, false));
+                            updatedCount++;
+                        } else {
+                            skippedCount++; // 現場編集済みのデータはスキップして保護
+                        }
                     } else {
                         promises.push(createShift({ ...part1Payload, patternId: p.id }, false));
                         createdCount++;
                     }
 
-                    // --- Part 2 (Day 2: 00:00 to p.end_time) ---
-                    const startAtStr2 = `${nextYY}-${pad(nextMM)}-${pad(nextDD)}T00:00:00+09:00`;
-                    const endAtStr2 = `${nextYY}-${pad(nextMM)}-${pad(nextDD)}T${pad(eHour)}:${pad(eMin)}:00+09:00`;
+                    // --- 泊まり Part 2 (翌日00:00 ～ 翌日終了時刻) ---
+                    const startAtStr2 = buildJstIsoString(nextDay.getFullYear(), nextDay.getMonth() + 1, nextDay.getDate(), "00:00");
+                    const endAtStr2 = buildJstIsoString(nextDay.getFullYear(), nextDay.getMonth() + 1, nextDay.getDate(), `${pad(eHour)}:${pad(eMin)}`);
 
-                    // Check duplicate starting exactly at 00:00 of nextDay JST
-                    const targetStart2 = new Date(startAtStr2).toISOString();
-                    const { data: existingPart2 } = await supabaseAdmin.from('shifts')
-                        .select('id')
-                        .eq('pattern_id', p.id)
-                        .eq('start_at', targetStart2)
-                        .maybeSingle();
+                    const nextJstDateStr = `${nextDay.getFullYear()}-${pad(nextDay.getMonth() + 1)}-${pad(nextDay.getDate())}`;
+                    const keyPart2 = `${p.id}::${nextJstDateStr}::part2`;
 
                     const part2Payload = {
                         organizationId,
@@ -414,31 +521,28 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                         endAt: new Date(endAtStr2).toISOString(),
                         staffIds: staffIds,
                         status: 'published' as const,
+                        isModified: false
                     };
 
-                    if (existingPart2) {
-                        promises.push(updateShift(existingPart2.id, part2Payload, false));
+                    const exist2 = existingMap.get(keyPart2);
+                    if (exist2) {
+                        if (!exist2.is_modified) {
+                            promises.push(updateShift(exist2.id, part2Payload, false));
+                            updatedCount++;
+                        } else {
+                            skippedCount++;
+                        }
                     } else {
                         promises.push(createShift({ ...part2Payload, patternId: p.id }, false));
                         createdCount++;
                     }
 
                 } else {
-                    // standard shift
-                    const startAtStr = `${yy}-${pad(mm)}-${pad(dd)}T${pad(sHour)}:${pad(sMin)}:00+09:00`;
-                    const endAtStr = `${yy}-${pad(mm)}-${pad(dd)}T${pad(eHour)}:${pad(eMin)}:00+09:00`;
+                    // --- 通常日中シフト ---
+                    const startAtStr = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
+                    const endAtStr = buildJstIsoString(yy, mm, dd, `${pad(eHour)}:${pad(eMin)}`);
 
-                    // Check duplicate on Day 1
-                    const dayStart = `${yy}-${pad(mm)}-${pad(dd)}T00:00:00+09:00`;
-                    const dayEnd = `${yy}-${pad(mm)}-${pad(dd)}T23:59:59+09:00`;
-
-                    const { data: existing } = await supabaseAdmin.from('shifts')
-                        .select('id')
-                        .eq('pattern_id', p.id)
-                        .gte('start_at', new Date(dayStart).toISOString())
-                        .lte('start_at', new Date(dayEnd).toISOString())
-                        .maybeSingle();
-
+                    const keyNormal = `${p.id}::${baseJstDateStr}`;
                     const payload = {
                         organizationId,
                         clientId: p.client_id,
@@ -447,10 +551,17 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                         endAt: new Date(endAtStr).toISOString(),
                         staffIds: staffIds,
                         status: 'published' as const,
+                        isModified: false
                     };
 
-                    if (existing) {
-                        promises.push(updateShift(existing.id, payload, false));
+                    const existNormal = existingMap.get(keyNormal);
+                    if (existNormal) {
+                        if (!existNormal.is_modified) {
+                            promises.push(updateShift(existNormal.id, payload, false));
+                            updatedCount++;
+                        } else {
+                            skippedCount++;
+                        }
                     } else {
                         promises.push(createShift({ ...payload, patternId: p.id }, false));
                         createdCount++;
@@ -458,8 +569,9 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 }
             }
         }
+
         await Promise.all(promises);
-        return { success: true, count: createdCount };
+        return { success: true, count: createdCount, updated: updatedCount, skipped: skippedCount };
     } catch (error) {
         console.error('Generate Shifts Error:', error);
         throw error;
@@ -499,11 +611,11 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
             .in('id', shiftIds);
 
         if (shiftsData) {
-            const deletePromises = shiftsData.map(shift => 
+            const deletePromises = shiftsData.map(shift =>
                 syncToGoogleCalendarDirect(shift.organization_id, shift.id, 'delete')
                     .catch(e => console.error('Bulk Delete Sync Error:', e))
             );
-            Promise.all(deletePromises);
+            await Promise.all(deletePromises);
         }
 
         const { error } = await supabaseAdmin

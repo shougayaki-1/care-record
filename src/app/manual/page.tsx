@@ -1,91 +1,117 @@
 'use client';
 
-import { Box, Container, Typography, Grid, Card, CardActionArea, Chip } from '@mui/material';
+import { useState } from 'react';
+import { Box, Typography, Paper, Stack, Chip } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
-import { useRouter } from 'next/navigation';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
 
-// マニュアルデータの定義
-const manuals = [
-    {
-        id: 'form-settings',
-        title: '記録フォームの設定',
-        description: '利用者ごとの記録項目（フォーム）をカスタマイズする方法や、テンプレートの読み込み手順について、実際の画面を見ながら解説します。',
-        icon: <DescriptionIcon fontSize="large" sx={{ color: 'primary.main' }} />,
-        link: '/manual/form-settings',
-        category: '管理者向け'
-    },
-    // 将来的にマニュアルが増えたらここに追加します
-];
+// マニュアル用の独立したコンテンツコンポーネントをインポート
+import FormSettingsManual from '@/components/manual/FormSettingsManual';
+import ShiftGuideManual from '@/components/manual/ShiftGuideManual';
 
 export default function ManualPortalPage() {
-    const router = useRouter();
+    // 選択中のアクティブなマニュアルID
+    const [activeManual, setActiveManual] = useState<'form-settings' | 'shift-guide'>('form-settings');
+
+    // 目次データ（新しいマニュアルを追加する場合は、この配列を増やすだけで自動的にUIに反映されます）
+    const manualList = [
+        {
+            id: 'form-settings' as const,
+            title: '記録フォームの設定',
+            subtitle: '利用者ごとのフォーム作成方法',
+            category: '管理者向け',
+            categoryColor: 'primary' as const,
+            icon: <DescriptionIcon />
+        },
+        {
+            id: 'shift-guide' as const,
+            title: 'シフト管理・閲覧ガイド',
+            subtitle: 'ひな形登録、D&D、PDF出力',
+            category: '管理者・一般向け',
+            categoryColor: 'secondary' as const,
+            icon: <CalendarMonthIcon />
+        }
+    ];
 
     return (
-        <Box sx={{ py: 8, bgcolor: '#f5f5f5', minHeight: '100%' }}>
-            <Container maxWidth="lg">
-                <Box textAlign="center" mb={8}>
-                    <Typography variant="h3" fontWeight="bold" color="text.primary" gutterBottom>
-                        マニュアルセンター
-                    </Typography>
-                    <Typography variant="h6" color="text.secondary">
-                        CareRecordの操作方法や設定手順をご案内します。
-                    </Typography>
-                </Box>
+        <Box sx={{ display: 'flex', height: '100vh', bgcolor: '#f4f5f7', overflow: 'hidden' }}>
 
-                <Box mb={6}>
-                    <Typography variant="h5" fontWeight="bold" color="primary.main" sx={{ mb: 3, borderLeft: '6px solid #2255CC', pl: 2 }}>
-                        管理者向け機能
-                    </Typography>
-                    
-                    <Grid container spacing={3}>
-                        {manuals.filter(m => m.category === '管理者向け').map((manual) => (
-                            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={manual.id}>
-                                <Card 
-                                    variant="outlined" 
-                                    sx={{ 
-                                        height: '100%', 
-                                        borderRadius: 3, 
-                                        border: '1px solid #e0e0e0',
+            {/* --- 左ペイン：目次サイドバー（マニュアル一覧） --- */}
+            <Box sx={{
+                width: 320,
+                bgcolor: '#fff',
+                borderRight: '1px solid #e0e0e0',
+                display: 'flex',
+                flexDirection: 'column',
+                flexShrink: 0,
+                height: '100%'
+            }}>
+                <Box sx={{ p: 2.5, borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', gap: 1.5, bgcolor: '#F0F5FF' }}>
+                    <MenuBookIcon color="primary" />
+                    <Typography variant="h6" fontWeight="bold" color="primary.main">サポートマニュアル</Typography>
+                </Box>
+                <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2 }}>
+                    <Typography variant="caption" sx={{ px: 1, pb: 1.5, display: 'block', color: 'text.secondary', fontWeight: 'bold' }}>マニュアルを選択</Typography>
+                    <Stack spacing={1.5}>
+                        {manualList.map((item) => {
+                            const isSelected = activeManual === item.id;
+                            return (
+                                <Paper
+                                    key={item.id}
+                                    onClick={() => setActiveManual(item.id)}
+                                    variant={isSelected ? 'elevation' : 'outlined'}
+                                    elevation={isSelected ? 2 : 0}
+                                    sx={{
+                                        p: 2,
+                                        cursor: 'pointer',
+                                        borderRadius: 3,
                                         transition: 'all 0.2s',
-                                        '&:hover': { 
-                                            transform: 'translateY(-4px)',
-                                            boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
-                                            borderColor: 'primary.light'
-                                        }
+                                        border: isSelected ? '2px solid #2255CC' : '1px solid #e0e0e0',
+                                        bgcolor: isSelected ? '#eef2ff' : 'white',
+                                        '&:hover': { bgcolor: isSelected ? '#eef2ff' : '#f8fafc' }
                                     }}
                                 >
-                                    <CardActionArea 
-                                        onClick={() => router.push(manual.link)} 
-                                        sx={{ height: '100%', p: 3, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-start' }}
-                                    >
-                                        <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: '#eef2ff', mb: 2 }}>
-                                            {manual.icon}
+                                    <Stack direction="row" spacing={1.5} alignItems="center">
+                                        <Box sx={{ color: isSelected ? 'primary.main' : 'text.secondary' }}>
+                                            {item.icon}
                                         </Box>
-                                        <Typography variant="h6" fontWeight="bold" gutterBottom>
-                                            {manual.title}
-                                        </Typography>
-                                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2, flexGrow: 1, lineHeight: 1.6 }}>
-                                            {manual.description}
-                                        </Typography>
-                                        <Chip label={manual.category} size="small" color="primary" variant="outlined" />
-                                    </CardActionArea>
-                                </Card>
-                            </Grid>
-                        ))}
-                    </Grid>
+                                        <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+                                            <Typography variant="body2" fontWeight="bold" color={isSelected ? 'primary.main' : 'text.primary'} noWrap>
+                                                {item.title}
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary" display="block" noWrap>
+                                                {item.subtitle}
+                                            </Typography>
+                                            <Chip
+                                                label={item.category}
+                                                size="small"
+                                                color={item.categoryColor}
+                                                variant="outlined"
+                                                sx={{ height: 16, fontSize: '0.65rem', mt: 0.5, fontWeight: 'bold' }}
+                                            />
+                                        </Box>
+                                    </Stack>
+                                </Paper>
+                            );
+                        })}
+                    </Stack>
                 </Box>
+                <Box p={2.5} borderTop="1px solid #eee" textAlign="center" bgcolor="#fafafa">
+                    <Typography variant="caption" color="text.secondary">&copy; CareRecord System Manual</Typography>
+                </Box>
+            </Box>
 
-                {/* ヘルパー向けカテゴリの例（コンテンツが増えたらコメントアウトを解除） */}
-                {/* 
-                <Box mb={6}>
-                    <Typography variant="h5" fontWeight="bold" color="secondary.main" sx={{ mb: 3, borderLeft: '6px solid #f50057', pl: 2 }}>
-                        ヘルパー向け機能
-                    </Typography>
-                    <Typography color="text.secondary">現在準備中です。</Typography>
-                </Box> 
-                */}
+            {/* --- 右ペイン：選択されたマニュアルコンテンツの表示エリア --- */}
+            <Box sx={{ flexGrow: 1, bgcolor: '#f4f5f7', overflowY: 'auto', p: { xs: 2, md: 5 } }}>
+                <Paper variant="outlined" sx={{ borderRadius: 4, bgcolor: '#fff', p: { xs: 3, md: 6 }, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.02)' }}>
 
-            </Container>
+                    {/* 選択されたIDに応じて、分離されたコンポーネントを動的にマウント */}
+                    {activeManual === 'form-settings' && <FormSettingsManual />}
+                    {activeManual === 'shift-guide' && <ShiftGuideManual />}
+
+                </Paper>
+            </Box>
         </Box>
     );
 }

@@ -13,8 +13,18 @@ import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
 
 type ShiftStaffData = { staff_id: string; staffs: { name: string } | null; };
-type ShiftData = { id: string; start_at: string; end_at: string; status: string; client_id: string; clients: { name: string } | null; shift_staffs: ShiftStaffData[]; };
-type ReportData = { id: string; start_at: string; end_at: string; status: string; client_id: string; clients: { name: string } | null; report_values: { data: { _helpers?: string[] } }[] | null; };
+type ShiftData = { 
+    id: string; start_at: string; end_at: string; status: string; client_id: string; 
+    clients: { name: string } | null; shift_staffs: ShiftStaffData[]; 
+};
+
+type ReportData = { 
+    id: string; start_at: string; end_at: string; status: string; client_id: string; 
+    clients: { name: string } | null; 
+    helper?: { name: string } | null;
+    report_values: { data: { _helpers?: string[]; service_time?: string|number; travel_time?: string|number; } }[] | null; 
+};
+
 type AggregatedRow = { name: string; plannedHours: number; actualHours: number; };
 
 function getOverlappingHours(start: Date, end: Date, monthStart: Date, monthEnd: Date): number {
@@ -53,7 +63,7 @@ export default function StatisticsPage() {
             const shiftStartRange = new Date(monthStart.getTime() - (24 * 60 * 60 * 1000)).toISOString();
             const shiftEndRange = new Date(monthEnd.getTime() + (24 * 60 * 60 * 1000)).toISOString();
 
-            // ★修正：キャンセル済みのシフト（status='cancelled'）を除外する
+            // 予定（シフト）の取得
             const { data: shiftsData, error: shiftsError } = await supabase
                 .from('shifts')
                 .select(`
@@ -62,17 +72,19 @@ export default function StatisticsPage() {
                     shift_staffs (staff_id, staffs(name))
                 `)
                 .eq('organization_id', currentOrg.id)
-                .neq('status', 'cancelled') // ここで確実に除外
+                .neq('status', 'cancelled')
                 .gte('end_at', shiftStartRange)
                 .lte('start_at', shiftEndRange);
 
             if (shiftsError) throw shiftsError;
 
+            // 実績（記録）の取得
             const { data: reportsData, error: reportsError } = await supabase
                 .from('reports')
                 .select(`
                     id, start_at, end_at, status, client_id,
                     clients (name),
+                    helper:profiles!reports_helper_id_fkey (name),
                     report_values (data)
                 `)
                 .eq('clients.organization_id', currentOrg.id)
@@ -112,7 +124,7 @@ export default function StatisticsPage() {
             else statsMap[name].actualHours += hours;
         };
 
-        // ① 単発シフトの集計
+        // ① 単発シフトの集計 (予定時間)
         rawShifts.forEach(shift => {
             const shiftStart = new Date(shift.start_at);
             const shiftEnd = new Date(shift.end_at);
@@ -120,33 +132,60 @@ export default function StatisticsPage() {
                 
             if (hours > 0) {
                 if (tabIndex === 1 && shift.clients?.name) {
-                    addHours(shift.clients.name, 'planned', hours);
+                    const clientName = Array.isArray(shift.clients) ? shift.clients[0]?.name : shift.clients.name;
+                    addHours(clientName, 'planned', hours);
                 }
                 if (tabIndex === 0) {
-                    // ★修正：結合されたstaffs(name)から名前を取り出す（配列やオブジェクトのネストを考慮）
-                    shift.shift_staffs.forEach(staff => {
-                        const sName = Array.isArray(staff.staffs) ? staff.staffs[0]?.name : staff.staffs?.name;
-                        if (sName) addHours(sName, 'planned', hours);
-                    });
+                    if (shift.shift_staffs && shift.shift_staffs.length > 0) {
+                        shift.shift_staffs.forEach(staff => {
+                            const sName = Array.isArray(staff.staffs) ? staff.staffs[0]?.name : staff.staffs?.name;
+                            if (sName) addHours(sName, 'planned', hours);
+                            else addHours('未設定(スタッフ名なし)', 'planned', hours);
+                        });
+                    } else {
+                        addHours('未設定(シフト担当者なし)', 'planned', hours);
+                    }
                 }
             }
         });
 
-        // ② 実績（記録）の集計
+        // ② 実績（記録）の集計 (実績時間)
         rawReports.forEach(report => {
-            const rStart = new Date(report.start_at);
-            const rEnd = new Date(report.end_at);
-            const hours = getOverlappingHours(rStart, rEnd, monthStart, monthEnd);
+            let actualHours = 0;
+            const dataObj = (report.report_values && report.report_values.length > 0) ? report.report_values[0].data : null;
+            
+            // サービス時間に移動時間も含まれている前提のため、service_timeのみを実績時間とする
+            if (dataObj) {
+                const sTime = parseFloat(String(dataObj.service_time || 0)) || 0;
+                actualHours = sTime;
+            }
 
-            if (hours > 0) {
+            // もし入力されていなければ start_at と end_at から計算 (フォールバック)
+            if (actualHours <= 0) {
+                const rStart = new Date(report.start_at);
+                const rEnd = new Date(report.end_at);
+                actualHours = getOverlappingHours(rStart, rEnd, monthStart, monthEnd);
+            }
+
+            if (actualHours > 0) {
                 if (tabIndex === 1 && report.clients?.name) {
-                    addHours(report.clients.name, 'actual', hours);
+                    const clientName = Array.isArray(report.clients) ? report.clients[0]?.name : report.clients.name;
+                    addHours(clientName, 'actual', actualHours);
                 }
                 if (tabIndex === 0) {
-                    const actualHelpers = (report.report_values && report.report_values.length > 0) ? report.report_values[0].data?._helpers || [] : [];
-                    actualHelpers.forEach(helperName => {
-                        if (helperName) addHours(helperName, 'actual', hours);
-                    });
+                    const actualHelpers = dataObj?._helpers || [];
+                    
+                    if (Array.isArray(actualHelpers) && actualHelpers.length > 0) {
+                        actualHelpers.forEach(helperName => {
+                            if (helperName) addHours(String(helperName), 'actual', actualHours);
+                        });
+                    } else if (report.helper?.name) {
+                        // 古いデータなどで _helpers がない場合のフォールバック
+                        const fallbackName = Array.isArray(report.helper) ? report.helper[0]?.name : report.helper.name;
+                        if (fallbackName) addHours(fallbackName, 'actual', actualHours);
+                    } else {
+                        addHours('未設定(担当者不明)', 'actual', actualHours);
+                    }
                 }
             }
         });
@@ -200,7 +239,7 @@ export default function StatisticsPage() {
                             <Table>
                                 <TableHead sx={{ bgcolor: '#F0F5FF' }}>
                                     <TableRow>
-                                        <TableCell sx={{ fontWeight: 'bold' }}>氏名</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>{tabIndex === 0 ? 'スタッフ名' : '利用者名'}</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>予定時間 (h)</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>実績時間 (h)</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>差異 (h)</TableCell>
@@ -210,7 +249,7 @@ export default function StatisticsPage() {
                                     {aggregatedData.length === 0 ? <TableRow><TableCell colSpan={4} align="center" sx={{ py: 5, color: '#666' }}>データがありません</TableCell></TableRow> : (
                                         aggregatedData.map((row, i) => {
                                             const diff = row.actualHours - row.plannedHours;
-                                            const isAlert = diff < -2 || diff > 2;
+                                            const isAlert = diff < -2 || diff > 2; // ±2時間以上で赤字
                                             return (
                                                 <TableRow key={i} hover>
                                                     <TableCell sx={{ fontWeight: 'bold' }}>{row.name}</TableCell>

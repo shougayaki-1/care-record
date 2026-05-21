@@ -1,3 +1,4 @@
+// src/utils/supabase/middleware.ts
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
@@ -8,26 +9,28 @@ export async function updateSession(request: NextRequest) {
         },
     });
 
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-supabase-url.supabase.co';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'your-supabase-anon-key';
+
     const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        supabaseUrl,
+        supabaseAnonKey,
         {
             cookies: {
                 getAll() {
                     return request.cookies.getAll();
                 },
-                // optionsを使用しない場合は _options とするか、削除
                 setAll(cookiesToSet) {
-                    cookiesToSet.forEach(({ name, value }) => // options削除
+                    cookiesToSet.forEach(({ name, value }) =>
                         request.cookies.set(name, value),
                     );
-                    
+
                     response = NextResponse.next({
                         request: {
                             headers: request.headers,
                         },
                     });
-                    
+
                     cookiesToSet.forEach(({ name, value, options }) =>
                         response.cookies.set(name, value, options),
                     );

@@ -16,7 +16,7 @@ Font.register({
 });
 
 const styles = StyleSheet.create({
-    page: { padding: 20, fontFamily: 'NotoSansJP', fontSize: 9, color: '#333' },
+    page: { padding: 20, paddingBottom: 35, fontFamily: 'NotoSansJP', fontSize: 9, color: '#333' },
     header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, borderBottomWidth: 1, borderColor: '#2255CC', paddingBottom: 5 },
     title: { fontSize: 16, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 12 },
@@ -31,6 +31,7 @@ const styles = StyleSheet.create({
     eventTime: { fontSize: 7, fontWeight: 'bold', color: '#2255CC', marginBottom: 1 },
     eventText: { fontSize: 7, color: '#333' },
     eventTextCancelled: { color: '#999', textDecoration: 'line-through' },
+    footer: { position: 'absolute', bottom: 15, left: 20, right: 20, textAlign: 'right', fontSize: 8, color: '#666', borderTopWidth: 1, borderColor: '#ccc', paddingTop: 5 }
 });
 
 export type PdfCalendarEvent = {
@@ -51,9 +52,10 @@ type Props = {
     title: string;
     monthStr: string;
     weeks: PdfCalendarDay[][];
+    orgName: string; 
 };
 
-export const ShiftCalendarDocument = ({ title, monthStr, weeks }: Props) => {
+export const ShiftCalendarDocument = ({ title, monthStr, weeks, orgName }: Props) => {
     return (
         <Document>
             <Page size="A4" orientation="landscape" style={styles.page}>
@@ -73,7 +75,6 @@ export const ShiftCalendarDocument = ({ title, monthStr, weeks }: Props) => {
                                 <View key={dIdx} style={styles.dayCell}>
                                     <Text style={styles.dateNumber}>{day.dayNumber}</Text>
                                     {day.events.map((ev, eIdx) => {
-                                        // ★修正: 「様」がついていなければ付与
                                         const displayName = ev.clientName.endsWith('様') ? ev.clientName : `${ev.clientName} 様`;
                                         return (
                                             <View key={eIdx} style={[styles.eventBox, ev.isCancelled ? styles.eventBoxCancelled : {}]}>
@@ -96,6 +97,10 @@ export const ShiftCalendarDocument = ({ title, monthStr, weeks }: Props) => {
                         </View>
                     ))}
                 </View>
+                
+                <Text style={styles.footer} fixed>
+                    {orgName}
+                </Text>
             </Page>
         </Document>
     );

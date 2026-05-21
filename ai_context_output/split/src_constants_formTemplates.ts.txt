@@ -7,6 +7,7 @@ export type FormItem = {
   options?: string;
   required: boolean;
   hasDetail?: boolean;
+  [key: string]: unknown; // 柔軟なプロパティ拡張に対応可能にする
 };
 
 // 1. 身体介護中心テンプレート
@@ -34,25 +35,24 @@ export const HOUSEWORK_TEMPLATE: FormItem[] = [
 ];
 
 // 3. 総合テンプレート（重度訪問介護などフルの内容）
-// ※ 元のコードにあった DEFAULT_TEMPLATE をここに移動
 export const COMPREHENSIVE_TEMPLATE: FormItem[] = [
-    { id: 'sec_medical', label: '【医療的ケア・身体介護】', type: 'section', required: false },
-    { id: 'sputum_suction', label: '痰等の吸引（気管・口腔）', type: 'checkbox', required: false },
-    { id: 'meal_help', label: '食事介助', type: 'multicheckbox', options: '朝,昼,晩,他', required: false, hasDetail: true },
-    { id: 'excretion', label: '排泄介助', type: 'checkbox', required: false, hasDetail: true },
-    { id: 'body_cleaning', label: '清拭・整容介助', type: 'multicheckbox', options: '全身,顔,上肢,下肢,清拭,入浴介助', required: false, hasDetail: true },
-    { id: 'change_clothes', label: '更衣介助', type: 'checkbox', required: false, hasDetail: true },
-    { id: 'vital_check', label: 'バイタル測定', type: 'multicheckbox', options: '体温,血圧,脈拍,SpO2', required: false, hasDetail: true },
-    { id: 'sec_support', label: '【生活援助・移動支援】', type: 'section', required: false },
-    { id: 'position_change', label: '体位交換', type: 'checkbox', required: false },
-    { id: 'move_assist', label: '移動・移乗介助', type: 'checkbox', required: false },
-    { id: 'sec_housework', label: '【家事】', type: 'section', required: false },
-    { id: 'cooking', label: '調理・配膳', type: 'multicheckbox', options: '調理,配膳,下膳', required: false },
-    { id: 'cleaning', label: '掃除・ゴミ出し', type: 'multicheckbox', options: '居室,水回り,ゴミ出し', required: false },
-    { id: 'laundry', label: '洗濯', type: 'checkbox', required: false },
-    { id: 'sec_confirm', label: '【確認事項】', type: 'section', required: false },
-    { id: 'exit_check', label: '退出時確認（火元・戸締まり）', type: 'checkbox', required: false },
-    { id: 'special_note', label: '《特記事項》', type: 'text', required: false },
+  { id: 'sec_medical', label: '【医療的ケア・身体介護】', type: 'section', required: false },
+  { id: 'sputum_suction', label: '痰等の吸引（気管・口腔）', type: 'checkbox', required: false },
+  { id: 'meal_help', label: '食事介助', type: 'multicheckbox', options: '朝,昼,晩,他', required: false, hasDetail: true },
+  { id: 'excretion', label: '排泄介助', type: 'checkbox', required: false, hasDetail: true },
+  { id: 'body_cleaning', label: '清拭・整容介助', type: 'multicheckbox', options: '全身,顔,上肢,下肢,清拭,入浴介助', required: false, hasDetail: true },
+  { id: 'change_clothes', label: '更衣介助', type: 'checkbox', required: false, hasDetail: true },
+  { id: 'vital_check', label: 'バイタル測定', type: 'multicheckbox', options: '体温,血圧,脈拍,SpO2', required: false, hasDetail: true },
+  { id: 'sec_support', label: '【生活援助・移動支援】', type: 'section', required: false },
+  { id: 'position_change', label: '体位交換', type: 'checkbox', required: false },
+  { id: 'move_assist', label: '移動・移乗介助', type: 'checkbox', required: false },
+  { id: 'sec_housework', label: '【家事】', type: 'section', required: false },
+  { id: 'cooking', label: '調理・配膳', type: 'multicheckbox', options: '調理,配膳,下膳', required: false },
+  { id: 'cleaning', label: '掃除・ゴミ出し', type: 'multicheckbox', options: '居室,水回り,ゴミ出し', required: false },
+  { id: 'laundry', label: '洗濯', type: 'checkbox', required: false },
+  { id: 'sec_confirm', label: '【確認事項】', type: 'section', required: false },
+  { id: 'exit_check', label: '退出時確認（火元・戸締まり）', type: 'checkbox', required: false },
+  { id: 'special_note', label: '《特記事項》', type: 'text', required: false },
 ];
 
 // リストとしてエクスポート

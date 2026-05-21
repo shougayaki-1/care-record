@@ -5,9 +5,10 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Button, TextField, Stack, FormControl, InputLabel,
     Select, MenuItem, Box, Typography, CircularProgress, Chip, OutlinedInput,
-    SelectChangeEvent, IconButton, Tooltip // ★追加：IconButton, Tooltip
+    SelectChangeEvent, IconButton, Tooltip, Divider
 } from '@mui/material';
-import DeleteIcon from '@mui/icons-material/Delete'; // ★追加：DeleteIcon
+import DeleteIcon from '@mui/icons-material/Delete';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { ShiftPayload } from '@/app/actions/shift';
 
 export type ClientData = { id: string; name: string };
@@ -29,7 +30,7 @@ type Props = {
     onClose: () => void;
     onSave: (payload: ShiftPayload, shiftId?: string) => Promise<void>;
     onToggleCancel?: (shiftId: string, isCancel: boolean, reason: string) => Promise<void>;
-    onDelete?: (shiftId: string) => Promise<void>; // ★追加：完全削除用のコールバック
+    onDelete?: (shiftId: string) => Promise<void>;
     clients: ClientData[];
     staffs: StaffData[];
     organizationId: string;
@@ -40,9 +41,11 @@ const ITEM_HEIGHT = 48;
 const ITEM_PADDING_TOP = 8;
 const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
 
-export const ShiftFormModal = ({ open, onClose, onSave, onToggleCancel, onDelete, clients, staffs, organizationId, initialData }: Props) => {
+export const ShiftFormModal = ({
+    open, onClose, onSave, onToggleCancel, onDelete, clients, staffs, organizationId, initialData
+}: Props) => {
     const [loading, setLoading] = useState(false);
-    
+
     const [clientId, setClientId] = useState('');
     const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
     const [startAt, setStartAt] = useState('');
@@ -52,57 +55,93 @@ export const ShiftFormModal = ({ open, onClose, onSave, onToggleCancel, onDelete
     useEffect(() => {
         if (open) {
             if (initialData) {
-                setClientId(initialData.client_id);
-                setStartAt(initialData.start_at.slice(0, 16)); 
-                setEndAt(initialData.end_at.slice(0, 16));
+                setClientId(initialData.client_id || '');
+                // YYYY-MM-DDTHH:mm の形にフォーマットしてdatetime-localに安全に適用
+                const formatDatetime = (isoStr: string) => {
+                    if (!isoStr) return '';
+                    const d = new Date(isoStr);
+                    const pad = (n: number) => String(n).padStart(2, '0');
+                    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                };
+                setStartAt(formatDatetime(initialData.start_at));
+                setEndAt(formatDatetime(initialData.end_at));
                 setCancelReason(initialData.cancel_reason || '');
-                setSelectedStaffIds(initialData.shift_staffs.map(s => s.staff_id));
+                setSelectedStaffIds((initialData.shift_staffs || []).map(s => s.staff_id));
             } else {
-                setClientId(''); setSelectedStaffIds([]); setStartAt(''); setEndAt(''); setCancelReason('');
+                setClientId('');
+                setSelectedStaffIds([]);
+                setStartAt('');
+                setEndAt('');
+                setCancelReason('');
             }
         }
     }, [open, initialData]);
 
     const handleSave = async () => {
         if (!clientId || !startAt || !endAt || selectedStaffIds.length === 0) {
-            alert('必須項目を入力してください'); return;
+            alert('必須項目（利用者、スタッフ、日時）をすべて入力してください');
+            return;
         }
         setLoading(true);
         try {
             const clientName = clients.find(c => c.id === clientId)?.name || '';
             const staffNames = staffs.filter(s => selectedStaffIds.includes(s.id)).map(s => s.name).join(', ');
+
             const payload: ShiftPayload = {
-                organizationId, clientId, title: `${clientName} (${staffNames})`,
-                startAt: new Date(startAt).toISOString(), endAt: new Date(endAt).toISOString(),
+                organizationId,
+                clientId,
+                title: `${clientName} (${staffNames})`,
+                startAt: new Date(startAt).toISOString(),
+                endAt: new Date(endAt).toISOString(),
                 staffIds: selectedStaffIds,
+                isModified: true // 手動で保存したため「個別調整済み」フラグを立てる
             };
+
             await onSave(payload, initialData?.id);
             onClose();
-        } catch (error) { console.error(error); alert('保存に失敗しました'); } finally { setLoading(false); }
+        } catch (error) {
+            console.error(error);
+            alert('保存に失敗しました');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleToggleCancel = async (isCancel: boolean) => {
         if (!initialData || !onToggleCancel) return;
-        const msg = isCancel ? 'このシフトをお休み（キャンセル）扱いにしますか？' : 'キャンセルを取り消して稼働中に戻しますか？';
-        if (!confirm(msg)) return;
-        
+
+        const confirmMsg = isCancel
+            ? 'この予定を「お休み（キャンセル）」扱いに変更しますか？'
+            : 'キャンセルを取り消して、通常の稼働予定に復元しますか？';
+
+        if (!confirm(confirmMsg)) return;
+
         setLoading(true);
         try {
             await onToggleCancel(initialData.id, isCancel, cancelReason);
             onClose();
-        } catch (error) { console.error(error); alert('処理に失敗しました'); } finally { setLoading(false); }
+        } catch (error) {
+            console.error(error);
+            alert('処理に失敗しました');
+        } finally {
+            setLoading(false);
+        }
     };
 
-    // ★追加：完全削除ハンドラ
     const handleDelete = async () => {
         if (!initialData || !onDelete) return;
-        if (!confirm('このシフトを完全に削除しますか？\n（※Googleカレンダーからも削除されます。お休みの場合は「休みにする」ボタンを使用してください）')) return;
-        
+        if (!confirm('このシフトをカレンダーから完全に削除しますか？\n※この操作は取り消せません。Googleカレンダーからも完全に消去されます。')) return;
+
         setLoading(true);
         try {
             await onDelete(initialData.id);
             onClose();
-        } catch (error) { console.error(error); alert('削除に失敗しました'); } finally { setLoading(false); }
+        } catch (error) {
+            console.error(error);
+            alert('削除に失敗しました');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleStaffChange = (event: SelectChangeEvent<typeof selectedStaffIds>) => {
@@ -112,11 +151,14 @@ export const ShiftFormModal = ({ open, onClose, onSave, onToggleCancel, onDelete
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth disableEscapeKeyDown>
-            {/* ★修正：タイトルの右端に削除（ゴミ箱）ボタンを配置 */}
-            <DialogTitle fontWeight="bold" sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                {initialData ? '単発シフトの編集' : '単発シフトの追加'}
+            <DialogTitle sx={{ fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 2 }}>
+                <Typography variant="h6" fontWeight="bold">
+                    {initialData ? '単発シフトの編集・詳細' : '新規シフトの追加'}
+                </Typography>
+
+                {/* 誤消去を防ぐため、完全削除（Delete）はヘッダー右端に小さく配置 */}
                 {initialData && (
-                    <Tooltip title="このシフトを完全に削除">
+                    <Tooltip title="この予定を完全に削除（消去）">
                         <IconButton color="error" onClick={handleDelete} disabled={loading} size="small">
                             <DeleteIcon />
                         </IconButton>
@@ -124,65 +166,141 @@ export const ShiftFormModal = ({ open, onClose, onSave, onToggleCancel, onDelete
                 )}
             </DialogTitle>
 
-            <DialogContent dividers>
+            <DialogContent dividers sx={{ py: 3 }}>
                 <Stack spacing={3}>
                     {initialData?.status === 'cancelled' && (
-                        <Box p={2} bgcolor="#ffebee" borderRadius={1}>
-                            <Typography color="error" fontWeight="bold">このシフトはキャンセルされています</Typography>
-                            <Typography variant="body2" color="error">理由: {initialData.cancel_reason || 'なし'}</Typography>
+                        <Box p={2} bgcolor="#ffebee" borderRadius={2} border="1px solid #ffcdd2" display="flex" flexDirection="column" gap={0.5}>
+                            <Typography color="error" fontWeight="bold" variant="subtitle2">
+                                ⚠ この予定はキャンセル（お休み）に設定されています
+                            </Typography>
+                            {initialData.cancel_reason && (
+                                <Typography variant="caption" color="text.secondary">
+                                    キャンセル理由: {initialData.cancel_reason}
+                                </Typography>
+                            )}
                         </Box>
                     )}
 
                     <FormControl fullWidth size="small" required>
                         <InputLabel>利用者</InputLabel>
-                        <Select value={clientId} onChange={(e) => setClientId(e.target.value as string)} label="利用者">
+                        <Select
+                            value={clientId}
+                            onChange={(e) => setClientId(e.target.value as string)}
+                            label="利用者"
+                        >
                             {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                         </Select>
                     </FormControl>
 
                     <FormControl fullWidth size="small" required>
                         <InputLabel>担当スタッフ（複数選択可）</InputLabel>
-                        <Select multiple value={selectedStaffIds} onChange={handleStaffChange} input={<OutlinedInput label="担当スタッフ（複数選択可）" />} renderValue={(selected) => (
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                {selected.map((value) => { const staff = staffs.find(s => s.id === value); return <Chip key={value} label={staff?.name || ''} size="small" />; })}
-                            </Box>
-                        )} MenuProps={MenuProps}>
+                        <Select
+                            multiple
+                            value={selectedStaffIds}
+                            onChange={handleStaffChange}
+                            input={<OutlinedInput label="担当スタッフ（複数選択可）" />}
+                            renderValue={(selected) => (
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                    {selected.map((value) => {
+                                        const staff = staffs.find(s => s.id === value);
+                                        return <Chip key={value} label={staff?.name || ''} size="small" />;
+                                    })}
+                                </Box>
+                            )}
+                            MenuProps={MenuProps}
+                        >
                             {staffs.map(s => (
                                 <MenuItem key={s.id} value={s.id}>
-                                    <Typography variant="body2" sx={{ fontWeight: selectedStaffIds.includes(s.id) ? 'bold' : 'normal' }}>{s.name}</Typography>
+                                    <Typography variant="body2" sx={{ fontWeight: selectedStaffIds.includes(s.id) ? 'bold' : 'normal' }}>
+                                        {s.name}
+                                    </Typography>
                                 </MenuItem>
                             ))}
                         </Select>
                     </FormControl>
 
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                        <TextField label="開始日時" type="datetime-local" fullWidth size="small" required InputLabelProps={{ shrink: true }} value={startAt} onChange={(e) => setStartAt(e.target.value)} />
-                        <TextField label="終了日時" type="datetime-local" fullWidth size="small" required InputLabelProps={{ shrink: true }} value={endAt} onChange={(e) => setEndAt(e.target.value)} />
+                        <TextField
+                            label="開始日時"
+                            type="datetime-local"
+                            fullWidth
+                            size="small"
+                            required
+                            InputLabelProps={{ shrink: true }}
+                            value={startAt}
+                            onChange={(e) => setStartAt(e.target.value)}
+                        />
+                        <TextField
+                            label="終了日時"
+                            type="datetime-local"
+                            fullWidth
+                            size="small"
+                            required
+                            InputLabelProps={{ shrink: true }}
+                            value={endAt}
+                            onChange={(e) => setEndAt(e.target.value)}
+                        />
                     </Stack>
 
                     {initialData && (
-                        <Box p={2} border="1px solid #ffcdd2" borderRadius={2} bgcolor="#fffafb">
-                            <Typography variant="subtitle2" color="error" gutterBottom fontWeight="bold">休みの管理</Typography>
-                            <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-                                ※間違えて登録した場合は、右上のゴミ箱アイコンから削除してください。
-                            </Typography>
-                            {initialData.status === 'cancelled' ? (
-                                <Button variant="contained" color="success" onClick={() => handleToggleCancel(false)} disabled={loading} fullWidth sx={{ boxShadow: 'none' }}>
-                                    キャンセルを取り消す（復元）
-                                </Button>
-                            ) : (
-                                <Stack direction="row" spacing={1}>
-                                    <TextField size="small" fullWidth placeholder="理由（利用者入院など）" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} />
-                                    <Button variant="outlined" color="error" onClick={() => handleToggleCancel(true)} disabled={loading} sx={{ minWidth: 140 }}>休みにする</Button>
-                                </Stack>
-                            )}
-                        </Box>
+                        <>
+                            <Divider sx={{ my: 1 }} />
+                            <Box p={2.5} border="1px solid #eee" borderRadius={2} bgcolor="#fafafa">
+                                <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                                    お休み（キャンセル）の管理
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+                                    利用者の急な入院や都合によるキャンセル時は、完全に削除するのではなく「お休み」に設定することを推奨します。実績管理に履歴を残すことができます。
+                                </Typography>
+                                {initialData.status === 'cancelled' ? (
+                                    <Button
+                                        variant="contained"
+                                        color="success"
+                                        onClick={() => handleToggleCancel(false)}
+                                        disabled={loading}
+                                        fullWidth
+                                        sx={{ boxShadow: 'none' }}
+                                    >
+                                        キャンセルを取り消して「稼働中」に戻す
+                                    </Button>
+                                ) : (
+                                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                                        <TextField
+                                            size="small"
+                                            fullWidth
+                                            placeholder="例：当日体調不良、入院などの理由を入力"
+                                            value={cancelReason}
+                                            onChange={(e) => setCancelReason(e.target.value)}
+                                        />
+                                        <Button
+                                            variant="outlined"
+                                            color="error"
+                                            onClick={() => handleToggleCancel(true)}
+                                            disabled={loading}
+                                            sx={{ minWidth: 120, flexShrink: 0 }}
+                                        >
+                                            お休みにする
+                                        </Button>
+                                    </Stack>
+                                )}
+                            </Box>
+                        </>
                     )}
                 </Stack>
             </DialogContent>
-            <DialogActions sx={{ p: 2 }}>
-                <Button onClick={onClose} color="inherit" disabled={loading}>閉じる</Button>
-                <Button variant="contained" onClick={handleSave} disabled={loading} sx={{ boxShadow: 'none' }}>{loading ? <CircularProgress size={24} color="inherit" /> : '保存する'}</Button>
+
+            <DialogActions sx={{ p: 2, px: 3 }}>
+                <Button onClick={onClose} color="inherit" disabled={loading}>
+                    閉じる
+                </Button>
+                <Button
+                    variant="contained"
+                    onClick={handleSave}
+                    disabled={loading}
+                    sx={{ boxShadow: 'none', px: 3 }}
+                >
+                    {loading ? <CircularProgress size={24} color="inherit" /> : '変更を保存'}
+                </Button>
             </DialogActions>
         </Dialog>
     );

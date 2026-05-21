@@ -36,9 +36,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // suppressHydrationWarning を追加して拡張機能による書き換えエラーを抑制
+    // suppressHydrationWarningを追加して拡張機能によるタグ書き換えエラーを抑制
     <html lang="ja" suppressHydrationWarning>
-      <body className={`${inter.className} ${poppins.variable}`}>
+      <body
+        className={`${inter.className} ${poppins.variable}`}
+        suppressHydrationWarning // <body>タグ自体に注入される属性エラーも抑止
+      >
         <AppRouterCacheProvider>
           <ThemeProvider theme={theme}>
             <CssBaseline />

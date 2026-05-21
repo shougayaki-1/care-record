@@ -1,14 +1,10 @@
 // src/utils/templateHelper.ts
 
-export type FormItem = {
-    id: string;
-    label: string;
-    type: string;
-    options?: string;
-    hasDetail?: boolean;
-    required?: boolean;
-    [key: string]: unknown; 
-};
+import { FormItem } from '@/constants/formTemplates';
+
+// 他の画面ファイル（clients/[id]/page.tsx等）でのインポート互換性を維持するため、
+// 集約先の型定義をここで安全に再エクスポートします。
+export type { FormItem };
 
 export type FormValue = string | number | boolean | string[] | null | undefined;
 
@@ -20,13 +16,12 @@ export const generateKeyMap = (schema: FormItem[]) => {
     const labelCount: Record<string, number> = {};
 
     schema.forEach(item => {
-        // ★修正ポイント: 記号（●、■、▼、《》、【】）を除去する正規表現を強化
-        // これにより "●給付変更事項" -> "給付変更事項" に統一されます
+        // 記号（●、■、▼、《》、【】）を除去する正規表現を適用
         let cleanLabel = item.label.replace(/[{}[\].●■▼《》【】]/g, '').trim();
-        
+
         if (!cleanLabel) cleanLabel = "項目";
 
-        // 重複チェック（同じ名前の項目がある場合、_2, _3 をつける）
+        // 重複チェック（同じ名前の項目がある場合、_2, _3 を付与）
         if (labelCount[cleanLabel]) {
             labelCount[cleanLabel]++;
             const uniqueLabel = `${cleanLabel}_${labelCount[cleanLabel]}`;
@@ -47,7 +42,7 @@ export const convertSchemaToReadable = (schema: FormItem[]) => {
     const keyMap = generateKeyMap(schema);
     return schema.map(item => ({
         ...item,
-        id: keyMap[item.id] || item.id 
+        id: keyMap[item.id] || item.id
     }));
 };
 
@@ -64,12 +59,12 @@ export const convertDataToReadable = (data: Record<string, FormValue>, schema: F
             const originalId = key.replace('_detail', '');
             const newKey = keyMap[originalId] ? `${keyMap[originalId]}_詳細` : key;
             newData[newKey] = data[key];
-        } 
+        }
         // 通常項目の処理
         else if (keyMap[key]) {
             newData[keyMap[key]] = data[key];
         }
-        // マップにないもの（基本情報など）はそのまま
+        // マップにないもの（基本情報など）はそのまま維持
         else {
             newData[key] = data[key];
         }

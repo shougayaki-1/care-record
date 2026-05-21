@@ -4,7 +4,8 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Box, Button, Container, Typography, TextField, Checkbox, FormControlLabel, Radio, RadioGroup,
   Paper, Stack, IconButton, CircularProgress,
-  FormGroup, Switch, Autocomplete, FormHelperText, Chip, Divider, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions
+  FormGroup, Switch, FormHelperText, Chip, Divider, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
+  FormControl, InputLabel, Select, MenuItem, OutlinedInput, SelectChangeEvent
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
@@ -76,13 +77,16 @@ type FormAnswers = Record<string, string | number | boolean | string[]>;
 type HelperProfile = { id: string; name: string };
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 
-// 型定義追加：シフトから取得するスタッフ情報
+// シフトスタッフ取得用
 type ShiftStaffData = {
-    user_id: string | null;
-    ghost_staff_id: string | null;
-    profiles: { name: string } | null;
-    ghost_staffs: { name: string } | null;
+    staff_id: string;
+    staffs: { name: string } | null;
 };
+
+// ★ Select用のMenuProps定義
+const ITEM_HEIGHT = 48;
+const ITEM_PADDING_TOP = 8;
+const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
 
 export default function RecordPage() {
   const router = useRouter();
@@ -91,17 +95,18 @@ export default function RecordPage() {
   const { showToast } = useToast();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   
-  // URLパラメータの取得
   const paramReportId = searchParams.get('reportId');
   const shiftId = searchParams.get('shiftId');
 
-  // 動的に変化する実際の reportId を管理（シフトからの連携時に自動発見したIDもここに入れる）
   const [currentReportId, setCurrentReportId] = useState<string | null>(paramReportId);
 
   const [clientName, setClientName] = useState('');
   const [template, setTemplate] = useState<FormItem[]>([]);
   const [answers, setAnswers] = useState<FormAnswers>({});
+  
+  // 選択肢用 (スタッフ名簿一覧)
   const [selectableStaffs, setSelectableStaffs] = useState<HelperProfile[]>([]);
+  // 選択中のスタッフ名配列
   const [selectedHelpers, setSelectedHelpers] = useState<string[]>([]);
   
   const [startDateTime, setStartDateTime] = useState('');
@@ -140,28 +145,21 @@ export default function RecordPage() {
         setTemplate(schema.filter(i => i.id !== 'service_time' && i.id !== 'travel_time'));
       }
 
-      let allStaffs: HelperProfile[] = [];
-      const { data: members } = await supabase.from('organization_members').select('user_id').eq('organization_id', currentOrg.id);
-      if (members) {
-        const userIds = members.map((m) => m.user_id);
-        const { data: profiles } = await supabase.from('profiles').select('id, name').in('id', userIds);
-        if(profiles) allStaffs = [...allStaffs, ...profiles];
-      }
-      const { data: ghosts } = await supabase.from('ghost_staffs').select('id, name').eq('organization_id', currentOrg.id);
-      if(ghosts) allStaffs = [...allStaffs, ...ghosts];
+      // スタッフ名簿一覧を取得
+      const { data: staffsData } = await supabase
+        .from('staffs')
+        .select('id, name, user_id')
+        .eq('organization_id', currentOrg.id)
+        .order('name', { ascending: true });
 
-      const { data: assignments } = await supabase.from('assignments').select('helper_id, ghost_staff_id').eq('client_id', clientId);
-      let finalStaffList = allStaffs;
-      if (assignments && assignments.length > 0) {
-          const validIds = new Set(assignments.map(a => a.helper_id || a.ghost_staff_id).filter((id): id is string => id !== null));
-          if (validIds.size > 0) finalStaffList = allStaffs.filter(s => validIds.has(s.id));
-      }
-      setSelectableStaffs(finalStaffList);
+      const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id }));
+      setSelectableStaffs(allStaffs);
 
-      // ★修正：既存の記録もシフト指定もない場合のみ、自分を初期セット
       if (!currentReportId && !shiftId && user) {
-        const me = finalStaffList.find((p) => p.id === user.id);
-        if (me) setSelectedHelpers([me.name]);
+        const myStaffRecord = allStaffs.find(s => s.user_id === user.id);
+        if (myStaffRecord) {
+            setSelectedHelpers([myStaffRecord.name]);
+        }
       }
     } catch (error) { console.error('Error fetching base data:', error); }
   }, [clientId, currentOrg, currentReportId, shiftId]);
@@ -197,9 +195,7 @@ export default function RecordPage() {
     const init = async () => {
       let targetId = paramReportId;
 
-      // ★追加：URLにシフトIDがある場合の処理
       if (shiftId && !paramReportId) {
-          // 1. このシフトに紐づく記録がすでに存在するかチェック
           const { data: existingReport } = await supabase
               .from('reports')
               .select('id')
@@ -207,17 +203,20 @@ export default function RecordPage() {
               .maybeSingle();
           
           if (existingReport) {
-              // すでに記録がある場合は、それを開く（二重入力防止）
               targetId = existingReport.id;
               setCurrentReportId(targetId);
-              // URLも書き換えておく
               router.replace(`/app/record/${clientId}?reportId=${targetId}`);
               showToast('このシフトには既に記録が存在します。該当する記録を開きました。', 'info');
           } else {
-              // 2. 記録が存在しない場合、シフトの「時間」と「担当者」を取得して初期値にセット（プレフィル）
               const { data: shiftData } = await supabase
                   .from('shifts')
-                  .select('start_at, end_at, shift_staffs(user_id, ghost_staff_id, profiles(name), ghost_staffs(name))')
+                  .select(`
+                      start_at, end_at, 
+                      shift_staffs (
+                          staff_id, 
+                          staffs (name)
+                      )
+                  `)
                   .eq('id', shiftId)
                   .single();
               
@@ -225,20 +224,27 @@ export default function RecordPage() {
                   setStartDateTime(formatDatetimeLocal(new Date(shiftData.start_at)));
                   setEndDateTime(formatDatetimeLocal(new Date(shiftData.end_at)));
                   
+                  const sTime = new Date(shiftData.start_at).getTime();
+                  const eTime = new Date(shiftData.end_at).getTime();
+                  if (eTime > sTime) {
+                      const diffHours = (eTime - sTime) / (1000 * 60 * 60);
+                      setServiceTime(diffHours.toString());
+                  }
+
                   const staffNames: string[] = [];
                   const typedShiftStaffs = (shiftData.shift_staffs as unknown as ShiftStaffData[]) || [];
                   
                   typedShiftStaffs.forEach(s => {
-                      if (s.profiles?.name) staffNames.push(s.profiles.name);
-                      if (s.ghost_staffs?.name) staffNames.push(s.ghost_staffs.name);
+                      const name = Array.isArray(s.staffs) ? s.staffs[0]?.name : s.staffs?.name;
+                      if (name) staffNames.push(name);
                   });
+
                   setSelectedHelpers(staffNames);
                   setCurrentStatus('draft');
               }
           }
       }
 
-      // 何も指定がない完全新規の場合
       if (!targetId && !shiftId) {
         const now = new Date();
         setStartDateTime(formatDatetimeLocal(now));
@@ -286,8 +292,6 @@ export default function RecordPage() {
         if (error) throw error;
         
         await supabase.from('report_images').insert({ report_id: currentReportId, storage_path: path });
-        
-        // リロードして反映
         await loadExistingData(currentReportId);
         showToast('画像をアップロードしました');
     } catch(e) {
@@ -314,7 +318,7 @@ export default function RecordPage() {
   const validate = () => {
     const ne: Record<string, string> = {};
     if (!serviceTime) ne['serviceTime'] = '必須項目です';
-    if (selectedHelpers.length === 0) ne['helpers'] = '担当ヘルパーを選択してください';
+    if (selectedHelpers.length === 0) ne['helpers'] = '担当スタッフを選択してください';
     template.forEach(item => {
       const val = answers[item.id];
       if (item.required && (!val || (Array.isArray(val) && val.length === 0))) ne[item.id] = '必須項目です';
@@ -335,7 +339,7 @@ export default function RecordPage() {
         start_at: new Date(startDateTime).toISOString(),
         end_at: new Date(endDateTime).toISOString(),
         status: status,
-        shift_id: shiftId || null, // ★追加：シフトから作成された場合はヒモ付ける
+        shift_id: shiftId || null, 
         updated_at: new Date().toISOString()
       };
 
@@ -410,6 +414,18 @@ export default function RecordPage() {
 
   const isAdmin = currentOrg && ['owner', 'manager'].includes(currentOrg.role);
 
+  // ★ Selectの変更ハンドラ
+  const handleStaffChange = (event: SelectChangeEvent<typeof selectedHelpers>) => {
+      const { target: { value } } = event;
+      setSelectedHelpers(typeof value === 'string' ? value.split(',') : value);
+      setIsDirty(true);
+      if (errors.helpers) {
+          const newErrors = { ...errors };
+          delete newErrors.helpers;
+          setErrors(newErrors);
+      }
+  };
+
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}><CircularProgress /></Box>;
 
   return (
@@ -441,22 +457,42 @@ export default function RecordPage() {
             <Stack spacing={4}>
             <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, bgcolor: '#fff' }}>
                 <Stack spacing={3}>
+                
+                {/* ★修正: 担当スタッフをチェックボックス付きのSelectに変更 */}
                 <Box>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
                     </Typography>
-                    <Autocomplete
-                        multiple
-                        options={Array.from(new Set(selectableStaffs.map(h => h.name)))}
-                        value={selectedHelpers}
-                        onChange={(_, v) => {
-                        setSelectedHelpers(v as string[]);
-                        setIsDirty(true);
-                        if (v.length > 0 && errors.helpers) { const newErrors = { ...errors }; delete newErrors.helpers; setErrors(newErrors); }
-                        }}
-                        renderTags={(value, getTagProps) => value.map((option, index) => { const { key, ...tagProps } = getTagProps({ index }); return <Chip key={key} variant="outlined" label={option} size="small" {...tagProps} />; })}
-                        renderInput={(params) => <TextField {...params} placeholder={selectedHelpers.length === 0 ? "スタッフを選択" : ""} error={!!errors.helpers} helperText={errors.helpers} fullWidth />}
-                    />
+                    <FormControl fullWidth error={!!errors.helpers}>
+                        <Select
+                            multiple
+                            displayEmpty
+                            value={selectedHelpers}
+                            onChange={handleStaffChange}
+                            input={<OutlinedInput />}
+                            renderValue={(selected) => {
+                                if (selected.length === 0) {
+                                    return <Typography color="text.disabled">スタッフ名簿から選択</Typography>;
+                                }
+                                return (
+                                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                        {selected.map((value) => (
+                                            <Chip key={value} label={value} size="small" variant="outlined" />
+                                        ))}
+                                    </Box>
+                                );
+                            }}
+                            MenuProps={MenuProps}
+                        >
+                            {Array.from(new Set(selectableStaffs.map(h => h.name))).map((name) => (
+                                <MenuItem key={name} value={name}>
+                                    <Checkbox checked={selectedHelpers.indexOf(name) > -1} size="small" />
+                                    <Typography variant="body2" sx={{ fontWeight: selectedHelpers.includes(name) ? 'bold' : 'normal' }}>{name}</Typography>
+                                </MenuItem>
+                            ))}
+                        </Select>
+                        {errors.helpers && <FormHelperText>{errors.helpers}</FormHelperText>}
+                    </FormControl>
                 </Box>
 
                 <Box>
@@ -564,7 +600,6 @@ export default function RecordPage() {
         </Container>
       </Box>
 
-      {/* Dialogs */}
       <Dialog open={openCloseDialog} onClose={() => setOpenCloseDialog(false)}>
           <DialogTitle>保存されていない変更があります</DialogTitle>
           <DialogContent><DialogContentText>入力内容が保存されていません。<br/>下書きとして保存しますか？</DialogContentText></DialogContent>
