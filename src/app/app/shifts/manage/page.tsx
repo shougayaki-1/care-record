@@ -29,7 +29,6 @@ import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 
-// 高度なPDF出力用のコンポーネントとライブラリ
 import { pdf } from '@react-pdf/renderer';
 import { ShiftScheduleDocument, PdfShiftData } from '@/components/pdf/ShiftScheduleDocument';
 import { ShiftCalendarDocument, PdfCalendarEvent, PdfCalendarDay } from '@/components/pdf/ShiftCalendarDocument';
@@ -63,15 +62,11 @@ export default function ShiftManagePage() {
     const [clients, setClients] = useState<ClientData[]>([]);
     const [staffs, setStaffs] = useState<StaffData[]>([]);
 
-    // ユーザー情報
     const [currentUserId, setCurrentUserId] = useState<string>('');
     const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
 
-    // 5つの詳細タブ制御
-    // 0: ひな形パターン, 1: 全体カレンダー, 2: 自分のシフト, 3: スタッフ別, 4: 利用者別
     const [tabIndex, setTabIndex] = useState(1);
 
-    // フィルター用State
     const [selectedStaffId, setSelectedStaffId] = useState<string>('all');
     const [selectedClientId, setSelectedClientId] = useState<string>('all');
 
@@ -81,7 +76,6 @@ export default function ShiftManagePage() {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     });
 
-    // モーダル・ダイアログ制御
     const [shiftModalOpen, setShiftModalOpen] = useState(false);
     const [patternModalOpen, setPatternModalOpen] = useState(false);
     const [clearDialogOpen, setClearDialogOpen] = useState(false);
@@ -90,13 +84,8 @@ export default function ShiftManagePage() {
     const [selectedShift, setSelectedShift] = useState<ShiftData | null>(null);
     const [selectedPattern, setSelectedPattern] = useState<FetchedPatternData | null>(null);
 
-    // 消去設定
     const [clearMode, setClearMode] = useState<'unmodified' | 'all'>('unmodified');
-
-    // 自動生成プレビュー用State
     const [previewDetails, setPreviewDetails] = useState<{ total: number; details: any[] } | null>(null);
-
-    // 一括削除用のState
     const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
 
     useEffect(() => {
@@ -118,7 +107,6 @@ export default function ShiftManagePage() {
                 const parsed = s.map(item => ({ id: item.id, name: item.name, type: item.user_id ? 'member' as const : 'ghost' as const }));
                 setStaffs(parsed);
 
-                // ログインユーザー自身に紐づく名簿IDを特定する
                 if (currentUserId) {
                     const me = parsed.find(item => s.find(sd => sd.id === item.id)?.user_id === currentUserId);
                     if (me) setCurrentStaffId(me.id);
@@ -173,7 +161,6 @@ export default function ShiftManagePage() {
         }
     }, [wsLoading, currentOrg, fetchMasterData, fetchData]);
 
-    // タブ選択、または各種フィルター適用時に、表示用カレンダーイベントを動的にフィルタリング
     useEffect(() => {
         if (!currentUserId || rawShifts.length === 0) {
             setEvents([]);
@@ -181,17 +168,14 @@ export default function ShiftManagePage() {
         }
 
         const filtered = rawShifts.filter(shift => {
-            // 2: 自分のシフト
             if (tabIndex === 2) {
                 if (!currentStaffId) return false;
                 return shift.shift_staffs.some(s => s.staff_id === currentStaffId);
             }
-            // 3: スタッフ別
             if (tabIndex === 3) {
                 if (selectedStaffId === 'all') return true;
                 return shift.shift_staffs.some(s => s.staff_id === selectedStaffId);
             }
-            // 4: 利用者別
             if (tabIndex === 4) {
                 if (selectedClientId === 'all') return true;
                 return shift.client_id === selectedClientId;
@@ -199,12 +183,10 @@ export default function ShiftManagePage() {
             return true;
         });
 
-        // 管理者タブ以外は、カレンダー上でのドラッグ＆ドロップなどの直接編集を不許可（読み取り専用にする）
         const isEditable = tabIndex === 1 && ['owner', 'manager'].includes(currentOrg?.role || '');
         setEvents(convertToCalendarEvents(filtered, !isEditable));
     }, [rawShifts, tabIndex, selectedStaffId, selectedClientId, currentStaffId, currentUserId, currentOrg]);
 
-    // --- 高度なPDF出力・エクスポート機能 ---
     const handleDownloadPdf = async () => {
         if (!calendarRef.current || !currentOrg) return;
         setPdfGenerating(true);
@@ -224,27 +206,54 @@ export default function ShiftManagePage() {
 
             let blob: Blob;
 
-            // リスト（List）ビュー表示中の場合：リスト形式PDFを出力
             if (viewType.includes('list')) {
-                const pdfShifts: PdfShiftData[] = renderedEvents.map(ev => {
+                const pdfShifts: PdfShiftData[] = [];
+                renderedEvents.forEach(ev => {
                     const start = ev.start!;
                     const end = ev.end!;
                     const days = ['日', '月', '火', '水', '木', '金', '土'];
-                    return {
-                        dateStr: `${start.getMonth() + 1}/${start.getDate()} (${days[start.getDay()]})`,
-                        startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
-                        endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
-                        clientName: ev.extendedProps.clientName,
-                        staffNames: ev.extendedProps.staffNames,
-                        isCancelled: ev.extendedProps.isCancelled,
-                        timestamp: start.getTime()
-                    };
+
+                    const startZero = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+                    const endZero = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+                    const diffDays = Math.floor((endZero.getTime() - startZero.getTime()) / (1000 * 60 * 60 * 24));
+
+                    if (diffDays === 0) {
+                        pdfShifts.push({
+                            dateStr: `${start.getMonth() + 1}/${start.getDate()} (${days[start.getDay()]})`,
+                            startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
+                            endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
+                            clientName: ev.extendedProps.clientName,
+                            staffNames: ev.extendedProps.staffNames,
+                            isCancelled: ev.extendedProps.isCancelled,
+                            timestamp: start.getTime()
+                        });
+                    } else {
+                        // 印刷用PDF出力時: 繋がっている夜勤シフトを00:00で分割処理
+                        // Part 1: 開始時間 〜 24:00
+                        pdfShifts.push({
+                            dateStr: `${start.getMonth() + 1}/${start.getDate()} (${days[start.getDay()]})`,
+                            startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
+                            endTime: `24:00`,
+                            clientName: ev.extendedProps.clientName,
+                            staffNames: ev.extendedProps.staffNames,
+                            isCancelled: ev.extendedProps.isCancelled,
+                            timestamp: start.getTime()
+                        });
+                        // Part 2: 翌日00:00 〜 終了時間
+                        pdfShifts.push({
+                            dateStr: `${end.getMonth() + 1}/${end.getDate()} (${days[end.getDay()]})`,
+                            startTime: `00:00`,
+                            endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
+                            clientName: ev.extendedProps.clientName,
+                            staffNames: ev.extendedProps.staffNames,
+                            isCancelled: ev.extendedProps.isCancelled,
+                            timestamp: endZero.getTime()
+                        });
+                    }
                 });
                 pdfShifts.sort((a, b) => a.timestamp - b.timestamp);
                 blob = await pdf(<ShiftScheduleDocument title={docTitle} monthStr={monthStr} shifts={pdfShifts} orgName={currentOrg.name} />).toBlob();
-            }
-            // 月間・週間カレンダー表示中の場合：カレンダー型レイアウトPDFを出力（日を跨ぐシフトに完全対応）
-            else {
+            } else {
                 const activeStart = api.view.activeStart;
                 const activeEnd = api.view.activeEnd;
                 const dayMap = new Map<string, PdfCalendarEvent[]>();
@@ -253,7 +262,6 @@ export default function ShiftManagePage() {
                     const start = new Date(ev.start!);
                     const end = new Date(ev.end!);
 
-                    // 開始日と終了日の日付の差をローカル日付基準で計算
                     const startZero = new Date(start.getFullYear(), start.getMonth(), start.getDate());
                     const endZero = new Date(end.getFullYear(), end.getMonth(), end.getDate());
 
@@ -261,7 +269,6 @@ export default function ShiftManagePage() {
                     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
                     if (diffDays === 0) {
-                        // 同一日のシフト
                         const dateKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
                         const eventObj: PdfCalendarEvent = {
                             timeStr: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}-${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
@@ -272,7 +279,6 @@ export default function ShiftManagePage() {
                         if (!dayMap.has(dateKey)) dayMap.set(dateKey, []);
                         dayMap.get(dateKey)!.push(eventObj);
                     } else {
-                        // 日またぎのシフト：跨いでいる日数分ループして各日のセルに予定を分割登録する
                         for (let d = 0; d <= diffDays; d++) {
                             const currentDay = new Date(startZero);
                             currentDay.setDate(startZero.getDate() + d);
@@ -281,17 +287,13 @@ export default function ShiftManagePage() {
 
                             let timeDisplay = '';
                             if (d === 0) {
-                                // 跨ぎの開始日（「20:00〜翌」から「20:00〜00:00」に変更）
-                                timeDisplay = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}〜00:00`;
+                                timeDisplay = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}〜24:00`;
                             } else if (d === diffDays) {
-                                // 終了時刻がちょうど 00:00 の場合は、翌日（終了日）のセルに不要な 00:00〜00:00 を表示しないようスキップする
                                 if (end.getHours() === 0 && end.getMinutes() === 0) {
                                     continue;
                                 }
-                                // 跨ぎの終了日（「〜09:00」から「00:00〜09:00」に変更）
                                 timeDisplay = `00:00〜${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
                             } else {
-                                // 2日以上跨ぐ場合の中間日
                                 timeDisplay = `終日`;
                             }
 
@@ -336,7 +338,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // マトリックス全体シフト表（スタッフ横断グリッド表）の自動作成・PDF出力機能
     const handleDownloadMatrixPdf = async () => {
         if (!calendarRef.current || !currentOrg) return;
         setPdfGenerating(true);
@@ -401,7 +402,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // --- シフト単体操作 ---
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
         try {
             if (shiftId) await updateShift(shiftId, payload);
@@ -452,7 +452,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // --- ひな形・自動生成操作 ---
     const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {
         try {
             if (patternId) {
@@ -535,7 +534,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // ひな形の繰り返し規則（rrule文字列）をわかりやすい日本語に変換する補助関数
     const formatRule = (rrule: string) => {
         let desc = '';
         if (rrule.includes('FREQ=WEEKLY')) desc += '毎週 ';
@@ -605,7 +603,6 @@ export default function ShiftManagePage() {
                     <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>
                 ) : (
                     <>
-                        {/* --- 共通のヘッダー・フィルターコントロール (カレンダー表示系タブのみに動的表示) --- */}
                         {tabIndex >= 1 && (
                             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={2} spacing={2}>
                                 <Box flexGrow={1} width="100%">
@@ -635,7 +632,6 @@ export default function ShiftManagePage() {
                             </Stack>
                         )}
 
-                        {/* --- タブ0: ひな形（パターン）管理タブ --- */}
                         {isAdmin && (
                             <Box sx={{ display: tabIndex === 0 ? 'block' : 'none' }}>
                                 <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: '#F0F5FF', borderColor: '#D0E0FF' }}>
@@ -684,7 +680,6 @@ export default function ShiftManagePage() {
                             </Box>
                         )}
 
-                        {/* --- カレンダー表示 (各カレンダータブがこれを利用してFullCalendarを描画) --- */}
                         {tabIndex >= 1 && (
                             <Box sx={{ height: '100%' }}>
                                 <ShiftCalendarViewer
@@ -707,18 +702,14 @@ export default function ShiftManagePage() {
                                     }}
                                     onEventClick={(info) => {
                                         const { clientId, shiftId, isCancelled, shiftData } = info.event.extendedProps;
-                                        // 管理者かつ全体カレンダーの場合は「編集モーダル」を開く
                                         if (tabIndex === 1 && isAdmin) {
                                             setSelectedShift(shiftData);
                                             setShiftModalOpen(true);
-                                        }
-                                        // それ以外（ヘルパーが自分のシフト等を見る場合）は、クリックで「提供記録票の入力」へ遷移させる
-                                        else {
+                                        } else {
                                             if (isCancelled) {
                                                 showToast('このシフトは現在キャンセル（お休み）されています。', 'info');
                                                 return;
                                             }
-                                            // 記録入力画面へ遷移
                                             window.location.href = `/app/record/${clientId}?shiftId=${shiftId}`;
                                         }
                                     }}
@@ -729,7 +720,6 @@ export default function ShiftManagePage() {
                 )}
             </Box>
 
-            {/* --- 各種ダイアログ・モーダル --- */}
             <ShiftFormModal
                 open={shiftModalOpen}
                 onClose={() => setShiftModalOpen(false)}
@@ -809,7 +799,7 @@ export default function ShiftManagePage() {
                                     <Box key={index} display="flex" justifyContent="space-between" alignItems="center">
                                         <Typography variant="caption" fontWeight="bold">{d.title}</Typography>
                                         <Stack direction="row" spacing={1} alignItems="center">
-                                            {d.isOvernight && <Chip label="泊まり日またぎ" size="small" color="secondary" variant="outlined" sx={{ height: 16, fontSize: '0.65rem' }} />}
+                                            {d.isOvernight && <Chip label="日またぎ夜勤" size="small" color="secondary" variant="outlined" sx={{ height: 16, fontSize: '0.65rem' }} />}
                                             <Typography variant="caption" color="text.secondary">{d.count} 件</Typography>
                                         </Stack>
                                     </Box>

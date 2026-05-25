@@ -284,6 +284,10 @@ export default function ShiftManagePage() {
                                 // 跨ぎの開始日（「20:00〜翌」から「20:00〜00:00」に変更）
                                 timeDisplay = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}〜00:00`;
                             } else if (d === diffDays) {
+                                // 終了時刻がちょうど 00:00 の場合は、翌日（終了日）のセルに不要な 00:00〜00:00 を表示しないようスキップする
+                                if (end.getHours() === 0 && end.getMinutes() === 0) {
+                                    continue;
+                                }
                                 // 跨ぎの終了日（「〜09:00」から「00:00〜09:00」に変更）
                                 timeDisplay = `00:00〜${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
                             } else {
@@ -601,7 +605,7 @@ export default function ShiftManagePage() {
                     <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>
                 ) : (
                     <>
-                        {/* --- 共通のヘッダー・フィルタコントロール (カレンダー表示系タブのみに動的表示) --- */}
+                        {/* --- 共通のヘッダー・フィルターコントロール (カレンダー表示系タブのみに動的表示) --- */}
                         {tabIndex >= 1 && (
                             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={2} spacing={2}>
                                 <Box flexGrow={1} width="100%">
@@ -635,7 +639,7 @@ export default function ShiftManagePage() {
                         {isAdmin && (
                             <Box sx={{ display: tabIndex === 0 ? 'block' : 'none' }}>
                                 <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: '#F0F5FF', borderColor: '#D0E0FF' }}>
-                                    <Typography variant="body2" sx={{ fontWeight: '500' }}>登録したひな形をベースに、指定月のシフトをカレンダーへ一括展開・同期します。</Typography>
+                                    <Typography variant="body2" sx={{ fontWeight: '500' }}>登録したひな形をベースに、指定月のカレンダーへシフトを一括展開・同期します。</Typography>
                                     <Stack direction="row" spacing={1.5} alignItems="center">
                                         <TextField type="month" size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} sx={{ bgcolor: 'white' }} />
                                         <Button variant="contained" color="secondary" startIcon={<PlayArrowIcon />} onClick={handleCalculatePreview} disabled={generating || patterns.length === 0} sx={{ boxShadow: 'none' }}>
@@ -796,7 +800,7 @@ export default function ShiftManagePage() {
                             <Typography variant="body2" paragraph>
                                 以下の内容でカレンダーにシフト実体を作成します。既存の未編集シフトは自動で上書き更新され、現場で編集済みの調整シフトは安全にスキップ（自動保護）されます。
                             </Typography>
-                            <Box p={2} bgcolor="#F0F5FF" borderRadius={2} border="1px solid #D0E0FF">
+                            <Box p={2} bgcolor="#F0F5FF" borderRadius={2} border="1px solid #D0E0FF" mb={1.5}>
                                 <Typography variant="subtitle2" fontWeight="bold" color="primary">展開予定の総シフト数： {previewDetails.total} 件</Typography>
                             </Box>
                             <Typography variant="subtitle2" fontWeight="bold">ひな形ごとの生成予定内訳:</Typography>

@@ -296,7 +296,6 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
 
 /**
  * 月次で一括展開されたシフトを消去する
- * unmodifiedOnly が true の場合、手動編集されたシフト (is_modified=true) を保護し、未変更分のみ消去します。
  */
 export async function clearGeneratedShiftsForMonth(
     organizationId: string,
@@ -306,21 +305,15 @@ export async function clearGeneratedShiftsForMonth(
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
-    // タイムゾーンズレを起こさない安全なJST境界値を作成
     const startDateISO = new Date(buildJstIsoString(year, month, 1, "00:00")).toISOString();
     const endDateISO = new Date(buildJstIsoString(year, month, lastDayNum, "23:59")).toISOString();
-
-    // 当月末日から開始された泊まり勤務のPart2（翌月1日00:00開始）を消去対象に含めるため、
-    // 翌月1日00:00開始の予定も検索対象に加える
-    const nextMonth1stJst = new Date(year, month, 1);
-    const nextMonth1st0000 = new Date(buildJstIsoString(nextMonth1stJst.getFullYear(), nextMonth1stJst.getMonth() + 1, nextMonth1stJst.getDate(), "00:00")).toISOString();
 
     try {
         let query = supabaseAdmin.from('shifts')
             .select('id')
             .eq('organization_id', organizationId)
             .not('pattern_id', 'is', null)
-            .or(`and(start_at.gte.${startDateISO},start_at.lte.${endDateISO}),start_at.eq.${nextMonth1st0000}`);
+            .or(`and(start_at.gte.${startDateISO},start_at.lte.${endDateISO})`);
 
         if (unmodifiedOnly) {
             query = query.eq('is_modified', false);
@@ -332,7 +325,6 @@ export async function clearGeneratedShiftsForMonth(
 
         const shiftIds = shifts.map(s => s.id);
 
-        // Googleカレンダー側の該当予定を並行削除
         const deletePromises = shifts.map(shift =>
             syncToGoogleCalendarDirect(organizationId, shift.id, 'delete')
                 .catch(e => console.error('Clear Month Sync Error:', e))
@@ -365,7 +357,6 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
-    // タイムゾーンによる曜日ズレを完全に防ぐため、JSTのローカル時間をそのまま表すUTC Dateを作成
     const startDateJST = buildFloatingDate(year, month, 1, 0, 0);
     const endDateJST = buildFloatingDate(year, month, lastDayNum, 23, 59);
 
@@ -377,7 +368,6 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
         if (!patterns || patterns.length === 0) return { total: 0, details: [] };
 
         let totalNewCount = 0;
-        let totalSplitCount = 0;
         const details: any[] = [];
 
         for (const p of patterns) {
@@ -392,13 +382,8 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
 
             let patternCount = 0;
             occurrences.forEach(() => {
-                if (isOvernight) {
-                    totalSplitCount += 2;
-                    patternCount += 2;
-                } else {
-                    totalNewCount += 1;
-                    patternCount += 1;
-                }
+                totalNewCount += 1;
+                patternCount += 1;
             });
 
             details.push({
@@ -409,7 +394,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
         }
 
         return {
-            total: totalNewCount + totalSplitCount,
+            total: totalNewCount,
             details
         };
     } catch (e) {
@@ -420,21 +405,18 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
 
 /**
  * ひな形から対象月のシフトを一括生成する
- * 1フェッチ＆LookupMapの採用により、多重実行時でも100%重複が発生しない直列堅牢設計
  */
 export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
-    // タイムゾーンによる曜日ズレを完全に防ぐため、JSTのローカル時間をそのまま表すUTC Dateを作成（Floating時間処理）
     const startDateJST = buildFloatingDate(year, month, 1, 0, 0);
     const endDateJST = buildFloatingDate(year, month, lastDayNum, 23, 59);
 
     try {
-        // 1. 既存のシフトを取得する際、末日の翌日（翌月1日00:00）に開始されるPart2もカバーするため、取得の上限を翌月2日まで広げる
         const startSearchISO = new Date(buildJstIsoString(year, month, 1, "00:00")).toISOString();
         const endSearchDate = new Date(buildJstIsoString(year, month, lastDayNum, "23:59"));
-        endSearchDate.setDate(endSearchDate.getDate() + 2); // 翌月2日の夜まで
+        endSearchDate.setDate(endSearchDate.getDate() + 2);
         const endSearchISO = endSearchDate.toISOString();
 
         const { data: existingShifts } = await supabaseAdmin.from('shifts')
@@ -444,20 +426,13 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
             .gte('start_at', startSearchISO)
             .lte('start_at', endSearchISO);
 
-        // 2. LookupMapの構築。キー: "pattern_id::JST日付文字列", 値: { id, is_modified }
         const existingMap = new Map<string, { id: string, is_modified: boolean }>();
         existingShifts?.forEach(s => {
-            // 日本時間の日付部分 YYYY-MM-DD を抽出
             const jstDateStr = new Date(new Date(s.start_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-            // 泊まりのPart2 (JST 00:00開始) かどうかを判定
-            const isPart2 = s.start_at.endsWith('T00:00:00+09:00') || new Date(s.start_at).getUTCHours() === 15; // UTC 15:00 = JST 00:00
-            const key = isPart2 ? `${s.pattern_id}::${jstDateStr}::part2` : `${s.pattern_id}::${jstDateStr}`;
-
+            const key = `${s.pattern_id}::${jstDateStr}`;
             existingMap.set(key, { id: s.id, is_modified: s.is_modified || false });
         });
 
-        // 3. ひな形のフェッチ
         const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
             *, shift_pattern_staffs(staff_id)
         `).eq('organization_id', organizationId);
@@ -469,123 +444,58 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         let updatedCount = 0;
         const promises: Promise<any>[] = [];
 
-        // 4. 直列判定ループ処理による確実な重複回避
         for (const p of patterns) {
             const [sHour, sMin] = p.start_time.split(':').map(Number);
-            
-            // DTSTART も Floating時間で構築（タイムゾーン・サマータイムズレを100%排除）
             const dtStartStr = buildFloatingDate(year, month, 1, sHour, sMin).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
             const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
             const rule = rrulestr(ruleStr);
             const occurrences = rule.between(startDateJST, endDateJST, true);
 
             for (const dateJST of occurrences) {
-                // dateJST は UTC Date だが、その UTC の日時数値がそのまま JST のローカル日時
                 const yy = dateJST.getUTCFullYear();
                 const mm = dateJST.getUTCMonth() + 1;
                 const dd = dateJST.getUTCDate();
 
                 const [eHour, eMin] = p.end_time.split(':').map(Number);
-
                 const pad = (n: number) => String(n).padStart(2, '0');
                 const isOvernight = eHour < sHour;
                 const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
-
                 const baseJstDateStr = `${yy}-${pad(mm)}-${pad(dd)}`;
 
-                if (isOvernight) {
-                    // --- 泊まり Part 1 (当日開始時刻 ～ 翌日00:00) ---
-                    const startAtStr1 = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
+                let startAtStr = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
+                let endAtStr: string;
 
+                if (isOvernight) {
                     const nextDay = new Date(Date.UTC(yy, mm - 1, dd));
                     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-                    const endAtStr1 = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), "00:00");
-
-                    const keyPart1 = `${p.id}::${baseJstDateStr}`;
-                    const part1Payload = {
-                        organizationId,
-                        clientId: p.client_id,
-                        title: p.title,
-                        startAt: new Date(startAtStr1).toISOString(),
-                        endAt: new Date(endAtStr1).toISOString(),
-                        staffIds: staffIds,
-                        status: 'published' as const,
-                        isModified: false
-                    };
-
-                    const exist1 = existingMap.get(keyPart1);
-                    if (exist1) {
-                        if (!exist1.is_modified) {
-                            promises.push(updateShift(exist1.id, part1Payload, false));
-                            updatedCount++;
-                        } else {
-                            skippedCount++;
-                        }
-                    } else {
-                        promises.push(createShift({ ...part1Payload, patternId: p.id }, false));
-                        createdCount++;
-                    }
-
-                    // --- 泊まり Part 2 (翌日00:00 ～ 翌日終了時刻) ---
-                    const startAtStr2 = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), "00:00");
-                    const endAtStr2 = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), `${pad(eHour)}:${pad(eMin)}`);
-
-                    const nextJstDateStr = `${nextDay.getUTCFullYear()}-${pad(nextDay.getUTCMonth() + 1)}-${pad(nextDay.getUTCDate())}`;
-                    const keyPart2 = `${p.id}::${nextJstDateStr}::part2`;
-
-                    const part2Payload = {
-                        organizationId,
-                        clientId: p.client_id,
-                        title: p.title,
-                        startAt: new Date(startAtStr2).toISOString(),
-                        endAt: new Date(endAtStr2).toISOString(),
-                        staffIds: staffIds,
-                        status: 'published' as const,
-                        isModified: false
-                    };
-
-                    const exist2 = existingMap.get(keyPart2);
-                    if (exist2) {
-                        if (!exist2.is_modified) {
-                            promises.push(updateShift(exist2.id, part2Payload, false));
-                            updatedCount++;
-                        } else {
-                            skippedCount++;
-                        }
-                    } else {
-                        promises.push(createShift({ ...part2Payload, patternId: p.id }, false));
-                        createdCount++;
-                    }
-
+                    endAtStr = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), `${pad(eHour)}:${pad(eMin)}`);
                 } else {
-                    // --- 通常日中シフト ---
-                    const startAtStr = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
-                    const endAtStr = buildJstIsoString(yy, mm, dd, `${pad(eHour)}:${pad(eMin)}`);
+                    endAtStr = buildJstIsoString(yy, mm, dd, `${pad(eHour)}:${pad(eMin)}`);
+                }
 
-                    const keyNormal = `${p.id}::${baseJstDateStr}`;
-                    const payload = {
-                        organizationId,
-                        clientId: p.client_id,
-                        title: p.title,
-                        startAt: new Date(startAtStr).toISOString(),
-                        endAt: new Date(endAtStr).toISOString(),
-                        staffIds: staffIds,
-                        status: 'published' as const,
-                        isModified: false
-                    };
+                const keyNormal = `${p.id}::${baseJstDateStr}`;
+                const payload = {
+                    organizationId,
+                    clientId: p.client_id,
+                    title: p.title,
+                    startAt: new Date(startAtStr).toISOString(),
+                    endAt: new Date(endAtStr).toISOString(),
+                    staffIds: staffIds,
+                    status: 'published' as const,
+                    isModified: false
+                };
 
-                    const existNormal = existingMap.get(keyNormal);
-                    if (existNormal) {
-                        if (!existNormal.is_modified) {
-                            promises.push(updateShift(existNormal.id, payload, false));
-                            updatedCount++;
-                        } else {
-                            skippedCount++;
-                        }
+                const existNormal = existingMap.get(keyNormal);
+                if (existNormal) {
+                    if (!existNormal.is_modified) {
+                        promises.push(updateShift(existNormal.id, payload, false));
+                        updatedCount++;
                     } else {
-                        promises.push(createShift({ ...payload, patternId: p.id }, false));
-                        createdCount++;
+                        skippedCount++;
                     }
+                } else {
+                    promises.push(createShift({ ...payload, patternId: p.id }, false));
+                    createdCount++;
                 }
             }
         }
