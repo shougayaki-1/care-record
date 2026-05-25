@@ -15,12 +15,14 @@ import WarningIcon from '@mui/icons-material/Warning';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import BuildIcon from '@mui/icons-material/Build'; // 修復用アイコンを追加
 
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { deleteOrganization, leaveOrganization, getAuditLogs } from '@/app/actions/organization';
+import { repairUnsyncedShifts } from '@/app/actions/shift'; // 再同期アクションをインポート
 import { useToast } from '@/components/ui/ToastProvider';
 import { getGoogleAuthUrlAction } from '@/app/actions/google';
 
@@ -59,6 +61,7 @@ function SettingsContent() {
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [connectingCal, setConnectingCal] = useState(false);
+    const [repairingCal, setRepairingCal] = useState(false); // 修復中ステートを追加
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
     const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -228,6 +231,25 @@ function SettingsContent() {
         }
     };
 
+    // 未同期シフトの再同期（修復）を実行
+    const handleRepairCalendar = async () => {
+        if (!currentOrg) return;
+        if (!confirm('Googleカレンダーへの同期漏れ（未同期）になっている予定を検出し、一括で再接続（修復）します。よろしいですか？\n※件数が多い場合は時間がかかる場合があります。')) return;
+        
+        setRepairingCal(true);
+        try {
+            const res = await repairUnsyncedShifts(currentOrg.id);
+            if (res.success) {
+                showToast(`同期修復が完了しました。（修復されたシフト数: ${res.count} 件）`, 'success');
+            }
+        } catch (e) {
+            console.error(e);
+            showToast('カレンダーの同期修復に失敗しました。再接続をお試しください。', 'error');
+        } finally {
+            setRepairingCal(false);
+        }
+    };
+
     const handleDeleteOrg = async () => {
         if (!currentOrg || confirmInput !== currentOrg.name) return;
         try {
@@ -364,11 +386,14 @@ function SettingsContent() {
                                                 <Typography variant="body2">
                                                     連携中のカレンダーID: <code>{googleCalendarId}</code>
                                                 </Typography>
-                                                <Typography variant="caption" color="text.secondary">
+                                                <Typography variant="caption" color="text.secondary" display="block">
                                                     ※Googleカレンダーアプリから「CareRecord_{orgName}」という名前のカレンダーを確認してください。
                                                 </Typography>
-                                                <Stack direction="row" spacing={2}>
-                                                    <Button color="error" startIcon={<LinkOffIcon />} onClick={handleDisconnectCalendar}>
+                                                <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+                                                    <Button variant="contained" color="warning" startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />} onClick={handleRepairCalendar} disabled={repairingCal}>
+                                                        {repairingCal ? '同期修復中...' : 'カレンダーの同期修復'}
+                                                    </Button>
+                                                    <Button color="error" startIcon={<LinkOffIcon />} onClick={handleDisconnectCalendar} disabled={repairingCal}>
                                                         連携を解除
                                                     </Button>
                                                 </Stack>

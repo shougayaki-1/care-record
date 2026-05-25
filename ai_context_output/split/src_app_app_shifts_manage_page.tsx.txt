@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
     Box, Typography, Paper, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
     Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControlLabel, Radio, RadioGroup, LinearProgress,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Checkbox, MenuItem
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -21,7 +21,8 @@ import { supabase } from '@/lib/supabase';
 import {
     getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely,
     ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, updateShiftPattern,
-    clearGeneratedShiftsForMonth, generateShiftsForMonth, previewShiftsForMonth, ShiftPatternPayload
+    clearGeneratedShiftsForMonth, generateShiftsForMonth, previewShiftsForMonth, ShiftPatternPayload,
+    syncSingleShift
 } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { ShiftFormModal, ClientData, StaffData, ShiftData } from '@/components/shifts/ShiftFormModal';
@@ -85,8 +86,10 @@ export default function ShiftManagePage() {
     const [selectedPattern, setSelectedPattern] = useState<FetchedPatternData | null>(null);
 
     const [clearMode, setClearMode] = useState<'unmodified' | 'all'>('unmodified');
-    const [previewDetails, setPreviewDetails] = useState<{ total: number; details: any[] } | null>(null);
-    const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
+    const [previewDetails, setPreviewDetails] = useState<{ total: number; details: { title: string; count: number; isOvernight: boolean }[] } | null>(null);
+
+    // ★Googleカレンダーの同期進捗を監視するstateを追加
+    const [syncProgress, setSyncProgress] = useState<{ total: number; current: number; currentName: string } | null>(null);
 
     useEffect(() => {
         const fetchUser = async () => {
@@ -150,7 +153,6 @@ export default function ShiftManagePage() {
         } finally {
             setInitialLoading(false);
             setIsFetching(false);
-            setSelectedShiftIds([]);
         }
     }, [currentOrg, showToast]);
 
@@ -517,18 +519,58 @@ export default function ShiftManagePage() {
         }
     };
 
+    // ★一括自動展開処理の修正：生成後にクライアント側で進捗バーを出しながら逐次Googleカレンダーへ同期をかける
     const executeGenerate = async () => {
         if (!currentOrg) return;
         setPreviewDialogOpen(false);
         setGenerating(true);
+        
+        // 進捗インジケータを開始
+        setSyncProgress({ total: 0, current: 0, currentName: 'シフトデータを生成中...' });
+
         try {
+            // 1. Googleカレンダー同期を一旦スキップした状態でシフト実体を高速一括生成 (DB挿入のみ)
             const res = await generateShiftsForMonth(currentOrg.id, targetMonth);
-            showToast(`カレンダーに ${res.count} 件展開、${res.updated} 件更新しました。(微調整済み ${res.skipped} 件を自動保護)`, 'success');
+            
+            // 2. 新たに作成され、まだカレンダーに連携されていない（google_event_id IS NULL）のシフトを一覧抽出
+            const { data: unsyncedShifts, error: queryError } = await supabase
+                .from('shifts')
+                .select('id, title')
+                .eq('organization_id', currentOrg.id)
+                .is('google_event_id', null);
+
+            if (queryError) throw queryError;
+
+            // 3. 未同期シフトが存在する場合、進捗状況を細かく更新しながら1件ずつGoogleカレンダーと同期する
+            if (unsyncedShifts && unsyncedShifts.length > 0) {
+                setSyncProgress({ total: unsyncedShifts.length, current: 0, currentName: 'Googleカレンダーと同期中...' });
+                
+                let currentCount = 0;
+                for (const shift of unsyncedShifts) {
+                    setSyncProgress({
+                        total: unsyncedShifts.length,
+                        current: currentCount,
+                        currentName: `${shift.title || '予定'}`
+                    });
+                    
+                    // 1件ずつサーバー側の直接同期アクションを呼び出す
+                    await syncSingleShift(currentOrg.id, shift.id);
+                    
+                    currentCount++;
+                    // APIのアクセス上限（Rate Limit）を回避するために300msの間隔を設ける
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+            }
+
+            // 同期進捗表示をリセット
+            setSyncProgress(null);
+            showToast(`カレンダーに ${res.count} 件一括展開・同期を完了しました。 (微調整済み ${res.skipped} 件を自動保護)`, 'success');
             fetchData(true);
             setTabIndex(1);
         } catch (error) {
             console.error(error);
-            showToast('自動展開に失敗しました', 'error');
+            showToast('自動展開またはカレンダーとの同期に失敗しました', 'error');
+            setSyncProgress(null);
         } finally {
             setGenerating(false);
         }
@@ -553,18 +595,6 @@ export default function ShiftManagePage() {
             desc += days.join(', ');
         }
         return desc;
-    };
-
-    const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.checked) {
-            setSelectedShiftIds(rawShifts.slice(0, 100).map(s => s.id));
-        } else {
-            setSelectedShiftIds([]);
-        }
-    };
-
-    const handleSelectOne = (id: string) => {
-        setSelectedShiftIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
     };
 
     if (wsLoading || !currentOrg) return null;
@@ -719,6 +749,20 @@ export default function ShiftManagePage() {
                     </>
                 )}
             </Box>
+
+            {/* ★Googleカレンダー同期中のプログレス表示UI */}
+            {syncProgress && (
+                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'white', p: 2.5, borderRadius: 3, boxShadow: 3, zIndex: 9999, border: '1px solid #E3E5E8', minWidth: 280 }}>
+                    <Typography variant="body2" fontWeight="bold" gutterBottom>Googleカレンダー同期中...</Typography>
+                    <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                        {syncProgress.currentName}
+                    </Typography>
+                    <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 3 }} />
+                    <Typography variant="caption" sx={{ mt: 0.5, display: 'block', textAlign: 'right', fontWeight: 'bold' }}>
+                        {syncProgress.current} / {syncProgress.total} 件完了
+                    </Typography>
+                </Box>
+            )}
 
             <ShiftFormModal
                 open={shiftModalOpen}

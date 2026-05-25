@@ -296,7 +296,7 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
     } catch (error) { console.error('Google Calendar Direct Sync Error:', error); }
 }
 
-export async function createShift(payload: ShiftPayload, awaitSync: boolean = true) {
+export async function createShift(payload: ShiftPayload, awaitSync: boolean | 'skip' = true) {
     try {
         const { data: shift, error: shiftError } = await supabaseAdmin.from('shifts').insert({
             organization_id: payload.organizationId,
@@ -316,7 +316,9 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean = tr
             await supabaseAdmin.from('shift_staffs').insert(staffInserts);
         }
 
-        if (awaitSync) {
+        if (awaitSync === 'skip') {
+            // カレンダーへの同期を意図的に完全にスキップ（一括展開などのパフォーマンス・レート制限対策用）
+        } else if (awaitSync) {
             await syncToGoogleCalendarDirect(payload.organizationId, shift.id, 'sync');
         } else {
             syncToGoogleCalendarDirect(payload.organizationId, shift.id, 'sync').catch(e => console.error('Async Sync Error:', e));
@@ -326,7 +328,7 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean = tr
     } catch (error) { console.error(error); throw error; }
 }
 
-export async function updateShift(shiftId: string, payload: Partial<ShiftPayload>, awaitSync: boolean = true) {
+export async function updateShift(shiftId: string, payload: Partial<ShiftPayload>, awaitSync: boolean | 'skip' = true) {
     try {
         const updateData: ShiftUpdateData = {};
         if (payload.title !== undefined) updateData.title = payload.title;
@@ -350,7 +352,9 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
 
         const targetOrgId = payload.organizationId || (await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single()).data?.organization_id;
         if (targetOrgId) {
-            if (awaitSync) {
+            if (awaitSync === 'skip') {
+                // カレンダーへの同期をスキップ
+            } else if (awaitSync) {
                 await syncToGoogleCalendarDirect(targetOrgId, shiftId, 'sync');
             } else {
                 syncToGoogleCalendarDirect(targetOrgId, shiftId, 'sync').catch(e => console.error('Async Sync Error:', e));
@@ -487,7 +491,7 @@ export async function clearGeneratedShiftsForMonth(
         );
         await Promise.all(deletePromises);
 
-        const { error: deleteError } = await supabaseAdmin.from('shifts')
+        const { error: deleteError = null } = await supabaseAdmin.from('shifts') // _deleteError から deleteError に変更
             .delete()
             .in('id', shiftIds);
 
@@ -524,7 +528,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
         if (!patterns || patterns.length === 0) return { total: 0, details: [] };
 
         let totalNewCount = 0;
-        const details: any[] = [];
+        const details: { title: string; count: number; isOvernight: boolean }[] = [];
 
         for (const p of patterns) {
             const [sHour, sMin] = p.start_time.split(':').map(Number);
@@ -533,7 +537,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
             const rule = rrulestr(ruleStr);
             const occurrences = rule.between(startDateJST, endDateJST, true);
 
-            const [eHour, eMin] = p.end_time.split(':').map(Number);
+            const [eHour] = p.end_time.split(':').map(Number);
             const isOvernight = eHour < sHour;
 
             let patternCount = 0;
@@ -598,7 +602,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         let createdCount = 0;
         let skippedCount = 0;
         let updatedCount = 0;
-        const promises: Promise<any>[] = [];
+        const promises: Promise<unknown>[] = [];
 
         for (const p of patterns) {
             const [sHour, sMin] = p.start_time.split(':').map(Number);
@@ -618,7 +622,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
                 const baseJstDateStr = `${yy}-${pad(mm)}-${pad(dd)}`;
 
-                let startAtStr = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
+                const startAtStr = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
                 let endAtStr: string;
 
                 if (isOvernight) {
@@ -644,13 +648,13 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 const existNormal = existingMap.get(keyNormal);
                 if (existNormal) {
                     if (!existNormal.is_modified) {
-                        promises.push(updateShift(existNormal.id, payload, false));
+                        promises.push(updateShift(existNormal.id, payload, 'skip'));
                         updatedCount++;
                     } else {
                         skippedCount++;
                     }
                 } else {
-                    promises.push(createShift({ ...payload, patternId: p.id }, false));
+                    promises.push(createShift({ ...payload, patternId: p.id }, 'skip'));
                     createdCount++;
                 }
             }
@@ -713,6 +717,57 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
         return { success: true };
     } catch (error) {
         console.error('Delete Shifts Bulk Error:', error);
+        throw error;
+    }
+}
+
+/**
+ * 単一のシフトをGoogleカレンダーに直接強制同期する (クライアント進捗バー表示用の細切れ同期実行用)
+ */
+export async function syncSingleShift(organizationId: string, shiftId: string) {
+    try {
+        await syncToGoogleCalendarDirect(organizationId, shiftId, 'sync');
+        return { success: true };
+    } catch (error) {
+        console.error('Sync Single Shift Action Error:', error);
+        throw error;
+    }
+}
+
+/**
+ * 未同期（google_event_id IS NULL）のシフトを抽出し、Googleカレンダーへ一括再同期する
+ */
+export async function repairUnsyncedShifts(organizationId: string) {
+    try {
+        // google_event_id が登録されていないシフトを検索
+        const { data: unsyncedShifts, error } = await supabaseAdmin
+            .from('shifts')
+            .select('id')
+            .eq('organization_id', organizationId)
+            .is('google_event_id', null);
+
+        if (error) throw error;
+        if (!unsyncedShifts || unsyncedShifts.length === 0) {
+            return { success: true, count: 0 };
+        }
+
+        let successCount = 0;
+        for (const shift of unsyncedShifts) {
+            try {
+                // 'sync' アクションを実行。内部でイベントが新規作成され、IDが shifts テーブルに書き込まれる
+                await syncToGoogleCalendarDirect(organizationId, shift.id, 'sync');
+                successCount++;
+                
+                // Google APIのアクセス制限（Rate Limit）を回避するために300msの遅延を挟む
+                await new Promise(resolve => setTimeout(resolve, 300));
+            } catch (syncErr) {
+                console.error(`Shift ID ${shift.id} sync failed during repair:`, syncErr);
+            }
+        }
+
+        return { success: true, count: successCount };
+    } catch (error) {
+        console.error('Repair Unsynced Shifts Error:', error);
         throw error;
     }
 }
@@ -4280,12 +4335,14 @@ import WarningIcon from '@mui/icons-material/Warning';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import BuildIcon from '@mui/icons-material/Build'; // 修復用アイコンを追加
 
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { deleteOrganization, leaveOrganization, getAuditLogs } from '@/app/actions/organization';
+import { repairUnsyncedShifts } from '@/app/actions/shift'; // 再同期アクションをインポート
 import { useToast } from '@/components/ui/ToastProvider';
 import { getGoogleAuthUrlAction } from '@/app/actions/google';
 
@@ -4324,6 +4381,7 @@ function SettingsContent() {
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [connectingCal, setConnectingCal] = useState(false);
+    const [repairingCal, setRepairingCal] = useState(false); // 修復中ステートを追加
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
     const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -4493,6 +4551,25 @@ function SettingsContent() {
         }
     };
 
+    // 未同期シフトの再同期（修復）を実行
+    const handleRepairCalendar = async () => {
+        if (!currentOrg) return;
+        if (!confirm('Googleカレンダーへの同期漏れ（未同期）になっている予定を検出し、一括で再接続（修復）します。よろしいですか？\n※件数が多い場合は時間がかかる場合があります。')) return;
+        
+        setRepairingCal(true);
+        try {
+            const res = await repairUnsyncedShifts(currentOrg.id);
+            if (res.success) {
+                showToast(`同期修復が完了しました。（修復されたシフト数: ${res.count} 件）`, 'success');
+            }
+        } catch (e) {
+            console.error(e);
+            showToast('カレンダーの同期修復に失敗しました。再接続をお試しください。', 'error');
+        } finally {
+            setRepairingCal(false);
+        }
+    };
+
     const handleDeleteOrg = async () => {
         if (!currentOrg || confirmInput !== currentOrg.name) return;
         try {
@@ -4629,11 +4706,14 @@ function SettingsContent() {
                                                 <Typography variant="body2">
                                                     連携中のカレンダーID: <code>{googleCalendarId}</code>
                                                 </Typography>
-                                                <Typography variant="caption" color="text.secondary">
+                                                <Typography variant="caption" color="text.secondary" display="block">
                                                     ※Googleカレンダーアプリから「CareRecord_{orgName}」という名前のカレンダーを確認してください。
                                                 </Typography>
-                                                <Stack direction="row" spacing={2}>
-                                                    <Button color="error" startIcon={<LinkOffIcon />} onClick={handleDisconnectCalendar}>
+                                                <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+                                                    <Button variant="contained" color="warning" startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />} onClick={handleRepairCalendar} disabled={repairingCal}>
+                                                        {repairingCal ? '同期修復中...' : 'カレンダーの同期修復'}
+                                                    </Button>
+                                                    <Button color="error" startIcon={<LinkOffIcon />} onClick={handleDisconnectCalendar} disabled={repairingCal}>
                                                         連携を解除
                                                     </Button>
                                                 </Stack>
@@ -4788,7 +4868,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
     Box, Typography, Paper, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
     Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControlLabel, Radio, RadioGroup, LinearProgress,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Checkbox, MenuItem
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -4805,7 +4885,8 @@ import { supabase } from '@/lib/supabase';
 import {
     getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely,
     ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, updateShiftPattern,
-    clearGeneratedShiftsForMonth, generateShiftsForMonth, previewShiftsForMonth, ShiftPatternPayload
+    clearGeneratedShiftsForMonth, generateShiftsForMonth, previewShiftsForMonth, ShiftPatternPayload,
+    syncSingleShift
 } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { ShiftFormModal, ClientData, StaffData, ShiftData } from '@/components/shifts/ShiftFormModal';
@@ -4869,8 +4950,10 @@ export default function ShiftManagePage() {
     const [selectedPattern, setSelectedPattern] = useState<FetchedPatternData | null>(null);
 
     const [clearMode, setClearMode] = useState<'unmodified' | 'all'>('unmodified');
-    const [previewDetails, setPreviewDetails] = useState<{ total: number; details: any[] } | null>(null);
-    const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
+    const [previewDetails, setPreviewDetails] = useState<{ total: number; details: { title: string; count: number; isOvernight: boolean }[] } | null>(null);
+
+    // ★Googleカレンダーの同期進捗を監視するstateを追加
+    const [syncProgress, setSyncProgress] = useState<{ total: number; current: number; currentName: string } | null>(null);
 
     useEffect(() => {
         const fetchUser = async () => {
@@ -4934,7 +5017,6 @@ export default function ShiftManagePage() {
         } finally {
             setInitialLoading(false);
             setIsFetching(false);
-            setSelectedShiftIds([]);
         }
     }, [currentOrg, showToast]);
 
@@ -5301,18 +5383,58 @@ export default function ShiftManagePage() {
         }
     };
 
+    // ★一括自動展開処理の修正：生成後にクライアント側で進捗バーを出しながら逐次Googleカレンダーへ同期をかける
     const executeGenerate = async () => {
         if (!currentOrg) return;
         setPreviewDialogOpen(false);
         setGenerating(true);
+        
+        // 進捗インジケータを開始
+        setSyncProgress({ total: 0, current: 0, currentName: 'シフトデータを生成中...' });
+
         try {
+            // 1. Googleカレンダー同期を一旦スキップした状態でシフト実体を高速一括生成 (DB挿入のみ)
             const res = await generateShiftsForMonth(currentOrg.id, targetMonth);
-            showToast(`カレンダーに ${res.count} 件展開、${res.updated} 件更新しました。(微調整済み ${res.skipped} 件を自動保護)`, 'success');
+            
+            // 2. 新たに作成され、まだカレンダーに連携されていない（google_event_id IS NULL）のシフトを一覧抽出
+            const { data: unsyncedShifts, error: queryError } = await supabase
+                .from('shifts')
+                .select('id, title')
+                .eq('organization_id', currentOrg.id)
+                .is('google_event_id', null);
+
+            if (queryError) throw queryError;
+
+            // 3. 未同期シフトが存在する場合、進捗状況を細かく更新しながら1件ずつGoogleカレンダーと同期する
+            if (unsyncedShifts && unsyncedShifts.length > 0) {
+                setSyncProgress({ total: unsyncedShifts.length, current: 0, currentName: 'Googleカレンダーと同期中...' });
+                
+                let currentCount = 0;
+                for (const shift of unsyncedShifts) {
+                    setSyncProgress({
+                        total: unsyncedShifts.length,
+                        current: currentCount,
+                        currentName: `${shift.title || '予定'}`
+                    });
+                    
+                    // 1件ずつサーバー側の直接同期アクションを呼び出す
+                    await syncSingleShift(currentOrg.id, shift.id);
+                    
+                    currentCount++;
+                    // APIのアクセス上限（Rate Limit）を回避するために300msの間隔を設ける
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+            }
+
+            // 同期進捗表示をリセット
+            setSyncProgress(null);
+            showToast(`カレンダーに ${res.count} 件一括展開・同期を完了しました。 (微調整済み ${res.skipped} 件を自動保護)`, 'success');
             fetchData(true);
             setTabIndex(1);
         } catch (error) {
             console.error(error);
-            showToast('自動展開に失敗しました', 'error');
+            showToast('自動展開またはカレンダーとの同期に失敗しました', 'error');
+            setSyncProgress(null);
         } finally {
             setGenerating(false);
         }
@@ -5337,18 +5459,6 @@ export default function ShiftManagePage() {
             desc += days.join(', ');
         }
         return desc;
-    };
-
-    const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.checked) {
-            setSelectedShiftIds(rawShifts.slice(0, 100).map(s => s.id));
-        } else {
-            setSelectedShiftIds([]);
-        }
-    };
-
-    const handleSelectOne = (id: string) => {
-        setSelectedShiftIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
     };
 
     if (wsLoading || !currentOrg) return null;
@@ -5503,6 +5613,20 @@ export default function ShiftManagePage() {
                     </>
                 )}
             </Box>
+
+            {/* ★Googleカレンダー同期中のプログレス表示UI */}
+            {syncProgress && (
+                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'white', p: 2.5, borderRadius: 3, boxShadow: 3, zIndex: 9999, border: '1px solid #E3E5E8', minWidth: 280 }}>
+                    <Typography variant="body2" fontWeight="bold" gutterBottom>Googleカレンダー同期中...</Typography>
+                    <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                        {syncProgress.currentName}
+                    </Typography>
+                    <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 3 }} />
+                    <Typography variant="caption" sx={{ mt: 0.5, display: 'block', textAlign: 'right', fontWeight: 'bold' }}>
+                        {syncProgress.current} / {syncProgress.total} 件完了
+                    </Typography>
+                </Box>
+            )}
 
             <ShiftFormModal
                 open={shiftModalOpen}

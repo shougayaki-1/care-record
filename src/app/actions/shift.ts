@@ -140,7 +140,7 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
     } catch (error) { console.error('Google Calendar Direct Sync Error:', error); }
 }
 
-export async function createShift(payload: ShiftPayload, awaitSync: boolean = true) {
+export async function createShift(payload: ShiftPayload, awaitSync: boolean | 'skip' = true) {
     try {
         const { data: shift, error: shiftError } = await supabaseAdmin.from('shifts').insert({
             organization_id: payload.organizationId,
@@ -160,7 +160,9 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean = tr
             await supabaseAdmin.from('shift_staffs').insert(staffInserts);
         }
 
-        if (awaitSync) {
+        if (awaitSync === 'skip') {
+            // カレンダーへの同期を意図的に完全にスキップ（一括展開などのパフォーマンス・レート制限対策用）
+        } else if (awaitSync) {
             await syncToGoogleCalendarDirect(payload.organizationId, shift.id, 'sync');
         } else {
             syncToGoogleCalendarDirect(payload.organizationId, shift.id, 'sync').catch(e => console.error('Async Sync Error:', e));
@@ -170,7 +172,7 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean = tr
     } catch (error) { console.error(error); throw error; }
 }
 
-export async function updateShift(shiftId: string, payload: Partial<ShiftPayload>, awaitSync: boolean = true) {
+export async function updateShift(shiftId: string, payload: Partial<ShiftPayload>, awaitSync: boolean | 'skip' = true) {
     try {
         const updateData: ShiftUpdateData = {};
         if (payload.title !== undefined) updateData.title = payload.title;
@@ -194,7 +196,9 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
 
         const targetOrgId = payload.organizationId || (await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single()).data?.organization_id;
         if (targetOrgId) {
-            if (awaitSync) {
+            if (awaitSync === 'skip') {
+                // カレンダーへの同期をスキップ
+            } else if (awaitSync) {
                 await syncToGoogleCalendarDirect(targetOrgId, shiftId, 'sync');
             } else {
                 syncToGoogleCalendarDirect(targetOrgId, shiftId, 'sync').catch(e => console.error('Async Sync Error:', e));
@@ -295,7 +299,7 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
 }
 
 /**
- * 月次で一括展開されたシフトを消去する
+ * 月次で一括展開されたシフトを消去する (※こちらは従来機能の維持。画面からは、より詳細なプログレス付きのフロント直列消去を新たに実行) [2]
  */
 export async function clearGeneratedShiftsForMonth(
     organizationId: string,
@@ -325,13 +329,16 @@ export async function clearGeneratedShiftsForMonth(
 
         const shiftIds = shifts.map(s => s.id);
 
-        const deletePromises = shifts.map(shift =>
-            syncToGoogleCalendarDirect(organizationId, shift.id, 'delete')
-                .catch(e => console.error('Clear Month Sync Error:', e))
-        );
-        await Promise.all(deletePromises);
+        for (const shift of shifts) {
+            try {
+                await syncToGoogleCalendarDirect(organizationId, shift.id, 'delete');
+                await new Promise(resolve => setTimeout(resolve, 250));
+            } catch (syncErr) {
+                console.error(`Clear Month Sync Error for Shift ${shift.id}:`, syncErr);
+            }
+        }
 
-        const { error: deleteError } = await supabaseAdmin.from('shifts')
+        const { error: deleteError = null } = await supabaseAdmin.from('shifts')
             .delete()
             .in('id', shiftIds);
 
@@ -368,7 +375,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
         if (!patterns || patterns.length === 0) return { total: 0, details: [] };
 
         let totalNewCount = 0;
-        const details: any[] = [];
+        const details: { title: string; count: number; isOvernight: boolean }[] = [];
 
         for (const p of patterns) {
             const [sHour, sMin] = p.start_time.split(':').map(Number);
@@ -377,7 +384,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
             const rule = rrulestr(ruleStr);
             const occurrences = rule.between(startDateJST, endDateJST, true);
 
-            const [eHour, eMin] = p.end_time.split(':').map(Number);
+            const [eHour] = p.end_time.split(':').map(Number);
             const isOvernight = eHour < sHour;
 
             let patternCount = 0;
@@ -442,7 +449,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         let createdCount = 0;
         let skippedCount = 0;
         let updatedCount = 0;
-        const promises: Promise<any>[] = [];
+        const promises: Promise<unknown>[] = [];
 
         for (const p of patterns) {
             const [sHour, sMin] = p.start_time.split(':').map(Number);
@@ -462,7 +469,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
                 const baseJstDateStr = `${yy}-${pad(mm)}-${pad(dd)}`;
 
-                let startAtStr = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
+                const startAtStr = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
                 let endAtStr: string;
 
                 if (isOvernight) {
@@ -488,13 +495,13 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 const existNormal = existingMap.get(keyNormal);
                 if (existNormal) {
                     if (!existNormal.is_modified) {
-                        promises.push(updateShift(existNormal.id, payload, false));
+                        promises.push(updateShift(existNormal.id, payload, 'skip'));
                         updatedCount++;
                     } else {
                         skippedCount++;
                     }
                 } else {
-                    promises.push(createShift({ ...payload, patternId: p.id }, false));
+                    promises.push(createShift({ ...payload, patternId: p.id }, 'skip'));
                     createdCount++;
                 }
             }
@@ -541,11 +548,14 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
             .in('id', shiftIds);
 
         if (shiftsData) {
-            const deletePromises = shiftsData.map(shift =>
-                syncToGoogleCalendarDirect(shift.organization_id, shift.id, 'delete')
-                    .catch(e => console.error('Bulk Delete Sync Error:', e))
-            );
-            await Promise.all(deletePromises);
+            for (const shift of shiftsData) {
+                try {
+                    await syncToGoogleCalendarDirect(shift.organization_id, shift.id, 'delete');
+                    await new Promise(resolve => setTimeout(resolve, 250));
+                } catch (syncErr) {
+                    console.error(`Bulk Delete Sync Error for Shift ${shift.id}:`, syncErr);
+                }
+            }
         }
 
         const { error } = await supabaseAdmin
@@ -557,6 +567,37 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
         return { success: true };
     } catch (error) {
         console.error('Delete Shifts Bulk Error:', error);
+        throw error;
+    }
+}
+
+/**
+ * ★追加: Googleカレンダーの同期を行わず、DBのみから高速に予定を一括物理削除する (フロント直列削除後のDB最終処理用) [2]
+ */
+export async function deleteShiftsDbOnly(shiftIds: string[]) {
+    try {
+        const { error } = await supabaseAdmin
+            .from('shifts')
+            .delete()
+            .in('id', shiftIds);
+
+        if (error) throw error;
+        return { success: true };
+    } catch (error) {
+        console.error('Delete Shifts Db Only Error:', error);
+        throw error;
+    }
+}
+
+/**
+ * ★修正: 単一の予定をGoogleカレンダーへ強制同期、または強制削除する
+ */
+export async function syncSingleShift(organizationId: string, shiftId: string, action: 'sync' | 'delete' = 'sync') {
+    try {
+        await syncToGoogleCalendarDirect(organizationId, shiftId, action);
+        return { success: true };
+    } catch (error) {
+        console.error('Sync Single Shift Action Error:', error);
         throw error;
     }
 }
