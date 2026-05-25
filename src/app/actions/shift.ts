@@ -560,3 +560,41 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
         throw error;
     }
 }
+
+/**
+ * 未同期（google_event_id IS NULL）のシフトを抽出し、Googleカレンダーへ一括再同期する
+ */
+export async function repairUnsyncedShifts(organizationId: string) {
+    try {
+        // google_event_id が登録されていないシフトを検索
+        const { data: unsyncedShifts, error } = await supabaseAdmin
+            .from('shifts')
+            .select('id')
+            .eq('organization_id', organizationId)
+            .is('google_event_id', null);
+
+        if (error) throw error;
+        if (!unsyncedShifts || unsyncedShifts.length === 0) {
+            return { success: true, count: 0 };
+        }
+
+        let successCount = 0;
+        for (const shift of unsyncedShifts) {
+            try {
+                // 'sync' アクションを実行。内部でイベントが新規作成され、IDが shifts テーブルに書き込まれる
+                await syncToGoogleCalendarDirect(organizationId, shift.id, 'sync');
+                successCount++;
+                
+                // Google APIのアクセス制限（Rate Limit）を回避するために300msの遅延を挟む
+                await new Promise(resolve => setTimeout(resolve, 300));
+            } catch (syncErr) {
+                console.error(`Shift ID ${shift.id} sync failed during repair:`, syncErr);
+            }
+        }
+
+        return { success: true, count: successCount };
+    } catch (error) {
+        console.error('Repair Unsynced Shifts Error:', error);
+        throw error;
+    }
+}

@@ -452,7 +452,6 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
 
 /**
  * 月次で一括展開されたシフトを消去する
- * unmodifiedOnly が true の場合、手動編集されたシフト (is_modified=true) を保護し、未変更分のみ消去します。
  */
 export async function clearGeneratedShiftsForMonth(
     organizationId: string,
@@ -462,21 +461,15 @@ export async function clearGeneratedShiftsForMonth(
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
-    // タイムゾーンズレを起こさない安全なJST境界値を作成
     const startDateISO = new Date(buildJstIsoString(year, month, 1, "00:00")).toISOString();
     const endDateISO = new Date(buildJstIsoString(year, month, lastDayNum, "23:59")).toISOString();
-
-    // 当月末日から開始された泊まり勤務のPart2（翌月1日00:00開始）を消去対象に含めるため、
-    // 翌月1日00:00開始の予定も検索対象に加える
-    const nextMonth1stJst = new Date(year, month, 1);
-    const nextMonth1st0000 = new Date(buildJstIsoString(nextMonth1stJst.getFullYear(), nextMonth1stJst.getMonth() + 1, nextMonth1stJst.getDate(), "00:00")).toISOString();
 
     try {
         let query = supabaseAdmin.from('shifts')
             .select('id')
             .eq('organization_id', organizationId)
             .not('pattern_id', 'is', null)
-            .or(`and(start_at.gte.${startDateISO},start_at.lte.${endDateISO}),start_at.eq.${nextMonth1st0000}`);
+            .or(`and(start_at.gte.${startDateISO},start_at.lte.${endDateISO})`);
 
         if (unmodifiedOnly) {
             query = query.eq('is_modified', false);
@@ -488,7 +481,6 @@ export async function clearGeneratedShiftsForMonth(
 
         const shiftIds = shifts.map(s => s.id);
 
-        // Googleカレンダー側の該当予定を並行削除
         const deletePromises = shifts.map(shift =>
             syncToGoogleCalendarDirect(organizationId, shift.id, 'delete')
                 .catch(e => console.error('Clear Month Sync Error:', e))
@@ -521,7 +513,6 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
-    // タイムゾーンによる曜日ズレを完全に防ぐため、JSTのローカル時間をそのまま表すUTC Dateを作成
     const startDateJST = buildFloatingDate(year, month, 1, 0, 0);
     const endDateJST = buildFloatingDate(year, month, lastDayNum, 23, 59);
 
@@ -533,7 +524,6 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
         if (!patterns || patterns.length === 0) return { total: 0, details: [] };
 
         let totalNewCount = 0;
-        let totalSplitCount = 0;
         const details: any[] = [];
 
         for (const p of patterns) {
@@ -548,13 +538,8 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
 
             let patternCount = 0;
             occurrences.forEach(() => {
-                if (isOvernight) {
-                    totalSplitCount += 2;
-                    patternCount += 2;
-                } else {
-                    totalNewCount += 1;
-                    patternCount += 1;
-                }
+                totalNewCount += 1;
+                patternCount += 1;
             });
 
             details.push({
@@ -565,7 +550,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
         }
 
         return {
-            total: totalNewCount + totalSplitCount,
+            total: totalNewCount,
             details
         };
     } catch (e) {
@@ -576,21 +561,18 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
 
 /**
  * ひな形から対象月のシフトを一括生成する
- * 1フェッチ＆LookupMapの採用により、多重実行時でも100%重複が発生しない直列堅牢設計
  */
 export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
-    // タイムゾーンによる曜日ズレを完全に防ぐため、JSTのローカル時間をそのまま表すUTC Dateを作成（Floating時間処理）
     const startDateJST = buildFloatingDate(year, month, 1, 0, 0);
     const endDateJST = buildFloatingDate(year, month, lastDayNum, 23, 59);
 
     try {
-        // 1. 既存のシフトを取得する際、末日の翌日（翌月1日00:00）に開始されるPart2もカバーするため、取得の上限を翌月2日まで広げる
         const startSearchISO = new Date(buildJstIsoString(year, month, 1, "00:00")).toISOString();
         const endSearchDate = new Date(buildJstIsoString(year, month, lastDayNum, "23:59"));
-        endSearchDate.setDate(endSearchDate.getDate() + 2); // 翌月2日の夜まで
+        endSearchDate.setDate(endSearchDate.getDate() + 2);
         const endSearchISO = endSearchDate.toISOString();
 
         const { data: existingShifts } = await supabaseAdmin.from('shifts')
@@ -600,20 +582,13 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
             .gte('start_at', startSearchISO)
             .lte('start_at', endSearchISO);
 
-        // 2. LookupMapの構築。キー: "pattern_id::JST日付文字列", 値: { id, is_modified }
         const existingMap = new Map<string, { id: string, is_modified: boolean }>();
         existingShifts?.forEach(s => {
-            // 日本時間の日付部分 YYYY-MM-DD を抽出
             const jstDateStr = new Date(new Date(s.start_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-            // 泊まりのPart2 (JST 00:00開始) かどうかを判定
-            const isPart2 = s.start_at.endsWith('T00:00:00+09:00') || new Date(s.start_at).getUTCHours() === 15; // UTC 15:00 = JST 00:00
-            const key = isPart2 ? `${s.pattern_id}::${jstDateStr}::part2` : `${s.pattern_id}::${jstDateStr}`;
-
+            const key = `${s.pattern_id}::${jstDateStr}`;
             existingMap.set(key, { id: s.id, is_modified: s.is_modified || false });
         });
 
-        // 3. ひな形のフェッチ
         const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
             *, shift_pattern_staffs(staff_id)
         `).eq('organization_id', organizationId);
@@ -625,123 +600,58 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         let updatedCount = 0;
         const promises: Promise<any>[] = [];
 
-        // 4. 直列判定ループ処理による確実な重複回避
         for (const p of patterns) {
             const [sHour, sMin] = p.start_time.split(':').map(Number);
-            
-            // DTSTART も Floating時間で構築（タイムゾーン・サマータイムズレを100%排除）
             const dtStartStr = buildFloatingDate(year, month, 1, sHour, sMin).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
             const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
             const rule = rrulestr(ruleStr);
             const occurrences = rule.between(startDateJST, endDateJST, true);
 
             for (const dateJST of occurrences) {
-                // dateJST は UTC Date だが、その UTC の日時数値がそのまま JST のローカル日時
                 const yy = dateJST.getUTCFullYear();
                 const mm = dateJST.getUTCMonth() + 1;
                 const dd = dateJST.getUTCDate();
 
                 const [eHour, eMin] = p.end_time.split(':').map(Number);
-
                 const pad = (n: number) => String(n).padStart(2, '0');
                 const isOvernight = eHour < sHour;
                 const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
-
                 const baseJstDateStr = `${yy}-${pad(mm)}-${pad(dd)}`;
 
-                if (isOvernight) {
-                    // --- 泊まり Part 1 (当日開始時刻 ～ 翌日00:00) ---
-                    const startAtStr1 = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
+                let startAtStr = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
+                let endAtStr: string;
 
+                if (isOvernight) {
                     const nextDay = new Date(Date.UTC(yy, mm - 1, dd));
                     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-                    const endAtStr1 = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), "00:00");
-
-                    const keyPart1 = `${p.id}::${baseJstDateStr}`;
-                    const part1Payload = {
-                        organizationId,
-                        clientId: p.client_id,
-                        title: p.title,
-                        startAt: new Date(startAtStr1).toISOString(),
-                        endAt: new Date(endAtStr1).toISOString(),
-                        staffIds: staffIds,
-                        status: 'published' as const,
-                        isModified: false
-                    };
-
-                    const exist1 = existingMap.get(keyPart1);
-                    if (exist1) {
-                        if (!exist1.is_modified) {
-                            promises.push(updateShift(exist1.id, part1Payload, false));
-                            updatedCount++;
-                        } else {
-                            skippedCount++;
-                        }
-                    } else {
-                        promises.push(createShift({ ...part1Payload, patternId: p.id }, false));
-                        createdCount++;
-                    }
-
-                    // --- 泊まり Part 2 (翌日00:00 ～ 翌日終了時刻) ---
-                    const startAtStr2 = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), "00:00");
-                    const endAtStr2 = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), `${pad(eHour)}:${pad(eMin)}`);
-
-                    const nextJstDateStr = `${nextDay.getUTCFullYear()}-${pad(nextDay.getUTCMonth() + 1)}-${pad(nextDay.getUTCDate())}`;
-                    const keyPart2 = `${p.id}::${nextJstDateStr}::part2`;
-
-                    const part2Payload = {
-                        organizationId,
-                        clientId: p.client_id,
-                        title: p.title,
-                        startAt: new Date(startAtStr2).toISOString(),
-                        endAt: new Date(endAtStr2).toISOString(),
-                        staffIds: staffIds,
-                        status: 'published' as const,
-                        isModified: false
-                    };
-
-                    const exist2 = existingMap.get(keyPart2);
-                    if (exist2) {
-                        if (!exist2.is_modified) {
-                            promises.push(updateShift(exist2.id, part2Payload, false));
-                            updatedCount++;
-                        } else {
-                            skippedCount++;
-                        }
-                    } else {
-                        promises.push(createShift({ ...part2Payload, patternId: p.id }, false));
-                        createdCount++;
-                    }
-
+                    endAtStr = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), `${pad(eHour)}:${pad(eMin)}`);
                 } else {
-                    // --- 通常日中シフト ---
-                    const startAtStr = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
-                    const endAtStr = buildJstIsoString(yy, mm, dd, `${pad(eHour)}:${pad(eMin)}`);
+                    endAtStr = buildJstIsoString(yy, mm, dd, `${pad(eHour)}:${pad(eMin)}`);
+                }
 
-                    const keyNormal = `${p.id}::${baseJstDateStr}`;
-                    const payload = {
-                        organizationId,
-                        clientId: p.client_id,
-                        title: p.title,
-                        startAt: new Date(startAtStr).toISOString(),
-                        endAt: new Date(endAtStr).toISOString(),
-                        staffIds: staffIds,
-                        status: 'published' as const,
-                        isModified: false
-                    };
+                const keyNormal = `${p.id}::${baseJstDateStr}`;
+                const payload = {
+                    organizationId,
+                    clientId: p.client_id,
+                    title: p.title,
+                    startAt: new Date(startAtStr).toISOString(),
+                    endAt: new Date(endAtStr).toISOString(),
+                    staffIds: staffIds,
+                    status: 'published' as const,
+                    isModified: false
+                };
 
-                    const existNormal = existingMap.get(keyNormal);
-                    if (existNormal) {
-                        if (!existNormal.is_modified) {
-                            promises.push(updateShift(existNormal.id, payload, false));
-                            updatedCount++;
-                        } else {
-                            skippedCount++;
-                        }
+                const existNormal = existingMap.get(keyNormal);
+                if (existNormal) {
+                    if (!existNormal.is_modified) {
+                        promises.push(updateShift(existNormal.id, payload, false));
+                        updatedCount++;
                     } else {
-                        promises.push(createShift({ ...payload, patternId: p.id }, false));
-                        createdCount++;
+                        skippedCount++;
                     }
+                } else {
+                    promises.push(createShift({ ...payload, patternId: p.id }, false));
+                    createdCount++;
                 }
             }
         }
@@ -2885,7 +2795,7 @@ import {
   Box, Button, Container, Typography, TextField, Checkbox, FormControlLabel, Radio, RadioGroup,
   Paper, Stack, IconButton, CircularProgress,
   FormGroup, Switch, FormHelperText, Chip, Divider, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
-  FormControl, InputLabel, Select, MenuItem, OutlinedInput, SelectChangeEvent
+  FormControl, InputLabel, Select, MenuItem, OutlinedInput, SelectChangeEvent, Tabs, Tab
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
@@ -2909,7 +2819,6 @@ type FormItem = {
   options?: string; required: boolean; hasDetail?: boolean;
 };
 
-// デフォルトテンプレート
 const DEFAULT_TEMPLATE: FormItem[] = [
     { id: 'sec_medical', label: '【医療的ケア・身体介護】', type: 'section', required: false },
     { id: 'sputum_suction', label: '痰等の吸引（気管・口腔）', type: 'checkbox', required: false },
@@ -2957,13 +2866,11 @@ type FormAnswers = Record<string, string | number | boolean | string[]>;
 type HelperProfile = { id: string; name: string };
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 
-// シフトスタッフ取得用
 type ShiftStaffData = {
     staff_id: string;
     staffs: { name: string } | null;
 };
 
-// ★ Select用のMenuProps定義
 const ITEM_HEIGHT = 48;
 const ITEM_PADDING_TOP = 8;
 const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
@@ -2984,9 +2891,7 @@ export default function RecordPage() {
   const [template, setTemplate] = useState<FormItem[]>([]);
   const [answers, setAnswers] = useState<FormAnswers>({});
   
-  // 選択肢用 (スタッフ名簿一覧)
   const [selectableStaffs, setSelectableStaffs] = useState<HelperProfile[]>([]);
-  // 選択中のスタッフ名配列
   const [selectedHelpers, setSelectedHelpers] = useState<string[]>([]);
   
   const [startDateTime, setStartDateTime] = useState('');
@@ -3007,9 +2912,78 @@ export default function RecordPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
+  // 月末跨ぎ夜勤管理ステート
+  const [isSpanningMonth, setIsSpanningMonth] = useState(false);
+  const [selectedPart, setSelectedPart] = useState<'part1' | 'part2'>('part1');
+  const [originalShiftTimes, setOriginalShiftTimes] = useState<{ start_at: string; end_at: string } | null>(null);
+
   const formatDatetimeLocal = (date: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+
+  const formatTimeForLabel = (dateStr?: string) => {
+      if (!dateStr) return '';
+      const d = new Date(dateStr);
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const setupTimeForPart = (part: 'part1' | 'part2', startIso: string, endIso: string) => {
+      const s = new Date(startIso);
+      const e = new Date(endIso);
+      
+      if (part === 'part1') {
+          // 前半: 開始時刻 〜 月末23:59:59 (00:00)
+          setStartDateTime(formatDatetimeLocal(s));
+          const midnight = new Date(s.getFullYear(), s.getMonth() + 1, 1, 0, 0, 0);
+          setEndDateTime(formatDatetimeLocal(midnight));
+          const diff = (midnight.getTime() - s.getTime()) / (1000 * 60 * 60);
+          setServiceTime(diff.toString());
+      } else {
+          // 後半: 翌月00:00 〜 終了時刻
+          const midnight = new Date(s.getFullYear(), s.getMonth() + 1, 1, 0, 0, 0);
+          setStartDateTime(formatDatetimeLocal(midnight));
+          setEndDateTime(formatDatetimeLocal(e));
+          const diff = (e.getTime() - midnight.getTime()) / (1000 * 60 * 60);
+          setServiceTime(diff.toString());
+      }
+  };
+
+  const handlePartChange = async (part: 'part1' | 'part2') => {
+      if (isDirty) {
+          if (!confirm('変更内容が保存されていません。切り替えてよろしいですか？')) return;
+      }
+      setSelectedPart(part);
+      setIsDirty(false);
+      
+      if (!shiftId || !originalShiftTimes) return;
+      
+      const s = new Date(originalShiftTimes.start_at);
+      let expectedStartIso: string;
+      if (part === 'part1') {
+          expectedStartIso = new Date(originalShiftTimes.start_at).toISOString();
+      } else {
+          expectedStartIso = new Date(s.getFullYear(), s.getMonth() + 1, 1, 0, 0, 0).toISOString();
+      }
+
+      const { data: existing } = await supabase
+          .from('reports')
+          .select('id')
+          .eq('shift_id', shiftId)
+          .eq('start_at', expectedStartIso)
+          .maybeSingle();
+
+      if (existing) {
+          setCurrentReportId(existing.id);
+          router.replace(`/app/record/${clientId}?reportId=${existing.id}&shiftId=${shiftId}`);
+          await loadExistingData(existing.id);
+      } else {
+          setCurrentReportId(null);
+          router.replace(`/app/record/${clientId}?shiftId=${shiftId}`);
+          setupTimeForPart(part, originalShiftTimes.start_at, originalShiftTimes.end_at);
+          setAnswers({});
+          setCurrentStatus('draft');
+      }
   };
 
   const fetchBaseData = useCallback(async () => {
@@ -3025,7 +2999,6 @@ export default function RecordPage() {
         setTemplate(schema.filter(i => i.id !== 'service_time' && i.id !== 'travel_time'));
       }
 
-      // スタッフ名簿一覧を取得
       const { data: staffsData } = await supabase
         .from('staffs')
         .select('id, name, user_id')
@@ -3047,7 +3020,7 @@ export default function RecordPage() {
   const loadExistingData = useCallback(async (targetId: string) => {
     if (!targetId) return;
     try {
-      const { data: r } = await supabase.from('reports').select('*').eq('id', targetId).single();
+      const { data: r } = await supabase.from('reports').select('*, shifts(start_at, end_at)').eq('id', targetId).single();
       const { data: v } = await supabase.from('report_values').select('data').eq('report_id', targetId).single();
       if (r && v) {
         setStartDateTime(formatDatetimeLocal(new Date(r.start_at)));
@@ -3059,6 +3032,19 @@ export default function RecordPage() {
         setSelectedHelpers(data._helpers || []);
         setAnswers(data);
         setIsDirty(false);
+
+        if (r.shifts) {
+            const s = new Date(r.shifts.start_at);
+            const e = new Date(r.shifts.end_at);
+            const isCrossMonth = s.getMonth() !== e.getMonth();
+            setIsSpanningMonth(isCrossMonth);
+            setOriginalShiftTimes({ start_at: r.shifts.start_at, end_at: r.shifts.end_at });
+            
+            if (isCrossMonth) {
+                const isPart1 = new Date(r.start_at).getTime() === s.getTime();
+                setSelectedPart(isPart1 ? 'part1' : 'part2');
+            }
+        }
 
         const { data: imgData } = await supabase.from('report_images').select('*').eq('report_id', targetId);
         if (imgData) {
@@ -3086,7 +3072,7 @@ export default function RecordPage() {
               targetId = existingReport.id;
               setCurrentReportId(targetId);
               router.replace(`/app/record/${clientId}?reportId=${targetId}`);
-              showToast('このシフトには既に記録が存在します。該当する記録を開きました。', 'info');
+              showToast('このシフトにはすでに記録が存在します。該当する記録を開きました。', 'info');
           } else {
               const { data: shiftData } = await supabase
                   .from('shifts')
@@ -3101,13 +3087,19 @@ export default function RecordPage() {
                   .single();
               
               if (shiftData) {
-                  setStartDateTime(formatDatetimeLocal(new Date(shiftData.start_at)));
-                  setEndDateTime(formatDatetimeLocal(new Date(shiftData.end_at)));
+                  const s = new Date(shiftData.start_at);
+                  const e = new Date(shiftData.end_at);
+                  const isCrossMonth = s.getMonth() !== e.getMonth();
                   
-                  const sTime = new Date(shiftData.start_at).getTime();
-                  const eTime = new Date(shiftData.end_at).getTime();
-                  if (eTime > sTime) {
-                      const diffHours = (eTime - sTime) / (1000 * 60 * 60);
+                  setIsSpanningMonth(isCrossMonth);
+                  setOriginalShiftTimes({ start_at: shiftData.start_at, end_at: shiftData.end_at });
+
+                  if (isCrossMonth) {
+                      setupTimeForPart('part1', shiftData.start_at, shiftData.end_at);
+                  } else {
+                      setStartDateTime(formatDatetimeLocal(s));
+                      setEndDateTime(formatDatetimeLocal(e));
+                      const diffHours = (e.getTime() - s.getTime()) / (1000 * 60 * 60);
                       setServiceTime(diffHours.toString());
                   }
 
@@ -3294,7 +3286,6 @@ export default function RecordPage() {
 
   const isAdmin = currentOrg && ['owner', 'manager'].includes(currentOrg.role);
 
-  // ★ Selectの変更ハンドラ
   const handleStaffChange = (event: SelectChangeEvent<typeof selectedHelpers>) => {
       const { target: { value } } = event;
       setSelectedHelpers(typeof value === 'string' ? value.split(',') : value);
@@ -3335,10 +3326,28 @@ export default function RecordPage() {
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
         <Container maxWidth="md" disableGutters>
             <Stack spacing={4}>
+            
+            {/* 月末跨ぎの夜勤の場合のみ表示される分割選択タブコントロール */}
+            {isSpanningMonth && (
+                <Paper variant="outlined" sx={{ p: 2, bgcolor: '#FFFDE7', borderColor: '#FFF59D', borderRadius: 3 }}>
+                    <Typography variant="subtitle2" fontWeight="bold" color="warning.dark" mb={1.5}>
+                        ⚠ このシフトは月末を跨ぐ夜勤のため、請求都合上00:00で分割して記録を登録します。
+                    </Typography>
+                    <Tabs 
+                        value={selectedPart} 
+                        onChange={(_, val) => handlePartChange(val)} 
+                        variant="fullWidth"
+                        sx={{ bgcolor: '#FFF', borderRadius: 2 }}
+                    >
+                        <Tab value="part1" label={`前半（月末日の24:00まで: ${formatTimeForLabel(originalShiftTimes?.start_at)} 〜 24:00）`} />
+                        <Tab value="part2" label={`後半（翌月1日の00:00から: 00:00 〜 ${formatTimeForLabel(originalShiftTimes?.end_at)}）`} />
+                    </Tabs>
+                </Paper>
+            )}
+
             <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, bgcolor: '#fff' }}>
                 <Stack spacing={3}>
                 
-                {/* ★修正: 担当スタッフをチェックボックス付きのSelectに変更 */}
                 <Box>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
@@ -4804,7 +4813,6 @@ import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 
-// 高度なPDF出力用のコンポーネントとライブラリ
 import { pdf } from '@react-pdf/renderer';
 import { ShiftScheduleDocument, PdfShiftData } from '@/components/pdf/ShiftScheduleDocument';
 import { ShiftCalendarDocument, PdfCalendarEvent, PdfCalendarDay } from '@/components/pdf/ShiftCalendarDocument';
@@ -4838,15 +4846,11 @@ export default function ShiftManagePage() {
     const [clients, setClients] = useState<ClientData[]>([]);
     const [staffs, setStaffs] = useState<StaffData[]>([]);
 
-    // ユーザー情報
     const [currentUserId, setCurrentUserId] = useState<string>('');
     const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
 
-    // 5つの詳細タブ制御
-    // 0: ひな形パターン, 1: 全体カレンダー, 2: 自分のシフト, 3: スタッフ別, 4: 利用者別
     const [tabIndex, setTabIndex] = useState(1);
 
-    // フィルター用State
     const [selectedStaffId, setSelectedStaffId] = useState<string>('all');
     const [selectedClientId, setSelectedClientId] = useState<string>('all');
 
@@ -4856,7 +4860,6 @@ export default function ShiftManagePage() {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     });
 
-    // モーダル・ダイアログ制御
     const [shiftModalOpen, setShiftModalOpen] = useState(false);
     const [patternModalOpen, setPatternModalOpen] = useState(false);
     const [clearDialogOpen, setClearDialogOpen] = useState(false);
@@ -4865,13 +4868,8 @@ export default function ShiftManagePage() {
     const [selectedShift, setSelectedShift] = useState<ShiftData | null>(null);
     const [selectedPattern, setSelectedPattern] = useState<FetchedPatternData | null>(null);
 
-    // 消去設定
     const [clearMode, setClearMode] = useState<'unmodified' | 'all'>('unmodified');
-
-    // 自動生成プレビュー用State
     const [previewDetails, setPreviewDetails] = useState<{ total: number; details: any[] } | null>(null);
-
-    // 一括削除用のState
     const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
 
     useEffect(() => {
@@ -4893,7 +4891,6 @@ export default function ShiftManagePage() {
                 const parsed = s.map(item => ({ id: item.id, name: item.name, type: item.user_id ? 'member' as const : 'ghost' as const }));
                 setStaffs(parsed);
 
-                // ログインユーザー自身に紐づく名簿IDを特定する
                 if (currentUserId) {
                     const me = parsed.find(item => s.find(sd => sd.id === item.id)?.user_id === currentUserId);
                     if (me) setCurrentStaffId(me.id);
@@ -4948,7 +4945,6 @@ export default function ShiftManagePage() {
         }
     }, [wsLoading, currentOrg, fetchMasterData, fetchData]);
 
-    // タブ選択、または各種フィルター適用時に、表示用カレンダーイベントを動的にフィルタリング
     useEffect(() => {
         if (!currentUserId || rawShifts.length === 0) {
             setEvents([]);
@@ -4956,17 +4952,14 @@ export default function ShiftManagePage() {
         }
 
         const filtered = rawShifts.filter(shift => {
-            // 2: 自分のシフト
             if (tabIndex === 2) {
                 if (!currentStaffId) return false;
                 return shift.shift_staffs.some(s => s.staff_id === currentStaffId);
             }
-            // 3: スタッフ別
             if (tabIndex === 3) {
                 if (selectedStaffId === 'all') return true;
                 return shift.shift_staffs.some(s => s.staff_id === selectedStaffId);
             }
-            // 4: 利用者別
             if (tabIndex === 4) {
                 if (selectedClientId === 'all') return true;
                 return shift.client_id === selectedClientId;
@@ -4974,12 +4967,10 @@ export default function ShiftManagePage() {
             return true;
         });
 
-        // 管理者タブ以外は、カレンダー上でのドラッグ＆ドロップなどの直接編集を不許可（読み取り専用にする）
         const isEditable = tabIndex === 1 && ['owner', 'manager'].includes(currentOrg?.role || '');
         setEvents(convertToCalendarEvents(filtered, !isEditable));
     }, [rawShifts, tabIndex, selectedStaffId, selectedClientId, currentStaffId, currentUserId, currentOrg]);
 
-    // --- 高度なPDF出力・エクスポート機能 ---
     const handleDownloadPdf = async () => {
         if (!calendarRef.current || !currentOrg) return;
         setPdfGenerating(true);
@@ -4999,27 +4990,54 @@ export default function ShiftManagePage() {
 
             let blob: Blob;
 
-            // リスト（List）ビュー表示中の場合：リスト形式PDFを出力
             if (viewType.includes('list')) {
-                const pdfShifts: PdfShiftData[] = renderedEvents.map(ev => {
+                const pdfShifts: PdfShiftData[] = [];
+                renderedEvents.forEach(ev => {
                     const start = ev.start!;
                     const end = ev.end!;
                     const days = ['日', '月', '火', '水', '木', '金', '土'];
-                    return {
-                        dateStr: `${start.getMonth() + 1}/${start.getDate()} (${days[start.getDay()]})`,
-                        startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
-                        endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
-                        clientName: ev.extendedProps.clientName,
-                        staffNames: ev.extendedProps.staffNames,
-                        isCancelled: ev.extendedProps.isCancelled,
-                        timestamp: start.getTime()
-                    };
+
+                    const startZero = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+                    const endZero = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+                    const diffDays = Math.floor((endZero.getTime() - startZero.getTime()) / (1000 * 60 * 60 * 24));
+
+                    if (diffDays === 0) {
+                        pdfShifts.push({
+                            dateStr: `${start.getMonth() + 1}/${start.getDate()} (${days[start.getDay()]})`,
+                            startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
+                            endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
+                            clientName: ev.extendedProps.clientName,
+                            staffNames: ev.extendedProps.staffNames,
+                            isCancelled: ev.extendedProps.isCancelled,
+                            timestamp: start.getTime()
+                        });
+                    } else {
+                        // 印刷用PDF出力時: 繋がっている夜勤シフトを00:00で分割処理
+                        // Part 1: 開始時間 〜 24:00
+                        pdfShifts.push({
+                            dateStr: `${start.getMonth() + 1}/${start.getDate()} (${days[start.getDay()]})`,
+                            startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
+                            endTime: `24:00`,
+                            clientName: ev.extendedProps.clientName,
+                            staffNames: ev.extendedProps.staffNames,
+                            isCancelled: ev.extendedProps.isCancelled,
+                            timestamp: start.getTime()
+                        });
+                        // Part 2: 翌日00:00 〜 終了時間
+                        pdfShifts.push({
+                            dateStr: `${end.getMonth() + 1}/${end.getDate()} (${days[end.getDay()]})`,
+                            startTime: `00:00`,
+                            endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
+                            clientName: ev.extendedProps.clientName,
+                            staffNames: ev.extendedProps.staffNames,
+                            isCancelled: ev.extendedProps.isCancelled,
+                            timestamp: endZero.getTime()
+                        });
+                    }
                 });
                 pdfShifts.sort((a, b) => a.timestamp - b.timestamp);
                 blob = await pdf(<ShiftScheduleDocument title={docTitle} monthStr={monthStr} shifts={pdfShifts} orgName={currentOrg.name} />).toBlob();
-            }
-            // 月間・週間カレンダー表示中の場合：カレンダー型レイアウトPDFを出力（日を跨ぐシフトに完全対応）
-            else {
+            } else {
                 const activeStart = api.view.activeStart;
                 const activeEnd = api.view.activeEnd;
                 const dayMap = new Map<string, PdfCalendarEvent[]>();
@@ -5028,7 +5046,6 @@ export default function ShiftManagePage() {
                     const start = new Date(ev.start!);
                     const end = new Date(ev.end!);
 
-                    // 開始日と終了日の日付の差をローカル日付基準で計算
                     const startZero = new Date(start.getFullYear(), start.getMonth(), start.getDate());
                     const endZero = new Date(end.getFullYear(), end.getMonth(), end.getDate());
 
@@ -5036,7 +5053,6 @@ export default function ShiftManagePage() {
                     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
                     if (diffDays === 0) {
-                        // 同一日のシフト
                         const dateKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
                         const eventObj: PdfCalendarEvent = {
                             timeStr: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}-${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
@@ -5047,7 +5063,6 @@ export default function ShiftManagePage() {
                         if (!dayMap.has(dateKey)) dayMap.set(dateKey, []);
                         dayMap.get(dateKey)!.push(eventObj);
                     } else {
-                        // 日またぎのシフト：跨いでいる日数分ループして各日のセルに予定を分割登録する
                         for (let d = 0; d <= diffDays; d++) {
                             const currentDay = new Date(startZero);
                             currentDay.setDate(startZero.getDate() + d);
@@ -5056,17 +5071,13 @@ export default function ShiftManagePage() {
 
                             let timeDisplay = '';
                             if (d === 0) {
-                                // 跨ぎの開始日（「20:00〜翌」から「20:00〜00:00」に変更）
-                                timeDisplay = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}〜00:00`;
+                                timeDisplay = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}〜24:00`;
                             } else if (d === diffDays) {
-                                // 終了時刻がちょうど 00:00 の場合は、翌日（終了日）のセルに不要な 00:00〜00:00 を表示しないようスキップする
                                 if (end.getHours() === 0 && end.getMinutes() === 0) {
                                     continue;
                                 }
-                                // 跨ぎの終了日（「〜09:00」から「00:00〜09:00」に変更）
                                 timeDisplay = `00:00〜${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
                             } else {
-                                // 2日以上跨ぐ場合の中間日
                                 timeDisplay = `終日`;
                             }
 
@@ -5111,7 +5122,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // マトリックス全体シフト表（スタッフ横断グリッド表）の自動作成・PDF出力機能
     const handleDownloadMatrixPdf = async () => {
         if (!calendarRef.current || !currentOrg) return;
         setPdfGenerating(true);
@@ -5176,7 +5186,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // --- シフト単体操作 ---
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
         try {
             if (shiftId) await updateShift(shiftId, payload);
@@ -5227,7 +5236,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // --- ひな形・自動生成操作 ---
     const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {
         try {
             if (patternId) {
@@ -5310,7 +5318,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // ひな形の繰り返し規則（rrule文字列）をわかりやすい日本語に変換する補助関数
     const formatRule = (rrule: string) => {
         let desc = '';
         if (rrule.includes('FREQ=WEEKLY')) desc += '毎週 ';
@@ -5380,7 +5387,6 @@ export default function ShiftManagePage() {
                     <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>
                 ) : (
                     <>
-                        {/* --- 共通のヘッダー・フィルターコントロール (カレンダー表示系タブのみに動的表示) --- */}
                         {tabIndex >= 1 && (
                             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={2} spacing={2}>
                                 <Box flexGrow={1} width="100%">
@@ -5410,7 +5416,6 @@ export default function ShiftManagePage() {
                             </Stack>
                         )}
 
-                        {/* --- タブ0: ひな形（パターン）管理タブ --- */}
                         {isAdmin && (
                             <Box sx={{ display: tabIndex === 0 ? 'block' : 'none' }}>
                                 <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: '#F0F5FF', borderColor: '#D0E0FF' }}>
@@ -5459,7 +5464,6 @@ export default function ShiftManagePage() {
                             </Box>
                         )}
 
-                        {/* --- カレンダー表示 (各カレンダータブがこれを利用してFullCalendarを描画) --- */}
                         {tabIndex >= 1 && (
                             <Box sx={{ height: '100%' }}>
                                 <ShiftCalendarViewer
@@ -5482,18 +5486,14 @@ export default function ShiftManagePage() {
                                     }}
                                     onEventClick={(info) => {
                                         const { clientId, shiftId, isCancelled, shiftData } = info.event.extendedProps;
-                                        // 管理者かつ全体カレンダーの場合は「編集モーダル」を開く
                                         if (tabIndex === 1 && isAdmin) {
                                             setSelectedShift(shiftData);
                                             setShiftModalOpen(true);
-                                        }
-                                        // それ以外（ヘルパーが自分のシフト等を見る場合）は、クリックで「提供記録票の入力」へ遷移させる
-                                        else {
+                                        } else {
                                             if (isCancelled) {
                                                 showToast('このシフトは現在キャンセル（お休み）されています。', 'info');
                                                 return;
                                             }
-                                            // 記録入力画面へ遷移
                                             window.location.href = `/app/record/${clientId}?shiftId=${shiftId}`;
                                         }
                                     }}
@@ -5504,7 +5504,6 @@ export default function ShiftManagePage() {
                 )}
             </Box>
 
-            {/* --- 各種ダイアログ・モーダル --- */}
             <ShiftFormModal
                 open={shiftModalOpen}
                 onClose={() => setShiftModalOpen(false)}
@@ -5584,7 +5583,7 @@ export default function ShiftManagePage() {
                                     <Box key={index} display="flex" justifyContent="space-between" alignItems="center">
                                         <Typography variant="caption" fontWeight="bold">{d.title}</Typography>
                                         <Stack direction="row" spacing={1} alignItems="center">
-                                            {d.isOvernight && <Chip label="泊まり日またぎ" size="small" color="secondary" variant="outlined" sx={{ height: 16, fontSize: '0.65rem' }} />}
+                                            {d.isOvernight && <Chip label="日またぎ夜勤" size="small" color="secondary" variant="outlined" sx={{ height: 16, fontSize: '0.65rem' }} />}
                                             <Typography variant="caption" color="text.secondary">{d.count} 件</Typography>
                                         </Stack>
                                     </Box>

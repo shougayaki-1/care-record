@@ -5,7 +5,7 @@ import {
   Box, Button, Container, Typography, TextField, Checkbox, FormControlLabel, Radio, RadioGroup,
   Paper, Stack, IconButton, CircularProgress,
   FormGroup, Switch, FormHelperText, Chip, Divider, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
-  FormControl, InputLabel, Select, MenuItem, OutlinedInput, SelectChangeEvent
+  FormControl, InputLabel, Select, MenuItem, OutlinedInput, SelectChangeEvent, Tabs, Tab
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
@@ -29,7 +29,6 @@ type FormItem = {
   options?: string; required: boolean; hasDetail?: boolean;
 };
 
-// デフォルトテンプレート
 const DEFAULT_TEMPLATE: FormItem[] = [
     { id: 'sec_medical', label: '【医療的ケア・身体介護】', type: 'section', required: false },
     { id: 'sputum_suction', label: '痰等の吸引（気管・口腔）', type: 'checkbox', required: false },
@@ -77,13 +76,11 @@ type FormAnswers = Record<string, string | number | boolean | string[]>;
 type HelperProfile = { id: string; name: string };
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 
-// シフトスタッフ取得用
 type ShiftStaffData = {
     staff_id: string;
     staffs: { name: string } | null;
 };
 
-// ★ Select用のMenuProps定義
 const ITEM_HEIGHT = 48;
 const ITEM_PADDING_TOP = 8;
 const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
@@ -104,9 +101,7 @@ export default function RecordPage() {
   const [template, setTemplate] = useState<FormItem[]>([]);
   const [answers, setAnswers] = useState<FormAnswers>({});
   
-  // 選択肢用 (スタッフ名簿一覧)
   const [selectableStaffs, setSelectableStaffs] = useState<HelperProfile[]>([]);
-  // 選択中のスタッフ名配列
   const [selectedHelpers, setSelectedHelpers] = useState<string[]>([]);
   
   const [startDateTime, setStartDateTime] = useState('');
@@ -127,9 +122,78 @@ export default function RecordPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
+  // 月末跨ぎ夜勤管理ステート
+  const [isSpanningMonth, setIsSpanningMonth] = useState(false);
+  const [selectedPart, setSelectedPart] = useState<'part1' | 'part2'>('part1');
+  const [originalShiftTimes, setOriginalShiftTimes] = useState<{ start_at: string; end_at: string } | null>(null);
+
   const formatDatetimeLocal = (date: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+
+  const formatTimeForLabel = (dateStr?: string) => {
+      if (!dateStr) return '';
+      const d = new Date(dateStr);
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const setupTimeForPart = (part: 'part1' | 'part2', startIso: string, endIso: string) => {
+      const s = new Date(startIso);
+      const e = new Date(endIso);
+      
+      if (part === 'part1') {
+          // 前半: 開始時刻 〜 月末23:59:59 (00:00)
+          setStartDateTime(formatDatetimeLocal(s));
+          const midnight = new Date(s.getFullYear(), s.getMonth() + 1, 1, 0, 0, 0);
+          setEndDateTime(formatDatetimeLocal(midnight));
+          const diff = (midnight.getTime() - s.getTime()) / (1000 * 60 * 60);
+          setServiceTime(diff.toString());
+      } else {
+          // 後半: 翌月00:00 〜 終了時刻
+          const midnight = new Date(s.getFullYear(), s.getMonth() + 1, 1, 0, 0, 0);
+          setStartDateTime(formatDatetimeLocal(midnight));
+          setEndDateTime(formatDatetimeLocal(e));
+          const diff = (e.getTime() - midnight.getTime()) / (1000 * 60 * 60);
+          setServiceTime(diff.toString());
+      }
+  };
+
+  const handlePartChange = async (part: 'part1' | 'part2') => {
+      if (isDirty) {
+          if (!confirm('変更内容が保存されていません。切り替えてよろしいですか？')) return;
+      }
+      setSelectedPart(part);
+      setIsDirty(false);
+      
+      if (!shiftId || !originalShiftTimes) return;
+      
+      const s = new Date(originalShiftTimes.start_at);
+      let expectedStartIso: string;
+      if (part === 'part1') {
+          expectedStartIso = new Date(originalShiftTimes.start_at).toISOString();
+      } else {
+          expectedStartIso = new Date(s.getFullYear(), s.getMonth() + 1, 1, 0, 0, 0).toISOString();
+      }
+
+      const { data: existing } = await supabase
+          .from('reports')
+          .select('id')
+          .eq('shift_id', shiftId)
+          .eq('start_at', expectedStartIso)
+          .maybeSingle();
+
+      if (existing) {
+          setCurrentReportId(existing.id);
+          router.replace(`/app/record/${clientId}?reportId=${existing.id}&shiftId=${shiftId}`);
+          await loadExistingData(existing.id);
+      } else {
+          setCurrentReportId(null);
+          router.replace(`/app/record/${clientId}?shiftId=${shiftId}`);
+          setupTimeForPart(part, originalShiftTimes.start_at, originalShiftTimes.end_at);
+          setAnswers({});
+          setCurrentStatus('draft');
+      }
   };
 
   const fetchBaseData = useCallback(async () => {
@@ -145,7 +209,6 @@ export default function RecordPage() {
         setTemplate(schema.filter(i => i.id !== 'service_time' && i.id !== 'travel_time'));
       }
 
-      // スタッフ名簿一覧を取得
       const { data: staffsData } = await supabase
         .from('staffs')
         .select('id, name, user_id')
@@ -167,7 +230,7 @@ export default function RecordPage() {
   const loadExistingData = useCallback(async (targetId: string) => {
     if (!targetId) return;
     try {
-      const { data: r } = await supabase.from('reports').select('*').eq('id', targetId).single();
+      const { data: r } = await supabase.from('reports').select('*, shifts(start_at, end_at)').eq('id', targetId).single();
       const { data: v } = await supabase.from('report_values').select('data').eq('report_id', targetId).single();
       if (r && v) {
         setStartDateTime(formatDatetimeLocal(new Date(r.start_at)));
@@ -179,6 +242,19 @@ export default function RecordPage() {
         setSelectedHelpers(data._helpers || []);
         setAnswers(data);
         setIsDirty(false);
+
+        if (r.shifts) {
+            const s = new Date(r.shifts.start_at);
+            const e = new Date(r.shifts.end_at);
+            const isCrossMonth = s.getMonth() !== e.getMonth();
+            setIsSpanningMonth(isCrossMonth);
+            setOriginalShiftTimes({ start_at: r.shifts.start_at, end_at: r.shifts.end_at });
+            
+            if (isCrossMonth) {
+                const isPart1 = new Date(r.start_at).getTime() === s.getTime();
+                setSelectedPart(isPart1 ? 'part1' : 'part2');
+            }
+        }
 
         const { data: imgData } = await supabase.from('report_images').select('*').eq('report_id', targetId);
         if (imgData) {
@@ -206,7 +282,7 @@ export default function RecordPage() {
               targetId = existingReport.id;
               setCurrentReportId(targetId);
               router.replace(`/app/record/${clientId}?reportId=${targetId}`);
-              showToast('このシフトには既に記録が存在します。該当する記録を開きました。', 'info');
+              showToast('このシフトにはすでに記録が存在します。該当する記録を開きました。', 'info');
           } else {
               const { data: shiftData } = await supabase
                   .from('shifts')
@@ -221,13 +297,19 @@ export default function RecordPage() {
                   .single();
               
               if (shiftData) {
-                  setStartDateTime(formatDatetimeLocal(new Date(shiftData.start_at)));
-                  setEndDateTime(formatDatetimeLocal(new Date(shiftData.end_at)));
+                  const s = new Date(shiftData.start_at);
+                  const e = new Date(shiftData.end_at);
+                  const isCrossMonth = s.getMonth() !== e.getMonth();
                   
-                  const sTime = new Date(shiftData.start_at).getTime();
-                  const eTime = new Date(shiftData.end_at).getTime();
-                  if (eTime > sTime) {
-                      const diffHours = (eTime - sTime) / (1000 * 60 * 60);
+                  setIsSpanningMonth(isCrossMonth);
+                  setOriginalShiftTimes({ start_at: shiftData.start_at, end_at: shiftData.end_at });
+
+                  if (isCrossMonth) {
+                      setupTimeForPart('part1', shiftData.start_at, shiftData.end_at);
+                  } else {
+                      setStartDateTime(formatDatetimeLocal(s));
+                      setEndDateTime(formatDatetimeLocal(e));
+                      const diffHours = (e.getTime() - s.getTime()) / (1000 * 60 * 60);
                       setServiceTime(diffHours.toString());
                   }
 
@@ -414,7 +496,6 @@ export default function RecordPage() {
 
   const isAdmin = currentOrg && ['owner', 'manager'].includes(currentOrg.role);
 
-  // ★ Selectの変更ハンドラ
   const handleStaffChange = (event: SelectChangeEvent<typeof selectedHelpers>) => {
       const { target: { value } } = event;
       setSelectedHelpers(typeof value === 'string' ? value.split(',') : value);
@@ -455,10 +536,28 @@ export default function RecordPage() {
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
         <Container maxWidth="md" disableGutters>
             <Stack spacing={4}>
+            
+            {/* 月末跨ぎの夜勤の場合のみ表示される分割選択タブコントロール */}
+            {isSpanningMonth && (
+                <Paper variant="outlined" sx={{ p: 2, bgcolor: '#FFFDE7', borderColor: '#FFF59D', borderRadius: 3 }}>
+                    <Typography variant="subtitle2" fontWeight="bold" color="warning.dark" mb={1.5}>
+                        ⚠ このシフトは月末を跨ぐ夜勤のため、請求都合上00:00で分割して記録を登録します。
+                    </Typography>
+                    <Tabs 
+                        value={selectedPart} 
+                        onChange={(_, val) => handlePartChange(val)} 
+                        variant="fullWidth"
+                        sx={{ bgcolor: '#FFF', borderRadius: 2 }}
+                    >
+                        <Tab value="part1" label={`前半（月末日の24:00まで: ${formatTimeForLabel(originalShiftTimes?.start_at)} 〜 24:00）`} />
+                        <Tab value="part2" label={`後半（翌月1日の00:00から: 00:00 〜 ${formatTimeForLabel(originalShiftTimes?.end_at)}）`} />
+                    </Tabs>
+                </Paper>
+            )}
+
             <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, bgcolor: '#fff' }}>
                 <Stack spacing={3}>
                 
-                {/* ★修正: 担当スタッフをチェックボックス付きのSelectに変更 */}
                 <Box>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
