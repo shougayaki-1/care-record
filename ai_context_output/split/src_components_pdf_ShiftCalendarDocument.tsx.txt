@@ -16,22 +16,87 @@ Font.register({
 });
 
 const styles = StyleSheet.create({
-    page: { padding: 20, paddingBottom: 35, fontFamily: 'NotoSansJP', fontSize: 10, color: '#333' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, borderBottomWidth: 1, borderColor: '#2255CC', paddingBottom: 5 },
+    page: { 
+        padding: 12, 
+        paddingBottom: 25, 
+        fontFamily: 'NotoSansJP', 
+        fontSize: 10, 
+        color: '#333' 
+    },
+    header: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        marginBottom: 8, 
+        borderBottomWidth: 1, 
+        borderColor: '#2255CC', 
+        paddingBottom: 4 
+    },
     title: { fontSize: 14, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 11 },
     calendar: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
     dayHeaderRow: { flexDirection: 'row', backgroundColor: '#F0F5FF' },
-    dayHeaderCell: { width: '14.28%', textAlign: 'center', padding: 4, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', fontWeight: 'bold', fontSize: 8 },
+    dayHeaderCell: { 
+        width: '14.28%', 
+        textAlign: 'center', 
+        padding: 3, 
+        borderRightWidth: 1, 
+        borderBottomWidth: 1, 
+        borderColor: '#ccc', 
+        fontWeight: 'bold', 
+        fontSize: 9 
+    },
     weekRow: { flexDirection: 'row' },
-    dayCell: { width: '14.28%', minHeight: 100, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', padding: 2 },
-    dateNumber: { fontSize: 8, color: '#666', marginBottom: 2, textAlign: 'right', paddingRight: 4 },
-    eventBox: { backgroundColor: '#E6F0FF', padding: 2, paddingHorizontal: 3, marginBottom: 2, borderRadius: 2, height: 36, justifyContent: 'center' },
+    dayCell: { 
+        width: '14.28%', 
+        minHeight: 105, 
+        borderRightWidth: 1, 
+        borderBottomWidth: 1, 
+        borderColor: '#ccc', 
+        padding: 1.5 
+    },
+    dateNumber: { 
+        fontSize: 9, 
+        color: '#666', 
+        marginBottom: 1, 
+        textAlign: 'right', 
+        paddingRight: 4 
+    },
+    eventBox: { 
+        backgroundColor: '#E6F0FF', 
+        padding: 1, 
+        paddingHorizontal: 2, 
+        marginBottom: 1, 
+        borderRadius: 2, 
+        minHeight: 36,        // 固定高さを廃止し、文字量に応じて自動で伸びるように変更
+        justifyContent: 'center' 
+    },
     eventBoxCancelled: { backgroundColor: '#F2F3F5' },
-    eventTime: { fontSize: 7.2, fontWeight: 'bold', color: '#2255CC', marginBottom: 0.5, maxLines: 1, textOverflow: 'ellipsis' },
-    eventText: { fontSize: 7.2, color: '#333', lineHeight: 1.1, maxLines: 2, textOverflow: 'ellipsis' },
+    eventTime: { 
+        fontSize: 8.5, 
+        fontWeight: 'bold', 
+        color: '#2255CC', 
+        marginBottom: 0.5
+        // maxLines と textOverflow: 'ellipsis' を削除し、折り返しを許可
+    },
+    eventText: { 
+        fontSize: 8.5, 
+        color: '#333', 
+        lineHeight: 0.95,     // 行間を極限まで詰め込んで詰め込み表示
+        // maxLines と textOverflow: 'ellipsis' を削除し、すべて表示
+    },
     eventTextCancelled: { color: '#999', textDecoration: 'line-through' },
-    footer: { position: 'absolute', bottom: 15, left: 20, right: 20, textAlign: 'right', fontSize: 8, color: '#666', borderTopWidth: 1, borderColor: '#ccc', paddingTop: 5 }
+    footer: { 
+        position: 'absolute', 
+        bottom: 10, 
+        left: 12, 
+        right: 12, 
+        textAlign: 'right', 
+        fontSize: 8, 
+        color: '#666', 
+        borderTopWidth: 1, 
+        borderColor: '#ccc', 
+        paddingTop: 4 
+    }
 });
 
 export type PdfCalendarEvent = {

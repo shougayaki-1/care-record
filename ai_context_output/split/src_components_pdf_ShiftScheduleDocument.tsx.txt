@@ -16,20 +16,45 @@ Font.register({
 });
 
 const styles = StyleSheet.create({
-    page: { padding: 30, paddingBottom: 40, fontFamily: 'NotoSansJP', fontSize: 10, color: '#333' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, borderBottomWidth: 1, borderColor: '#2255CC', paddingBottom: 10 },
+    page: { 
+        padding: 15, 
+        paddingBottom: 25, 
+        fontFamily: 'NotoSansJP', 
+        fontSize: 11.5, 
+        color: '#333' 
+    },
+    header: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        marginBottom: 10, 
+        borderBottomWidth: 1, 
+        borderColor: '#2255CC', 
+        paddingBottom: 5 
+    },
     title: { fontSize: 16, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 12 },
     table: { width: '100%', borderWidth: 1, borderColor: '#ddd' },
     tableHeader: { flexDirection: 'row', backgroundColor: '#F0F5FF', borderBottomWidth: 1, borderColor: '#ddd', fontWeight: 'bold' },
-    tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#ddd', minHeight: 24, alignItems: 'center' },
+    tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#ddd', minHeight: 26, alignItems: 'center' },
     tableRowCancelled: { backgroundColor: '#f9f9f9', color: '#999' },
-    colDate: { width: '15%', padding: 5, borderRightWidth: 1, borderColor: '#ddd', textAlign: 'center' },
-    colTime: { width: '20%', padding: 5, borderRightWidth: 1, borderColor: '#ddd', textAlign: 'center' },
-    colClient: { width: '25%', padding: 5, borderRightWidth: 1, borderColor: '#ddd' },
-    colStaff: { width: '25%', padding: 5, borderRightWidth: 1, borderColor: '#ddd' },
-    colStatus: { width: '15%', padding: 5, textAlign: 'center' },
-    footer: { position: 'absolute', bottom: 20, left: 30, right: 30, textAlign: 'right', fontSize: 9, color: '#666', borderTopWidth: 1, borderColor: '#ccc', paddingTop: 5 }
+    // 各列の文字を 10.5pt、行間 1.0（ぎりぎり重ならない密着度）にして詰め込みます
+    colDate: { width: '15%', padding: 4, borderRightWidth: 1, borderColor: '#ddd', textAlign: 'center', fontSize: 10.5, lineHeight: 1.0 },
+    colTime: { width: '20%', padding: 4, borderRightWidth: 1, borderColor: '#ddd', textAlign: 'center', fontSize: 10.5, lineHeight: 1.0 },
+    colClient: { width: '25%', padding: 4, borderRightWidth: 1, borderColor: '#ddd', fontSize: 10.5, lineHeight: 1.0 },
+    colStaff: { width: '25%', padding: 4, borderRightWidth: 1, borderColor: '#ddd', fontSize: 10.5, lineHeight: 1.0 },
+    colStatus: { width: '15%', padding: 4, textAlign: 'center', fontSize: 10.5, lineHeight: 1.0 },
+    footer: { 
+        position: 'absolute', 
+        bottom: 12, 
+        left: 15, 
+        right: 15, 
+        textAlign: 'right', 
+        fontSize: 9, 
+        color: '#666', 
+        borderTopWidth: 1, 
+        borderColor: '#ccc', 
+        paddingTop: 4 
+    }
 });
 
 export type PdfShiftData = {

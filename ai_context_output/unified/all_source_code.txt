@@ -9338,22 +9338,87 @@ Font.register({
 });
 
 const styles = StyleSheet.create({
-    page: { padding: 20, paddingBottom: 35, fontFamily: 'NotoSansJP', fontSize: 10, color: '#333' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, borderBottomWidth: 1, borderColor: '#2255CC', paddingBottom: 5 },
+    page: { 
+        padding: 12, 
+        paddingBottom: 25, 
+        fontFamily: 'NotoSansJP', 
+        fontSize: 10, 
+        color: '#333' 
+    },
+    header: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        marginBottom: 8, 
+        borderBottomWidth: 1, 
+        borderColor: '#2255CC', 
+        paddingBottom: 4 
+    },
     title: { fontSize: 14, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 11 },
     calendar: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
     dayHeaderRow: { flexDirection: 'row', backgroundColor: '#F0F5FF' },
-    dayHeaderCell: { width: '14.28%', textAlign: 'center', padding: 4, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', fontWeight: 'bold', fontSize: 8 },
+    dayHeaderCell: { 
+        width: '14.28%', 
+        textAlign: 'center', 
+        padding: 3, 
+        borderRightWidth: 1, 
+        borderBottomWidth: 1, 
+        borderColor: '#ccc', 
+        fontWeight: 'bold', 
+        fontSize: 9 
+    },
     weekRow: { flexDirection: 'row' },
-    dayCell: { width: '14.28%', minHeight: 100, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', padding: 2 },
-    dateNumber: { fontSize: 8, color: '#666', marginBottom: 2, textAlign: 'right', paddingRight: 4 },
-    eventBox: { backgroundColor: '#E6F0FF', padding: 2, paddingHorizontal: 3, marginBottom: 2, borderRadius: 2, height: 36, justifyContent: 'center' },
+    dayCell: { 
+        width: '14.28%', 
+        minHeight: 105, 
+        borderRightWidth: 1, 
+        borderBottomWidth: 1, 
+        borderColor: '#ccc', 
+        padding: 1.5 
+    },
+    dateNumber: { 
+        fontSize: 9, 
+        color: '#666', 
+        marginBottom: 1, 
+        textAlign: 'right', 
+        paddingRight: 4 
+    },
+    eventBox: { 
+        backgroundColor: '#E6F0FF', 
+        padding: 1, 
+        paddingHorizontal: 2, 
+        marginBottom: 1, 
+        borderRadius: 2, 
+        minHeight: 36,        // 固定高さを廃止し、文字量に応じて自動で伸びるように変更
+        justifyContent: 'center' 
+    },
     eventBoxCancelled: { backgroundColor: '#F2F3F5' },
-    eventTime: { fontSize: 7.2, fontWeight: 'bold', color: '#2255CC', marginBottom: 0.5, maxLines: 1, textOverflow: 'ellipsis' },
-    eventText: { fontSize: 7.2, color: '#333', lineHeight: 1.1, maxLines: 2, textOverflow: 'ellipsis' },
+    eventTime: { 
+        fontSize: 8.5, 
+        fontWeight: 'bold', 
+        color: '#2255CC', 
+        marginBottom: 0.5
+        // maxLines と textOverflow: 'ellipsis' を削除し、折り返しを許可
+    },
+    eventText: { 
+        fontSize: 8.5, 
+        color: '#333', 
+        lineHeight: 0.95,     // 行間を極限まで詰め込んで詰め込み表示
+        // maxLines と textOverflow: 'ellipsis' を削除し、すべて表示
+    },
     eventTextCancelled: { color: '#999', textDecoration: 'line-through' },
-    footer: { position: 'absolute', bottom: 15, left: 20, right: 20, textAlign: 'right', fontSize: 8, color: '#666', borderTopWidth: 1, borderColor: '#ccc', paddingTop: 5 }
+    footer: { 
+        position: 'absolute', 
+        bottom: 10, 
+        left: 12, 
+        right: 12, 
+        textAlign: 'right', 
+        fontSize: 8, 
+        color: '#666', 
+        borderTopWidth: 1, 
+        borderColor: '#ccc', 
+        paddingTop: 4 
+    }
 });
 
 export type PdfCalendarEvent = {
@@ -9445,22 +9510,65 @@ Font.register({
 });
 
 const styles = StyleSheet.create({
-    // ★修正: フッター用の余白を paddingBottom で確保
-    page: { padding: 15, paddingBottom: 30, fontFamily: 'NotoSansJP', fontSize: 6, color: '#333' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+    page: { 
+        padding: 10, 
+        paddingBottom: 20, 
+        fontFamily: 'NotoSansJP', 
+        fontSize: 6.5, 
+        color: '#333' 
+    },
+    header: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        marginBottom: 6 
+    },
     title: { fontSize: 14, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 12 },
     table: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
     row: { flexDirection: 'row' },
     headerRow: { backgroundColor: '#F0F5FF' },
     headerCell: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', textAlign: 'center', paddingVertical: 4, fontWeight: 'bold' },
-    staffCell: { width: 50, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', padding: 2, justifyContent: 'center' },
-    dayCell: { flex: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', padding: 1, textAlign: 'center', minHeight: 30 },
-    shiftText: { fontSize: 4.5, marginBottom: 2, lineHeight: 1.2, textAlign: 'center' },
-    shiftBox: { backgroundColor: '#F0F5FF', padding: 1, marginBottom: 1, borderRadius: 1 },
-    
-    // ★修正: 絶対配置で確実に一番下へ置く
-    footer: { position: 'absolute', bottom: 10, left: 15, right: 15, textAlign: 'right', fontSize: 8, color: '#666', borderTopWidth: 1, borderColor: '#ccc', paddingTop: 5 }
+    staffCell: { 
+        width: 45, 
+        borderRightWidth: 1, 
+        borderBottomWidth: 1, 
+        borderColor: '#ccc', 
+        padding: 2, 
+        justifyContent: 'center' 
+    },
+    dayCell: { 
+        flex: 1, 
+        borderRightWidth: 1, 
+        borderBottomWidth: 1, 
+        borderColor: '#ccc', 
+        padding: 0.5, 
+        textAlign: 'center', 
+        minHeight: 30 
+    },
+    shiftText: { 
+        fontSize: 5.8, 
+        marginBottom: 1, 
+        lineHeight: 0.95,     // 行間を 0.95 まで詰めて、限られたマス内に極力収めます
+        textAlign: 'center' 
+    },
+    shiftBox: { 
+        backgroundColor: '#F0F5FF', 
+        padding: 0.5, 
+        marginBottom: 1, 
+        borderRadius: 1 
+    },
+    footer: { 
+        position: 'absolute', 
+        bottom: 8, 
+        left: 10, 
+        right: 10, 
+        textAlign: 'right', 
+        fontSize: 8, 
+        color: '#666', 
+        borderTopWidth: 1, 
+        borderColor: '#ccc', 
+        paddingTop: 4 
+    }
 });
 
 export type MatrixStaffData = {
@@ -9516,7 +9624,6 @@ export const ShiftMatrixDocument = ({ title, monthStr, daysInMonth, staffData, o
                     ))}
                 </View>
 
-                {/* ★修正: ページ番号と事業所名を出す（fixedで全ページに出力） */}
                 <Text style={styles.footer} fixed>
                     {orgName}
                 </Text>
@@ -9546,20 +9653,45 @@ Font.register({
 });
 
 const styles = StyleSheet.create({
-    page: { padding: 30, paddingBottom: 40, fontFamily: 'NotoSansJP', fontSize: 10, color: '#333' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, borderBottomWidth: 1, borderColor: '#2255CC', paddingBottom: 10 },
+    page: { 
+        padding: 15, 
+        paddingBottom: 25, 
+        fontFamily: 'NotoSansJP', 
+        fontSize: 11.5, 
+        color: '#333' 
+    },
+    header: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        marginBottom: 10, 
+        borderBottomWidth: 1, 
+        borderColor: '#2255CC', 
+        paddingBottom: 5 
+    },
     title: { fontSize: 16, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 12 },
     table: { width: '100%', borderWidth: 1, borderColor: '#ddd' },
     tableHeader: { flexDirection: 'row', backgroundColor: '#F0F5FF', borderBottomWidth: 1, borderColor: '#ddd', fontWeight: 'bold' },
-    tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#ddd', minHeight: 24, alignItems: 'center' },
+    tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#ddd', minHeight: 26, alignItems: 'center' },
     tableRowCancelled: { backgroundColor: '#f9f9f9', color: '#999' },
-    colDate: { width: '15%', padding: 5, borderRightWidth: 1, borderColor: '#ddd', textAlign: 'center' },
-    colTime: { width: '20%', padding: 5, borderRightWidth: 1, borderColor: '#ddd', textAlign: 'center' },
-    colClient: { width: '25%', padding: 5, borderRightWidth: 1, borderColor: '#ddd' },
-    colStaff: { width: '25%', padding: 5, borderRightWidth: 1, borderColor: '#ddd' },
-    colStatus: { width: '15%', padding: 5, textAlign: 'center' },
-    footer: { position: 'absolute', bottom: 20, left: 30, right: 30, textAlign: 'right', fontSize: 9, color: '#666', borderTopWidth: 1, borderColor: '#ccc', paddingTop: 5 }
+    // 各列の文字を 10.5pt、行間 1.0（ぎりぎり重ならない密着度）にして詰め込みます
+    colDate: { width: '15%', padding: 4, borderRightWidth: 1, borderColor: '#ddd', textAlign: 'center', fontSize: 10.5, lineHeight: 1.0 },
+    colTime: { width: '20%', padding: 4, borderRightWidth: 1, borderColor: '#ddd', textAlign: 'center', fontSize: 10.5, lineHeight: 1.0 },
+    colClient: { width: '25%', padding: 4, borderRightWidth: 1, borderColor: '#ddd', fontSize: 10.5, lineHeight: 1.0 },
+    colStaff: { width: '25%', padding: 4, borderRightWidth: 1, borderColor: '#ddd', fontSize: 10.5, lineHeight: 1.0 },
+    colStatus: { width: '15%', padding: 4, textAlign: 'center', fontSize: 10.5, lineHeight: 1.0 },
+    footer: { 
+        position: 'absolute', 
+        bottom: 12, 
+        left: 15, 
+        right: 15, 
+        textAlign: 'right', 
+        fontSize: 9, 
+        color: '#666', 
+        borderTopWidth: 1, 
+        borderColor: '#ccc', 
+        paddingTop: 4 
+    }
 });
 
 export type PdfShiftData = {
@@ -9624,7 +9756,6 @@ export const ShiftScheduleDocument = ({ title, monthStr, shifts, orgName }: Prop
         </Document>
     );
 };
-
 
 
 --- START OF FILE src/components/shifts/ShiftCalendarViewer.tsx ---
