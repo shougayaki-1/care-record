@@ -15,14 +15,15 @@ import WarningIcon from '@mui/icons-material/Warning';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import BuildIcon from '@mui/icons-material/Build'; // 修復用アイコンを追加
+import BuildIcon from '@mui/icons-material/Build';
+import SyncIcon from '@mui/icons-material/Sync'; // ★追加: 同期用のアイコンを追加
 
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { deleteOrganization, leaveOrganization, getAuditLogs } from '@/app/actions/organization';
-import { repairUnsyncedShifts } from '@/app/actions/shift'; // 再同期アクションをインポート
+import { repairUnsyncedShifts, forceSyncAllShifts } from '@/app/actions/shift'; // ★修正: forceSyncAllShifts を追加
 import { useToast } from '@/components/ui/ToastProvider';
 import { getGoogleAuthUrlAction } from '@/app/actions/google';
 
@@ -61,7 +62,8 @@ function SettingsContent() {
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [connectingCal, setConnectingCal] = useState(false);
-    const [repairingCal, setRepairingCal] = useState(false); // 修復中ステートを追加
+    const [repairingCal, setRepairingCal] = useState(false);
+    const [resyncingCal, setResyncingCal] = useState(false); // ★追加: 強制全件再同期中ステート
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
     const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -250,6 +252,25 @@ function SettingsContent() {
         }
     };
 
+    // ★追加: 全件強制再同期（修復）を実行
+    const handleForceResyncCalendar = async () => {
+        if (!currentOrg) return;
+        if (!confirm('全ての予定（既に同期済みの予定も含む）をGoogleカレンダーに強制的に再同期します。よろしいですか？\n※件数が多い場合は完了まで非常に時間がかかる可能性があります。')) return;
+        
+        setResyncingCal(true);
+        try {
+            const res = await forceSyncAllShifts(currentOrg.id);
+            if (res.success) {
+                showToast(`全件の強制再同期が完了しました。（同期されたシフト数: ${res.count} 件）`, 'success');
+            }
+        } catch (e) {
+            console.error(e);
+            showToast('全件強制再同期に失敗しました。再接続をお試しください。', 'error');
+        } finally {
+            setResyncingCal(false);
+        }
+    };
+
     const handleDeleteOrg = async () => {
         if (!currentOrg || confirmInput !== currentOrg.name) return;
         try {
@@ -389,11 +410,34 @@ function SettingsContent() {
                                                 <Typography variant="caption" color="text.secondary" display="block">
                                                     ※Googleカレンダーアプリから「CareRecord_{orgName}」という名前のカレンダーを確認してください。
                                                 </Typography>
-                                                <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
-                                                    <Button variant="contained" color="warning" startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />} onClick={handleRepairCalendar} disabled={repairingCal}>
-                                                        {repairingCal ? '同期修復中...' : 'カレンダーの同期修復'}
+                                                <Stack direction="row" spacing={2} sx={{ mt: 1, flexWrap: 'wrap', gap: 1.5 }}>
+                                                    <Button 
+                                                        variant="contained" 
+                                                        color="warning" 
+                                                        startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />} 
+                                                        onClick={handleRepairCalendar} 
+                                                        disabled={repairingCal || resyncingCal}
+                                                    >
+                                                        {repairingCal ? '同期修復中...' : '未同期のみ修復'}
                                                     </Button>
-                                                    <Button color="error" startIcon={<LinkOffIcon />} onClick={handleDisconnectCalendar} disabled={repairingCal}>
+                                                    {/* ★追加: 全件強制再同期ボタン */}
+                                                    <Button 
+                                                        variant="contained" 
+                                                        color="primary" 
+                                                        startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />} 
+                                                        onClick={handleForceResyncCalendar} 
+                                                        disabled={repairingCal || resyncingCal}
+                                                        sx={{ boxShadow: 'none' }}
+                                                    >
+                                                        {resyncingCal ? '全件再同期中...' : '全件強制再同期'}
+                                                    </Button>
+                                                    <Button 
+                                                        variant="outlined"
+                                                        color="error" 
+                                                        startIcon={<LinkOffIcon />} 
+                                                        onClick={handleDisconnectCalendar} 
+                                                        disabled={repairingCal || resyncingCal}
+                                                    >
                                                         連携を解除
                                                     </Button>
                                                 </Stack>

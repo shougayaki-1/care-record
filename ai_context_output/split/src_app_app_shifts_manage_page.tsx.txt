@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
     Box, Typography, Paper, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
     Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControlLabel, Radio, RadioGroup, LinearProgress,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem, Alert
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -12,6 +12,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
+import BuildIcon from '@mui/icons-material/Build'; 
 import FullCalendar from '@fullcalendar/react';
 import { EventInput, EventDropArg } from '@fullcalendar/core';
 import { EventResizeDoneArg } from '@fullcalendar/interaction';
@@ -22,7 +23,7 @@ import {
     getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely,
     ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, updateShiftPattern,
     clearGeneratedShiftsForMonth, generateShiftsForMonth, previewShiftsForMonth, ShiftPatternPayload,
-    syncSingleShift
+    syncSingleShift, repairUnsyncedShifts, deleteShiftsDbOnly
 } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { ShiftFormModal, ClientData, StaffData, ShiftData } from '@/components/shifts/ShiftFormModal';
@@ -88,8 +89,12 @@ export default function ShiftManagePage() {
     const [clearMode, setClearMode] = useState<'unmodified' | 'all'>('unmodified');
     const [previewDetails, setPreviewDetails] = useState<{ total: number; details: { title: string; count: number; isOvernight: boolean }[] } | null>(null);
 
-    // ★Googleカレンダーの同期進捗を監視するstateを追加
+    // Googleカレンダーの同期進捗を監視するstate
     const [syncProgress, setSyncProgress] = useState<{ total: number; current: number; currentName: string } | null>(null);
+    
+    // 未同期件数を検知・管理するためのstate
+    const [unsyncedCount, setUnsyncedCount] = useState<number>(0);
+    const [repairingFromBanner, setRepairingFromBanner] = useState(false);
 
     useEffect(() => {
         const fetchUser = async () => {
@@ -141,6 +146,14 @@ export default function ShiftManagePage() {
 
             setRawShifts(typedShifts);
             setEvents(convertToCalendarEvents(typedShifts, false));
+
+            // 未同期シフト数のチェック
+            const { count: unsyncedCountResult } = await supabase
+                .from('shifts')
+                .select('id', { count: 'exact', head: true })
+                .eq('organization_id', currentOrg.id)
+                .is('google_event_id', null);
+            setUnsyncedCount(unsyncedCountResult || 0);
 
             if (calendarApi && currentCalendarDate) {
                 setTimeout(() => {
@@ -404,7 +417,9 @@ export default function ShiftManagePage() {
         }
     };
 
+    // ★修正: シフト単発追加・更新時にも同期中パネルを表示
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
+        setSyncProgress({ total: 1, current: 0, currentName: shiftId ? 'Googleカレンダーの予定を更新中...' : 'Googleカレンダーへ新規登録中...' });
         try {
             if (shiftId) await updateShift(shiftId, payload);
             else await createShift(payload);
@@ -413,10 +428,14 @@ export default function ShiftManagePage() {
         } catch (error) {
             console.error(error);
             showToast('保存に失敗しました', 'error');
+        } finally {
+            setSyncProgress(null);
         }
     };
 
+    // ★修正: キャンセル（お休み）切替時にも同期中パネルを表示
     const handleToggleCancel = async (shiftId: string, isCancel: boolean, reason: string) => {
+        setSyncProgress({ total: 1, current: 0, currentName: isCancel ? '予定をお休みに設定＆Google同期中...' : '予定を通常復元＆Google同期中...' });
         try {
             await toggleCancelShift(shiftId, isCancel, reason);
             showToast(isCancel ? 'シフトをお休みに設定しました' : '通常予定に復元しました');
@@ -424,10 +443,14 @@ export default function ShiftManagePage() {
         } catch (error) {
             console.error(error);
             showToast('変更に失敗しました', 'error');
+        } finally {
+            setSyncProgress(null);
         }
     };
 
+    // ★修正: シフトの完全削除時にも同期中パネルを表示
     const handleDeleteShift = async (shiftId: string) => {
+        setSyncProgress({ total: 1, current: 0, currentName: 'Googleカレンダーから予定を削除中...' });
         try {
             await deleteShiftCompletely(shiftId);
             showToast('シフトを完全に削除しました');
@@ -435,14 +458,18 @@ export default function ShiftManagePage() {
         } catch (error) {
             console.error(error);
             showToast('削除に失敗しました', 'error');
+        } finally {
+            setSyncProgress(null);
         }
     };
 
+    // ★修正: ドラッグ＆ドロップによる時間変更時にも同期中パネルを表示
     const handleEventChange = async (info: EventDropArg | EventResizeDoneArg) => {
         const shiftId = info.event.extendedProps.shiftId;
         const start = info.event.start?.toISOString() || '';
         const end = info.event.end ? info.event.end.toISOString() : new Date(info.event.start!.getTime() + 3600000).toISOString();
 
+        setSyncProgress({ total: 1, current: 0, currentName: '予定時間を更新＆Google同期中...' });
         try {
             await updateShiftTimeOnly(shiftId, start, end);
             showToast('シフト時間を調整しました');
@@ -451,6 +478,8 @@ export default function ShiftManagePage() {
             console.error(error);
             info.revert();
             showToast('変更に失敗しました', 'error');
+        } finally {
+            setSyncProgress(null);
         }
     };
 
@@ -475,20 +504,82 @@ export default function ShiftManagePage() {
         setClearDialogOpen(true);
     };
 
+    // ★修正: 一括消去時も、カレンダー削除の進行度合い（プログレスバー）を1件ずつリアルタイム表示 [2]
     const executeClearMonthShifts = async () => {
         if (!currentOrg) return;
         setClearDialogOpen(false);
         setGenerating(true);
+
         try {
-            const unmodifiedOnly = clearMode === 'unmodified';
-            const res = await clearGeneratedShiftsForMonth(currentOrg.id, targetMonth, unmodifiedOnly);
-            showToast(`${targetMonth}月の対象シフトを ${res.count} 件消去しました。`, 'success');
-            fetchData(true);
-        } catch (error) {
-            console.error(error);
-            showToast('消去に失敗しました', 'error');
-        } finally {
+            // 1. クリア対象となる予定をフロントエンド側で特定・取得 [2]
+            const [year, month] = targetMonth.split('-').map(Number);
+            const lastDayNum = new Date(year, month, 0).getDate();
+            const pad = (n: number) => String(n).padStart(2, '0');
+            const startDateISO = new Date(`${year}-${pad(month)}-01T00:00:00+09:00`).toISOString();
+            const endDateISO = new Date(`${year}-${pad(month)}-${pad(lastDayNum)}T23:59:59+09:00`).toISOString();
+
+            let query = supabase.from('shifts')
+                .select('id, title')
+                .eq('organization_id', currentOrg.id)
+                .not('pattern_id', 'is', null)
+                .or(`and(start_at.gte.${startDateISO},start_at.lte.${endDateISO})`);
+
+            if (clearMode === 'unmodified') {
+                query = query.eq('is_modified', false);
+            }
+
+            const { data: targetShifts, error: queryError } = await query;
+            if (queryError) throw queryError;
+
+            if (!targetShifts || targetShifts.length === 0) {
+                showToast(`${targetMonth}月に消去対象の予定はありませんでした。`, 'info');
+                setGenerating(false);
+                return;
+            }
+
+            // 2. カレンダーから安全に直列で1件ずつ同期削除を実行 [2]
             setGenerating(false);
+            setSyncProgress({ total: targetShifts.length, current: 0, currentName: '一括消去の同期処理を開始中...' });
+
+            const preventTabClose = (e: BeforeUnloadEvent) => {
+                e.preventDefault();
+                e.returnValue = '一括消去が進行中です。ページを閉じると同期が途中で中断されます。';
+            };
+            window.addEventListener('beforeunload', preventTabClose);
+
+            let currentCount = 0;
+            const shiftIds = targetShifts.map(s => s.id);
+
+            for (const shift of targetShifts) {
+                setSyncProgress({
+                    total: targetShifts.length,
+                    current: currentCount,
+                    currentName: `Googleから削除中: ${shift.title || '予定'}`
+                });
+
+                // Googleカレンダーからイベントを個別に同期削除
+                await syncSingleShift(currentOrg.id, shift.id, 'delete');
+
+                currentCount++;
+                // APIアクセス制限回避のためのインターバル [2]
+                await new Promise(resolve => setTimeout(resolve, 250));
+            }
+
+            // 3. 同期消去がすべて完了した後に、DBから一斉高速消去 [2]
+            setSyncProgress({ total: targetShifts.length, current: targetShifts.length, currentName: 'DBから一括消去中...' });
+            await deleteShiftsDbOnly(shiftIds);
+
+            setSyncProgress(null);
+            window.removeEventListener('beforeunload', preventTabClose);
+
+            showToast(`${targetMonth}月のシフトを ${targetShifts.length} 件、Googleカレンダーを含めて完全に消去しました。`, 'success');
+            fetchData(true);
+
+        } catch (error) {
+            console.error('Clear Deployed Shifts Error:', error);
+            showToast('消去処理、またはカレンダーとの同期に失敗しました。', 'error');
+            setGenerating(false);
+            setSyncProgress(null);
         }
     };
 
@@ -519,20 +610,74 @@ export default function ShiftManagePage() {
         }
     };
 
-    // ★一括自動展開処理の修正：生成後にクライアント側で進捗バーを出しながら逐次Googleカレンダーへ同期をかける
+    // バックグラウンド同期実行用のノンブロッキング非同期関数
+    const runBackgroundSync = async (unsyncedShifts: { id: string; title: string | null }[]) => {
+        if (!currentOrg) return;
+
+        setSyncProgress({ total: unsyncedShifts.length, current: 0, currentName: '同期を開始しています...' });
+        let currentCount = 0;
+
+        // 同期進行中にユーザーがタブを閉じる/更新するのを防止する警告リスナー [2]
+        const preventTabClose = (e: BeforeUnloadEvent) => {
+            e.preventDefault();
+            e.returnValue = 'Googleカレンダーとの同期が進行中です。ページを閉じると一部の予定が未同期のまま中断されますが、よろしいですか？';
+        };
+        window.addEventListener('beforeunload', preventTabClose);
+
+        try {
+            for (const shift of unsyncedShifts) {
+                setSyncProgress({
+                    total: unsyncedShifts.length,
+                    current: currentCount,
+                    currentName: `${shift.title || '予定'}`
+                });
+
+                // 1件ずつ直列でサーバー側の直接同期アクションを呼び出す [2]
+                await syncSingleShift(currentOrg.id, shift.id);
+
+                currentCount++;
+                // APIのアクセス上限（Rate Limit）を回避するために300msの間隔を設ける [2]
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+
+            setSyncProgress(null);
+            showToast('Googleカレンダーへの同期が正常に完了しました！', 'success');
+            
+            // 件数表示をクリアするために最新データを軽くリフレッシュ
+            const { count: finalUnsynced } = await supabase
+                .from('shifts')
+                .select('id', { count: 'exact', head: true })
+                .eq('organization_id', currentOrg.id)
+                .is('google_event_id', null);
+            setUnsyncedCount(finalUnsynced || 0);
+
+        } catch (error) {
+            console.error('Background Sync Error:', error);
+            showToast('バックグラウンドでの同期処理中に一部エラーが発生しました。カレンダー上部の修復ボタン等から再接続してください。', 'warning');
+            setSyncProgress(null);
+        } finally {
+            window.removeEventListener('beforeunload', preventTabClose);
+        }
+    };
+
     const executeGenerate = async () => {
         if (!currentOrg) return;
         setPreviewDialogOpen(false);
         setGenerating(true);
-        
-        // 進捗インジケータを開始
-        setSyncProgress({ total: 0, current: 0, currentName: 'シフトデータを生成中...' });
 
         try {
-            // 1. Googleカレンダー同期を一旦スキップした状態でシフト実体を高速一括生成 (DB挿入のみ)
+            // 1. Googleカレンダー同期を一旦スキップした状態で、シフト実体をDBに一括超高速生成 (DB挿入のみ) [2]
             const res = await generateShiftsForMonth(currentOrg.id, targetMonth);
-            
-            // 2. 新たに作成され、まだカレンダーに連携されていない（google_event_id IS NULL）のシフトを一覧抽出
+
+            // 2. DB生成が完了した時点で、即座にローディングを解除してカレンダー画面を表示！ [2]
+            setGenerating(false);
+            setTabIndex(1);
+            showToast(`${targetMonth}月のシフト ${res.count} 件の生成が完了しました！カレンダーへの同期をバックグラウンドで開始します。`, 'success');
+
+            // すぐにアプリ内カレンダーを最新情報に更新して描画 [2]
+            fetchData(true);
+
+            // 3. 新たに作成され、まだカレンダーに連携されていないシフト（google_event_id IS NULL）を抽出 [2]
             const { data: unsyncedShifts, error: queryError } = await supabase
                 .from('shifts')
                 .select('id, title')
@@ -541,38 +686,33 @@ export default function ShiftManagePage() {
 
             if (queryError) throw queryError;
 
-            // 3. 未同期シフトが存在する場合、進捗状況を細かく更新しながら1件ずつGoogleカレンダーと同期する
+            // 4. 未同期の予定が存在する場合、awaitを付けずに非同期（ノンブロッキング）で同期処理を裏側で走らせる [2]
             if (unsyncedShifts && unsyncedShifts.length > 0) {
-                setSyncProgress({ total: unsyncedShifts.length, current: 0, currentName: 'Googleカレンダーと同期中...' });
-                
-                let currentCount = 0;
-                for (const shift of unsyncedShifts) {
-                    setSyncProgress({
-                        total: unsyncedShifts.length,
-                        current: currentCount,
-                        currentName: `${shift.title || '予定'}`
-                    });
-                    
-                    // 1件ずつサーバー側の直接同期アクションを呼び出す
-                    await syncSingleShift(currentOrg.id, shift.id);
-                    
-                    currentCount++;
-                    // APIのアクセス上限（Rate Limit）を回避するために300msの間隔を設ける
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                }
+                runBackgroundSync(unsyncedShifts);
             }
-
-            // 同期進捗表示をリセット
-            setSyncProgress(null);
-            showToast(`カレンダーに ${res.count} 件一括展開・同期を完了しました。 (微調整済み ${res.skipped} 件を自動保護)`, 'success');
-            fetchData(true);
-            setTabIndex(1);
         } catch (error) {
             console.error(error);
             showToast('自動展開またはカレンダーとの同期に失敗しました', 'error');
-            setSyncProgress(null);
-        } finally {
             setGenerating(false);
+        }
+    };
+
+    // 警告バナーから手動で修復（再同期）を実行する関数
+    const handleRepairFromBanner = async () => {
+        if (!currentOrg) return;
+        setRepairingFromBanner(true);
+        // 修復プログレスも画面で表示するように同期化
+        setSyncProgress({ total: unsyncedCount, current: 0, currentName: '同期修復を開始しています...' });
+        try {
+            const res = await repairUnsyncedShifts(currentOrg.id);
+            showToast(`カレンダー同期を修復しました。（修復されたシフト数: ${res.count} 件）`, 'success');
+            fetchData(true);
+        } catch (e) {
+            console.error(e);
+            showToast('同期修復に失敗しました。接続設定を確認してください。', 'error');
+        } finally {
+            setRepairingFromBanner(false);
+            setSyncProgress(null);
         }
     };
 
@@ -633,6 +773,27 @@ export default function ShiftManagePage() {
                     <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>
                 ) : (
                     <>
+                        {/* ブラウザ閉鎖等による同期未完了シフトを検知した際のリカバリー用修復警告バナー */}
+                        {unsyncedCount > 0 && isAdmin && (
+                            <Alert 
+                                severity="warning" 
+                                action={
+                                    <Button 
+                                        color="warning" 
+                                        size="small" 
+                                        onClick={handleRepairFromBanner}
+                                        disabled={repairingFromBanner}
+                                        startIcon={repairingFromBanner ? <CircularProgress size={14} color="inherit" /> : <BuildIcon />}
+                                    >
+                                        {repairingFromBanner ? '修復中...' : '同期を修復する'}
+                                    </Button>
+                                }
+                                sx={{ mb: 2, borderRadius: 3, boxShadow: 'none', border: '1px solid #ffe0b2' }}
+                            >
+                                Googleカレンダーと同期されていない予定が <strong>{unsyncedCount} 件</strong> あります。前回の自動展開が途中で中断された場合はこちらから同期を再開できます。
+                            </Alert>
+                        )}
+
                         {tabIndex >= 1 && (
                             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={2} spacing={2}>
                                 <Box flexGrow={1} width="100%">
@@ -750,17 +911,24 @@ export default function ShiftManagePage() {
                 )}
             </Box>
 
-            {/* ★Googleカレンダー同期中のプログレス表示UI */}
+            {/* Googleカレンダー同期中のプログレス表示UI */}
             {syncProgress && (
                 <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'white', p: 2.5, borderRadius: 3, boxShadow: 3, zIndex: 9999, border: '1px solid #E3E5E8', minWidth: 280 }}>
                     <Typography variant="body2" fontWeight="bold" gutterBottom>Googleカレンダー同期中...</Typography>
                     <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                         {syncProgress.currentName}
                     </Typography>
-                    <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 3 }} />
-                    <Typography variant="caption" sx={{ mt: 0.5, display: 'block', textAlign: 'right', fontWeight: 'bold' }}>
-                        {syncProgress.current} / {syncProgress.total} 件完了
-                    </Typography>
+                    {/* 件数が複数の場合のみ、パーセンテージ付きの進捗バーにする */}
+                    {syncProgress.total > 1 ? (
+                        <>
+                            <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 3 }} />
+                            <Typography variant="caption" sx={{ mt: 0.5, display: 'block', textAlign: 'right', fontWeight: 'bold' }}>
+                                {syncProgress.current} / {syncProgress.total} 件完了
+                            </Typography>
+                        </>
+                    ) : (
+                        <LinearProgress sx={{ height: 6, borderRadius: 3 }} />
+                    )}
                 </Box>
             )}
 

@@ -13,6 +13,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import BuildIcon from '@mui/icons-material/Build'; 
+import SyncIcon from '@mui/icons-material/Sync'; // ★追加: 同期アイコン
 import FullCalendar from '@fullcalendar/react';
 import { EventInput, EventDropArg } from '@fullcalendar/core';
 import { EventResizeDoneArg } from '@fullcalendar/interaction';
@@ -23,7 +24,7 @@ import {
     getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely,
     ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, updateShiftPattern,
     clearGeneratedShiftsForMonth, generateShiftsForMonth, previewShiftsForMonth, ShiftPatternPayload,
-    syncSingleShift, repairUnsyncedShifts, deleteShiftsDbOnly
+    syncSingleShift, repairUnsyncedShifts, deleteShiftsDbOnly, forceSyncAllShifts // ★追加
 } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { ShiftFormModal, ClientData, StaffData, ShiftData } from '@/components/shifts/ShiftFormModal';
@@ -95,6 +96,9 @@ export default function ShiftManagePage() {
     // 未同期件数を検知・管理するためのstate
     const [unsyncedCount, setUnsyncedCount] = useState<number>(0);
     const [repairingFromBanner, setRepairingFromBanner] = useState(false);
+
+    // ★追加: 強制全件再同期中ステート
+    const [resyncingCal, setResyncingCal] = useState(false);
 
     useEffect(() => {
         const fetchUser = async () => {
@@ -286,7 +290,7 @@ export default function ShiftManagePage() {
                     if (diffDays === 0) {
                         const dateKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
                         const eventObj: PdfCalendarEvent = {
-                            timeStr: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}-${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
+                            timeStr: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}〜${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`,
                             clientName: ev.extendedProps.clientName,
                             staffNames: ev.extendedProps.staffNames,
                             isCancelled: ev.extendedProps.isCancelled,
@@ -417,7 +421,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // ★修正: シフト単発追加・更新時にも同期中パネルを表示
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
         setSyncProgress({ total: 1, current: 0, currentName: shiftId ? 'Googleカレンダーの予定を更新中...' : 'Googleカレンダーへ新規登録中...' });
         try {
@@ -433,7 +436,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // ★修正: キャンセル（お休み）切替時にも同期中パネルを表示
     const handleToggleCancel = async (shiftId: string, isCancel: boolean, reason: string) => {
         setSyncProgress({ total: 1, current: 0, currentName: isCancel ? '予定をお休みに設定＆Google同期中...' : '予定を通常復元＆Google同期中...' });
         try {
@@ -448,7 +450,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // ★修正: シフトの完全削除時にも同期中パネルを表示
     const handleDeleteShift = async (shiftId: string) => {
         setSyncProgress({ total: 1, current: 0, currentName: 'Googleカレンダーから予定を削除中...' });
         try {
@@ -463,7 +464,6 @@ export default function ShiftManagePage() {
         }
     };
 
-    // ★修正: ドラッグ＆ドロップによる時間変更時にも同期中パネルを表示
     const handleEventChange = async (info: EventDropArg | EventResizeDoneArg) => {
         const shiftId = info.event.extendedProps.shiftId;
         const start = info.event.start?.toISOString() || '';
@@ -504,14 +504,13 @@ export default function ShiftManagePage() {
         setClearDialogOpen(true);
     };
 
-    // ★修正: 一括消去時も、カレンダー削除の進行度合い（プログレスバー）を1件ずつリアルタイム表示 [2]
     const executeClearMonthShifts = async () => {
         if (!currentOrg) return;
         setClearDialogOpen(false);
         setGenerating(true);
 
         try {
-            // 1. クリア対象となる予定をフロントエンド側で特定・取得 [2]
+            // 1. クリア対象となる予定をフロントエンド側で特定・取得
             const [year, month] = targetMonth.split('-').map(Number);
             const lastDayNum = new Date(year, month, 0).getDate();
             const pad = (n: number) => String(n).padStart(2, '0');
@@ -537,7 +536,7 @@ export default function ShiftManagePage() {
                 return;
             }
 
-            // 2. カレンダーから安全に直列で1件ずつ同期削除を実行 [2]
+            // 2. カレンダーから安全に直列で1件ずつ同期削除を実行
             setGenerating(false);
             setSyncProgress({ total: targetShifts.length, current: 0, currentName: '一括消去の同期処理を開始中...' });
 
@@ -561,11 +560,11 @@ export default function ShiftManagePage() {
                 await syncSingleShift(currentOrg.id, shift.id, 'delete');
 
                 currentCount++;
-                // APIアクセス制限回避のためのインターバル [2]
+                // APIアクセス制限回避のためのインターバル
                 await new Promise(resolve => setTimeout(resolve, 250));
             }
 
-            // 3. 同期消去がすべて完了した後に、DBから一斉高速消去 [2]
+            // 3. 同期消去がすべて完了した後に、DBから一斉高速消去
             setSyncProgress({ total: targetShifts.length, current: targetShifts.length, currentName: 'DBから一括消去中...' });
             await deleteShiftsDbOnly(shiftIds);
 
@@ -617,7 +616,7 @@ export default function ShiftManagePage() {
         setSyncProgress({ total: unsyncedShifts.length, current: 0, currentName: '同期を開始しています...' });
         let currentCount = 0;
 
-        // 同期進行中にユーザーがタブを閉じる/更新するのを防止する警告リスナー [2]
+        // 同期進行中にユーザーがタブを閉じる/更新するのを防止する警告リスナー
         const preventTabClose = (e: BeforeUnloadEvent) => {
             e.preventDefault();
             e.returnValue = 'Googleカレンダーとの同期が進行中です。ページを閉じると一部の予定が未同期のまま中断されますが、よろしいですか？';
@@ -632,11 +631,11 @@ export default function ShiftManagePage() {
                     currentName: `${shift.title || '予定'}`
                 });
 
-                // 1件ずつ直列でサーバー側の直接同期アクションを呼び出す [2]
+                // 1件ずつ直列でサーバー側の直接同期アクションを呼び出す
                 await syncSingleShift(currentOrg.id, shift.id);
 
                 currentCount++;
-                // APIのアクセス上限（Rate Limit）を回避するために300msの間隔を設ける [2]
+                // APIのアクセス上限（Rate Limit）を回避するために300msの間隔を設ける
                 await new Promise(resolve => setTimeout(resolve, 300));
             }
 
@@ -666,18 +665,18 @@ export default function ShiftManagePage() {
         setGenerating(true);
 
         try {
-            // 1. Googleカレンダー同期を一旦スキップした状態で、シフト実体をDBに一括超高速生成 (DB挿入のみ) [2]
+            // 1. Googleカレンダー同期を一旦スキップした状態で、シフト実体をDBに一括超高速生成 (DB挿入のみ)
             const res = await generateShiftsForMonth(currentOrg.id, targetMonth);
 
-            // 2. DB生成が完了した時点で、即座にローディングを解除してカレンダー画面を表示！ [2]
+            // 2. DB生成が完了した時点で、即座にローディングを解除してカレンダー画面を表示！
             setGenerating(false);
             setTabIndex(1);
             showToast(`${targetMonth}月のシフト ${res.count} 件の生成が完了しました！カレンダーへの同期をバックグラウンドで開始します。`, 'success');
 
-            // すぐにアプリ内カレンダーを最新情報に更新して描画 [2]
+            // すぐにアプリ内カレンダーを最新情報に更新して描画
             fetchData(true);
 
-            // 3. 新たに作成され、まだカレンダーに連携されていないシフト（google_event_id IS NULL）を抽出 [2]
+            // 3. 新たに作成され、まだカレンダーに連携されていないシフト（google_event_id IS NULL）を抽出
             const { data: unsyncedShifts, error: queryError } = await supabase
                 .from('shifts')
                 .select('id, title')
@@ -686,7 +685,7 @@ export default function ShiftManagePage() {
 
             if (queryError) throw queryError;
 
-            // 4. 未同期の予定が存在する場合、awaitを付けずに非同期（ノンブロッキング）で同期処理を裏側で走らせる [2]
+            // 4. 未同期の予定が存在する場合、awaitを付けずに非同期（ノンブロッキング）で同期処理を裏側で走らせる
             if (unsyncedShifts && unsyncedShifts.length > 0) {
                 runBackgroundSync(unsyncedShifts);
             }
@@ -713,6 +712,50 @@ export default function ShiftManagePage() {
         } finally {
             setRepairingFromBanner(false);
             setSyncProgress(null);
+        }
+    };
+
+    // ★追加: フロントエンドのタイムアウトを考慮した安全な全件強制再同期処理
+    const handleForceResyncCalendar = async () => {
+        if (!currentOrg || rawShifts.length === 0) return;
+        if (!confirm(`カレンダーに登録・表示されているすべての予定 (${rawShifts.length} 件) をGoogleカレンダーへ強制的に再同期（最新状態に更新・追加）します。よろしいですか？\n※件数が多い場合は完了まで時間がかかる可能性があります。途中でブラウザを閉じないでください。`)) return;
+
+        setResyncingCal(true);
+        setSyncProgress({ total: rawShifts.length, current: 0, currentName: '同期の準備中...' });
+
+        // 同期中に誤ってタブを閉じるのを防ぐ警告イベント登録
+        const preventTabClose = (e: BeforeUnloadEvent) => {
+            e.preventDefault();
+            e.returnValue = 'Googleカレンダーへの全件強制再同期が進行中です。';
+        };
+        window.addEventListener('beforeunload', preventTabClose);
+
+        try {
+            let successCount = 0;
+            for (const shift of rawShifts) {
+                setSyncProgress({
+                    total: rawShifts.length,
+                    current: successCount,
+                    currentName: `強制同期中: ${shift.title || '予定'}`
+                });
+
+                // Googleカレンダーへ直接強制同期を実施
+                await syncSingleShift(currentOrg.id, shift.id);
+
+                successCount++;
+                // APIのアクセス制限（Rate Limit）を回避するために300msの遅延を挟む
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+
+            showToast(`全件の強制再同期が完了しました。（同期されたシフト数: ${successCount} 件）`, 'success');
+            fetchData(true);
+        } catch (e) {
+            console.error('Force Resync Error:', e);
+            showToast('再同期処理中にエラーが発生しました。カレンダーの連携状態を確認してください。', 'error');
+        } finally {
+            setResyncingCal(false);
+            setSyncProgress(null);
+            window.removeEventListener('beforeunload', preventTabClose);
         }
     };
 
@@ -811,12 +854,25 @@ export default function ShiftManagePage() {
                                     )}
                                 </Box>
                                 <Stack direction="row" spacing={1} sx={{ ml: 'auto' }}>
+                                    {/* ★追加: 管理者用 Googleカレンダー全件強制再同期ボタン */}
+                                    {isAdmin && (
+                                        <Button 
+                                            variant="outlined" 
+                                            color="primary" 
+                                            startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />} 
+                                            onClick={handleForceResyncCalendar} 
+                                            disabled={resyncingCal || pdfGenerating}
+                                            sx={{ bgcolor: 'white' }}
+                                        >
+                                            {resyncingCal ? '再同期中...' : 'Googleカレンダー全件再同期'}
+                                        </Button>
+                                    )}
                                     {tabIndex === 3 && selectedStaffId === 'all' && (
-                                        <Button variant="outlined" color="primary" startIcon={<GridOnIcon />} onClick={handleDownloadMatrixPdf} disabled={pdfGenerating} sx={{ bgcolor: 'white' }}>
+                                        <Button variant="outlined" color="primary" startIcon={<GridOnIcon />} onClick={handleDownloadMatrixPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'white' }}>
                                             {pdfGenerating ? '作成中...' : '全体マトリックスPDF'}
                                         </Button>
                                     )}
-                                    <Button variant="outlined" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleDownloadPdf} disabled={pdfGenerating} sx={{ bgcolor: 'white' }}>
+                                    <Button variant="outlined" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleDownloadPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'white' }}>
                                         {pdfGenerating ? '作成中...' : '表示中の形式でPDF出力'}
                                     </Button>
                                 </Stack>

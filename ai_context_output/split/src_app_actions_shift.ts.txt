@@ -615,3 +615,40 @@ export async function repairUnsyncedShifts(organizationId: string) {
         throw error;
     }
 }
+
+/**
+ * 登録されている全てのシフト（google_event_idの有無に関わらず）を抽出し、Googleカレンダーへ強制的に全件再同期する
+ */
+export async function forceSyncAllShifts(organizationId: string) {
+    try {
+        // google_event_id の有無にかかわらず、全てのシフトを検索
+        const { data: allShifts, error } = await supabaseAdmin
+            .from('shifts')
+            .select('id')
+            .eq('organization_id', organizationId);
+
+        if (error) throw error;
+        if (!allShifts || allShifts.length === 0) {
+            return { success: true, count: 0 };
+        }
+
+        let successCount = 0;
+        for (const shift of allShifts) {
+            try {
+                // 'sync' アクションを実行。既存イベントの更新、または新規作成を強制します
+                await syncToGoogleCalendarDirect(organizationId, shift.id, 'sync');
+                successCount++;
+                
+                // Google APIのアクセス制限（Rate Limit）を回避するために300msの遅延を挟む
+                await new Promise(resolve => setTimeout(resolve, 300));
+            } catch (syncErr) {
+                console.error(`Shift ID ${shift.id} sync failed during force resync:`, syncErr);
+            }
+        }
+
+        return { success: true, count: successCount };
+    } catch (error) {
+        console.error('Force Sync All Shifts Error:', error);
+        throw error;
+    }
+}

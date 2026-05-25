@@ -299,7 +299,7 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
 }
 
 /**
- * 月次で一括展開されたシフトを消去する (※こちらは従来機能の維持。画面からは、より詳細なプログレス付きのフロント直列消去を新たに実行) [2]
+ * 月次で一括展開されたシフトを消去する
  */
 export async function clearGeneratedShiftsForMonth(
     organizationId: string,
@@ -329,16 +329,13 @@ export async function clearGeneratedShiftsForMonth(
 
         const shiftIds = shifts.map(s => s.id);
 
-        for (const shift of shifts) {
-            try {
-                await syncToGoogleCalendarDirect(organizationId, shift.id, 'delete');
-                await new Promise(resolve => setTimeout(resolve, 250));
-            } catch (syncErr) {
-                console.error(`Clear Month Sync Error for Shift ${shift.id}:`, syncErr);
-            }
-        }
+        const deletePromises = shifts.map(shift =>
+            syncToGoogleCalendarDirect(organizationId, shift.id, 'delete')
+                .catch(e => console.error('Clear Month Sync Error:', e))
+        );
+        await Promise.all(deletePromises);
 
-        const { error: deleteError = null } = await supabaseAdmin.from('shifts')
+        const { error: deleteError = null } = await supabaseAdmin.from('shifts') // _deleteError から deleteError に変更
             .delete()
             .in('id', shiftIds);
 
@@ -548,14 +545,11 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
             .in('id', shiftIds);
 
         if (shiftsData) {
-            for (const shift of shiftsData) {
-                try {
-                    await syncToGoogleCalendarDirect(shift.organization_id, shift.id, 'delete');
-                    await new Promise(resolve => setTimeout(resolve, 250));
-                } catch (syncErr) {
-                    console.error(`Bulk Delete Sync Error for Shift ${shift.id}:`, syncErr);
-                }
-            }
+            const deletePromises = shiftsData.map(shift =>
+                syncToGoogleCalendarDirect(shift.organization_id, shift.id, 'delete')
+                    .catch(e => console.error('Bulk Delete Sync Error:', e))
+            );
+            await Promise.all(deletePromises);
         }
 
         const { error } = await supabaseAdmin
@@ -572,25 +566,8 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
 }
 
 /**
- * ★追加: Googleカレンダーの同期を行わず、DBのみから高速に予定を一括物理削除する (フロント直列削除後のDB最終処理用) [2]
- */
-export async function deleteShiftsDbOnly(shiftIds: string[]) {
-    try {
-        const { error } = await supabaseAdmin
-            .from('shifts')
-            .delete()
-            .in('id', shiftIds);
-
-        if (error) throw error;
-        return { success: true };
-    } catch (error) {
-        console.error('Delete Shifts Db Only Error:', error);
-        throw error;
-    }
-}
-
-/**
- * ★修正: 単一の予定をGoogleカレンダーへ強制同期、または強制削除する
+ * 単一のシフトをGoogleカレンダーに直接強制同期または削除する
+ * （第3引数 action に 'sync' または 'delete' を指定。デフォルトは 'sync'）
  */
 export async function syncSingleShift(organizationId: string, shiftId: string, action: 'sync' | 'delete' = 'sync') {
     try {
@@ -636,6 +613,61 @@ export async function repairUnsyncedShifts(organizationId: string) {
         return { success: true, count: successCount };
     } catch (error) {
         console.error('Repair Unsynced Shifts Error:', error);
+        throw error;
+    }
+}
+
+/**
+ * 登録されている全てのシフト（google_event_idの有無に関わらず）を抽出し、Googleカレンダーへ強制的に全件再同期する
+ */
+export async function forceSyncAllShifts(organizationId: string) {
+    try {
+        // google_event_id の有無にかかわらず、全てのシフトを検索
+        const { data: allShifts, error } = await supabaseAdmin
+            .from('shifts')
+            .select('id')
+            .eq('organization_id', organizationId);
+
+        if (error) throw error;
+        if (!allShifts || allShifts.length === 0) {
+            return { success: true, count: 0 };
+        }
+
+        let successCount = 0;
+        for (const shift of allShifts) {
+            try {
+                // 'sync' アクションを実行。既存イベントの更新、または新規作成を強制します
+                await syncToGoogleCalendarDirect(organizationId, shift.id, 'sync');
+                successCount++;
+                
+                // Google APIのアクセス制限（Rate Limit）を回避するために300msの遅延を挟む
+                await new Promise(resolve => setTimeout(resolve, 300));
+            } catch (syncErr) {
+                console.error(`Shift ID ${shift.id} sync failed during force resync:`, syncErr);
+            }
+        }
+
+        return { success: true, count: successCount };
+    } catch (error) {
+        console.error('Force Sync All Shifts Error:', error);
+        throw error;
+    }
+}
+
+/**
+ * Googleカレンダーの同期を伴わず、DBのシフトデータのみを一括削除する（一括消去時のパフォーマンス・エラー防止対策用）
+ */
+export async function deleteShiftsDbOnly(shiftIds: string[]) {
+    try {
+        const { error } = await supabaseAdmin
+            .from('shifts')
+            .delete()
+            .in('id', shiftIds);
+
+        if (error) throw error;
+        return { success: true };
+    } catch (error) {
+        console.error('Delete Shifts DB Only Error:', error);
         throw error;
     }
 }
