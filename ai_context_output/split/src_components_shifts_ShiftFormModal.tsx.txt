@@ -5,25 +5,11 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions,
     Button, TextField, Stack, FormControl, InputLabel,
     Select, MenuItem, Box, Typography, CircularProgress, Chip, OutlinedInput,
-    SelectChangeEvent, IconButton, Tooltip, Divider
+    SelectChangeEvent, IconButton, Tooltip, Divider, Checkbox
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import { ShiftPayload } from '@/app/actions/shift';
-
-export type ClientData = { id: string; name: string };
-export type StaffData = { id: string; name: string };
-
-export type ShiftData = {
-    id: string;
-    client_id: string;
-    title: string | null;
-    start_at: string;
-    end_at: string;
-    status: string;
-    cancel_reason: string | null;
-    shift_staffs: { staff_id: string; }[];
-};
+import { ShiftPayload, ClientData, StaffData, ShiftData } from '@/types';
+import { MenuProps } from '@/constants/ui';
 
 type Props = {
     open: boolean;
@@ -36,10 +22,6 @@ type Props = {
     organizationId: string;
     initialData?: ShiftData | null;
 };
-
-const ITEM_HEIGHT = 48;
-const ITEM_PADDING_TOP = 8;
-const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
 
 export const ShiftFormModal = ({
     open, onClose, onSave, onToggleCancel, onDelete, clients, staffs, organizationId, initialData
@@ -56,7 +38,6 @@ export const ShiftFormModal = ({
         if (open) {
             if (initialData) {
                 setClientId(initialData.client_id || '');
-                // YYYY-MM-DDTHH:mm の形にフォーマットしてdatetime-localに安全に適用
                 const formatDatetime = (isoStr: string) => {
                     if (!isoStr) return '';
                     const d = new Date(isoStr);
@@ -94,7 +75,7 @@ export const ShiftFormModal = ({
                 startAt: new Date(startAt).toISOString(),
                 endAt: new Date(endAt).toISOString(),
                 staffIds: selectedStaffIds,
-                isModified: true // 手動で保存したため「個別調整済み」フラグを立てる
+                isModified: true 
             };
 
             await onSave(payload, initialData?.id);
@@ -155,8 +136,6 @@ export const ShiftFormModal = ({
                 <Typography variant="h6" fontWeight="bold">
                     {initialData ? '単発シフトの編集・詳細' : '新規シフトの追加'}
                 </Typography>
-
-                {/* 誤消去を防ぐため、完全削除（Delete）はヘッダー右端に小さく配置 */}
                 {initialData && (
                     <Tooltip title="この予定を完全に削除（消去）">
                         <IconButton color="error" onClick={handleDelete} disabled={loading} size="small">
@@ -211,6 +190,7 @@ export const ShiftFormModal = ({
                         >
                             {staffs.map(s => (
                                 <MenuItem key={s.id} value={s.id}>
+                                    <Checkbox checked={selectedStaffIds.indexOf(s.id) > -1} size="small" />
                                     <Typography variant="body2" sx={{ fontWeight: selectedStaffIds.includes(s.id) ? 'bold' : 'normal' }}>
                                         {s.name}
                                     </Typography>
@@ -299,9 +279,11 @@ export const ShiftFormModal = ({
                     disabled={loading}
                     sx={{ boxShadow: 'none', px: 3 }}
                 >
-                    {loading ? <CircularProgress size={24} color="inherit" /> : '変更を保存'}
+                    変更を保存
                 </Button>
             </DialogActions>
         </Dialog>
     );
 };
+
+export default ShiftFormModal;

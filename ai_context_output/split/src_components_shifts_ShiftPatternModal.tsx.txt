@@ -7,8 +7,8 @@ import {
     Select, MenuItem, Box, Typography, Checkbox, FormGroup,
     FormControlLabel, CircularProgress, Chip, OutlinedInput, SelectChangeEvent
 } from '@mui/material';
-import { ShiftPatternPayload } from '@/app/actions/shift';
-import { ClientData, StaffData } from './ShiftFormModal';
+import { ClientData, StaffData, ShiftPatternPayload } from '@/types';
+import { MenuProps } from '@/constants/ui';
 
 type Props = {
     open: boolean;
@@ -75,10 +75,6 @@ const WEEKS_OF_MONTH = [
     { label: '第1', value: '1' }, { label: '第2', value: '2' }, { label: '第3', value: '3' },
     { label: '第4', value: '4' }, { label: '第5', value: '5' }
 ];
-
-const ITEM_HEIGHT = 48;
-const ITEM_PADDING_TOP = 8;
-const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
 
 export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, organizationId, initialData }: Props) => {
     const [loading, setLoading] = useState(false);
@@ -294,9 +290,11 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                     disabled={loading}
                     sx={{ boxShadow: 'none', px: 3 }}
                 >
-                    {loading ? <CircularProgress size={24} color="inherit" /> : (initialData ? '設定を保存' : 'ひな形を登録')}
+                    ひな形を登録
                 </Button>
             </DialogActions>
         </Dialog>
     );
 };
+
+export default ShiftPatternModal;

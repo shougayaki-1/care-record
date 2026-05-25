@@ -1,0 +1,21 @@
+// src/proxy.ts
+import { type NextRequest } from 'next/server';
+import { updateSession } from '@/utils/supabase/middleware';
+
+// 関数名を proxy に変更します
+export async function proxy(request: NextRequest) {
+  return await updateSession(request);
+}
+
+export const config = {
+  matcher: [
+    /*
+     * 下記のパスに該当するもの「以外」の、すべてのリクエストパスで実行します。
+     * - _next/static (Next.jsの静的ファイル)
+     * - _next/image (画像最適化用のファイル)
+     * - favicon.ico (ファビコン)
+     * - 各種静的画像ファイル (svg, png, jpg, jpeg, gif, webp)
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
+};

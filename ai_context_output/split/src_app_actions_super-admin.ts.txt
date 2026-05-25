@@ -1,53 +1,111 @@
-// app/actions/super-admin.ts
 'use server';
 
-import { createClient } from '@supabase/supabase-js';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
+import { ActionResponse } from '@/types';
 
-// 管理者権限を持つクライアント（全データにアクセス可能）
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    {
-        auth: {
-            autoRefreshToken: false,
-            persistSession: false
+type OrgRow = {
+    id: string;
+    name: string;
+    created_at: string;
+    profiles: { count: number }[];
+    clients: { count: number }[];
+};
+
+type FormattedOrg = {
+    id: string;
+    name: string;
+    createdAt: string;
+    staffCount: number;
+    clientCount: number;
+};
+
+async function requireSuperAdmin(): Promise<string> {
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+            cookies: {
+                getAll() {
+                    return cookieStore.getAll();
+                },
+                setAll(cookiesToSet) {
+                    try {
+                        cookiesToSet.forEach(({ name, value, options }) =>
+                            cookieStore.set(name, value, options)
+                        );
+                    } catch {
+                        // エラー無視しつつCookieを同期
+                    }
+                },
+            },
         }
+    );
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('認証が必要です。');
+
+    const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+    if (profile?.role !== 'super_admin') {
+        throw new Error('システム管理者（Super Admin）権限が必要です。');
     }
-);
-
-// 全事業所の一覧を取得
-export async function getAllOrganizations() {
-    // 事業所情報と、それに紐づくスタッフ数、利用者数を取得
-    const { data: orgs, error } = await supabaseAdmin
-        .from('organizations')
-        .select(`
-      id,
-      name,
-      created_at,
-      profiles (count),
-      clients (count)
-    `)
-        .order('created_at', { ascending: false });
-
-    if (error) throw new Error(error.message);
-
-    // 整形して返す
-    return orgs.map((org: any) => ({
-        id: org.id,
-        name: org.name,
-        createdAt: org.created_at,
-        staffCount: org.profiles[0]?.count || 0,
-        clientCount: org.clients[0]?.count || 0,
-    }));
+    return user.id;
 }
 
-// 事業所の削除（危険操作）
-export async function deleteOrganization(orgId: string) {
-    const { error } = await supabaseAdmin
-        .from('organizations')
-        .delete()
-        .eq('id', orgId);
+export async function getAllOrganizations(): Promise<ActionResponse<FormattedOrg[]>> {
+    try {
+        await requireSuperAdmin();
 
-    if (error) throw new Error(error.message);
-    return { success: true };
+        const { data, error } = await supabaseAdmin
+            .from('organizations')
+            .select(`
+                id,
+                name,
+                created_at,
+                profiles (count),
+                clients (count)
+            `)
+            .order('created_at', { ascending: false });
+
+        if (error) throw new Error(error.message);
+
+        const orgs = data as unknown as OrgRow[];
+
+        const formatted = orgs.map((org) => ({
+            id: org.id,
+            name: org.name,
+            createdAt: org.created_at,
+            staffCount: org.profiles[0]?.count || 0,
+            clientCount: org.clients[0]?.count || 0,
+        }));
+
+        return { status: 'success', data: formatted };
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { status: 'error', message };
+    }
+}
+
+export async function deleteOrganization(orgId: string): Promise<ActionResponse<{ success: boolean }>> {
+    try {
+        await requireSuperAdmin();
+
+        const { error } = await supabaseAdmin
+            .from('organizations')
+            .delete()
+            .eq('id', orgId);
+
+        if (error) throw new Error(error.message);
+        return { status: 'success', data: { success: true } };
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { status: 'error', message };
+    }
 }

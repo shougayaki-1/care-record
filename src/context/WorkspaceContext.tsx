@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-// useRouterは使用していなかったので削除
+import { useRouter } from 'next/navigation';
 import { CircularProgress, Box } from '@mui/material';
 
 export type OrganizationRole = 'owner' | 'manager' | 'staff';
@@ -20,13 +20,13 @@ type OrgMemberResponse = {
   organizations: {
     id: string;
     name: string;
-  } | null; // Left Join等の可能性を考慮してnull許容
+  } | null;
 };
 
 type WorkspaceContextType = {
   currentOrg: Workspace | null;
   orgList: Workspace[];
-  switchOrg: (orgId: string) => void;
+  switchOrg: (orgId: string) => Promise<void>;
   refreshWorkspace: () => Promise<void>;
   loading: boolean;
 };
@@ -37,16 +37,28 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const [currentOrg, setCurrentOrg] = useState<Workspace | null>(null);
   const [orgList, setOrgList] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
-    // 初回読み込み
-    fetchWorkspaces();
+    // onAuthStateChange に一本化。
+    // INITIAL_SESSION も処理することで、Googleログイン直後のCookie→セッション伝播を確実に受け取る。
+    // （getSession() はlocalStorageを参照するためCookieベースのセッションを取れないケースがある）
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log(`[WorkspaceProvider] Auth event: ${event}, session: ${!!session}`);
 
-    // 認証状態の変化を監視
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      console.log(`[WorkspaceProvider] Auth event: ${event}`);
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        fetchWorkspaces();
+      if (
+        event === 'INITIAL_SESSION' ||
+        event === 'SIGNED_IN' ||
+        event === 'TOKEN_REFRESHED'
+      ) {
+        if (session) {
+          fetchWorkspaces(session.user.id);
+        } else {
+          // INITIAL_SESSION でセッションなし = 未ログイン確定
+          setCurrentOrg(null);
+          setOrgList([]);
+          setLoading(false);
+        }
       } else if (event === 'SIGNED_OUT') {
         setCurrentOrg(null);
         setOrgList([]);
@@ -59,34 +71,27 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
     };
   }, []);
 
-  const fetchWorkspaces = async () => {
+  // user.id を引数で受け取ることで getSession()/getUser() の二重呼び出しを排除
+  const fetchWorkspaces = async (userId: string) => {
     try {
       setLoading(true);
-      // getSessionでセッションの存在を確認（getUserより速く、クライアントサイド向き）
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.user) {
-        console.log('[WorkspaceProvider] No session.');
-        setOrgList([]);
-        setCurrentOrg(null);
-        return;
-      }
+      console.log('[WorkspaceProvider] Fetching for user:', userId);
 
-      const user = session.user;
-      console.log('[WorkspaceProvider] Fetching for user:', user.id);
+      const [membersRes, profileRes] = await Promise.all([
+        supabase
+          .from('organization_members')
+          .select('role, organization_id, organizations (id, name)')
+          .eq('user_id', userId),
+        supabase
+          .from('profiles')
+          .select('last_organization_id')
+          .eq('id', userId)
+          .maybeSingle(),
+      ]);
 
-      const { data, error } = await supabase
-        .from('organization_members')
-        .select(`
-          role,
-          organization_id,
-          organizations (id, name)
-        `)
-        .eq('user_id', user.id);
+      if (membersRes.error) throw membersRes.error;
 
-      if (error) throw error;
-
-      const members = data as unknown as OrgMemberResponse[];
+      const members = membersRes.data as unknown as OrgMemberResponse[];
 
       if (members && members.length > 0) {
         const list: Workspace[] = members
@@ -94,18 +99,12 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
           .map((m) => ({
             id: m.organizations!.id,
             name: m.organizations!.name,
-            role: m.role as OrganizationRole
+            role: m.role as OrganizationRole,
           }));
-        
+
         setOrgList(list);
 
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('last_organization_id')
-          .eq('id', user.id)
-          .single();
-
-        const lastOrgId = profile?.last_organization_id;
+        const lastOrgId = profileRes.data?.last_organization_id;
         const target = list.find(o => o.id === lastOrgId) || list[0];
         setCurrentOrg(target);
       } else {
@@ -127,8 +126,14 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       if (user) {
         await supabase.from('profiles').update({ last_organization_id: orgId }).eq('id', user.id);
       }
-      window.location.href = '/app'; 
+      router.push('/app');
     }
+  };
+
+  // refreshWorkspace は外部から呼べるようにするため、getUser() で userId を取得してから委譲
+  const refreshWorkspace = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) await fetchWorkspaces(user.id);
   };
 
   if (loading) {
@@ -136,7 +141,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   }
 
   return (
-    <WorkspaceContext.Provider value={{ currentOrg, orgList, switchOrg, refreshWorkspace: fetchWorkspaces, loading }}>
+    <WorkspaceContext.Provider value={{ currentOrg, orgList, switchOrg, refreshWorkspace, loading }}>
       {children}
     </WorkspaceContext.Provider>
   );

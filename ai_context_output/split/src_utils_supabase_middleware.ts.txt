@@ -31,9 +31,14 @@ export async function updateSession(request: NextRequest) {
                         },
                     });
 
-                    cookiesToSet.forEach(({ name, value, options }) =>
-                        response.cookies.set(name, value, options),
-                    );
+                    // ★ローカル環境（http://localhost）でのCookie書き込み拒否を回避するための修正
+                    cookiesToSet.forEach(({ name, value, options }) => {
+                        const finalOptions = {
+                            ...options,
+                            secure: process.env.NODE_ENV === 'development' ? false : options.secure,
+                        };
+                        response.cookies.set(name, value, finalOptions);
+                    });
                 },
             },
         }

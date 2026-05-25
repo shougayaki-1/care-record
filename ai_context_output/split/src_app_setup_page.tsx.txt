@@ -1,19 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import {
-    Box, Typography, Paper, TextField, Button, Stack, CircularProgress, Card, CardActionArea, Alert
-} from '@mui/material';
+import { useState, useEffect, Suspense } from 'react';
+import { Box, Paper, CircularProgress, Alert, Typography } from '@mui/material';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
-import BusinessIcon from '@mui/icons-material/Business';
-import GroupAddIcon from '@mui/icons-material/GroupAdd';
-import PersonIcon from '@mui/icons-material/Person';
+
+// 子コンポーネントをインポート
+import { ProfileStep } from './_components/ProfileStep';
+import { ChoiceStep } from './_components/ChoiceStep';
+import { CreateStep } from './_components/CreateStep';
+import { JoinStep } from './_components/JoinStep';
 
 type Step = 'profile' | 'choice' | 'create' | 'join';
 
-export default function SetupPage() {
+function SetupContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const paramInviteCode = searchParams.get('inviteCode');
@@ -44,16 +45,29 @@ export default function SetupPage() {
             setUserId(user.id);
 
             try {
+                // 1. プロファイル情報の取得
                 const { data: profile, error: profileError } = await supabase.from('profiles').select('name').eq('id', user.id).single();
                 
                 if (profileError && profileError.code !== 'PGRST116') {
                     console.error('[SetupPage] Profile fetch error:', profileError);
                 }
 
+                // 2. 所属組織の確認
                 const { data: members } = await supabase.from('organization_members').select('id').eq('user_id', user.id);
                 const isMember = members && members.length > 0;
                 setHasMembership(isMember || false);
 
+                // 3. すでに組織に所属しているユーザーの場合、直接アプリ（/app）へ転送
+                if (isMember) {
+                    console.log('[SetupPage] User is already a member. Autoredirecting to app...');
+                    if (mounted) {
+                        setLoading(false);
+                        router.replace('/app');
+                    }
+                    return;
+                }
+
+                // 4. 新規ユーザーの場合はステップの切り替え
                 if (profile?.name) {
                     setUserName(profile.name);
                     if (paramInviteCode) {
@@ -72,31 +86,37 @@ export default function SetupPage() {
             }
         };
 
+        // 初期マウント時に getUser() を使って安全かつ確実に認証判定を行う
         const initSetup = async () => {
-            console.log('[SetupPage] Checking user session...');
-            const { data: { session } } = await supabase.auth.getSession();
+            console.log('[SetupPage] Checking user session via getUser...');
+            const { data: { user } } = await supabase.auth.getUser();
 
-            if (!session) {
-                console.log('[SetupPage] No initial session, waiting for auth state change...');
-                // ここではまだリダイレクトせず、イベント発火を少し待つ
+            if (!mounted) return;
+
+            if (user) {
+                console.log('[SetupPage] User confirmed via getUser:', user.id);
+                await processUser(user);
             } else {
-                await processUser(session.user);
+                console.log('[SetupPage] No active session. Redirecting to login.');
+                setLoading(false);
+                router.replace('/');
             }
         };
 
+        // 認証状態の変化を監視。初期の不安定な INITIAL_SESSION null は無視する
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            console.log(`[SetupPage] Auth Event: ${event}`);
+            console.log(`[SetupPage] Auth Event: ${event}, Session exists: ${!!session}`);
             
-            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+            if (!mounted) return;
+
+            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
                 if (session) {
                     await processUser(session.user);
-                } else if (event === 'INITIAL_SESSION') {
-                    // ★重要: 初期チェック完了時にセッションがなければ、認証失敗とみなしてログイン画面へ
-                    console.warn('[SetupPage] INITIAL_SESSION received but no session found. Redirecting to login.');
-                    if (mounted) router.replace('/?error=session_missing');
                 }
             } else if (event === 'SIGNED_OUT') {
-                if (mounted) router.replace('/');
+                console.log('[SetupPage] SIGNED_OUT detected. Redirecting to login.');
+                setLoading(false);
+                router.replace('/');
             }
         });
 
@@ -108,9 +128,6 @@ export default function SetupPage() {
         };
     }, [router, paramInviteCode]);
 
-    // ... (以降の関数群、return部分は変更なし。そのまま維持してください) ...
-    // handleSaveProfile, handleCreateOrg, handleJoinOrg, およびJSX部分
-    
     const getErrorMessage = (error: unknown): string => {
         if (error instanceof Error) return error.message;
         if (typeof error === 'object' && error !== null && 'message' in error) {
@@ -232,135 +249,51 @@ export default function SetupPage() {
                 )}
 
                 {step === 'profile' && (
-                    <Stack spacing={3}>
-                        <Box textAlign="center">
-                            <PersonIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-                            <Typography variant="h5" fontWeight="bold">ようこそ！</Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                はじめに、あなたのお名前を教えてください。<br/>
-                                (記録や報告書に表示されます)
-                            </Typography>
-                        </Box>
-                        <TextField 
-                            label="氏名" 
-                            placeholder="例: 山田 太郎" 
-                            fullWidth 
-                            value={userName} 
-                            onChange={(e) => setUserName(e.target.value)} 
-                        />
-                        <Button 
-                            variant="contained" size="large" fullWidth 
-                            onClick={handleSaveProfile} disabled={submitting || !userName.trim()}
-                        >
-                            次へ進む
-                        </Button>
-                    </Stack>
+                    <ProfileStep 
+                        userName={userName}
+                        setUserName={setUserName}
+                        onNext={handleSaveProfile}
+                        submitting={submitting}
+                    />
                 )}
 
                 {step === 'choice' && (
-                    <Stack spacing={3}>
-                        <Box textAlign="center">
-                            <Typography variant="h5" fontWeight="bold">事業所の設定</Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                新しく事業所を立ち上げるか、<br/>既存の事業所に参加するか選んでください。
-                            </Typography>
-                        </Box>
-                        
-                        <Card variant="outlined" sx={{ borderRadius: 2 }}>
-                            <CardActionArea onClick={() => setStep('create')} sx={{ p: 2 }}>
-                                <Stack direction="row" alignItems="center" spacing={2}>
-                                    <Box sx={{ p: 1, bgcolor: '#e3f2fd', borderRadius: '50%', color: 'primary.main' }}>
-                                        <BusinessIcon />
-                                    </Box>
-                                    <Box>
-                                        <Typography fontWeight="bold">新しい事業所を作成する</Typography>
-                                        <Typography variant="caption" color="text.secondary">管理者として新しく登録します</Typography>
-                                    </Box>
-                                </Stack>
-                            </CardActionArea>
-                        </Card>
-
-                        <Card variant="outlined" sx={{ borderRadius: 2 }}>
-                            <CardActionArea onClick={() => setStep('join')} sx={{ p: 2 }}>
-                                <Stack direction="row" alignItems="center" spacing={2}>
-                                    <Box sx={{ p: 1, bgcolor: '#f3e5f5', borderRadius: '50%', color: 'secondary.main' }}>
-                                        <GroupAddIcon />
-                                    </Box>
-                                    <Box>
-                                        <Typography fontWeight="bold">既存の事業所に参加する</Typography>
-                                        <Typography variant="caption" color="text.secondary">招待コードをお持ちの方はこちら</Typography>
-                                    </Box>
-                                </Stack>
-                            </CardActionArea>
-                        </Card>
-
-                        {hasMembership && (
-                            <Button color="inherit" onClick={() => router.push('/app')}>
-                                キャンセルしてアプリに戻る
-                            </Button>
-                        )}
-                    </Stack>
+                    <ChoiceStep 
+                        setStep={setStep}
+                        hasMembership={hasMembership}
+                        onBackToApp={() => router.push('/app')}
+                    />
                 )}
 
                 {step === 'create' && (
-                    <Stack spacing={3}>
-                        <Box textAlign="center">
-                            <BusinessIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-                            <Typography variant="h5" fontWeight="bold">事業所の作成</Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                事業所の名称を入力してください。
-                            </Typography>
-                        </Box>
-                        <TextField 
-                            label="事業所名" 
-                            placeholder="例: ケアサービス東京" 
-                            fullWidth 
-                            value={orgName} 
-                            onChange={(e) => setOrgName(e.target.value)} 
-                        />
-                        <Stack direction="row" spacing={2}>
-                            <Button fullWidth onClick={() => setStep('choice')} disabled={submitting}>戻る</Button>
-                            <Button 
-                                variant="contained" fullWidth size="large" 
-                                onClick={handleCreateOrg} disabled={submitting || !orgName.trim()}
-                            >
-                                {submitting ? '作成中...' : '作成して開始'}
-                            </Button>
-                        </Stack>
-                    </Stack>
+                    <CreateStep 
+                        orgName={orgName}
+                        setOrgName={setOrgName}
+                        onCreate={handleCreateOrg}
+                        onBack={() => setStep('choice')}
+                        submitting={submitting}
+                    />
                 )}
 
                 {step === 'join' && (
-                    <Stack spacing={3}>
-                        <Box textAlign="center">
-                            <GroupAddIcon color="secondary" sx={{ fontSize: 40, mb: 1 }} />
-                            <Typography variant="h5" fontWeight="bold">事業所に参加</Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                管理者から共有された招待コードを入力してください。
-                            </Typography>
-                        </Box>
-                        <TextField 
-                            label="招待コード" 
-                            placeholder="コードを入力" 
-                            fullWidth 
-                            value={inviteCode} 
-                            onChange={(e) => setInviteCode(e.target.value)} 
-                        />
-                        <Stack direction="row" spacing={2}>
-                            <Button fullWidth onClick={() => paramInviteCode ? router.push('/app') : setStep('choice')} disabled={submitting}>
-                                {paramInviteCode ? 'キャンセル' : '戻る'}
-                            </Button>
-                            <Button 
-                                variant="contained" fullWidth size="large" 
-                                onClick={handleJoinOrg} disabled={submitting || !inviteCode.trim()}
-                            >
-                                {submitting ? '参加中...' : '参加する'}
-                            </Button>
-                        </Stack>
-                    </Stack>
+                    <JoinStep 
+                        inviteCode={inviteCode}
+                        setInviteCode={setInviteCode}
+                        onJoin={handleJoinOrg}
+                        onBack={() => paramInviteCode ? router.push('/app') : setStep('choice')}
+                        submitting={submitting}
+                    />
                 )}
 
             </Paper>
         </Box>
+    );
+}
+
+export default function SetupPage() {
+    return (
+        <Suspense fallback={<Box p={5} textAlign="center"><CircularProgress /></Box>}>
+            <SetupContent />
+        </Suspense>
     );
 }

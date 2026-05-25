@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-// useRouterは使用していなかったので削除
+import { useRouter } from 'next/navigation'; // ★修正: スムーズな遷移のため useRouter を追加
 import { CircularProgress, Box } from '@mui/material';
 
 export type OrganizationRole = 'owner' | 'manager' | 'staff';
@@ -20,13 +20,13 @@ type OrgMemberResponse = {
   organizations: {
     id: string;
     name: string;
-  } | null; // Left Join等の可能性を考慮してnull許容
+  } | null;
 };
 
 type WorkspaceContextType = {
   currentOrg: Workspace | null;
   orgList: Workspace[];
-  switchOrg: (orgId: string) => void;
+  switchOrg: (orgId: string) => Promise<void>; // ★修正: 非同期処理を考慮して Promise<void> に変更
   refreshWorkspace: () => Promise<void>;
   loading: boolean;
 };
@@ -37,6 +37,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const [currentOrg, setCurrentOrg] = useState<Workspace | null>(null);
   const [orgList, setOrgList] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
+  const router = useRouter(); // ★useRouter を初期化
 
   useEffect(() => {
     // 初回読み込み
@@ -62,7 +63,6 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const fetchWorkspaces = async () => {
     try {
       setLoading(true);
-      // getSessionでセッションの存在を確認（getUserより速く、クライアントサイド向き）
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session?.user) {
@@ -75,18 +75,22 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       const user = session.user;
       console.log('[WorkspaceProvider] Fetching for user:', user.id);
 
-      const { data, error } = await supabase
-        .from('organization_members')
-        .select(`
-          role,
-          organization_id,
-          organizations (id, name)
-        `)
-        .eq('user_id', user.id);
+      // ★改善: 並行化 (Promise.all) により、データベースのフェッチ往復時間を半分に削減
+      const [membersRes, profileRes] = await Promise.all([
+        supabase
+          .from('organization_members')
+          .select('role, organization_id, organizations (id, name)')
+          .eq('user_id', user.id),
+        supabase
+          .from('profiles')
+          .select('last_organization_id')
+          .eq('id', user.id)
+          .maybeSingle() // .single() によるPGRST116エラーを回避するためmaybeSingleに変更
+      ]);
 
-      if (error) throw error;
+      if (membersRes.error) throw membersRes.error;
 
-      const members = data as unknown as OrgMemberResponse[];
+      const members = membersRes.data as unknown as OrgMemberResponse[];
 
       if (members && members.length > 0) {
         const list: Workspace[] = members
@@ -99,13 +103,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         
         setOrgList(list);
 
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('last_organization_id')
-          .eq('id', user.id)
-          .single();
-
-        const lastOrgId = profile?.last_organization_id;
+        const lastOrgId = profileRes.data?.last_organization_id;
         const target = list.find(o => o.id === lastOrgId) || list[0];
         setCurrentOrg(target);
       } else {
@@ -127,7 +125,9 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       if (user) {
         await supabase.from('profiles').update({ last_organization_id: orgId }).eq('id', user.id);
       }
-      window.location.href = '/app'; 
+      
+      // ★改善: 全画面リロード (window.location.href) を廃止し、Next.jsのSPA遷移へ変更
+      router.push('/app');
     }
   };
 

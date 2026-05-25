@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
     Box, Typography, Paper, Stack, Chip, TextField, Tabs, Tab, Card, CardActionArea, Divider,
-    Grid, IconButton, Tooltip
+    IconButton
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
@@ -12,73 +12,14 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import HistoryIcon from '@mui/icons-material/History';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
 
-type Report = {
-    id: string; start_at: string; status: 'pending' | 'approved' | 'remanded';
-    client_id: string; clients: { name: string; } | null;
-};
-
-// 簡易カレンダーコンポーネント
-const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month: number, events: Report[], onSelect: (report: Report) => void }) => {
-    const firstDay = new Date(year, month, 1).getDay(); // 0: Sun, 1: Mon...
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
-    // カレンダーのマス目作成
-    const days: (number | null)[] = [];
-    for (let i = 0; i < firstDay; i++) days.push(null);
-    for (let i = 1; i <= daysInMonth; i++) days.push(i);
-
-    return (
-        <Grid container spacing={1}>
-            {/* ★修正: Grid item を削除し、xs を size に変更 (MUI v6対応) */}
-            {['日','月','火','水','木','金','土'].map(d => (
-                <Grid size={{ xs: 12/7 }} key={d} textAlign="center" fontWeight="bold" fontSize={12} color="text.secondary" sx={{ py: 1 }}>{d}</Grid>
-            ))}
-            {days.map((d, i) => {
-                const dayEvents = d ? events.filter(e => new Date(e.start_at).getDate() === d) : [];
-                return (
-                    <Grid size={{ xs: 12/7 }} key={i}>
-                        <Box 
-                            sx={{ 
-                                height: 80, border: '1px solid #eee', borderRadius: 1, p: 0.5, 
-                                bgcolor: d ? 'white' : 'transparent',
-                                display: 'flex', flexDirection: 'column'
-                            }}
-                        >
-                            {d && (
-                                <>
-                                    <Typography variant="caption" fontWeight="bold" color={new Date().getDate() === d && year === new Date().getFullYear() && month === new Date().getMonth() ? 'primary' : 'textSecondary'}>
-                                        {d}
-                                    </Typography>
-                                    <Box sx={{ flexGrow: 1, overflowY: 'auto', '::-webkit-scrollbar': {width:0} }}>
-                                        {dayEvents.map(ev => (
-                                            <Tooltip key={ev.id} title={`${new Date(ev.start_at).getHours()}:${String(new Date(ev.start_at).getMinutes()).padStart(2,'0')} ${ev.clients?.name}`}>
-                                                <Box 
-                                                    onClick={() => onSelect(ev)}
-                                                    sx={{ 
-                                                        bgcolor: ev.status === 'approved' ? '#e8f5e9' : (ev.status === 'remanded' ? '#ffebee' : '#fff3e0'), 
-                                                        fontSize: 10, p: 0.2, borderRadius: 0.5, mb: 0.5, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
-                                                        cursor: 'pointer',
-                                                        '&:hover': { filter: 'brightness(0.95)' }
-                                                    }}
-                                                >
-                                                    {ev.clients?.name}
-                                                </Box>
-                                            </Tooltip>
-                                        ))}
-                                    </Box>
-                                </>
-                            )}
-                        </Box>
-                    </Grid>
-                );
-            })}
-        </Grid>
-    );
-};
+// 新規作成した型定義およびサブコンポーネントをインポート
+import { Report } from './types';
+import { HistoryCalendar } from './_components/HistoryCalendar';
 
 export default function HistoryPage() {
     const router = useRouter();
@@ -192,7 +133,8 @@ export default function HistoryPage() {
                             <IconButton onClick={() => handleMonthChange(1)}><ChevronRightIcon /></IconButton>
                         </Box>
                         <Divider sx={{ mb: 2 }} />
-                        <SimpleCalendar 
+                        {/* リファクタリング: カレンダー描画UIを呼び出しに変更 */}
+                        <HistoryCalendar 
                             year={currentMonth.getFullYear()} 
                             month={currentMonth.getMonth()} 
                             events={reports} 

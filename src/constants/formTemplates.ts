@@ -1,14 +1,7 @@
-// src/constants/formTemplates.ts
+import { FormItem } from '@/types';
 
-export type FormItem = {
-  id: string;
-  label: string;
-  type: 'text' | 'number' | 'checkbox' | 'time' | 'select' | 'section' | 'multicheckbox';
-  options?: string;
-  required: boolean;
-  hasDetail?: boolean;
-  [key: string]: unknown; // 柔軟なプロパティ拡張に対応可能にする
-};
+// 他コンポーネントからのインポート互換性を維持するために再エクスポート
+export type { FormItem };
 
 // 1. 身体介護中心テンプレート
 export const PHYSICAL_CARE_TEMPLATE: FormItem[] = [

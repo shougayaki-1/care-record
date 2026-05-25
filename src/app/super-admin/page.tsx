@@ -1,4 +1,3 @@
-// app/super-admin/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -32,10 +31,14 @@ export default function SuperAdminDashboard() {
         setLoading(true);
         setError('');
         try {
-            const data = await getAllOrganizations();
-            setOrgs(data);
-        } catch (error: any) {
-            console.error(error);
+            const res = await getAllOrganizations();
+            if (res.status === 'success') {
+                setOrgs(res.data);
+            } else {
+                setError(res.message);
+            }
+        } catch (err: unknown) {
+            console.error(err);
             setError('データの取得に失敗しました。管理者権限や環境変数を確認してください。');
         } finally {
             setLoading(false);
@@ -46,11 +49,15 @@ export default function SuperAdminDashboard() {
         if (!confirm(`【警告】\n本当に事業所「${name}」を削除しますか？\n\n所属するスタッフ、利用者、記録データなど、全ての関連データが永久に削除されます。この操作は取り消せません。`)) return;
 
         try {
-            await deleteOrganization(id);
-            alert('削除しました');
-            fetchData();
-        } catch (error) {
-            console.error(error);
+            const res = await deleteOrganization(id);
+            if (res.status === 'success') {
+                alert('削除しました');
+                fetchData();
+            } else {
+                alert(`削除に失敗しました: ${res.message}`);
+            }
+        } catch (err: unknown) {
+            console.error(err);
             alert('削除に失敗しました');
         }
     };

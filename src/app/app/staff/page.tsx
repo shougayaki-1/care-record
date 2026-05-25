@@ -3,8 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { 
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Stack, 
-  IconButton, Tooltip, CircularProgress, Select, MenuItem, FormControl, InputLabel
+  Button, Stack, IconButton, Tooltip, CircularProgress
 } from '@mui/material';
 import BadgeIcon from '@mui/icons-material/Badge';
 import AddIcon from '@mui/icons-material/Add';
@@ -15,6 +14,9 @@ import LinkIcon from '@mui/icons-material/Link';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
+
+// 新規作成したモーダルをインポート
+import { StaffFormModal } from './_components/StaffFormModal';
 
 type StaffData = { id: string; name: string; user_id: string | null; profiles?: { name: string } | null; };
 type AccountData = { id: string; name: string; };
@@ -36,7 +38,6 @@ export default function StaffPage() {
     if (!currentOrg) return;
     setIsFetching(true);
     try {
-      // 1. スタッフ一覧の取得
       const { data: staffsData, error: staffsError } = await supabase
         .from('staffs')
         .select(`id, name, user_id, profiles(name)`)
@@ -46,7 +47,6 @@ export default function StaffPage() {
       if (staffsError) throw staffsError;
       setStaffList((staffsData as unknown as StaffData[]) || []);
 
-      // 2. メンバーのアカウント一覧を安全に取得 (2段階クエリ)
       const { data: membersData } = await supabase
         .from('organization_members')
         .select('user_id')
@@ -77,19 +77,18 @@ export default function StaffPage() {
 
   useEffect(() => { if (!wsLoading && currentOrg) fetchData(); }, [wsLoading, currentOrg, fetchData]);
 
-  const handleSave = async () => {
-    if (!currentOrg || !staffName.trim()) return;
-    const finalUserId = linkedUserId === 'none' ? null : linkedUserId;
+  const handleSave = async (nameInput: string, linkedUserIdInput: string) => {
+    if (!currentOrg || !nameInput.trim()) return;
+    const finalUserId = linkedUserIdInput === 'none' ? null : linkedUserIdInput;
 
     try {
         if (editId) {
-            await supabase.from('staffs').update({ name: staffName.trim(), user_id: finalUserId }).eq('id', editId);
+            await supabase.from('staffs').update({ name: nameInput.trim(), user_id: finalUserId }).eq('id', editId);
             showToast('更新しました');
         } else {
-            await supabase.from('staffs').insert({ organization_id: currentOrg.id, name: staffName.trim(), user_id: finalUserId });
+            await supabase.from('staffs').insert({ organization_id: currentOrg.id, name: nameInput.trim(), user_id: finalUserId });
             showToast('追加しました');
         }
-        setModalOpen(false);
         fetchData();
     } catch (e) { console.error(e); showToast('保存に失敗しました', 'error'); }
   };
@@ -138,7 +137,6 @@ export default function StaffPage() {
                             <TableRow><TableCell colSpan={3} align="center" sx={{ py: 4, color: 'text.secondary' }}>登録がありません</TableCell></TableRow>
                         ) : (
                             staffList.map((staff) => {
-                                // プロフィール名も安全に抽出
                                 const profileName = Array.isArray(staff.profiles) ? staff.profiles[0]?.name : staff.profiles?.name;
                                 return (
                                     <TableRow key={staff.id} hover sx={{ height: 60 }}>
@@ -169,30 +167,16 @@ export default function StaffPage() {
         </Box>
       </Box>
 
-      <Dialog open={openModal} onClose={() => setModalOpen(false)} maxWidth="xs" fullWidth>
-          <DialogTitle sx={{ fontWeight: 'bold' }}>{editId ? 'スタッフの編集' : 'スタッフの追加'}</DialogTitle>
-          <DialogContent dividers>
-              <Stack spacing={3} pt={1}>
-                <TextField autoFocus label="スタッフ名 (表示用)" fullWidth size="small" value={staffName} onChange={e => setStaffName(e.target.value)} required />
-                <FormControl fullWidth size="small">
-                    <InputLabel>紐付けるアカウント (任意)</InputLabel>
-                    <Select value={linkedUserId} onChange={(e) => setLinkedUserId(e.target.value as string)} label="紐付けるアカウント (任意)">
-                        <MenuItem value="none"><em>紐付けない (転記・代理入力用)</em></MenuItem>
-                        {accountList.map(acc => (
-                            <MenuItem key={acc.id} value={acc.id}>{acc.name}</MenuItem>
-                        ))}
-                    </Select>
-                </FormControl>
-                <Typography variant="caption" color="text.secondary">
-                    ※システムにログインして自分で記録をつけるヘルパーの場合は、その人の「アカウント」を紐付けてください。事務員が代わりに記録を打ち込むだけのスタッフの場合は「紐付けない」を選択してください。
-                </Typography>
-              </Stack>
-          </DialogContent>
-          <DialogActions sx={{ p: 2 }}>
-              <Button onClick={() => setModalOpen(false)} color="inherit">キャンセル</Button>
-              <Button onClick={handleSave} variant="contained" disabled={!staffName.trim()} sx={{ boxShadow: 'none' }}>保存</Button>
-          </DialogActions>
-      </Dialog>
+      {/* 抽出したモーダルコンポーネント */}
+      <StaffFormModal 
+          open={openModal}
+          onClose={() => setModalOpen(false)}
+          editId={editId}
+          initialName={staffName}
+          initialLinkedUserId={linkedUserId}
+          accountList={accountList}
+          onSave={handleSave}
+      />
     </Box>
   );
 }
