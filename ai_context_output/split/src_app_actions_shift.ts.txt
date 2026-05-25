@@ -566,11 +566,12 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
 }
 
 /**
- * 単一のシフトをGoogleカレンダーに直接強制同期する (クライアント進捗バー表示用の細切れ同期実行用)
+ * 単一のシフトをGoogleカレンダーに直接強制同期または削除する
+ * （第3引数 action に 'sync' または 'delete' を指定。デフォルトは 'sync'）
  */
-export async function syncSingleShift(organizationId: string, shiftId: string) {
+export async function syncSingleShift(organizationId: string, shiftId: string, action: 'sync' | 'delete' = 'sync') {
     try {
-        await syncToGoogleCalendarDirect(organizationId, shiftId, 'sync');
+        await syncToGoogleCalendarDirect(organizationId, shiftId, action);
         return { success: true };
     } catch (error) {
         console.error('Sync Single Shift Action Error:', error);
@@ -649,6 +650,24 @@ export async function forceSyncAllShifts(organizationId: string) {
         return { success: true, count: successCount };
     } catch (error) {
         console.error('Force Sync All Shifts Error:', error);
+        throw error;
+    }
+}
+
+/**
+ * Googleカレンダーの同期を伴わず、DBのシフトデータのみを一括削除する（一括消去時のパフォーマンス・エラー防止対策用）
+ */
+export async function deleteShiftsDbOnly(shiftIds: string[]) {
+    try {
+        const { error } = await supabaseAdmin
+            .from('shifts')
+            .delete()
+            .in('id', shiftIds);
+
+        if (error) throw error;
+        return { success: true };
+    } catch (error) {
+        console.error('Delete Shifts DB Only Error:', error);
         throw error;
     }
 }
