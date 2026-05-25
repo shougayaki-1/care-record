@@ -57,6 +57,13 @@ function buildJstIsoString(year: number, month: number, day: number, timeStr: st
 }
 
 /**
+ * タイムゾーンの影響を受けずにローカル時間を正しく扱うための Floating 時間 Date
+ */
+function buildFloatingDate(year: number, month: number, day: number, hour: number, minute: number): Date {
+    return new Date(Date.UTC(year, month - 1, day, hour, minute));
+}
+
+/**
  * Googleカレンダーへの同期処理
  */
 async function syncToGoogleCalendarDirect(organizationId: string, shiftId: string, action: 'sync' | 'delete') {
@@ -172,7 +179,6 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
         if (payload.status !== undefined) updateData.status = payload.status;
         if (payload.cancelReason !== undefined) updateData.cancel_reason = payload.cancelReason;
 
-        // ユーザーが手動で編集・保存した場合は is_modified: true とする
         updateData.is_modified = payload.isModified ?? true;
 
         if (Object.keys(updateData).length > 0) {
@@ -204,7 +210,7 @@ export async function updateShiftTimeOnly(shiftId: string, startAt: string, endA
             start_at: startAt,
             end_at: endAt,
             updated_at: new Date().toISOString(),
-            is_modified: true // ドラッグ＆ドロップによる編集も保護対象にする
+            is_modified: true
         }).eq('id', shiftId);
 
         const { data } = await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single();
@@ -304,13 +310,17 @@ export async function clearGeneratedShiftsForMonth(
     const startDateISO = new Date(buildJstIsoString(year, month, 1, "00:00")).toISOString();
     const endDateISO = new Date(buildJstIsoString(year, month, lastDayNum, "23:59")).toISOString();
 
+    // 当月末日から開始された泊まり勤務のPart2（翌月1日00:00開始）を消去対象に含めるため、
+    // 翌月1日00:00開始の予定も検索対象に加える
+    const nextMonth1stJst = new Date(year, month, 1);
+    const nextMonth1st0000 = new Date(buildJstIsoString(nextMonth1stJst.getFullYear(), nextMonth1stJst.getMonth() + 1, nextMonth1stJst.getDate(), "00:00")).toISOString();
+
     try {
         let query = supabaseAdmin.from('shifts')
             .select('id')
             .eq('organization_id', organizationId)
             .not('pattern_id', 'is', null)
-            .gte('start_at', startDateISO)
-            .lte('start_at', endDateISO);
+            .or(`and(start_at.gte.${startDateISO},start_at.lte.${endDateISO}),start_at.eq.${nextMonth1st0000}`);
 
         if (unmodifiedOnly) {
             query = query.eq('is_modified', false);
@@ -355,8 +365,9 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
-    const startDateJST = new Date(buildJstIsoString(year, month, 1, "00:00"));
-    const endDateJST = new Date(buildJstIsoString(year, month, lastDayNum, "23:59"));
+    // タイムゾーンによる曜日ズレを完全に防ぐため、JSTのローカル時間をそのまま表すUTC Dateを作成
+    const startDateJST = buildFloatingDate(year, month, 1, 0, 0);
+    const endDateJST = buildFloatingDate(year, month, lastDayNum, 23, 59);
 
     try {
         const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
@@ -370,12 +381,12 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
         const details: any[] = [];
 
         for (const p of patterns) {
-            const dtStartStr = startDateJST.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+            const [sHour, sMin] = p.start_time.split(':').map(Number);
+            const dtStartStr = buildFloatingDate(year, month, 1, sHour, sMin).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
             const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
             const rule = rrulestr(ruleStr);
             const occurrences = rule.between(startDateJST, endDateJST, true);
 
-            const [sHour, sMin] = p.start_time.split(':').map(Number);
             const [eHour, eMin] = p.end_time.split(':').map(Number);
             const isOvernight = eHour < sHour;
 
@@ -415,17 +426,23 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
-    const startDateJST = new Date(buildJstIsoString(year, month, 1, "00:00"));
-    const endDateJST = new Date(buildJstIsoString(year, month, lastDayNum, "23:59"));
+    // タイムゾーンによる曜日ズレを完全に防ぐため、JSTのローカル時間をそのまま表すUTC Dateを作成（Floating時間処理）
+    const startDateJST = buildFloatingDate(year, month, 1, 0, 0);
+    const endDateJST = buildFloatingDate(year, month, lastDayNum, 23, 59);
 
     try {
-        // 1. 対象月・対象事業所にひな形から展開されたシフトを1回で一括全取得 (DBアクセス効率化)
+        // 1. 既存のシフトを取得する際、末日の翌日（翌月1日00:00）に開始されるPart2もカバーするため、取得の上限を翌月2日まで広げる
+        const startSearchISO = new Date(buildJstIsoString(year, month, 1, "00:00")).toISOString();
+        const endSearchDate = new Date(buildJstIsoString(year, month, lastDayNum, "23:59"));
+        endSearchDate.setDate(endSearchDate.getDate() + 2); // 翌月2日の夜まで
+        const endSearchISO = endSearchDate.toISOString();
+
         const { data: existingShifts } = await supabaseAdmin.from('shifts')
             .select('id, pattern_id, start_at, is_modified')
             .eq('organization_id', organizationId)
             .not('pattern_id', 'is', null)
-            .gte('start_at', startDateJST.toISOString())
-            .lte('start_at', endDateJST.toISOString());
+            .gte('start_at', startSearchISO)
+            .lte('start_at', endSearchISO);
 
         // 2. LookupMapの構築。キー: "pattern_id::JST日付文字列", 値: { id, is_modified }
         const existingMap = new Map<string, { id: string, is_modified: boolean }>();
@@ -433,7 +450,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
             // 日本時間の日付部分 YYYY-MM-DD を抽出
             const jstDateStr = new Date(new Date(s.start_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-            // 泊まりのPart2 (翌日00:00開始) かどうかを判定
+            // 泊まりのPart2 (JST 00:00開始) かどうかを判定
             const isPart2 = s.start_at.endsWith('T00:00:00+09:00') || new Date(s.start_at).getUTCHours() === 15; // UTC 15:00 = JST 00:00
             const key = isPart2 ? `${s.pattern_id}::${jstDateStr}::part2` : `${s.pattern_id}::${jstDateStr}`;
 
@@ -454,17 +471,20 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
 
         // 4. 直列判定ループ処理による確実な重複回避
         for (const p of patterns) {
-            const dtStartStr = startDateJST.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+            const [sHour, sMin] = p.start_time.split(':').map(Number);
+            
+            // DTSTART も Floating時間で構築（タイムゾーン・サマータイムズレを100%排除）
+            const dtStartStr = buildFloatingDate(year, month, 1, sHour, sMin).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
             const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
             const rule = rrulestr(ruleStr);
             const occurrences = rule.between(startDateJST, endDateJST, true);
 
             for (const dateJST of occurrences) {
-                const yy = dateJST.getFullYear();
-                const mm = dateJST.getMonth() + 1;
-                const dd = dateJST.getDate();
+                // dateJST は UTC Date だが、その UTC の日時数値がそのまま JST のローカル日時
+                const yy = dateJST.getUTCFullYear();
+                const mm = dateJST.getUTCMonth() + 1;
+                const dd = dateJST.getUTCDate();
 
-                const [sHour, sMin] = p.start_time.split(':').map(Number);
                 const [eHour, eMin] = p.end_time.split(':').map(Number);
 
                 const pad = (n: number) => String(n).padStart(2, '0');
@@ -477,9 +497,9 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                     // --- 泊まり Part 1 (当日開始時刻 ～ 翌日00:00) ---
                     const startAtStr1 = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
 
-                    const nextDay = new Date(dateJST);
-                    nextDay.setDate(nextDay.getDate() + 1);
-                    const endAtStr1 = buildJstIsoString(nextDay.getFullYear(), nextDay.getMonth() + 1, nextDay.getDate(), "00:00");
+                    const nextDay = new Date(Date.UTC(yy, mm - 1, dd));
+                    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+                    const endAtStr1 = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), "00:00");
 
                     const keyPart1 = `${p.id}::${baseJstDateStr}`;
                     const part1Payload = {
@@ -490,7 +510,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                         endAt: new Date(endAtStr1).toISOString(),
                         staffIds: staffIds,
                         status: 'published' as const,
-                        isModified: false // システム自動展開時はfalse
+                        isModified: false
                     };
 
                     const exist1 = existingMap.get(keyPart1);
@@ -499,7 +519,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                             promises.push(updateShift(exist1.id, part1Payload, false));
                             updatedCount++;
                         } else {
-                            skippedCount++; // 現場編集済みのデータはスキップして保護
+                            skippedCount++;
                         }
                     } else {
                         promises.push(createShift({ ...part1Payload, patternId: p.id }, false));
@@ -507,10 +527,10 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                     }
 
                     // --- 泊まり Part 2 (翌日00:00 ～ 翌日終了時刻) ---
-                    const startAtStr2 = buildJstIsoString(nextDay.getFullYear(), nextDay.getMonth() + 1, nextDay.getDate(), "00:00");
-                    const endAtStr2 = buildJstIsoString(nextDay.getFullYear(), nextDay.getMonth() + 1, nextDay.getDate(), `${pad(eHour)}:${pad(eMin)}`);
+                    const startAtStr2 = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), "00:00");
+                    const endAtStr2 = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), `${pad(eHour)}:${pad(eMin)}`);
 
-                    const nextJstDateStr = `${nextDay.getFullYear()}-${pad(nextDay.getMonth() + 1)}-${pad(nextDay.getDate())}`;
+                    const nextJstDateStr = `${nextDay.getUTCFullYear()}-${pad(nextDay.getUTCMonth() + 1)}-${pad(nextDay.getUTCDate())}`;
                     const keyPart2 = `${p.id}::${nextJstDateStr}::part2`;
 
                     const part2Payload = {

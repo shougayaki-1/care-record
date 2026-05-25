@@ -230,13 +230,13 @@ const PdfCalendarSplitMock = () => (
                 <TableRow sx={{ height: 60 }}>
                     <TableCell valign="top" sx={{ borderRight: '1px solid #ccc', p: 0.3 }}>
                         <Box sx={{ bgcolor: '#E6F0FF', p: 0.4, borderRadius: 0.5 }}>
-                            <Typography sx={{ fontSize: 7, fontWeight: 'bold', color: '#2255CC' }}>20:00〜翌</Typography>
+                            <Typography sx={{ fontSize: 7, fontWeight: 'bold', color: '#2255CC' }}>20:00〜00:00</Typography>
                             <Typography sx={{ fontSize: 7, fontWeight: 'bold' }}>山田 太郎 様</Typography>
                         </Box>
                     </TableCell>
                     <TableCell valign="top" sx={{ p: 0.3 }}>
                         <Box sx={{ bgcolor: '#E6F0FF', p: 0.4, borderRadius: 0.5, borderLeft: '2px solid #ff9800' }}>
-                            <Typography sx={{ fontSize: 7, fontWeight: 'bold', color: '#ff9800' }}>〜09:00</Typography>
+                            <Typography sx={{ fontSize: 7, fontWeight: 'bold', color: '#ff9800' }}>00:00〜09:00</Typography>
                             <Typography sx={{ fontSize: 7, fontWeight: 'bold' }}>山田 太郎 様</Typography>
                         </Box>
                     </TableCell>
@@ -327,7 +327,7 @@ export default function ShiftGuideManual() {
                 desc="現場ヘルパーおよび管理者は、統合カレンダー画面から直観的なカレンダービューでスケジュールを一覧確認できます。"
             >
                 <Typography variant="body2" color="text.secondary" mb={3}>
-                    スマホやPCの画面サイズに合わせてレスポンシブに調整され、表示形式（月間・週間・リスト）をタブやボタンで瞬時に切り替えられます。<br />
+                    スマホやPC of の画面サイズに合わせてレスポンシブに調整され、表示形式（月間・週間・リスト）をタブやボタンで瞬時に切り替えられます。<br />
                     予定ブロックをクリックすることで、そのまま「サービス提供記録票」の入力画面へとダイレクトに遷移できます。
                 </Typography>
                 <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: '#f0f2f5', borderRadius: 3, border: '1px solid #e0e0e0', pointerEvents: 'none' }}>
@@ -341,7 +341,7 @@ export default function ShiftGuideManual() {
                 desc="夜勤や宿直など「日を跨ぐシフト」が入っている場合、翌日のカレンダーセルにも自動的に予定が分割マッピングされて印刷・エクスポートされます。"
             >
                 <Typography variant="body2" color="text.secondary" mb={3}>
-                    「表示中の形式でPDF出力」ボタンを押すと、紙面での夜勤帯の確認・把握漏れを防ぐために、開始日の『20:00〜翌』と翌日の『〜09:00』の両方に予定が表示されるカレンダーPDFが自動生成されます。<br />
+                    「表示中の形式でPDF出力」ボタンを押すと、紙面での夜勤帯の確認・把握漏れを防ぐために、開始日の『20:00〜00:00』と翌日の『00:00〜09:00』の両方に予定が表示されるカレンダーPDFが自動生成されます。<br />
                     また、管理者側ではスタッフ全員の横断シフトを一目で把握できる「全体マトリックスPDF」の印刷出力も可能です。
                 </Typography>
                 <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: '#f0f2f5', borderRadius: 3, border: '1px solid #e0e0e0', pointerEvents: 'none' }}>
