@@ -16,22 +16,65 @@ Font.register({
 });
 
 const styles = StyleSheet.create({
-    // ★修正: フッター用の余白を paddingBottom で確保
-    page: { padding: 15, paddingBottom: 30, fontFamily: 'NotoSansJP', fontSize: 6, color: '#333' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+    page: { 
+        padding: 10, 
+        paddingBottom: 20, 
+        fontFamily: 'NotoSansJP', 
+        fontSize: 6.5, 
+        color: '#333' 
+    },
+    header: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        marginBottom: 6 
+    },
     title: { fontSize: 14, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 12 },
     table: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
     row: { flexDirection: 'row' },
     headerRow: { backgroundColor: '#F0F5FF' },
     headerCell: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', textAlign: 'center', paddingVertical: 4, fontWeight: 'bold' },
-    staffCell: { width: 50, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', padding: 2, justifyContent: 'center' },
-    dayCell: { flex: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', padding: 1, textAlign: 'center', minHeight: 30 },
-    shiftText: { fontSize: 4.5, marginBottom: 2, lineHeight: 1.2, textAlign: 'center' },
-    shiftBox: { backgroundColor: '#F0F5FF', padding: 1, marginBottom: 1, borderRadius: 1 },
-    
-    // ★修正: 絶対配置で確実に一番下へ置く
-    footer: { position: 'absolute', bottom: 10, left: 15, right: 15, textAlign: 'right', fontSize: 8, color: '#666', borderTopWidth: 1, borderColor: '#ccc', paddingTop: 5 }
+    staffCell: { 
+        width: 45, 
+        borderRightWidth: 1, 
+        borderBottomWidth: 1, 
+        borderColor: '#ccc', 
+        padding: 2, 
+        justifyContent: 'center' 
+    },
+    dayCell: { 
+        flex: 1, 
+        borderRightWidth: 1, 
+        borderBottomWidth: 1, 
+        borderColor: '#ccc', 
+        padding: 0.5, 
+        textAlign: 'center', 
+        minHeight: 30 
+    },
+    shiftText: { 
+        fontSize: 5.8, 
+        marginBottom: 1, 
+        lineHeight: 0.95,     // 行間を 0.95 まで詰めて、限られたマス内に極力収めます
+        textAlign: 'center' 
+    },
+    shiftBox: { 
+        backgroundColor: '#F0F5FF', 
+        padding: 0.5, 
+        marginBottom: 1, 
+        borderRadius: 1 
+    },
+    footer: { 
+        position: 'absolute', 
+        bottom: 8, 
+        left: 10, 
+        right: 10, 
+        textAlign: 'right', 
+        fontSize: 8, 
+        color: '#666', 
+        borderTopWidth: 1, 
+        borderColor: '#ccc', 
+        paddingTop: 4 
+    }
 });
 
 export type MatrixStaffData = {
@@ -87,7 +130,6 @@ export const ShiftMatrixDocument = ({ title, monthStr, daysInMonth, staffData, o
                     ))}
                 </View>
 
-                {/* ★修正: ページ番号と事業所名を出す（fixedで全ページに出力） */}
                 <Text style={styles.footer} fixed>
                     {orgName}
                 </Text>

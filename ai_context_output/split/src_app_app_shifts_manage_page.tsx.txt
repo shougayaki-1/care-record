@@ -67,7 +67,7 @@ export default function ShiftManagePage() {
     const [currentUserId, setCurrentUserId] = useState<string>('');
     const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
 
-    // 5つの詳細タブ制御 (改善提案の設計思想に準拠)
+    // 5つの詳細タブ制御
     // 0: ひな形パターン, 1: 全体カレンダー, 2: 自分のシフト, 3: スタッフ別, 4: 利用者別
     const [tabIndex, setTabIndex] = useState(1);
 
@@ -281,11 +281,11 @@ export default function ShiftManagePage() {
 
                             let timeDisplay = '';
                             if (d === 0) {
-                                // 跨ぎの開始日
-                                timeDisplay = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}〜翌`;
+                                // 跨ぎの開始日（「20:00〜翌」から「20:00〜00:00」に変更）
+                                timeDisplay = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}〜00:00`;
                             } else if (d === diffDays) {
-                                // 跨ぎの終了日（翌日）
-                                timeDisplay = `〜${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+                                // 跨ぎの終了日（「〜09:00」から「00:00〜09:00」に変更）
+                                timeDisplay = `00:00〜${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
                             } else {
                                 // 2日以上跨ぐ場合の中間日
                                 timeDisplay = `終日`;
