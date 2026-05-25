@@ -1,3 +1,4 @@
+// src/app/auth/callback/route.ts
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
@@ -11,8 +12,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/?error=no_code`);
   }
 
-  // Cookieが確実に紐付けられたレスポンスオブジェクトを先に用意
   const response = NextResponse.redirect(`${origin}${next}`);
+  const isHttp = requestUrl.protocol === 'http:';
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,19 +25,18 @@ export async function GET(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
-            const isLocal = origin.startsWith('http://localhost');
-            const finalOptions = {
+            response.cookies.set(name, value, {
               ...options,
-              secure: !isLocal && options.secure, // ローカル環境ならSecureを強制オフにする
-            };
-            response.cookies.set(name, value, finalOptions);
+              secure: isHttp ? false : options.secure,
+              path: options.path ?? '/',
+              sameSite: options.sameSite ?? 'lax',
+            });
           });
         },
       },
     }
   );
 
-  // 認証コードをセッション情報に交換。この時点で上記の setAll が走りCookieがセットされます
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {

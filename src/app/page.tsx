@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Box, Paper, CircularProgress, Container, Alert } from '@mui/material'; // Alert追加
-import { useRouter, useSearchParams } from 'next/navigation'; // useSearchParams追加
+import { Box, Paper, CircularProgress, Container, Alert } from '@mui/material';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { AuthForm } from '@/components/auth/AuthForm';
 
@@ -10,33 +10,37 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [checking, setChecking] = useState(true);
-  const [debugMsg, setDebugMsg] = useState(''); // デバッグ表示用
 
-  // URLパラメータのエラーを表示
   const errorParam = searchParams.get('error');
   const detailsParam = searchParams.get('details');
+  const nextUrl = searchParams.get('next') || '/app';
 
   useEffect(() => {
-    const checkSession = async () => {
-      console.log('[LoginPage] Checking session...');
-      const { data: { session }, error } = await supabase.auth.getSession();
-      
-      if (error) {
-          console.error('[LoginPage] GetSession Error:', error);
+    let mounted = true;
+
+    // getSession の一発判定ではなく、onAuthStateChange でセッション確定を監視
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+
+      if (
+        (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') &&
+        session
+      ) {
+        router.replace(nextUrl);
+        return;
       }
 
-      if (session) {
-        console.log('[LoginPage] Session found. Redirecting to /app', session.user.id);
-        router.replace('/app');
-      } else {
-        console.log('[LoginPage] No session found.');
+      // INITIAL_SESSION が発火し、かつセッションが未確立であることが確定した場合のみフォームを表示
+      if (event === 'INITIAL_SESSION' && !session) {
         setChecking(false);
-        // デバッグ用にコンソールだけでなく画面にも出す（必要なら）
-        setDebugMsg('No Session Found');
       }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
     };
-    checkSession();
-  }, [router]);
+  }, [router, nextUrl]);
 
   if (checking) {
     return (
@@ -61,10 +65,10 @@ export default function LoginPage() {
       <Container maxWidth="xs">
         {/* エラーがあれば表示 */}
         {(errorParam || detailsParam) && (
-             <Alert severity="error" sx={{ mb: 2 }}>
-                 Login Error: {errorParam} <br/>
-                 {detailsParam}
-             </Alert>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            Login Error: {errorParam} <br/>
+            {detailsParam}
+          </Alert>
         )}
         
         <Paper 
