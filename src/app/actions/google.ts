@@ -2,10 +2,8 @@
 
 import { randomBytes } from 'crypto';
 import { cookies } from 'next/headers';
-import { getGoogleOAuthClient } from '@/utils/googleCalendar';
+import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar';
 import { assertOrgRole } from '@/utils/supabase/auth';
-
-export const OAUTH_STATE_COOKIE = 'g_oauth_state';
 
 export async function getGoogleAuthUrlAction(organizationId: string) {
     // 呼び出し元がこの事業所の owner であることを検証（カレンダー連携は owner 操作）

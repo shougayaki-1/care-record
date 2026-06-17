@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
-import { getGoogleOAuthClient } from '@/utils/googleCalendar';
-import { OAUTH_STATE_COOKIE } from '@/app/actions/google';
+import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar';
 
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
