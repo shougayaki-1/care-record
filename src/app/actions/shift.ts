@@ -1,15 +1,28 @@
 'use server';
 
-import { createClient } from '@supabase/supabase-js';
 import { google, calendar_v3 } from 'googleapis';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 import { rrulestr } from 'rrule';
+import { supabaseAdmin, assertOrgRole, assertResourceOrgRole } from '@/utils/supabase/auth';
 
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-);
+/**
+ * 複数 shiftId が呼び出し元のアクセス可能な事業所に属することを検証する。
+ * 属さない / 存在しない shiftId が混在する場合は例外。
+ */
+async function assertShiftsAccessible(shiftIds: string[]): Promise<void> {
+    if (!shiftIds || shiftIds.length === 0) return;
+    const { data, error } = await supabaseAdmin
+        .from('shifts')
+        .select('id, organization_id')
+        .in('id', shiftIds);
+    if (error) throw error;
+    if ((data?.length || 0) !== shiftIds.length) throw new Error('対象シフトが見つかりません');
+
+    const orgIds = Array.from(new Set((data || []).map(s => s.organization_id)));
+    for (const orgId of orgIds) {
+        await assertOrgRole(orgId);
+    }
+}
 
 export type ShiftPayload = {
     organizationId: string;
@@ -140,7 +153,14 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
     } catch (error) { console.error('Google Calendar Direct Sync Error:', error); }
 }
 
+// 認可チェックを伴う公開アクション
 export async function createShift(payload: ShiftPayload, awaitSync: boolean | 'skip' = true) {
+    await assertOrgRole(payload.organizationId);
+    return createShiftInternal(payload, awaitSync);
+}
+
+// 認可チェックを伴わない内部実装（呼び出し元で必ず先に検証すること）
+async function createShiftInternal(payload: ShiftPayload, awaitSync: boolean | 'skip' = true) {
     try {
         const { data: shift, error: shiftError } = await supabaseAdmin.from('shifts').insert({
             organization_id: payload.organizationId,
@@ -172,7 +192,14 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean | 's
     } catch (error) { console.error(error); throw error; }
 }
 
+// 認可チェックを伴う公開アクション
 export async function updateShift(shiftId: string, payload: Partial<ShiftPayload>, awaitSync: boolean | 'skip' = true) {
+    await assertResourceOrgRole('shifts', shiftId);
+    return updateShiftInternal(shiftId, payload, awaitSync);
+}
+
+// 認可チェックを伴わない内部実装（呼び出し元で必ず先に検証すること）
+async function updateShiftInternal(shiftId: string, payload: Partial<ShiftPayload>, awaitSync: boolean | 'skip' = true) {
     try {
         const updateData: ShiftUpdateData = {};
         if (payload.title !== undefined) updateData.title = payload.title;
@@ -209,6 +236,7 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
 }
 
 export async function updateShiftTimeOnly(shiftId: string, startAt: string, endAt: string) {
+    await assertResourceOrgRole('shifts', shiftId);
     try {
         await supabaseAdmin.from('shifts').update({
             start_at: startAt,
@@ -224,6 +252,7 @@ export async function updateShiftTimeOnly(shiftId: string, startAt: string, endA
 }
 
 export async function toggleCancelShift(shiftId: string, isCancel: boolean, reason: string = '') {
+    await assertResourceOrgRole('shifts', shiftId);
     try {
         const status = isCancel ? 'cancelled' : 'published';
         const cancelReason = isCancel ? reason : null;
@@ -241,6 +270,7 @@ export async function toggleCancelShift(shiftId: string, isCancel: boolean, reas
 }
 
 export async function getShifts(organizationId: string, startDate: string, endDate: string) {
+    await assertOrgRole(organizationId);
     try {
         const { data, error } = await supabaseAdmin.from('shifts').select(`
             *, clients (id, name), shift_staffs (staff_id, staffs (name))
@@ -252,6 +282,7 @@ export async function getShifts(organizationId: string, startDate: string, endDa
 }
 
 export async function getShiftPatterns(organizationId: string) {
+    await assertOrgRole(organizationId);
     const { data, error } = await supabaseAdmin.from('shift_patterns').select(`
         *, clients (id, name), shift_pattern_staffs (staff_id, staffs (name))
     `).eq('organization_id', organizationId);
@@ -260,6 +291,7 @@ export async function getShiftPatterns(organizationId: string) {
 }
 
 export async function createShiftPattern(payload: ShiftPatternPayload) {
+    await assertOrgRole(payload.organizationId, ['owner', 'manager']);
     const { data: pattern, error } = await supabaseAdmin.from('shift_patterns').insert({
         organization_id: payload.organizationId, client_id: payload.clientId, title: payload.title,
         start_time: payload.startTime, end_time: payload.endTime, rrule: payload.rrule
@@ -274,6 +306,7 @@ export async function createShiftPattern(payload: ShiftPatternPayload) {
 }
 
 export async function updateShiftPattern(patternId: string, payload: ShiftPatternPayload) {
+    await assertResourceOrgRole('shift_patterns', patternId, ['owner', 'manager']);
     try {
         const { error } = await supabaseAdmin.from('shift_patterns').update({
             client_id: payload.clientId,
@@ -306,6 +339,7 @@ export async function clearGeneratedShiftsForMonth(
     yearMonth: string,
     unmodifiedOnly: boolean = true
 ) {
+    await assertOrgRole(organizationId, ['owner', 'manager']);
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
@@ -349,6 +383,7 @@ export async function clearGeneratedShiftsForMonth(
 }
 
 export async function deleteShiftPattern(patternId: string) {
+    await assertResourceOrgRole('shift_patterns', patternId, ['owner', 'manager']);
     const { error } = await supabaseAdmin.from('shift_patterns').delete().eq('id', patternId);
     if (error) throw error;
     return { success: true };
@@ -358,6 +393,7 @@ export async function deleteShiftPattern(patternId: string) {
  * ひな形から1ヶ月分のシフトをプレビュー表示用に計算する (DB書き込みは行わない)
  */
 export async function previewShiftsForMonth(organizationId: string, yearMonth: string) {
+    await assertOrgRole(organizationId);
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
@@ -411,6 +447,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
  * ひな形から対象月のシフトを一括生成する
  */
 export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
+    await assertOrgRole(organizationId, ['owner', 'manager']);
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
@@ -492,13 +529,14 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 const existNormal = existingMap.get(keyNormal);
                 if (existNormal) {
                     if (!existNormal.is_modified) {
-                        promises.push(updateShift(existNormal.id, payload, 'skip'));
+                        // org は冒頭で検証済みのため内部実装を直接呼ぶ（多数回の getUser を回避）
+                        promises.push(updateShiftInternal(existNormal.id, payload, 'skip'));
                         updatedCount++;
                     } else {
                         skippedCount++;
                     }
                 } else {
-                    promises.push(createShift({ ...payload, patternId: p.id }, 'skip'));
+                    promises.push(createShiftInternal({ ...payload, patternId: p.id }, 'skip'));
                     createdCount++;
                 }
             }
@@ -513,6 +551,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
 }
 
 export async function deleteShiftCompletely(shiftId: string) {
+    await assertResourceOrgRole('shifts', shiftId);
     try {
         const { data: shiftData } = await supabaseAdmin
             .from('shifts')
@@ -538,6 +577,7 @@ export async function deleteShiftCompletely(shiftId: string) {
 }
 
 export async function deleteShiftsBulk(shiftIds: string[]) {
+    await assertShiftsAccessible(shiftIds);
     try {
         const { data: shiftsData } = await supabaseAdmin
             .from('shifts')
@@ -570,6 +610,7 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
  * （第3引数 action に 'sync' または 'delete' を指定。デフォルトは 'sync'）
  */
 export async function syncSingleShift(organizationId: string, shiftId: string, action: 'sync' | 'delete' = 'sync') {
+    await assertOrgRole(organizationId);
     try {
         await syncToGoogleCalendarDirect(organizationId, shiftId, action);
         return { success: true };
@@ -583,6 +624,7 @@ export async function syncSingleShift(organizationId: string, shiftId: string, a
  * 未同期（google_event_id IS NULL）のシフトを抽出し、Googleカレンダーへ一括再同期する
  */
 export async function repairUnsyncedShifts(organizationId: string) {
+    await assertOrgRole(organizationId, ['owner', 'manager']);
     try {
         // google_event_id が登録されていないシフトを検索
         const { data: unsyncedShifts, error } = await supabaseAdmin
@@ -621,6 +663,7 @@ export async function repairUnsyncedShifts(organizationId: string) {
  * 登録されている全てのシフト（google_event_idの有無に関わらず）を抽出し、Googleカレンダーへ強制的に全件再同期する
  */
 export async function forceSyncAllShifts(organizationId: string) {
+    await assertOrgRole(organizationId, ['owner', 'manager']);
     try {
         // google_event_id の有無にかかわらず、全てのシフトを検索
         const { data: allShifts, error } = await supabaseAdmin
@@ -658,6 +701,7 @@ export async function forceSyncAllShifts(organizationId: string) {
  * Googleカレンダーの同期を伴わず、DBのシフトデータのみを一括削除する（一括消去時のパフォーマンス・エラー防止対策用）
  */
 export async function deleteShiftsDbOnly(shiftIds: string[]) {
+    await assertShiftsAccessible(shiftIds);
     try {
         const { error } = await supabaseAdmin
             .from('shifts')

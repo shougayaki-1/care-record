@@ -1,14 +1,10 @@
 'use server';
 
-import { createClient } from '@supabase/supabase-js';
+import { supabaseAdmin, getAuthedUser } from '@/utils/supabase/auth';
 
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-);
-
-export async function deleteUserAccount(userId: string) {
+export async function deleteUserAccount() {
+    // 退会できるのは本人のみ。対象 userId はセッションから取得する
+    const { id: userId } = await getAuthedUser();
     // Authユーザー削除 (関連するpublicテーブルのデータはカスケード設定またはTriggerで削除される前提)
     // ここではAuth削除のみ行う
     const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);

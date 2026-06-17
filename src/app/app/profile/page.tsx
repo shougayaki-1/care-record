@@ -134,7 +134,7 @@ export default function ProfilePage() {
     const handleDeleteAccount = async () => {
         if (!confirm('本当に退会しますか？\nアカウントと関連データが完全に削除され、復元できません。')) return;
         try {
-            await deleteUserAccount(userId);
+            await deleteUserAccount();
             await supabase.auth.signOut();
             window.location.href = '/';
         } catch(e: unknown) { 
