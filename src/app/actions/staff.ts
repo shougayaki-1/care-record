@@ -1,18 +1,15 @@
 'use server';
 
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-);
+import { supabaseAdmin, assertOrgRole } from '@/utils/supabase/auth';
 
 export async function createStaffDirectly(params: {
     email: string; password: string; name: string;
     organizationId: string; assignedClientIds: string[];
 }) {
     const { email, password, name, organizationId, assignedClientIds } = params;
+
+    // 権限チェック: 呼び出し元がこの事業所の owner/manager であることを検証
+    await assertOrgRole(organizationId, ['owner', 'manager']);
 
     // 1. Authユーザー作成
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({

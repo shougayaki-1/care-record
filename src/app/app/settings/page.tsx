@@ -274,9 +274,7 @@ function SettingsContent() {
     const handleDeleteOrg = async () => {
         if (!currentOrg || confirmInput !== currentOrg.name) return;
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if(!user) return;
-            await deleteOrganization(currentOrg.id, user.id);
+            await deleteOrganization(currentOrg.id);
             showToast('事業所を削除しました');
             window.location.href = '/setup';
         } catch (e: unknown) { 
@@ -289,9 +287,7 @@ function SettingsContent() {
     const handleLeaveOrg = async () => {
         if (!currentOrg) return;
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if(!user) return;
-            await leaveOrganization(currentOrg.id, user.id);
+            await leaveOrganization(currentOrg.id);
             showToast('事業所から脱退しました');
             window.location.href = '/setup';
         } catch (e: unknown) { 

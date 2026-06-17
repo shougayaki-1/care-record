@@ -19,6 +19,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
+import { createInvitation, updateAccountRole, removeAccount } from '@/app/actions/accounts';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -129,13 +130,14 @@ export default function AccountsPage() {
 
   const handleGenerateLink = async () => {
     if (!currentOrg) return;
-    const code = crypto.randomUUID().slice(0, 8);
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from('invitations').insert({ 
-        organization_id: currentOrg.id, code, created_by: user?.id, target_name: newInviteName || null, role: newInviteRole 
-    });
-    setGeneratedLink(`${BASE_URL}/join?code=${code}`);
-    fetchData(); 
+    try {
+        const { code } = await createInvitation(currentOrg.id, { targetName: newInviteName, role: newInviteRole });
+        setGeneratedLink(`${BASE_URL}/join?code=${code}`);
+        fetchData();
+    } catch (e) {
+        console.error(e);
+        showToast(e instanceof Error ? e.message : '招待の発行に失敗しました', 'error');
+    }
   };
 
   const handleShare = async () => {
@@ -181,11 +183,11 @@ export default function AccountsPage() {
               }
           }
 
-          if (selectedAccount.status === 'active') {
-              await supabase.from('organization_members').update({ role: editRole }).eq('organization_id', currentOrg.id).eq('user_id', selectedAccount.id);
-          } else {
-              await supabase.from('invitations').update({ role: editRole }).eq('id', selectedAccount.id);
-          }
+          await updateAccountRole(currentOrg.id, {
+              targetId: selectedAccount.id,
+              status: selectedAccount.status === 'active' ? 'active' : 'invited',
+              newRole: editRole,
+          });
 
           showToast('権限を変更しました');
           setOpenRoleDialog(false);
@@ -223,22 +225,16 @@ export default function AccountsPage() {
       if (!currentOrg || !selectedAccount) return;
 
       try {
-          if (selectedAccount.status === 'active') {
-              // アカウントの削除（organization_membersからの削除）
-              const { error } = await supabase.from('organization_members').delete().eq('organization_id', currentOrg.id).eq('user_id', selectedAccount.id);
-              if (error) throw error;
-              showToast('アカウントを事業所から削除しました');
-          } else {
-              // 招待の取り消し（invitationsからの削除）
-              const { error } = await supabase.from('invitations').delete().eq('id', selectedAccount.id);
-              if (error) throw error;
-              showToast('招待を取り消しました');
-          }
+          await removeAccount(currentOrg.id, {
+              targetId: selectedAccount.id,
+              status: selectedAccount.status === 'active' ? 'active' : 'invited',
+          });
+          showToast(selectedAccount.status === 'active' ? 'アカウントを事業所から削除しました' : '招待を取り消しました');
           setOpenDeleteDialog(false);
           fetchData(); // 一覧を再取得して表示を更新
-      } catch (e) { 
-          console.error(e); 
-          showToast('エラーが発生しました', 'error'); 
+      } catch (e) {
+          console.error(e);
+          showToast(e instanceof Error ? e.message : 'エラーが発生しました', 'error');
           setOpenDeleteDialog(false);
       }
   };

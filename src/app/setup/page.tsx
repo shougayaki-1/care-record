@@ -6,6 +6,7 @@ import {
 } from '@mui/material';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { acceptInvitation } from '@/app/actions/accounts';
 import { User } from '@supabase/supabase-js';
 import BusinessIcon from '@mui/icons-material/Business';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
@@ -162,55 +163,11 @@ export default function SetupPage() {
         if (!inviteCode.trim()) return;
         setSubmitting(true);
         try {
-            const { data: invite, error: inviteError } = await supabase
-                .from('invitations')
-                .select('*')
-                .eq('code', inviteCode)
-                .eq('is_used', false)
-                .single();
-
-            if (inviteError || !invite) {
-                alert('無効な招待コード、または既に使用されています');
-                setSubmitting(false);
-                return;
-            }
-
-            const { data: existingMember } = await supabase
-                .from('organization_members')
-                .select('id')
-                .eq('organization_id', invite.organization_id)
-                .eq('user_id', userId)
-                .maybeSingle();
-
-            if (existingMember) {
-                await supabase.from('profiles').update({ last_organization_id: invite.organization_id }).eq('id', userId);
+            // 招待の検証・メンバー登録・割り当てはサーバ(service role)で安全に処理する
+            const res = await acceptInvitation(inviteCode.trim());
+            if (res.alreadyMember) {
                 alert('すでにこの事業所に参加しています。移動します。');
-                window.location.href = '/app';
-                return;
             }
-
-            const { error: memberError } = await supabase
-                .from('organization_members')
-                .insert({
-                    organization_id: invite.organization_id,
-                    user_id: userId,
-                    role: invite.role
-                });
-
-            if (memberError) throw memberError;
-
-            await supabase.from('invitations').update({ is_used: true }).eq('id', invite.id);
-
-            if (invite.target_client_ids && invite.target_client_ids.length > 0) {
-                const assignments = invite.target_client_ids.map((clientId: string) => ({
-                    helper_id: userId,
-                    client_id: clientId
-                }));
-                await supabase.from('assignments').insert(assignments);
-            }
-
-            await supabase.from('profiles').update({ last_organization_id: invite.organization_id }).eq('id', userId);
-
             window.location.href = '/app';
         } catch (e) {
             console.error('Join Org Error:', e);

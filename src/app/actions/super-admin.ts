@@ -1,22 +1,11 @@
 // app/actions/super-admin.ts
 'use server';
 
-import { createClient } from '@supabase/supabase-js';
-
-// 管理者権限を持つクライアント（全データにアクセス可能）
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    {
-        auth: {
-            autoRefreshToken: false,
-            persistSession: false
-        }
-    }
-);
+import { supabaseAdmin, assertSuperAdmin } from '@/utils/supabase/auth';
 
 // 全事業所の一覧を取得
 export async function getAllOrganizations() {
+    await assertSuperAdmin();
     // 事業所情報と、それに紐づくスタッフ数、利用者数を取得
     const { data: orgs, error } = await supabaseAdmin
         .from('organizations')
@@ -32,7 +21,14 @@ export async function getAllOrganizations() {
     if (error) throw new Error(error.message);
 
     // 整形して返す
-    return orgs.map((org: any) => ({
+    type OrgRow = {
+        id: string;
+        name: string;
+        created_at: string;
+        profiles: { count: number }[];
+        clients: { count: number }[];
+    };
+    return (orgs as OrgRow[]).map((org) => ({
         id: org.id,
         name: org.name,
         createdAt: org.created_at,
@@ -43,6 +39,7 @@ export async function getAllOrganizations() {
 
 // 事業所の削除（危険操作）
 export async function deleteOrganization(orgId: string) {
+    await assertSuperAdmin();
     const { error } = await supabaseAdmin
         .from('organizations')
         .delete()
