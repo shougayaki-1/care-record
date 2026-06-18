@@ -2,14 +2,14 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-    Dialog, DialogTitle, DialogContent, DialogActions,
-    Button, TextField, Stack, FormControl, InputLabel,
+    Stack, FormControl,
     Select, MenuItem, Box, Typography, Checkbox, FormGroup,
-    FormControlLabel, CircularProgress, Chip, OutlinedInput, SelectChangeEvent
-} from '@mui/material';
+    FormControlLabel
+} from '@/components/ui/mui';
 import { ShiftPatternPayload } from '@/app/actions/shift';
 import { ClientData, StaffData } from './ShiftFormModal';
 import { useToast } from '@/components/ui/ToastProvider';
+import { AppButton, AppDialog, DateTimeField, MultiSelectField, SelectField } from '@/components/ui';
 
 type Props = {
     open: boolean;
@@ -76,10 +76,6 @@ const WEEKS_OF_MONTH = [
     { label: '第1', value: '1' }, { label: '第2', value: '2' }, { label: '第3', value: '3' },
     { label: '第4', value: '4' }, { label: '第5', value: '5' }
 ];
-
-const ITEM_HEIGHT = 48;
-const ITEM_PADDING_TOP = 8;
-const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
 
 export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, organizationId, initialData }: Props) => {
     const { showToast } = useToast();
@@ -161,76 +157,55 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
         }
     };
 
-    const handleStaffChange = (event: SelectChangeEvent<typeof selectedStaffIds>) => {
-        const { target: { value } } = event;
-        setSelectedStaffIds(typeof value === 'string' ? value.split(',') : value);
-    };
-
     const toggleArrayItem = (array: string[], setArray: (val: string[]) => void, item: string) => {
         if (array.includes(item)) setArray(array.filter(i => i !== item));
         else setArray([...array, item]);
     };
 
     return (
-        <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth disableEscapeKeyDown>
-            <DialogTitle sx={{ fontWeight: 'bold' }}>
-                {initialData ? '基本パターン（ひな形）の編集' : '基本パターン（ひな形）の登録'}
-            </DialogTitle>
-            <DialogContent dividers>
+        <AppDialog
+            open={open}
+            onClose={onClose}
+            disableEscapeKeyDown
+            loading={loading}
+            title={initialData ? '基本パターン（ひな形）の編集' : '基本パターン（ひな形）の登録'}
+            actions={<><AppButton variant="text" intent="secondary" onClick={onClose} disabled={loading}>閉じる</AppButton><AppButton onClick={handleSave} loading={loading}>{initialData ? '設定を保存' : 'ひな形を登録'}</AppButton></>}
+        >
                 <Stack spacing={3}>
-                    <FormControl fullWidth size="small" required>
-                        <InputLabel>利用者</InputLabel>
-                        <Select value={clientId} onChange={(e) => setClientId(e.target.value)} label="利用者">
-                            {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
-                        </Select>
-                    </FormControl>
+                    <SelectField
+                        required
+                        label="利用者"
+                        value={clientId}
+                        options={clients.map((client) => ({ value: client.id, label: client.name }))}
+                        onChange={setClientId}
+                    />
 
-                    <FormControl fullWidth size="small" required>
-                        <InputLabel>担当スタッフ（複数選択可）</InputLabel>
-                        <Select
-                            multiple
-                            value={selectedStaffIds}
-                            onChange={handleStaffChange}
-                            input={<OutlinedInput label="担当スタッフ（複数選択可）" />}
-                            renderValue={(selected) => (
-                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                    {selected.map((value) => {
-                                        const staff = staffs.find(s => s.id === value);
-                                        return <Chip key={value} label={staff?.name || ''} size="small" />;
-                                    })}
-                                </Box>
-                            )}
-                            MenuProps={MenuProps}
-                        >
-                            {staffs.map(s => (
-                                <MenuItem key={s.id} value={s.id}>
-                                    <Checkbox checked={selectedStaffIds.indexOf(s.id) > -1} size="small" />
-                                    <Typography variant="body2" sx={{ fontWeight: selectedStaffIds.includes(s.id) ? 'bold' : 'normal' }}>
-                                        {s.name}
-                                    </Typography>
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
+                    <MultiSelectField
+                        required
+                        label="担当スタッフ（複数選択可）"
+                        options={staffs}
+                        value={staffs.filter((staff) => selectedStaffIds.includes(staff.id))}
+                        onChange={(selected) => setSelectedStaffIds(selected.map((staff) => staff.id))}
+                        getOptionLabel={(staff) => staff.name}
+                        getOptionValue={(staff) => staff.id}
+                    />
 
                     <Stack direction="row" spacing={2}>
-                        <TextField
+                        <DateTimeField
+                            kind="time"
                             label="開始時間"
-                            type="time"
                             fullWidth
                             size="small"
                             required
-                            InputLabelProps={{ shrink: true }}
                             value={startTime}
                             onChange={(e) => setStartTime(e.target.value)}
                         />
-                        <TextField
+                        <DateTimeField
+                            kind="time"
                             label="終了時間"
-                            type="time"
                             fullWidth
                             size="small"
                             required
-                            InputLabelProps={{ shrink: true }}
                             value={endTime}
                             onChange={(e) => setEndTime(e.target.value)}
                         />
@@ -287,18 +262,6 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                         </Stack>
                     </Box>
                 </Stack>
-            </DialogContent>
-            <DialogActions sx={{ p: 2, px: 3 }}>
-                <Button onClick={onClose} color="inherit" disabled={loading}>閉じる</Button>
-                <Button
-                    variant="contained"
-                    onClick={handleSave}
-                    disabled={loading}
-                    sx={{ boxShadow: 'none', px: 3 }}
-                >
-                    {loading ? <CircularProgress size={24} color="inherit" /> : (initialData ? '設定を保存' : 'ひな形を登録')}
-                </Button>
-            </DialogActions>
-        </Dialog>
+        </AppDialog>
     );
 };

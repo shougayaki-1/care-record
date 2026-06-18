@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Box, Typography, Paper, Stack, Chip } from '@mui/material';
+import { Box, Typography, Paper, Stack, Chip } from '@/components/ui/mui';
 import DescriptionIcon from '@mui/icons-material/Description';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
@@ -35,19 +35,19 @@ export default function ManualPortalPage() {
     ];
 
     return (
-        <Box sx={{ display: 'flex', height: '100vh', bgcolor: '#f4f5f7', overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', height: '100vh', bgcolor: 'background.default', overflow: 'hidden' }}>
 
             {/* --- 左ペイン：目次サイドバー（マニュアル一覧） --- */}
             <Box sx={{
                 width: 320,
-                bgcolor: '#fff',
-                borderRight: '1px solid #e0e0e0',
+                bgcolor: 'background.paper',
+                borderRight: '1px solid', borderColor: 'divider',
                 display: 'flex',
                 flexDirection: 'column',
                 flexShrink: 0,
                 height: '100%'
             }}>
-                <Box sx={{ p: 2.5, borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', gap: 1.5, bgcolor: '#F0F5FF' }}>
+                <Box sx={{ p: 2.5, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1.5, bgcolor: 'background.tint' }}>
                     <MenuBookIcon color="primary" />
                     <Typography variant="h6" fontWeight="bold" color="primary.main">サポートマニュアル</Typography>
                 </Box>
@@ -67,9 +67,10 @@ export default function ManualPortalPage() {
                                         cursor: 'pointer',
                                         borderRadius: 3,
                                         transition: 'all 0.2s',
-                                        border: isSelected ? '2px solid #2255CC' : '1px solid #e0e0e0',
-                                        bgcolor: isSelected ? '#eef2ff' : 'white',
-                                        '&:hover': { bgcolor: isSelected ? '#eef2ff' : '#f8fafc' }
+                                        border: isSelected ? '2px solid' : '1px solid',
+                                        borderColor: isSelected ? 'primary.main' : 'divider',
+                                        bgcolor: isSelected ? 'background.tint' : 'background.paper',
+                                        '&:hover': { bgcolor: isSelected ? 'background.tint' : 'background.subtle' }
                                     }}
                                 >
                                     <Stack direction="row" spacing={1.5} alignItems="center">
@@ -97,14 +98,14 @@ export default function ManualPortalPage() {
                         })}
                     </Stack>
                 </Box>
-                <Box p={2.5} borderTop="1px solid #eee" textAlign="center" bgcolor="#fafafa">
+                <Box p={2.5} borderTop="1px solid" borderColor="divider" textAlign="center" bgcolor="background.subtle">
                     <Typography variant="caption" color="text.secondary">&copy; CareRecord System Manual</Typography>
                 </Box>
             </Box>
 
             {/* --- 右ペイン：選択されたマニュアルコンテンツの表示エリア --- */}
-            <Box sx={{ flexGrow: 1, bgcolor: '#f4f5f7', overflowY: 'auto', p: { xs: 2, md: 5 } }}>
-                <Paper variant="outlined" sx={{ borderRadius: 4, bgcolor: '#fff', p: { xs: 3, md: 6 }, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.02)' }}>
+            <Box sx={{ flexGrow: 1, bgcolor: 'background.default', overflowY: 'auto', p: { xs: 2, md: 5 } }}>
+                <Paper variant="outlined" sx={{ borderRadius: 4, bgcolor: 'background.paper', p: { xs: 3, md: 6 }, border: 'none', boxShadow: 1 }}>
 
                     {/* 選択されたIDに応じて、分離されたコンポーネントを動的にマウント */}
                     {activeManual === 'form-settings' && <FormSettingsManual />}

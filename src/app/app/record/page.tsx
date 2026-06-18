@@ -2,9 +2,9 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { 
-    Box, Typography, Card, CardActionArea, Stack, Avatar, CircularProgress, 
-    IconButton, Chip, Paper
-} from '@mui/material';
+    Box, Typography, Card, CardActionArea, Stack, Avatar,
+    Chip
+} from '@/components/ui/mui';
 import PersonIcon from '@mui/icons-material/Person';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
@@ -95,7 +95,7 @@ export default function RecordSelectPage() {
                                 {drafts.length > 0 && (
                                     <Box sx={{ mt: 1.5, ml: 2, display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1, '&::-webkit-scrollbar': { display: 'none' } }}>
                                         {drafts.map((draft) => (
-                                            <Card key={draft.id} variant="outlined" sx={{ minWidth: 200, flexShrink: 0, borderRadius: 2, bgcolor: '#fff8e1', borderColor: '#ffecb3' }}>
+                                            <Card key={draft.id} variant="outlined" sx={{ minWidth: 200, flexShrink: 0, borderRadius: 2, bgcolor: 'background.warning', borderColor: 'warning.light' }}>
                                                 <CardActionArea onClick={() => router.push(`/app/record/${client.id}?reportId=${draft.id}`)} sx={{ p: 1.5 }}>
                                                     <Stack spacing={0.5}>
                                                         <Box display="flex" alignItems="center" gap={1}>

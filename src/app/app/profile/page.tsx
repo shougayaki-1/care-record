@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import {
     Box, Typography, Paper, TextField, Button, Alert, Stack, Divider,
     Container, Chip, CircularProgress, Avatar, IconButton
-} from '@mui/material';
+} from '@/components/ui/mui';
 import SaveIcon from '@mui/icons-material/Save';
 import LockIcon from '@mui/icons-material/Lock';
 import PersonIcon from '@mui/icons-material/Person';
@@ -245,7 +245,7 @@ export default function ProfilePage() {
                             {saving ? '保存中...' : '設定を保存'}
                         </Button>
 
-                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.main', bgcolor: '#fff5f5' }}>
+                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.main', bgcolor: 'background.danger' }}>
                             <Typography variant="h6" color="error" gutterBottom fontWeight="bold" display="flex" alignItems="center" gap={1}>
                                 <DeleteForeverIcon /> 退会エリア
                             </Typography>

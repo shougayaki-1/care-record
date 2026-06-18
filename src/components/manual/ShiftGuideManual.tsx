@@ -3,17 +3,15 @@
 import React, { ReactNode } from 'react';
 import {
     Box, Typography, Paper, Stack, TextField, Card, CardContent,
-    Switch, FormControlLabel, Checkbox, FormGroup, Alert, Button, Chip,
+    Alert, Button, Chip,
     Table, TableHead, TableBody, TableRow, TableCell, IconButton, List, ListItem, ListItemButton, ListItemIcon, ListItemText
-} from '@mui/material';
+} from '@/components/ui/mui';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import PeopleIcon from '@mui/icons-material/People';
-import BusinessIcon from '@mui/icons-material/Business';
 import EditNoteIcon from '@mui/icons-material/EditNote';
-import HistoryIcon from '@mui/icons-material/History';
 import Avatar from '@mui/material/Avatar';
 import AddIcon from '@mui/icons-material/Add';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -52,20 +50,20 @@ const ShiftManageScreenMock = () => {
         <Box sx={{ display: 'flex', height: 480, border: '1px solid #ddd', borderRadius: 3, overflow: 'hidden', bgcolor: '#f4f5f7', pointerEvents: 'none', userSelect: 'none' }}>
             {/* 1. 左端レール */}
             <Box sx={{ width: 55, bgcolor: '#E3E5E8', display: 'flex', flexDirection: 'column', alignItems: 'center', py: 1.5, gap: 1.5, borderRight: '1px solid #d0d0d0' }}>
-                <Avatar sx={{ bgcolor: '#2255CC', width: 35, height: 35, fontSize: '0.8rem' }}>社</Avatar>
-                <Avatar sx={{ bgcolor: '#fff', color: '#23A559', width: 35, height: 35 }}><AddIcon fontSize="small" /></Avatar>
+                <Avatar sx={{ bgcolor: 'primary.main', width: 35, height: 35, fontSize: '0.8rem' }}>社</Avatar>
+                <Avatar sx={{ bgcolor: 'background.paper', color: '#23A559', width: 35, height: 35 }}><AddIcon fontSize="small" /></Avatar>
             </Box>
 
             {/* 2. サイドバー */}
             <Box sx={{ width: 200, bgcolor: '#F2F3F5', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e0e0e0' }}>
                 <Box p={1.5} borderBottom="1px solid #e0e0e0"><Typography variant="caption" fontWeight="bold" sx={{ fontSize: '0.75rem' }}>一般社団法人ケアワーク</Typography></Box>
                 <Box flexGrow={1} py={0.5}>
-                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#666', fontWeight: 'bold', fontSize: '0.65rem' }}>記録</Typography>
+                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: 'text.secondary', fontWeight: 'bold', fontSize: '0.65rem' }}>記録</Typography>
                     <List dense disablePadding>
                         <ListItem disablePadding><ListItemButton sx={{ py: 0.4 }}><ListItemIcon sx={{ minWidth: 28 }}><EditNoteIcon fontSize="small" /></ListItemIcon><ListItemText primary="記録を作成" primaryTypographyProps={{ fontSize: '0.75rem' }} /></ListItemButton></ListItem>
                     </List>
 
-                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#666', fontWeight: 'bold', display: 'block', mt: 1, fontSize: '0.65rem' }}>シフト</Typography>
+                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: 'text.secondary', fontWeight: 'bold', display: 'block', mt: 1, fontSize: '0.65rem' }}>シフト</Typography>
                     <List dense disablePadding>
                         <Box sx={{ position: 'relative', mx: 0.8 }}>
                             <NumberBadge number={1} />
@@ -78,7 +76,7 @@ const ShiftManageScreenMock = () => {
                         </Box>
                     </List>
 
-                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#666', fontWeight: 'bold', display: 'block', mt: 1, fontSize: '0.65rem' }}>管理</Typography>
+                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: 'text.secondary', fontWeight: 'bold', display: 'block', mt: 1, fontSize: '0.65rem' }}>管理</Typography>
                     <List dense disablePadding>
                         <ListItem disablePadding><ListItemButton sx={{ py: 0.4 }}><ListItemIcon sx={{ minWidth: 28 }}><PeopleIcon fontSize="small" /></ListItemIcon><ListItemText primary="利用者管理" primaryTypographyProps={{ fontSize: '0.75rem' }} /></ListItemButton></ListItem>
                     </List>
@@ -86,25 +84,25 @@ const ShiftManageScreenMock = () => {
             </Box>
 
             {/* 3. メインエリア */}
-            <Box sx={{ flexGrow: 1, bgcolor: '#fff', display: 'flex', flexDirection: 'column' }}>
+            <Box sx={{ flexGrow: 1, bgcolor: 'background.paper', display: 'flex', flexDirection: 'column' }}>
                 <Box sx={{ px: 2, pt: 1.5, borderBottom: '1px solid #eee', bgcolor: 'background.paper' }}>
                     <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>シフト管理・カレンダー</Typography>
 
                     <Box sx={{ display: 'flex', borderBottom: '2px solid #ddd', pb: '1px', gap: 2, position: 'relative' }}>
                         <Typography sx={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'primary.main', borderBottom: '2px solid #2255CC', pb: 1 }}>基本パターン(ひな形)</Typography>
-                        <Typography sx={{ fontSize: '0.75rem', color: '#666', pb: 1 }}>全体カレンダー</Typography>
-                        <Typography sx={{ fontSize: '0.75rem', color: '#666', pb: 1 }}>自分のシフト</Typography>
-                        <Typography sx={{ fontSize: '0.75rem', color: '#666', pb: 1 }}>スタッフ別</Typography>
-                        <Typography sx={{ fontSize: '0.75rem', color: '#666', pb: 1 }}>利用者別</Typography>
+                        <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', pb: 1 }}>全体カレンダー</Typography>
+                        <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', pb: 1 }}>自分のシフト</Typography>
+                        <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', pb: 1 }}>スタッフ別</Typography>
+                        <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', pb: 1 }}>利用者別</Typography>
                     </Box>
                 </Box>
 
                 <Box sx={{ p: 2, bgcolor: '#f9f9f9', flexGrow: 1 }}>
-                    <Box sx={{ position: 'relative', p: 1.5, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: '#F0F5FF', border: '1px solid #D0E0FF' }}>
+                    <Box sx={{ position: 'relative', p: 1.5, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: 'background.tint', border: '1px solid #D0E0FF' }}>
                         <NumberBadge number={2} />
                         <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>ひな形から指定月のカレンダーへシフトを一括展開します。</Typography>
                         <Stack direction="row" spacing={1} alignItems="center">
-                            <TextField type="month" size="small" defaultValue="2025-06" sx={{ bgcolor: 'white', '& .MuiInputBase-input': { fontSize: '0.7rem', py: 0.5 } }} />
+                            <TextField type="month" size="small" defaultValue="2025-06" sx={{ bgcolor: 'background.paper', '& .MuiInputBase-input': { fontSize: '0.7rem', py: 0.5 } }} />
                             <Box sx={{ border: '3px solid #ff1744', borderRadius: 1 }}>
                                 <Button variant="contained" color="secondary" size="small" startIcon={<PlayArrowIcon fontSize="small" />} sx={{ fontSize: '0.7rem', py: 0.2, boxShadow: 'none' }}>一括自動展開</Button>
                             </Box>
@@ -113,7 +111,7 @@ const ShiftManageScreenMock = () => {
 
                     <Paper variant="outlined" sx={{ borderRadius: 2 }}>
                         <Table size="small">
-                            <TableHead sx={{ bgcolor: '#fafafa' }}>
+                            <TableHead sx={{ bgcolor: 'background.subtle' }}>
                                 <TableRow>
                                     <TableCell sx={{ fontSize: '0.7rem', py: 0.5 }}>対象の利用者</TableCell>
                                     <TableCell sx={{ fontSize: '0.7rem', py: 0.5 }}>サイクル</TableCell>
@@ -134,7 +132,7 @@ const ShiftManageScreenMock = () => {
 };
 
 const PatternCardMock = () => (
-    <Card variant="outlined" sx={{ borderRadius: 2, bgcolor: 'white', border: '1px solid #ddd' }}>
+    <Card variant="outlined" sx={{ borderRadius: 2, bgcolor: 'background.paper', border: '1px solid #ddd' }}>
         <Box sx={{ p: 1.5, borderBottom: '1px solid #eee', bgcolor: '#fbfbfb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="subtitle2" fontWeight="bold" fontSize="0.8rem">【ひな形】山田 太郎 様 (毎週日曜・夜勤)</Typography>
             <Chip label="毎週日曜日" size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
@@ -149,8 +147,8 @@ const PatternCardMock = () => (
 );
 
 const PreviewDialogMock = () => (
-    <Paper elevation={3} sx={{ width: '100%', maxWidth: 450, borderRadius: 2, overflow: 'hidden', bgcolor: '#fff', border: '1px solid #ccc', mx: 'auto' }}>
-        <Box sx={{ p: 1.5, px: 2, bgcolor: '#f5f5f5' }}><Typography variant="subtitle2" fontWeight="bold">2025年6月 シフト展開の確認</Typography></Box>
+    <Paper elevation={3} sx={{ width: '100%', maxWidth: 450, borderRadius: 2, overflow: 'hidden', bgcolor: 'background.paper', border: '1px solid #ccc', mx: 'auto' }}>
+        <Box sx={{ p: 1.5, px: 2, bgcolor: 'background.default' }}><Typography variant="subtitle2" fontWeight="bold">2025年6月 シフト展開の確認</Typography></Box>
         <Box sx={{ p: 2 }}>
             <Alert severity="info" sx={{ mb: 1.5, py: 0, fontSize: '0.75rem' }}>既存の未編集シフトは自動更新され、手動調整済みのシフトは保護されます。</Alert>
             <Box p={1.5} bgcolor="#F0F5FF" borderRadius={2} border="1px solid #D0E0FF" mb={1.5}>
@@ -165,7 +163,7 @@ const PreviewDialogMock = () => (
 );
 
 const ShiftFormModalMock = () => (
-    <Paper elevation={3} sx={{ width: '100%', maxWidth: 450, borderRadius: 2, overflow: 'hidden', bgcolor: '#fff', border: '1px solid #ccc', mx: 'auto' }}>
+    <Paper elevation={3} sx={{ width: '100%', maxWidth: 450, borderRadius: 2, overflow: 'hidden', bgcolor: 'background.paper', border: '1px solid #ccc', mx: 'auto' }}>
         <Box sx={{ p: 1.5, px: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee' }}>
             <Typography variant="subtitle2" fontWeight="bold">単発シフトの編集・詳細</Typography>
             <IconButton size="small" color="error"><DeleteIcon fontSize="small" /></IconButton>
@@ -183,10 +181,10 @@ const ShiftFormModalMock = () => (
 );
 
 const CalendarGridMock = () => (
-    <Box sx={{ border: '1px solid #ddd', borderRadius: 2, overflow: 'hidden', bgcolor: 'white', maxWidth: 500, width: '100%', mx: 'auto' }}>
+    <Box sx={{ border: '1px solid #ddd', borderRadius: 2, overflow: 'hidden', bgcolor: 'background.paper', maxWidth: 500, width: '100%', mx: 'auto' }}>
         <Table size="small" sx={{ tableLayout: 'fixed' }}>
             <TableHead>
-                <TableRow sx={{ bgcolor: '#f5f5f5', height: 32 }}>
+                <TableRow sx={{ bgcolor: 'background.default', height: 32 }}>
                     <TableCell align="center" sx={{ fontWeight: 'bold', fontSize: '0.85rem', borderRight: '1px solid #ddd', p: 0.5 }}>日</TableCell>
                     <TableCell align="center" sx={{ fontWeight: 'bold', fontSize: '0.85rem', p: 0.5 }}>月</TableCell>
                 </TableRow>
@@ -215,13 +213,13 @@ const CalendarGridMock = () => (
 );
 
 const PdfCalendarSplitMock = () => (
-    <Box sx={{ border: '2px solid #2255CC', borderRadius: 2, p: 1.5, bgcolor: '#fafafa', maxWidth: 500, width: '100%', mx: 'auto' }}>
+    <Box sx={{ border: '2px solid #2255CC', borderRadius: 2, p: 1.5, bgcolor: 'background.subtle', maxWidth: 500, width: '100%', mx: 'auto' }}>
         <Box display="flex" justifyContent="space-between" mb={0.5} borderBottom="1px solid #ccc" pb={0.5}>
             <Typography variant="caption" color="primary" fontWeight="bold" fontSize="0.7rem">カレンダー型PDF出力レイアウト（日またぎ自動分割表示）</Typography>
         </Box>
         <Table size="small" sx={{ tableLayout: 'fixed', border: '1px solid #ccc' }}>
             <TableHead>
-                <TableRow sx={{ bgcolor: '#F0F5FF', height: 20 }}>
+                <TableRow sx={{ bgcolor: 'background.tint', height: 20 }}>
                     <TableCell align="center" sx={{ fontSize: 8, p: 0.3, borderRight: '1px solid #ccc' }}>26 (日)</TableCell>
                     <TableCell align="center" sx={{ fontSize: 8, p: 0.3 }}>27 (月)</TableCell>
                 </TableRow>
@@ -230,7 +228,7 @@ const PdfCalendarSplitMock = () => (
                 <TableRow sx={{ height: 60 }}>
                     <TableCell valign="top" sx={{ borderRight: '1px solid #ccc', p: 0.3 }}>
                         <Box sx={{ bgcolor: '#E6F0FF', p: 0.4, borderRadius: 0.5 }}>
-                            <Typography sx={{ fontSize: 7, fontWeight: 'bold', color: '#2255CC' }}>20:00〜00:00</Typography>
+                            <Typography sx={{ fontSize: 7, fontWeight: 'bold', color: 'primary.main' }}>20:00〜00:00</Typography>
                             <Typography sx={{ fontSize: 7, fontWeight: 'bold' }}>山田 太郎 様</Typography>
                         </Box>
                     </TableCell>
@@ -274,7 +272,7 @@ export default function ShiftGuideManual() {
                     目次メニューから <span style={{ color: '#ff1744', fontWeight: 'bold' }}>① 「シフト管理」</span> を開くと、統合カレンダー画面が立ち上がります。<br />
                     管理者が今月分のひな形を一括反映させたい場合は、<span style={{ color: '#ff1744', fontWeight: 'bold' }}>② コントロールパネルの「一括自動展開」</span> ボタンをクリックして、展開プレビューを実行します。
                 </Typography>
-                <Box sx={{ p: { xs: 1.5, md: 3 }, bgcolor: '#eef2ff', borderRadius: 3, border: '1px solid #d0d0d0', pointerEvents: 'none', userSelect: 'none' }}>
+                <Box sx={{ p: { xs: 1.5, md: 3 }, bgcolor: 'background.tint', borderRadius: 3, border: '1px solid #d0d0d0', pointerEvents: 'none', userSelect: 'none' }}>
                     <ShiftManageScreenMock />
                 </Box>
             </StepBlock>

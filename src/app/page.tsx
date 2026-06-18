@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Box, Paper, CircularProgress, Container, Alert } from '@mui/material'; // Alert追加
+import { Box, Paper, CircularProgress, Container, Alert } from '@/components/ui/mui'; // Alert追加
 import { useRouter, useSearchParams } from 'next/navigation'; // useSearchParams追加
 import { supabase } from '@/lib/supabase';
 import { AuthForm } from '@/components/auth/AuthForm';
@@ -10,7 +10,6 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [checking, setChecking] = useState(true);
-  const [debugMsg, setDebugMsg] = useState(''); // デバッグ表示用
 
   // URLパラメータのエラーを表示
   const errorParam = searchParams.get('error');
@@ -32,7 +31,6 @@ export default function LoginPage() {
         console.log('[LoginPage] No session found.');
         setChecking(false);
         // デバッグ用にコンソールだけでなく画面にも出す（必要なら）
-        setDebugMsg('No Session Found');
       }
     };
     checkSession();
@@ -40,9 +38,9 @@ export default function LoginPage() {
 
   if (checking) {
     return (
-      <Box height="100vh" display="flex" flexDirection="column" justifyContent="center" alignItems="center" bgcolor="#f8f9fa">
+      <Box height="100vh" display="flex" flexDirection="column" justifyContent="center" alignItems="center" bgcolor="background.default">
         <CircularProgress />
-        <p style={{ marginTop: 10, color: '#666' }}>Checking Session...</p>
+        <p style={{ marginTop: 10, color: 'text.secondary' }}>Checking Session...</p>
       </Box>
     );
   }
@@ -54,7 +52,7 @@ export default function LoginPage() {
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'center', 
-        bgcolor: '#f0f2f5',
+        bgcolor: 'background.default',
         py: 4
       }}
     >
@@ -72,10 +70,10 @@ export default function LoginPage() {
           sx={{ 
             p: { xs: 4, sm: 5 }, 
             borderRadius: 4, 
-            border: '1px solid #e0e0e0', 
-            boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+            border: '1px solid', borderColor: 'divider',
+            boxShadow: 1,
             width: '100%',
-            bgcolor: '#ffffff'
+            bgcolor: 'background.paper'
           }}
         >
           <AuthForm />

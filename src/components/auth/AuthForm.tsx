@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import {
     Box, Button, TextField, Typography, Stack, Alert, CircularProgress, Divider, Tabs, Tab, Fade
-} from '@mui/material';
+} from '@/components/ui/mui';
 import { supabase } from '@/lib/supabase';
 import { useSearchParams } from 'next/navigation';
 
@@ -126,7 +126,7 @@ export const AuthForm = () => {
                 <Typography
                     variant="h4"
                     component="h1"
-                    sx={{ fontFamily: 'var(--font-poppins)', fontWeight: 700, color: '#2255CC', letterSpacing: '-0.5px' }}
+                    sx={{ fontFamily: 'var(--font-poppins)', fontWeight: 700, color: 'primary.main', letterSpacing: '-0.5px' }}
                 >
                     CareRecord
                 </Typography>
@@ -162,7 +162,7 @@ export const AuthForm = () => {
                     )}
 
                     <Stack spacing={1.5} mb={3}>
-                        <Button variant="outlined" startIcon={<GoogleLogo />} onClick={() => handleOAuth('google')} fullWidth sx={{ color: '#3c4043', borderColor: '#dadce0', bgcolor: '#fff', textTransform: 'none', py: 1.2 }}>
+                        <Button variant="outlined" startIcon={<GoogleLogo />} onClick={() => handleOAuth('google')} fullWidth sx={{ color: '#3c4043', borderColor: '#dadce0', bgcolor: 'background.paper', textTransform: 'none', py: 1.2 }}>
                             Google で{isRegisterMode ? '登録' : 'ログイン'}
                         </Button>
                         <Button variant="contained" startIcon={<MicrosoftLogo />} onClick={() => handleOAuth('azure')} fullWidth sx={{ color: '#fff', bgcolor: '#2F2F2F', textTransform: 'none', py: 1.2, '&:hover': { bgcolor: '#1a1a1a' } }}>
@@ -170,7 +170,7 @@ export const AuthForm = () => {
                         </Button>
                     </Stack>
 
-                    <Divider sx={{ mb: 3, fontSize: 12, color: '#666' }}>またはメールアドレス</Divider>
+                    <Divider sx={{ mb: 3, fontSize: 12, color: 'text.secondary' }}>またはメールアドレス</Divider>
 
                     <form onSubmit={handleAuth}>
                         <Stack spacing={2.5}>

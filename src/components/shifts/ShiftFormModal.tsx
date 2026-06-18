@@ -2,16 +2,15 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-    Dialog, DialogTitle, DialogContent, DialogActions,
-    Button, TextField, Stack, FormControl, InputLabel,
-    Select, MenuItem, Box, Typography, CircularProgress, Chip, OutlinedInput,
-    SelectChangeEvent, IconButton, Tooltip, Divider
-} from '@mui/material';
+    Button, Stack,
+    Box, Typography,
+    IconButton, Tooltip, Divider
+} from '@/components/ui/mui';
 import DeleteIcon from '@mui/icons-material/Delete';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { ShiftPayload } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { AppButton, AppDialog, AppTextField, DateTimeField, MultiSelectField, SelectField } from '@/components/ui';
 
 export type ClientData = { id: string; name: string };
 export type StaffData = { id: string; name: string };
@@ -38,10 +37,6 @@ type Props = {
     organizationId: string;
     initialData?: ShiftData | null;
 };
-
-const ITEM_HEIGHT = 48;
-const ITEM_PADDING_TOP = 8;
-const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
 
 export const ShiftFormModal = ({
     open, onClose, onSave, onToggleCancel, onDelete, clients, staffs, organizationId, initialData
@@ -152,29 +147,23 @@ export const ShiftFormModal = ({
         }
     };
 
-    const handleStaffChange = (event: SelectChangeEvent<typeof selectedStaffIds>) => {
-        const { target: { value } } = event;
-        setSelectedStaffIds(typeof value === 'string' ? value.split(',') : value);
-    };
-
     return (
-        <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth disableEscapeKeyDown>
-            <DialogTitle sx={{ fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 2 }}>
-                <Typography variant="h6" fontWeight="bold">
-                    {initialData ? '単発シフトの編集・詳細' : '新規シフトの追加'}
-                </Typography>
-
-                {/* 誤消去を防ぐため、完全削除（Delete）はヘッダー右端に小さく配置 */}
-                {initialData && (
+        <AppDialog
+            open={open}
+            onClose={onClose}
+            disableEscapeKeyDown
+            loading={loading}
+            title={initialData ? '単発シフトの編集・詳細' : '新規シフトの追加'}
+            titleAction={initialData && (
                     <Tooltip title="この予定を完全に削除（消去）">
                         <IconButton color="error" onClick={handleDelete} disabled={loading} size="small">
                             <DeleteIcon />
                         </IconButton>
                     </Tooltip>
                 )}
-            </DialogTitle>
-
-            <DialogContent dividers sx={{ py: 3 }}>
+            contentSx={{ py: 3 }}
+            actions={<><AppButton variant="text" intent="secondary" onClick={onClose} disabled={loading}>閉じる</AppButton><AppButton onClick={handleSave} loading={loading}>変更を保存</AppButton></>}
+        >
                 <Stack spacing={3}>
                     {initialData?.status === 'cancelled' && (
                         <Box p={2} bgcolor="error.light" borderRadius={2} border="1px solid" borderColor="error.light" display="flex" flexDirection="column" gap={0.5}>
@@ -189,62 +178,38 @@ export const ShiftFormModal = ({
                         </Box>
                     )}
 
-                    <FormControl fullWidth size="small" required>
-                        <InputLabel>利用者</InputLabel>
-                        <Select
-                            value={clientId}
-                            onChange={(e) => setClientId(e.target.value as string)}
-                            label="利用者"
-                        >
-                            {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
-                        </Select>
-                    </FormControl>
+                    <SelectField
+                        required
+                        label="利用者"
+                        value={clientId}
+                        options={clients.map((client) => ({ value: client.id, label: client.name }))}
+                        onChange={setClientId}
+                    />
 
-                    <FormControl fullWidth size="small" required>
-                        <InputLabel>担当スタッフ（複数選択可）</InputLabel>
-                        <Select
-                            multiple
-                            value={selectedStaffIds}
-                            onChange={handleStaffChange}
-                            input={<OutlinedInput label="担当スタッフ（複数選択可）" />}
-                            renderValue={(selected) => (
-                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                    {selected.map((value) => {
-                                        const staff = staffs.find(s => s.id === value);
-                                        return <Chip key={value} label={staff?.name || ''} size="small" />;
-                                    })}
-                                </Box>
-                            )}
-                            MenuProps={MenuProps}
-                        >
-                            {staffs.map(s => (
-                                <MenuItem key={s.id} value={s.id}>
-                                    <Typography variant="body2" sx={{ fontWeight: selectedStaffIds.includes(s.id) ? 'bold' : 'normal' }}>
-                                        {s.name}
-                                    </Typography>
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
+                    <MultiSelectField
+                        required
+                        label="担当スタッフ（複数選択可）"
+                        options={staffs}
+                        value={staffs.filter((staff) => selectedStaffIds.includes(staff.id))}
+                        onChange={(selected) => setSelectedStaffIds(selected.map((staff) => staff.id))}
+                        getOptionLabel={(staff) => staff.name}
+                        getOptionValue={(staff) => staff.id}
+                    />
 
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                        <TextField
+                        <DateTimeField
                             label="開始日時"
-                            type="datetime-local"
                             fullWidth
                             size="small"
                             required
-                            InputLabelProps={{ shrink: true }}
                             value={startAt}
                             onChange={(e) => setStartAt(e.target.value)}
                         />
-                        <TextField
+                        <DateTimeField
                             label="終了日時"
-                            type="datetime-local"
                             fullWidth
                             size="small"
                             required
-                            InputLabelProps={{ shrink: true }}
                             value={endAt}
                             onChange={(e) => setEndAt(e.target.value)}
                         />
@@ -273,7 +238,7 @@ export const ShiftFormModal = ({
                                     </Button>
                                 ) : (
                                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                                        <TextField
+                                        <AppTextField
                                             size="small"
                                             fullWidth
                                             placeholder="例：当日体調不良、入院などの理由を入力"
@@ -295,21 +260,6 @@ export const ShiftFormModal = ({
                         </>
                     )}
                 </Stack>
-            </DialogContent>
-
-            <DialogActions sx={{ p: 2, px: 3 }}>
-                <Button onClick={onClose} color="inherit" disabled={loading}>
-                    閉じる
-                </Button>
-                <Button
-                    variant="contained"
-                    onClick={handleSave}
-                    disabled={loading}
-                    sx={{ boxShadow: 'none', px: 3 }}
-                >
-                    {loading ? <CircularProgress size={24} color="inherit" /> : '変更を保存'}
-                </Button>
-            </DialogActions>
-        </Dialog>
+        </AppDialog>
     );
 };

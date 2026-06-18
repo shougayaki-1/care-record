@@ -1,12 +1,12 @@
 'use client';
 
-import { Fragment, ReactNode } from 'react';
+import { ReactNode } from 'react';
 import {
     Box, Typography, Paper, Stack, TextField, MenuItem, IconButton, Card, CardContent,
     Switch, FormControlLabel, Divider, Checkbox, FormGroup, Alert, Button, Tabs, Tab,
     List, ListItem, ListItemButton, ListItemIcon, ListItemText, RadioGroup, Radio,
     Table, TableHead, TableBody, TableRow, TableCell, Chip
-} from '@mui/material';
+} from '@/components/ui/mui';
 
 // Icons
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -15,18 +15,9 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import TitleIcon from '@mui/icons-material/Title';
 import CheckBoxIcon from '@mui/icons-material/CheckBox';
 import CommentIcon from '@mui/icons-material/Comment';
-import AddCircleIcon from '@mui/icons-material/AddCircle';
-import SaveIcon from '@mui/icons-material/Save';
-import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
-import PersonIcon from '@mui/icons-material/Person';
-import ContentPasteIcon from '@mui/icons-material/ContentPaste';
-import DescriptionIcon from '@mui/icons-material/Description';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import HistoryIcon from '@mui/icons-material/History';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import BusinessIcon from '@mui/icons-material/Business';
-import BadgeIcon from '@mui/icons-material/Badge';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import PeopleIcon from '@mui/icons-material/People';
@@ -64,24 +55,24 @@ const NumberBadge = ({ number }: { number: number }) => (
 
 const NavigationScreenMock = () => {
     return (
-        <Box sx={{ display: 'flex', height: 420, border: '1px solid #ddd', borderRadius: 2, overflow: 'hidden', bgcolor: '#f5f5f5', pointerEvents: 'none', userSelect: 'none' }}>
+        <Box sx={{ display: 'flex', height: 420, border: '1px solid #ddd', borderRadius: 2, overflow: 'hidden', bgcolor: 'background.default', pointerEvents: 'none', userSelect: 'none' }}>
             {/* 1. 左端レール */}
             <Box sx={{ width: 55, bgcolor: '#E3E5E8', display: 'flex', flexDirection: 'column', alignItems: 'center', py: 1.5, gap: 1.5, borderRight: '1px solid #d0d0d0' }}>
-                <Avatar sx={{ bgcolor: '#2255CC', width: 35, height: 35, fontSize: '0.8rem' }}>社</Avatar>
-                <Avatar sx={{ bgcolor: '#fff', color: '#23A559', width: 35, height: 35 }}><AddIcon fontSize="small" /></Avatar>
+                <Avatar sx={{ bgcolor: 'primary.main', width: 35, height: 35, fontSize: '0.8rem' }}>社</Avatar>
+                <Avatar sx={{ bgcolor: 'background.paper', color: '#23A559', width: 35, height: 35 }}><AddIcon fontSize="small" /></Avatar>
             </Box>
 
             {/* 2. サイドバー */}
             <Box sx={{ width: 200, bgcolor: '#F2F3F5', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e0e0e0' }}>
                 <Box p={1.5} borderBottom="1px solid #e0e0e0"><Typography variant="caption" fontWeight="bold" sx={{ fontSize: '0.75rem' }}>一般社団法人ケアワーク</Typography></Box>
                 <Box flexGrow={1} py={0.5}>
-                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#666', fontWeight: 'bold', fontSize: '0.65rem' }}>記録</Typography>
+                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: 'text.secondary', fontWeight: 'bold', fontSize: '0.65rem' }}>記録</Typography>
                     <List dense disablePadding>
                         <ListItem disablePadding><ListItemButton sx={{ py: 0.4 }}><ListItemIcon sx={{ minWidth: 28 }}><EditNoteIcon fontSize="small" /></ListItemIcon><ListItemText primary="記録を作成" primaryTypographyProps={{ fontSize: '0.75rem' }} /></ListItemButton></ListItem>
                         <ListItem disablePadding><ListItemButton sx={{ py: 0.4 }}><ListItemIcon sx={{ minWidth: 28 }}><HistoryIcon fontSize="small" /></ListItemIcon><ListItemText primary="自分の履歴" primaryTypographyProps={{ fontSize: '0.75rem' }} /></ListItemButton></ListItem>
                     </List>
 
-                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#666', fontWeight: 'bold', display: 'block', mt: 0.5, fontSize: '0.65rem' }}>管理</Typography>
+                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: 'text.secondary', fontWeight: 'bold', display: 'block', mt: 0.5, fontSize: '0.65rem' }}>管理</Typography>
                     <List dense disablePadding>
                         <ListItem disablePadding><ListItemButton sx={{ py: 0.4 }}><ListItemIcon sx={{ minWidth: 28 }}><BusinessIcon fontSize="small" /></ListItemIcon><ListItemText primary="事業所設定" primaryTypographyProps={{ fontSize: '0.75rem' }} /></ListItemButton></ListItem>
 
@@ -100,7 +91,7 @@ const NavigationScreenMock = () => {
             </Box>
 
             {/* 3. メインエリア */}
-            <Box sx={{ flexGrow: 1, bgcolor: '#fff', display: 'flex', flexDirection: 'column' }}>
+            <Box sx={{ flexGrow: 1, bgcolor: 'background.paper', display: 'flex', flexDirection: 'column' }}>
                 <Box sx={{ height: 48, borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', px: 2 }}>
                     <Stack direction="row" alignItems="center" spacing={1}>
                         <PeopleIcon color="action" fontSize="small" />
@@ -115,7 +106,7 @@ const NavigationScreenMock = () => {
 
                     <Paper variant="outlined" sx={{ borderRadius: 1, overflow: 'hidden' }}>
                         <Table size="small">
-                            <TableHead sx={{ bgcolor: '#f5f5f5' }}>
+                            <TableHead sx={{ bgcolor: 'background.default' }}>
                                 <TableRow>
                                     <TableCell sx={{ fontSize: '0.7rem', py: 0.5 }}>利用者氏名</TableCell>
                                     <TableCell align="right" sx={{ fontSize: '0.7rem', py: 0.5 }}>操作</TableCell>
@@ -132,7 +123,7 @@ const NavigationScreenMock = () => {
                                             <Box sx={{ position: 'relative' }}>
                                                 <NumberBadge number={2} />
                                                 <Box sx={{ border: '3px solid #ff1744', borderRadius: 1, display: 'inline-block' }}>
-                                                    <IconButton size="small" color="primary" sx={{ bgcolor: '#eef2ff', p: 0.3 }}>
+                                                    <IconButton size="small" color="primary" sx={{ bgcolor: 'background.tint', p: 0.3 }}>
                                                         <SettingsIcon fontSize="small" />
                                                     </IconButton>
                                                 </Box>
@@ -165,7 +156,7 @@ const SettingsCardMock = ({
                 </Stack>
                 <Box sx={{ flexGrow: 1, width: '100%' }}>
                     <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} mb={1}>
-                        <TextField select label="種類" size="small" value={type} sx={{ minWidth: 140 }} InputProps={{ startAdornment: type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null }}>
+                        <TextField select label="種類" size="small" value={type} sx={{ minWidth: 140 }} slotProps={{ input: { startAdornment: type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null } }}>
                             <MenuItem value={type}>
                                 {type === 'section' ? '■ セクション見出し' :
                                     type === 'checkbox' ? 'チェック (ON/OFF)' :
@@ -183,7 +174,7 @@ const SettingsCardMock = ({
                         <FormControlLabel control={<Switch size="small" color="secondary" checked={hasDetail || false} />} label={<Box display="flex" alignItems="center" gap={0.5} sx={{ fontSize: '0.75rem' }}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: 0.5 }} />
                     )}
                     {(type === 'select' || type === 'multicheckbox') && (
-                        <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={options || ''} InputProps={{ startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 16 }} /> }} />
+                        <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={options || ''} slotProps={{ input: { startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 16 }} /> } }} />
                     )}
                 </Box>
             </Stack>
@@ -193,9 +184,9 @@ const SettingsCardMock = ({
 
 const TemplateDialogMock = ({ tabIndex }: { tabIndex: number }) => (
     <Box sx={{ position: 'relative', p: { xs: 1.5, md: 3 }, bgcolor: 'rgba(0,0,0,0.03)', borderRadius: 2, display: 'flex', justifyContent: 'center', my: 2 }}>
-        <Paper elevation={3} sx={{ width: '100%', maxWidth: 500, borderRadius: 2, overflow: 'hidden', bgcolor: '#fff' }}>
+        <Paper elevation={3} sx={{ width: '100%', maxWidth: 500, borderRadius: 2, overflow: 'hidden', bgcolor: 'background.paper' }}>
             <Box sx={{ p: 1.5, px: 2, borderBottom: '1px solid #eee' }}><Typography variant="subtitle2" fontWeight="bold">記録項目の設定を読み込む</Typography></Box>
-            <Tabs value={tabIndex} variant="fullWidth" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#f8f9fa' }}>
+            <Tabs value={tabIndex} variant="fullWidth" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.muted' }}>
                 <Tab label="標準テンプレート" />
                 <Tab label="他の利用者からコピー" />
             </Tabs>
@@ -226,9 +217,9 @@ const TemplateDialogMock = ({ tabIndex }: { tabIndex: number }) => (
 );
 
 const RecordUIMock = ({ title, children }: { title?: string, children: ReactNode }) => (
-    <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', bgcolor: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', maxWidth: 500, margin: '0 auto', width: '100%' }}>
+    <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', bgcolor: 'background.paper', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', maxWidth: 500, margin: '0 auto', width: '100%' }}>
         {title && (
-            <Box sx={{ bgcolor: '#f8f9fa', px: 2.5, py: 1.2, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
+            <Box sx={{ bgcolor: 'background.muted', px: 2.5, py: 1.2, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
                 <Box sx={{ width: 5, height: 22, bgcolor: 'primary.main', borderRadius: 1, mr: 1.5, flexShrink: 0 }} />
                 <Typography variant="subtitle2" color="text.primary" fontWeight="bold">{title}</Typography>
             </Box>
@@ -291,7 +282,7 @@ const RecordNumberMock = ({ label, required, error }: { label: string, required?
 const RecordTimeMock = ({ label, required }: { label: string, required?: boolean }) => (
     <Box sx={{ p: 2.5, bgcolor: 'transparent' }}>
         <Typography variant="caption" fontWeight="bold" gutterBottom sx={{ mb: 1, display: 'block' }}>{label} {required && <Typography component="span" color="error">*</Typography>}</Typography>
-        <TextField fullWidth variant="outlined" type="time" size="small" InputLabelProps={{ shrink: true }} defaultValue="12:00" />
+        <TextField fullWidth variant="outlined" type="time" size="small" slotProps={{ inputLabel: { shrink: true } }} defaultValue="12:00" />
     </Box>
 );
 
@@ -335,7 +326,7 @@ const ComparisonBlock = ({
 ========================================================================= */
 export default function FormSettingsManual() {
     return (
-        <Box sx={{ bgcolor: '#fff', pb: 10 }}>
+        <Box sx={{ bgcolor: 'background.paper', pb: 10 }}>
             <Box sx={{ mb: 5, borderBottom: '2px solid #eee', pb: 3 }}>
                 <Chip label="管理者向け" color="primary" size="small" sx={{ mb: 1, fontWeight: 'bold' }} />
                 <Typography variant="h4" fontWeight="bold" color="text.primary">記録フォームの設定・カスタマイズ</Typography>
@@ -461,9 +452,9 @@ export default function FormSettingsManual() {
 
                 {/* 6. 項目の追加・削除・並び替え */}
                 <StepBlock title="6. 項目の追加・削除・並び替え" desc="一番下にある点線の「＋ 項目を追加する」ボタンを押すと、新しい空の質問が追加されます。各項目の左下にある赤い「ゴミ箱」アイコンを押すと、その項目を削除できます。項目の左側にある「↑（上へ）」「↓（下へ）」ボタンをクリックすることで、質問の順番を入れ替えることができます。">
-                    <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: '#fafafa', borderRadius: 3, border: '1px dashed #e2e8f0', pointerEvents: 'none', userSelect: 'none' }}>
+                    <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: 'background.subtle', borderRadius: 3, border: '1px dashed #e2e8f0', pointerEvents: 'none', userSelect: 'none' }}>
                         <SettingsCardMock type="text" label="特記事項" />
-                        <Button variant="outlined" size="large" sx={{ border: '2px dashed #ccc', color: '#666', py: 1.5, width: '100%', bgcolor: '#fff', mb: 3 }}>
+                        <Button variant="outlined" size="large" sx={{ border: '2px dashed #ccc', color: 'text.secondary', py: 1.5, width: '100%', bgcolor: 'background.paper', mb: 3 }}>
                             項目を追加する
                         </Button>
 

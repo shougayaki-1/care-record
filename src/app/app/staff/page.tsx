@@ -3,9 +3,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { 
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Stack,
-  IconButton, Tooltip, CircularProgress, Select, MenuItem, FormControl, InputLabel, Autocomplete, Chip
-} from '@mui/material';
+  Button, Stack,
+  IconButton, Tooltip, CircularProgress, Chip
+} from '@/components/ui/mui';
 
 // 役職の入力候補（自由入力も可）
 const POSITION_OPTIONS = ['管理者', 'サービス管理責任者', '常勤', '非常勤', 'ヘルパー', 'サービス提供責任者', '看護師'];
@@ -23,6 +23,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { AppButton, AppDialog, AppTextField, CreatableMultiSelectField, SelectField } from '@/components/ui';
 
 type StaffData = { id: string; name: string; positions: string[] | null; user_id: string | null; archived_at: string | null; sort_order: number | null; profiles?: { name: string } | null; };
 type AccountData = { id: string; name: string; };
@@ -161,7 +162,7 @@ export default function StaffPage() {
         <Typography variant="h6" fontWeight="bold" color="text.primary">スタッフ(名簿)管理</Typography>
       </Box>
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: '#f5f5f5' }}>
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
         <Box maxWidth="md" mx="auto">
             <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
                 <Box>
@@ -189,7 +190,7 @@ export default function StaffPage() {
 
             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, boxShadow: 'none' }}>
                 <Table>
-                    <TableHead sx={{ bgcolor: '#F0F5FF' }}>
+                    <TableHead sx={{ bgcolor: 'background.tint' }}>
                         <TableRow>
                             <TableCell sx={{ fontWeight: 'bold' }}>スタッフ名 (シフト表示用)</TableCell>
                             <TableCell sx={{ fontWeight: 'bold' }}>役職</TableCell>
@@ -209,11 +210,11 @@ export default function StaffPage() {
                                 const isArchived = !!staff.archived_at;
                                 const activeIndex = isArchived ? -1 : activeStaff.findIndex(s => s.id === staff.id);
                                 return (
-                                    <TableRow key={staff.id} hover sx={{ height: 60, opacity: isArchived ? 0.6 : 1, bgcolor: isArchived ? '#fafafa' : 'inherit' }}>
+                                    <TableRow key={staff.id} hover sx={{ height: 60, opacity: isArchived ? 0.6 : 1, bgcolor: isArchived ? 'background.subtle' : 'inherit' }}>
                                         <TableCell sx={{ fontWeight: 'bold' }}>
                                             <Stack direction="row" spacing={1} alignItems="center">
                                                 <span>{staff.name}</span>
-                                                {isArchived && <Chip label="退職" size="small" color="default" sx={{ bgcolor: '#e0e0e0' }} />}
+                                                {isArchived && <Chip label="退職" size="small" color="default" sx={{ bgcolor: 'background.muted' }} />}
                                             </Stack>
                                         </TableCell>
                                         <TableCell>
@@ -266,46 +267,16 @@ export default function StaffPage() {
         </Box>
       </Box>
 
-      <Dialog open={openModal} onClose={() => setModalOpen(false)} maxWidth="xs" fullWidth>
-          <DialogTitle sx={{ fontWeight: 'bold' }}>{editId ? 'スタッフの編集' : 'スタッフの追加'}</DialogTitle>
-          <DialogContent dividers>
+      <AppDialog open={openModal} onClose={() => setModalOpen(false)} maxWidth="xs" title={editId ? 'スタッフの編集' : 'スタッフの追加'} actions={<><AppButton variant="text" intent="secondary" onClick={() => setModalOpen(false)}>キャンセル</AppButton><AppButton onClick={handleSave} disabled={!staffName.trim()}>保存</AppButton></>}>
               <Stack spacing={3} pt={1}>
-                <TextField autoFocus label="スタッフ名 (表示用)" fullWidth size="small" value={staffName} onChange={e => setStaffName(e.target.value)} required />
-                <Autocomplete
-                    multiple
-                    freeSolo
-                    options={POSITION_OPTIONS}
-                    value={staffPositions}
-                    onChange={(_, newValue) => setStaffPositions(newValue.map(v => v.trim()).filter(Boolean))}
-                    renderValue={(value, getItemProps) =>
-                        value.map((option, index) => {
-                            const { key, ...itemProps } = getItemProps({ index });
-                            return <Chip key={key} label={option} size="small" color="primary" {...itemProps} />;
-                        })
-                    }
-                    renderInput={(params) => (
-                        <TextField {...params} label="役職 (任意・複数可)" size="small" placeholder="入力してEnter / 候補から選択" helperText="例: 管理者、サービス管理責任者、常勤、非常勤、ヘルパー など（複数登録可・自由入力可）" />
-                    )}
-                />
-                <FormControl fullWidth size="small">
-                    <InputLabel>紐付けるアカウント (任意)</InputLabel>
-                    <Select value={linkedUserId} onChange={(e) => setLinkedUserId(e.target.value as string)} label="紐付けるアカウント (任意)">
-                        <MenuItem value="none"><em>紐付けない (転記・代理入力用)</em></MenuItem>
-                        {accountList.map(acc => (
-                            <MenuItem key={acc.id} value={acc.id}>{acc.name}</MenuItem>
-                        ))}
-                    </Select>
-                </FormControl>
+                <AppTextField autoFocus label="スタッフ名 (表示用)" value={staffName} onChange={e => setStaffName(e.target.value)} required />
+                <CreatableMultiSelectField options={POSITION_OPTIONS} value={staffPositions} onChange={setStaffPositions} label="役職 (任意・複数可)" placeholder="入力してEnter / 候補から選択" helperText="例: 管理者、サービス管理責任者、常勤、非常勤、ヘルパー など（複数登録可・自由入力可）" />
+                <SelectField value={linkedUserId} onChange={setLinkedUserId} label="紐付けるアカウント (任意)" options={[{ value: 'none', label: '紐付けない (転記・代理入力用)' }, ...accountList.map((account) => ({ value: account.id, label: account.name }))]} />
                 <Typography variant="caption" color="text.secondary">
                     ※システムにログインして自分で記録をつけるヘルパーの場合は、その人の「アカウント」を紐付けてください。事務員が代わりに記録を打ち込むだけのスタッフの場合は「紐付けない」を選択してください。
                 </Typography>
               </Stack>
-          </DialogContent>
-          <DialogActions sx={{ p: 2 }}>
-              <Button onClick={() => setModalOpen(false)} color="inherit">キャンセル</Button>
-              <Button onClick={handleSave} variant="contained" disabled={!staffName.trim()} sx={{ boxShadow: 'none' }}>保存</Button>
-          </DialogActions>
-      </Dialog>
+      </AppDialog>
     </Box>
   );
 }

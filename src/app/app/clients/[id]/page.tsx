@@ -4,11 +4,10 @@ import { useEffect, useState, useCallback } from 'react';
 import {
     Box, Button, Typography, Paper, Stack, TextField,
     MenuItem, IconButton, Card, CardContent, Switch,
-    FormControlLabel, Alert, CircularProgress, Dialog,
-    DialogTitle, DialogContent, DialogActions, Divider,
-    Tabs, Tab, Checkbox, FormGroup, List, ListItem, ListItemButton, ListItemText, ListItemIcon,
+    FormControlLabel, Alert, CircularProgress, Divider,
+    Tabs, Tab, List, ListItem, ListItemButton, ListItemText, ListItemIcon,
     Tooltip, Chip, Accordion, AccordionSummary, AccordionDetails
-} from '@mui/material';
+} from '@/components/ui/mui';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
@@ -37,6 +36,7 @@ import { STANDARD_TEMPLATES, COMPREHENSIVE_TEMPLATE, FormItem } from '@/constant
 import { convertSchemaToReadable, FormItem as HelperFormItem } from '../../../../utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { AppButton, AppDialog, CheckboxGroupField } from '@/components/ui';
 
 type Staff = { id: string; name: string; type: 'member' | 'ghost' };
 
@@ -216,10 +216,6 @@ export default function ClientSettingsPage() {
         }
     };
 
-    const handleToggleStaff = (staffId: string) => {
-        setAssignedStaffIds(prev => prev.includes(staffId) ? prev.filter(id => id !== staffId) : [...prev, staffId]);
-    };
-
     const handleCopy = async (sourceType: 'standard' | 'client', sourceId: string) => {
         if (!(await confirm({ message: '現在の設定はすべて上書きされます。よろしいですか？' }))) return;
 
@@ -362,7 +358,7 @@ export default function ClientSettingsPage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ p: 2, borderBottom: '1px solid #e0e0e0', bgcolor: '#fff', flexShrink: 0 }}>
+            <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', flexShrink: 0 }}>
                 <Stack direction="row" alignItems="center" spacing={2} mb={2}>
                     <IconButton onClick={() => router.back()}><ArrowBackIcon /></IconButton>
                     <Box>
@@ -377,7 +373,7 @@ export default function ClientSettingsPage() {
                 </Tabs>
             </Box>
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: '#f5f5f5' }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
                 {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
                 {tabIndex === 0 && (
@@ -393,7 +389,7 @@ export default function ClientSettingsPage() {
                         </Box>
                         <Stack spacing={2} pb={2}>
                             {formItems.map((item, index) => (
-                                <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid #2255CC' : 'none', bgcolor: item.type === 'section' ? '#eef2ff' : 'white' }}>
+                                <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid' : 'none', borderLeftColor: 'primary.main', bgcolor: item.type === 'section' ? 'background.tint' : 'background.paper' }}>
                                     <CardContent sx={{ p: '16px !important' }}>
                                         <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2}>
                                             <Stack direction="column" spacing={0.5}>
@@ -403,7 +399,7 @@ export default function ClientSettingsPage() {
                                             </Stack>
                                             <Box sx={{ flexGrow: 1, width: '100%' }}>
                                                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} mb={1}>
-                                                    <TextField select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ minWidth: 160 }} InputProps={{ startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null }}>
+                                                    <TextField select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ minWidth: 160 }} slotProps={{ input: { startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null } }}>
                                                         <MenuItem value="section" sx={{ fontWeight: 'bold', color: 'primary.main' }}>■ セクション見出し</MenuItem>
                                                         <Divider /><MenuItem value="checkbox">チェック (ON/OFF)</MenuItem><MenuItem value="multicheckbox">複数選択</MenuItem><MenuItem value="text">テキスト入力</MenuItem><MenuItem value="number">数値入力</MenuItem><MenuItem value="select">1つ選択 (ラジオ)</MenuItem><MenuItem value="time">時間</MenuItem>
                                                     </TextField>
@@ -414,14 +410,14 @@ export default function ClientSettingsPage() {
                                                     <FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: 1 }} />
                                                 )}
                                                 {(item.type === 'select' || item.type === 'multicheckbox') && (
-                                                    <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={item.options || ''} onChange={(e) => updateField(index, 'options', e.target.value)} InputProps={{ startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} /> }} />
+                                                    <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={item.options || ''} onChange={(e) => updateField(index, 'options', e.target.value)} slotProps={{ input: { startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} /> } }} />
                                                 )}
                                             </Box>
                                         </Stack>
                                     </CardContent>
                                 </Card>
                             ))}
-                            <Button variant="outlined" startIcon={<AddCircleIcon />} onClick={addField} size="large" sx={{ border: '2px dashed #ccc', color: '#666', py: 2 }}>項目を追加する</Button>
+                            <Button variant="outlined" startIcon={<AddCircleIcon />} onClick={addField} size="large" sx={{ border: '2px dashed', borderColor: 'divider', color: 'text.secondary', py: 2 }}>項目を追加する</Button>
                         </Stack>
                     </Box>
                 )}
@@ -431,20 +427,24 @@ export default function ClientSettingsPage() {
                         <CardContent>
                             <Typography variant="subtitle1" fontWeight="bold" gutterBottom>この利用者を担当するスタッフを選択してください</Typography>
                             <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。</Typography>
-                            <FormGroup>
-                                <Typography variant="subtitle2" sx={{ mt: 1, mb: 1, color: 'primary.main' }}>メンバー（ログインユーザー）</Typography>
-                                <Box display="flex" flexWrap="wrap" gap={2}>
-                                    {allStaffs.filter(s => s.type === 'member').map(staff => (
-                                        <FormControlLabel key={staff.id} control={<Checkbox checked={assignedStaffIds.includes(staff.id)} onChange={() => handleToggleStaff(staff.id)} />} label={staff.name} sx={{ minWidth: 150 }} />
-                                    ))}
-                                </Box>
-                                <Typography variant="subtitle2" sx={{ mt: 3, mb: 1, color: 'secondary.main' }}>アカウントなし（転記用）</Typography>
-                                <Box display="flex" flexWrap="wrap" gap={2}>
-                                    {allStaffs.filter(s => s.type === 'ghost').map(staff => (
-                                        <FormControlLabel key={staff.id} control={<Checkbox checked={assignedStaffIds.includes(staff.id)} onChange={() => handleToggleStaff(staff.id)} />} label={staff.name} sx={{ minWidth: 150 }} />
-                                    ))}
-                                </Box>
-                            </FormGroup>
+                            <Stack spacing={3}>
+                                <CheckboxGroupField
+                                    label="メンバー（ログインユーザー）"
+                                    options={allStaffs.filter((staff) => staff.type === 'member')}
+                                    value={assignedStaffIds}
+                                    onChange={setAssignedStaffIds}
+                                    getOptionLabel={(staff) => staff.name}
+                                    getOptionValue={(staff) => staff.id}
+                                />
+                                <CheckboxGroupField
+                                    label="アカウントなし（転記用）"
+                                    options={allStaffs.filter((staff) => staff.type === 'ghost')}
+                                    value={assignedStaffIds}
+                                    onChange={setAssignedStaffIds}
+                                    getOptionLabel={(staff) => staff.name}
+                                    getOptionValue={(staff) => staff.id}
+                                />
+                            </Stack>
                         </CardContent>
                     </Card>
                 )}
@@ -520,7 +520,7 @@ export default function ClientSettingsPage() {
 
                                     {renderTagList().map((group, gIdx) => (
                                         <Accordion key={gIdx} defaultExpanded={gIdx === 0}>
-                                            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: '#f8f9fa' }}>
+                                            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: 'background.muted' }}>
                                                 <Typography fontWeight="bold">{group.title}</Typography>
                                             </AccordionSummary>
                                             <AccordionDetails>
@@ -545,7 +545,7 @@ export default function ClientSettingsPage() {
                                                         if (['multicheckbox', 'select'].includes(item.type)) {
                                                             const options = item.options?.split(',') || [];
                                                             return (
-                                                                <Box key={item.id} width="100%" sx={{ p: 1, border: '1px dashed #ddd', borderRadius: 1 }}>
+                                                                <Box key={item.id} width="100%" sx={{ p: 1, border: '1px dashed', borderColor: 'divider', borderRadius: 1 }}>
                                                                     <Typography variant="caption" display="block" mb={0.5} fontWeight="bold">{item.label}</Typography>
                                                                     <Box display="flex" flexWrap="wrap" gap={1}>
                                                                         {options.map((opt: string) => {
@@ -575,7 +575,7 @@ export default function ClientSettingsPage() {
                                     ))}
                                     
                                     <Accordion>
-                                        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: '#f8f9fa' }}>
+                                        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: 'background.muted' }}>
                                             <Typography fontWeight="bold">共通項目（日付・ヘルパー名など）</Typography>
                                         </AccordionSummary>
                                         <AccordionDetails>
@@ -595,20 +595,18 @@ export default function ClientSettingsPage() {
                 )}
             </Box>
 
-            <Paper elevation={3} sx={{ p: 2, borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'center', bgcolor: '#fff', flexShrink: 0, zIndex: 10 }}>
+            <Paper elevation={3} sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center', bgcolor: 'background.paper', flexShrink: 0, zIndex: 10 }}>
                 <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={() => { if (tabIndex === 0) handleSaveForm(); if (tabIndex === 1) handleSaveAssignments(); if (tabIndex === 2) handleSaveTemplateId(); }} disabled={isSaving} sx={{ minWidth: 300, fontWeight: 'bold', height: 48 }}>
                     {isSaving ? '保存中...' : '設定を保存'}
                 </Button>
             </Paper>
 
-            <Dialog open={openCopyDialog} onClose={() => setOpenCopyDialog(false)} maxWidth="sm" fullWidth>
-                <DialogTitle>記録項目の設定を読み込む</DialogTitle>
-                <DialogContent dividers sx={{ p: 0 }}>
+            <AppDialog open={openCopyDialog} onClose={() => setOpenCopyDialog(false)} maxWidth="sm" title="記録項目の設定を読み込む" contentSx={{ p: 0 }} actions={<AppButton variant="text" intent="secondary" onClick={() => setOpenCopyDialog(false)}>キャンセル</AppButton>}>
                     <Tabs 
                         value={copyTab} 
                         onChange={(_, v) => setCopyTab(v)} 
                         variant="fullWidth" 
-                        sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#f8f9fa' }}
+                        sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.muted' }}
                     >
                         <Tab icon={<LibraryBooksIcon />} label="標準テンプレート" />
                         <Tab icon={<PersonIcon />} label="他の利用者からコピー" />
@@ -621,7 +619,7 @@ export default function ClientSettingsPage() {
                                     用途に合わせて標準的な記録項目セットを一括反映します。<br/>
                                     反映後、自由に項目の追加・削除が可能です。
                                 </Typography>
-                                <List sx={{ bgcolor: 'background.paper', border: '1px solid #eee', borderRadius: 2 }}>
+                                <List sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
                                     {STANDARD_TEMPLATES.map((tmpl, index) => (
                                         <div key={tmpl.key}>
                                             <ListItem disablePadding>
@@ -650,7 +648,7 @@ export default function ClientSettingsPage() {
                                 {otherClients.length === 0 ? (
                                     <Alert severity="info">他に登録されている利用者がいません</Alert>
                                 ) : (
-                                    <List sx={{ bgcolor: 'background.paper', border: '1px solid #eee', borderRadius: 2 }}>
+                                    <List sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
                                         {otherClients.map((client, index) => (
                                             <div key={client.id}>
                                                 <ListItem disablePadding>
@@ -669,11 +667,7 @@ export default function ClientSettingsPage() {
                             </Stack>
                         )}
                     </Box>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setOpenCopyDialog(false)}>キャンセル</Button>
-                </DialogActions>
-            </Dialog>
+            </AppDialog>
         </Box>
     );
 }

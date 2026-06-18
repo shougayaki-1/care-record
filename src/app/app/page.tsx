@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { Box, CircularProgress } from '@mui/material';
+import { Box, CircularProgress } from '@/components/ui/mui';
 
 export default function AppPage() {
   const router = useRouter();

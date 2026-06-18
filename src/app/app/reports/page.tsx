@@ -5,8 +5,7 @@ import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Button,
   CircularProgress, Stack, TextField, MenuItem, Checkbox, TableSortLabel, Switch, FormControlLabel, Divider,
   LinearProgress, Tooltip
-} from '@mui/material';
-import { alpha } from '@mui/material/styles';
+} from '@/components/ui/mui';
 import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -485,24 +484,24 @@ export default function ReportsPage() {
         </Box>
 
        <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
-           <Paper sx={{ p: 2, mb: 3, bgcolor: '#F2F3F5', boxShadow: 'none' }}>
+           <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.muted', boxShadow: 'none' }}>
               <Stack spacing={2}>
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-                    <Box display="flex" alignItems="center" gap={1} color="#5C5E66">
+                    <Box display="flex" alignItems="center" gap={1} color="text.secondary">
                         <FilterListIcon fontSize="small" />
                         <Typography variant="subtitle2" fontWeight="bold">絞り込み:</Typography>
                     </Box>
-                    <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: 150, bgcolor: 'white' }}>
+                    <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: 150, bgcolor: 'background.paper' }}>
                         <MenuItem value="all">全員</MenuItem>
                         {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                     </TextField>
-                    <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 120, bgcolor: 'white' }}>
+                    <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 120, bgcolor: 'background.paper' }}>
                         <MenuItem value="all">全て</MenuItem><MenuItem value="pending">未承認</MenuItem><MenuItem value="approved">承認済</MenuItem>
                     </TextField>
                     <Box display="flex" alignItems="center" gap={1}>
-                        <TextField type="date" label="開始日" size="small" InputLabelProps={{ shrink: true }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'white' }} />
+                        <TextField type="date" label="開始日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
                         <Typography>～</Typography>
-                        <TextField type="date" label="終了日" size="small" InputLabelProps={{ shrink: true }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'white' }} />
+                        <TextField type="date" label="終了日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
                     </Box>
                     <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />
                     <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none' }}>検索</Button>
@@ -510,7 +509,7 @@ export default function ReportsPage() {
               </Stack>
            </Paper>
            
-           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? alpha('#2255CC', 0.1) : '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #E3E5E8', boxShadow: 'none' }}>
+           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? 'background.tint' : 'background.paper', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
                <Box>
                    <Typography variant="body1" fontWeight="bold">
                        {selected.length > 0 ? `${selected.length} 件選択中` : `検索結果: ${reports.length} 件`}
@@ -538,7 +537,7 @@ export default function ReportsPage() {
            </Paper>
 
            {gasProgress && (
-               <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'white', p: 2, borderRadius: 2, boxShadow: 3, zIndex: 9999 }}>
+               <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'background.paper', p: 2, borderRadius: 2, boxShadow: 3, zIndex: 9999 }}>
                    <Typography variant="body2" fontWeight="bold">帳票作成中...</Typography>
                    <Typography variant="caption" display="block" sx={{ mb: 1 }}>{gasProgress.currentName}</Typography>
                    <LinearProgress variant="determinate" value={(gasProgress.current / gasProgress.total) * 100} sx={{ width: 250 }} />
@@ -547,20 +546,20 @@ export default function ReportsPage() {
            )}
 
            {loading ? <CircularProgress /> : (
-             <TableContainer component={Paper} sx={{ boxShadow: 'none', border: '1px solid #E3E5E8' }}>
+             <TableContainer component={Paper} sx={{ boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
                <Table>
-                 <TableHead sx={{ bgcolor: '#F2F3F5' }}>
+                 <TableHead sx={{ bgcolor: 'background.muted' }}>
                    <TableRow>
                      <TableCell padding="checkbox"><Checkbox onChange={handleSelectAllClick} /></TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>ステータス</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>
+                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>ステータス</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>
                          <TableSortLabel active={orderBy === 'start_at'} direction={order} onClick={() => { setOrder(order === 'asc' ? 'desc' : 'asc'); setOrderBy('start_at'); }}>
                              開始 〜 終了日時
                          </TableSortLabel>
                      </TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>利用者</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>担当</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>操作</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>利用者</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>担当</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>操作</TableCell>
                    </TableRow>
                  </TableHead>
                  <TableBody>
@@ -576,7 +575,7 @@ export default function ReportsPage() {
                      };
 
                      return (
-                         <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 }, bgcolor: isAbnormal ? '#fff5f5' : 'inherit' }}>
+                         <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 }, bgcolor: isAbnormal ? 'background.danger' : 'inherit' }}>
                            <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
                            <TableCell><Chip label={row.status === 'approved' ? '承認済' : row.status === 'remanded' ? '差戻し' : '未承認'} color={row.status === 'approved' ? 'success' : row.status === 'remanded' ? 'error' : 'warning'} size="small" variant="outlined" /></TableCell>
                            
@@ -609,7 +608,7 @@ export default function ReportsPage() {
                          </TableRow>
                      );
                    })}
-                   {reports.length === 0 && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: '#999' }}>該当する記録がありません</TableCell></TableRow>}
+                   {reports.length === 0 && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: 'text.disabled' }}>該当する記録がありません</TableCell></TableRow>}
                  </TableBody>
                </Table>
              </TableContainer>

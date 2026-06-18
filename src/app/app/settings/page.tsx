@@ -3,9 +3,9 @@
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { 
   Box, Typography, Paper, TextField, Button, Alert, CircularProgress, LinearProgress, Stack, Divider,
-  Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow, Dialog, 
-  DialogTitle, DialogContent, DialogContentText, DialogActions
-} from '@mui/material';
+  Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow
+} from '@/components/ui/mui';
+import { AppButton, AppDialog, AppTextField } from '@/components/ui';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
@@ -392,7 +392,7 @@ function SettingsContent() {
                             </Paper>
 
                             {/* Google Drive連携 */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? '#F0F5FF' : '#fff' }}>
+                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>
                                 <Stack direction="row" alignItems="center" gap={2} mb={2}>
                                     <CloudQueueIcon color="primary" fontSize="large" />
                                     <Box>
@@ -402,7 +402,7 @@ function SettingsContent() {
                                     <Chip label={googleFolderId ? "連携済み" : "未連携"} color={googleFolderId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: 'auto' }} />
                                 </Stack>
                                 
-                                <Box sx={{ mt: 2, p: 2, bgcolor: '#fff', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                                <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
                                     {isOwner ? (
                                         googleFolderId ? (
                                             <Stack spacing={2}>
@@ -440,7 +440,7 @@ function SettingsContent() {
                             </Paper>
 
                             {/* Googleカレンダー連携 (OAuth方式) */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleCalendarId ? '#4caf50' : 'divider', bgcolor: googleCalendarId ? '#f1f8e9' : '#fff' }}>
+                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleCalendarId ? 'success.main' : 'divider', bgcolor: googleCalendarId ? 'background.success' : 'background.paper' }}>
                                 <Stack direction="row" alignItems="center" gap={2} mb={2}>
                                     <CalendarMonthIcon color="success" fontSize="large" />
                                     <Box>
@@ -450,7 +450,7 @@ function SettingsContent() {
                                     <Chip label={googleCalendarId ? "連携済み" : "未連携"} color={googleCalendarId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: 'auto' }} />
                                 </Stack>
                                 
-                                <Box sx={{ mt: 2, p: 2, bgcolor: '#fff', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                                <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
                                     {isOwner ? (
                                         googleCalendarId ? (
                                             <Stack spacing={2}>
@@ -532,7 +532,7 @@ function SettingsContent() {
                             </Paper>
 
                             {/* 危険な設定 */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.light', bgcolor: '#fff5f5' }}>
+                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.light', bgcolor: 'background.danger' }}>
                                 <Stack direction="row" alignItems="center" gap={1} mb={2}>
                                     <WarningIcon color="error" />
                                     <Typography variant="h6" fontWeight="bold" color="error">危険な設定</Typography>
@@ -600,47 +600,26 @@ function SettingsContent() {
                 </Box>
             </Box>
 
-            <Dialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)}>
-                <DialogTitle>事業所の完全削除</DialogTitle>
-                <DialogContent>
-                    <DialogContentText color="error" sx={{ mb: 2 }}>
+            <AppDialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)} title="事業所の完全削除" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton><AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name}>削除実行</AppButton></>}>
+                    <Typography color="error" sx={{ mb: 2 }}>
                         本当に削除しますか？この操作は取り消せません。<br/>
                         確認のため、事業所名 <b>{currentOrg.name}</b> を入力してください。
-                    </DialogContentText>
-                    <TextField 
+                    </Typography>
+                    <AppTextField
                         fullWidth 
                         size="small" 
                         value={confirmInput} 
                         onChange={e => setConfirmInput(e.target.value)} 
                         placeholder={currentOrg.name} 
                     />
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setOpenDeleteDialog(false)}>キャンセル</Button>
-                    <Button 
-                        onClick={handleDeleteOrg} 
-                        color="error" 
-                        variant="contained" 
-                        disabled={confirmInput !== currentOrg.name}
-                    >
-                        削除実行
-                    </Button>
-                </DialogActions>
-            </Dialog>
+            </AppDialog>
 
-            <Dialog open={openLeaveDialog} onClose={() => setOpenLeaveDialog(false)}>
-                <DialogTitle>脱退の確認</DialogTitle>
-                <DialogContent>
-                    <DialogContentText>
+            <AppDialog open={openLeaveDialog} onClose={() => setOpenLeaveDialog(false)} title="脱退の確認" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenLeaveDialog(false)}>キャンセル</AppButton><AppButton onClick={handleLeaveOrg} intent="warning">脱退する</AppButton></>}>
+                    <Typography>
                         本当にこの事業所から脱退しますか？<br/>
                         オーナー権限を持っている場合は、事前に他のメンバーへ権限を譲渡する必要があります。
-                    </DialogContentText>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setOpenLeaveDialog(false)}>キャンセル</Button>
-                    <Button onClick={handleLeaveOrg} color="warning" variant="contained">脱退する</Button>
-                </DialogActions>
-            </Dialog>
+                    </Typography>
+            </AppDialog>
         </Box>
     );
 }

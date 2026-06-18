@@ -1,5 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
+if (process.env.E2E_TEST_ENV !== 'true') {
+  throw new Error('Playwrightは専用テスト環境でのみ実行できます。E2E_TEST_ENV=true とテスト用Supabase環境変数を設定してください。');
+}
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
@@ -22,6 +26,10 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'mobile-chrome',
+      use: { ...devices['Pixel 7'] },
     },
   ],
 });

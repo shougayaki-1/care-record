@@ -5,7 +5,7 @@ import {
   Box, Avatar, Tooltip, IconButton, Divider, List, ListItem, ListItemButton,
   ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge, Popover, CircularProgress,
   AppBar, Toolbar, Button, Menu, MenuItem
-} from '@mui/material';
+} from '@/components/ui/mui';
 import { useTheme, alpha, Theme } from '@mui/material/styles';
 import MenuIcon from '@mui/icons-material/Menu';
 import AddIcon from '@mui/icons-material/Add';
@@ -80,7 +80,7 @@ const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | n
       onClose={onClose}
       anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-      PaperProps={{ sx: { width: 320, maxHeight: 400 } }}
+      slotProps={{ paper: { sx: { width: 320, maxHeight: 400 } } }}
     >
       <Box p={2} borderBottom="1px solid" borderColor="divider">
         <Typography fontWeight="bold">通知</Typography>
@@ -203,7 +203,7 @@ const TopAppBar = ({
           onClose={() => setOrgAnchor(null)}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
           transformOrigin={{ vertical: 'top', horizontal: 'left' }}
-          PaperProps={{ sx: { minWidth: 240 } }}
+          slotProps={{ paper: { sx: { minWidth: 240 } } }}
         >
           {orgList.map(org => (
             <MenuItem
@@ -212,7 +212,7 @@ const TopAppBar = ({
               onClick={() => handleSwitchOrg(org.id)}
             >
               <ListItemIcon>
-                <Avatar sx={{ width: 28, height: 28, fontSize: '0.85rem', bgcolor: currentOrg?.id === org.id ? 'primary.main' : '#e0e0e0', color: currentOrg?.id === org.id ? '#fff' : '#555' }}>
+                <Avatar sx={{ width: 28, height: 28, fontSize: '0.85rem', bgcolor: currentOrg?.id === org.id ? 'primary.main' : 'background.muted', color: currentOrg?.id === org.id ? 'primary.contrastText' : 'text.secondary' }}>
                   {org.name.slice(0, 1)}
                 </Avatar>
               </ListItemIcon>
@@ -221,7 +221,7 @@ const TopAppBar = ({
           ))}
           <Divider />
           <MenuItem onClick={() => { setOrgAnchor(null); router.push('/setup'); }}>
-            <ListItemIcon><AddIcon fontSize="small" sx={{ color: '#23A559' }} /></ListItemIcon>
+            <ListItemIcon><AddIcon fontSize="small" color="success" /></ListItemIcon>
             <ListItemText primary="事業所を追加 / 参加" />
           </MenuItem>
         </Menu>
@@ -252,7 +252,7 @@ const TopAppBar = ({
           onClose={() => setAccountAnchor(null)}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
           transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-          PaperProps={{ sx: { minWidth: 220 } }}
+          slotProps={{ paper: { sx: { minWidth: 220 } } }}
         >
           <Box sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Avatar src={avatarUrl} sx={{ width: 40, height: 40, bgcolor: 'primary.main' }}>

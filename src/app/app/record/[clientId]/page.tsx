@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
-  Box, Button, Container, Typography, TextField, Checkbox, FormControlLabel, Radio, RadioGroup,
+  Box, Button, Container, Typography, TextField,
   Paper, Stack, IconButton, CircularProgress,
-  FormGroup, Switch, FormHelperText, Chip, Divider, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
-  FormControl, InputLabel, Select, MenuItem, OutlinedInput, SelectChangeEvent, Tabs, Tab
-} from '@mui/material';
+  Divider,
+  Tabs, Tab
+} from '@/components/ui/mui';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
 import SaveIcon from '@mui/icons-material/Save';
@@ -24,6 +24,7 @@ import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { AppButton, AppDialog, DateTimeField, DynamicFormField, MultiSelectField } from '@/components/ui';
 
 type FormItem = {
   id: string; label: string; type: 'text' | 'number' | 'checkbox' | 'time' | 'select' | 'section' | 'multicheckbox';
@@ -82,10 +83,6 @@ type ShiftStaffData = {
     staffs: { name: string } | null;
 };
 
-const ITEM_HEIGHT = 48;
-const ITEM_PADDING_TOP = 8;
-const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
-
 export default function RecordPage() {
   const router = useRouter();
   const { clientId } = useParams();
@@ -116,9 +113,6 @@ export default function RecordPage() {
   const [images, setImages] = useState<{id: string, url: string}[]>([]);
   
   const [openCloseDialog, setOpenCloseDialog] = useState(false);
-  const [openApproveDialog, setOpenApproveDialog] = useState(false); 
-  const [openSubmitDialog, setOpenSubmitDialog] = useState(false);   
-  const [openRemandDialog, setOpenRemandDialog] = useState(false);   
 
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -129,10 +123,10 @@ export default function RecordPage() {
   const [selectedPart, setSelectedPart] = useState<'part1' | 'part2'>('part1');
   const [originalShiftTimes, setOriginalShiftTimes] = useState<{ start_at: string; end_at: string } | null>(null);
 
-  const formatDatetimeLocal = (date: Date) => {
+  const formatDatetimeLocal = useCallback((date: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  };
+  }, []);
 
   const formatTimeForLabel = (dateStr?: string) => {
       if (!dateStr) return '';
@@ -140,7 +134,7 @@ export default function RecordPage() {
       return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
-  const setupTimeForPart = (part: 'part1' | 'part2', startIso: string, endIso: string) => {
+  const setupTimeForPart = useCallback((part: 'part1' | 'part2', startIso: string, endIso: string) => {
       const s = new Date(startIso);
       const e = new Date(endIso);
       
@@ -159,7 +153,7 @@ export default function RecordPage() {
           const diff = (e.getTime() - midnight.getTime()) / (1000 * 60 * 60);
           setServiceTime(diff.toString());
       }
-  };
+  }, [formatDatetimeLocal]);
 
   const handlePartChange = async (part: 'part1' | 'part2') => {
       if (isDirty) {
@@ -278,7 +272,7 @@ export default function RecordPage() {
           })));
       }
     } catch (e) { console.error(e); showToast('記録の読み込みに失敗しました', 'error'); }
-  }, [showToast]);
+  }, [showToast, formatDatetimeLocal]);
 
   useEffect(() => {
     const init = async () => {
@@ -357,7 +351,7 @@ export default function RecordPage() {
     if (!wsLoading && currentOrg) {
       init();
     }
-  }, [wsLoading, currentOrg, paramReportId, shiftId, clientId, router, showToast, fetchBaseData, loadExistingData]);
+  }, [wsLoading, currentOrg, paramReportId, shiftId, clientId, router, showToast, fetchBaseData, loadExistingData, formatDatetimeLocal, setupTimeForPart]);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -470,11 +464,15 @@ export default function RecordPage() {
   };
 
   const handleDraftSave = async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); } };
-  const handleSubmit = () => setOpenSubmitDialog(true);
-  const executeSubmit = async () => { setOpenSubmitDialog(false); if (await saveReport('pending')) { showToast('記録を送信しました', 'success'); router.push('/app/record'); } };
-  const handleApprove = () => setOpenApproveDialog(true);
+  const handleSubmit = async () => {
+      if (!(await confirm({ title: '送信の確認', message: '記録を送信しますか？', confirmText: '送信する' }))) return;
+      if (await saveReport('pending')) { showToast('記録を送信しました', 'success'); router.push('/app/record'); }
+  };
+  const handleApprove = async () => {
+      if (!(await confirm({ title: '承認の確認', message: 'この記録を承認しますか？', confirmText: '承認する', confirmColor: 'primary' }))) return;
+      await executeApprove();
+  };
   const executeApprove = async () => {
-      setOpenApproveDialog(false);
       if (await saveReport('approved')) {
           const { data: { user } } = await supabase.auth.getUser();
           if (currentReportId && user) await supabase.from('reports').update({ approved_by: user.id, approved_at: new Date().toISOString() }).eq('id', currentReportId);
@@ -482,9 +480,11 @@ export default function RecordPage() {
           router.push('/app/reports');
       }
   };
-  const handleRemand = () => setOpenRemandDialog(true);
+  const handleRemand = async () => {
+      if (!(await confirm({ title: '承認取消の確認', message: '承認を取り消し、差し戻しますか？', confirmText: '差し戻す', confirmColor: 'warning' }))) return;
+      await executeRemand();
+  };
   const executeRemand = async () => {
-      setOpenRemandDialog(false);
       if (await saveReport('remanded')) {
           if (currentReportId) await supabase.from('reports').update({ approved_by: null, approved_at: null }).eq('id', currentReportId);
           showToast('記録を差し戻しました', 'info');
@@ -509,9 +509,8 @@ export default function RecordPage() {
 
   const isAdmin = currentOrg && ['owner', 'manager'].includes(currentOrg.role);
 
-  const handleStaffChange = (event: SelectChangeEvent<typeof selectedHelpers>) => {
-      const { target: { value } } = event;
-      setSelectedHelpers(typeof value === 'string' ? value.split(',') : value);
+  const handleStaffChange = (value: string[]) => {
+      setSelectedHelpers(value);
       setIsDirty(true);
       if (errors.helpers) {
           const newErrors = { ...errors };
@@ -552,7 +551,7 @@ export default function RecordPage() {
             
             {/* 月末跨ぎの夜勤の場合のみ表示される分割選択タブコントロール */}
             {isSpanningMonth && (
-                <Paper variant="outlined" sx={{ p: 2, bgcolor: '#FFFDE7', borderColor: '#FFF59D', borderRadius: 3 }}>
+                <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.warning', borderColor: 'warning.light', borderRadius: 3 }}>
                     <Typography variant="subtitle2" fontWeight="bold" color="warning.dark" mb={1.5}>
                         ⚠ このシフトは月末を跨ぐ夜勤のため、請求都合上00:00で分割して記録を登録します。
                     </Typography>
@@ -560,7 +559,7 @@ export default function RecordPage() {
                         value={selectedPart} 
                         onChange={(_, val) => handlePartChange(val)} 
                         variant="fullWidth"
-                        sx={{ bgcolor: '#FFF', borderRadius: 2 }}
+                        sx={{ bgcolor: 'background.paper', borderRadius: 2 }}
                     >
                         <Tab value="part1" label={`前半（月末日の24:00まで: ${formatTimeForLabel(originalShiftTimes?.start_at)} 〜 24:00）`} />
                         <Tab value="part2" label={`後半（翌月1日の00:00から: 00:00 〜 ${formatTimeForLabel(originalShiftTimes?.end_at)}）`} />
@@ -568,43 +567,25 @@ export default function RecordPage() {
                 </Paper>
             )}
 
-            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, bgcolor: '#fff' }}>
+            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, bgcolor: 'background.paper' }}>
                 <Stack spacing={3}>
                 
                 <Box>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
                     </Typography>
-                    <FormControl fullWidth error={!!errors.helpers}>
-                        <Select
-                            multiple
-                            displayEmpty
-                            value={selectedHelpers}
-                            onChange={handleStaffChange}
-                            input={<OutlinedInput />}
-                            renderValue={(selected) => {
-                                if (selected.length === 0) {
-                                    return <Typography color="text.disabled">スタッフ名簿から選択</Typography>;
-                                }
-                                return (
-                                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                        {selected.map((value) => (
-                                            <Chip key={value} label={value} size="small" variant="outlined" />
-                                        ))}
-                                    </Box>
-                                );
-                            }}
-                            MenuProps={MenuProps}
-                        >
-                            {Array.from(new Set(selectableStaffs.map(h => h.name))).map((name) => (
-                                <MenuItem key={name} value={name}>
-                                    <Checkbox checked={selectedHelpers.indexOf(name) > -1} size="small" />
-                                    <Typography variant="body2" sx={{ fontWeight: selectedHelpers.includes(name) ? 'bold' : 'normal' }}>{name}</Typography>
-                                </MenuItem>
-                            ))}
-                        </Select>
-                        {errors.helpers && <FormHelperText>{errors.helpers}</FormHelperText>}
-                    </FormControl>
+                    <MultiSelectField
+                        required
+                        label="担当スタッフ"
+                        options={Array.from(new Set(selectableStaffs.map((helper) => helper.name)))}
+                        value={selectedHelpers}
+                        onChange={handleStaffChange}
+                        getOptionLabel={(name) => name}
+                        getOptionValue={(name) => name}
+                        error={!!errors.helpers}
+                        helperText={errors.helpers}
+                        placeholder="スタッフ名簿から選択"
+                    />
                 </Box>
 
                 <Box>
@@ -612,9 +593,9 @@ export default function RecordPage() {
                         <CalendarTodayIcon fontSize="small" /> サービス日時
                     </Typography>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
-                    <TextField type="datetime-local" fullWidth value={startDateTime} onChange={e => handleChange(setStartDateTime, e.target.value)} InputLabelProps={{ shrink: true }} />
+                    <DateTimeField value={startDateTime} onChange={e => handleChange(setStartDateTime, e.target.value)} />
                     <Typography color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>～</Typography>
-                    <TextField type="datetime-local" fullWidth value={endDateTime} onChange={e => handleChange(setEndDateTime, e.target.value)} InputLabelProps={{ shrink: true }} />
+                    <DateTimeField value={endDateTime} onChange={e => handleChange(setEndDateTime, e.target.value)} />
                     </Stack>
                 </Box>
 
@@ -623,16 +604,16 @@ export default function RecordPage() {
                         <AccessTimeIcon fontSize="small" /> 提供時間 <Typography component="span" color="error">*</Typography>
                     </Typography>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                        <TextField label="サービス提供" type="number" fullWidth value={serviceTime} onChange={e => handleChange(setServiceTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} error={!!errors.serviceTime} InputProps={{ endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }} inputProps={{ inputMode: 'decimal', step: '0.5' }} />
-                        <TextField label="移動" type="number" fullWidth value={travelTime} onChange={e => handleChange(setTravelTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} InputProps={{ startAdornment: <DirectionsCarIcon color="action" fontSize="small" sx={{ mr: 1 }} />, endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }} inputProps={{ inputMode: 'decimal', step: '0.5' }} />
+                        <TextField label="サービス提供" type="number" fullWidth value={serviceTime} onChange={e => handleChange(setServiceTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} error={!!errors.serviceTime} slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
+                        <TextField label="移動" type="number" fullWidth value={travelTime} onChange={e => handleChange(setTravelTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} slotProps={{ input: { startAdornment: <DirectionsCarIcon color="action" fontSize="small" sx={{ mr: 1 }} />, endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
                     </Stack>
                 </Box>
                 </Stack>
             </Paper>
 
             {groupedSections.map((section, idx) => (
-                <Paper key={idx} variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', bgcolor: '#fff' }}>
-                <Box sx={{ bgcolor: '#f8f9fa', px: 3, py: 2, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
+                <Paper key={idx} variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', bgcolor: 'background.paper' }}>
+                <Box sx={{ bgcolor: 'background.muted', px: 3, py: 2, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
                     <Box sx={{ width: 6, height: 28, bgcolor: 'primary.main', borderRadius: 1, mr: 2, flexShrink: 0 }} />
                     <Typography variant="h6" color="text.primary" fontWeight="bold">{section.title}</Typography>
                 </Box>
@@ -640,52 +621,15 @@ export default function RecordPage() {
                     {section.items.map((item) => {
                     const hasError = !!errors[item.id];
                     return (
-                        <Box key={item.id} sx={{ p: 3, bgcolor: hasError ? '#fff5f5' : 'transparent' }}>
-                        {item.type === 'checkbox' && (
-                            <Box display="flex" flexDirection="column" gap={1}>
-                            <Box display="flex" justifyContent="space-between" alignItems="center" width="100%">
-                                <Typography variant="subtitle1" fontWeight={answers[item.id] ? "bold" : "normal"} color={answers[item.id] ? "primary.main" : "text.primary"} onClick={() => handleAnswerChange(item.id, !answers[item.id])} sx={{ cursor: 'pointer', flex: 1 }}>{item.label}</Typography>
-                                <Switch checked={!!answers[item.id]} onChange={e => handleAnswerChange(item.id, e.target.checked)} color="primary" />
-                            </Box>
-                            {item.hasDetail && answers[item.id] && (
-                                <TextField placeholder="詳細..." fullWidth size="small" value={(answers[`${item.id}_detail`] as string) || ''} onChange={e => handleAnswerChange(`${item.id}_detail`, e.target.value)} sx={{ mt: 1 }} />
-                            )}
-                            </Box>
-                        )}
-                        {['text', 'number', 'time'].includes(item.type) && (
-                            <Box>
-                            <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ mb: 1, display: 'block' }}>{item.label} {item.required && <Typography component="span" color="error">*</Typography>}</Typography>
-                            <TextField fullWidth variant="outlined" type={item.type === 'number' ? 'number' : 'text'} multiline={item.type === 'text'} minRows={item.type === 'text' ? 3 : 1} value={(answers[item.id] as string) || ''} onChange={e => handleAnswerChange(item.id, e.target.value)} onWheel={item.type === 'number' ? (e => (e.target as HTMLElement).blur()) : undefined} error={hasError} helperText={errors[item.id]} placeholder={`${item.label}を入力`} />
-                            </Box>
-                        )}
-                        {item.type === 'multicheckbox' && (
-                            <Box>
-                            <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ mb: 1.5, display: 'block' }}>{item.label} {item.required && <Typography component="span" color="error">*</Typography>}</Typography>
-                            <FormGroup row sx={{ gap: 1 }}>
-                                {item.options?.split(',').map((opt: string) => (
-                                <FormControlLabel key={opt} sx={{ mr: 2, mb: 1, border: '1px solid', borderRadius: 2, px: 1.5, py: 0.5, mx: 0, '&:hover': { bgcolor: '#f5f5f5' }, bgcolor: ((answers[item.id] as string[]) || []).includes(opt.trim()) ? '#eef2ff' : 'transparent', borderColor: ((answers[item.id] as string[]) || []).includes(opt.trim()) ? 'primary.main' : 'divider' }} control={<Checkbox size="small" checked={((answers[item.id] as string[]) || []).includes(opt.trim())} onChange={e => { const current = (answers[item.id] as string[]) || []; const next = e.target.checked ? [...current, opt.trim()] : current.filter((v: string) => v !== opt.trim()); handleAnswerChange(item.id, next); }} />} label={<Typography variant="body2" fontWeight={((answers[item.id] as string[]) || []).includes(opt.trim()) ? 'bold' : 'normal'}>{opt.trim()}</Typography>} />
-                                ))}
-                            </FormGroup>
-                            {item.hasDetail && String(answers[item.id] || '').includes('他') && (
-                                <TextField placeholder="その他の詳細..." fullWidth size="small" sx={{ mt: 1 }} value={(answers[`${item.id}_detail`] as string) || ''} onChange={e => handleAnswerChange(`${item.id}_detail`, e.target.value)} />
-                            )}
-                            {hasError && <FormHelperText error>{errors[item.id]}</FormHelperText>}
-                            </Box>
-                        )}
-                        {item.type === 'select' && (
-                            <Box>
-                            <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ mb: 1.5, display: 'block' }}>{item.label} {item.required && <Typography component="span" color="error">*</Typography>}</Typography>
-                            <RadioGroup row value={(answers[item.id] as string) || ''} onChange={e => handleAnswerChange(item.id, e.target.value)}>
-                                {item.options?.split(',').map((opt: string) => (
-                                <FormControlLabel key={opt} value={opt.trim()} control={<Radio size="small" />} label={<Typography variant="body2">{opt.trim()}</Typography>} sx={{ mr: 3 }} />
-                                ))}
-                            </RadioGroup>
-                            {item.hasDetail && (answers[item.id] === 'その他' || String(answers[item.id]).includes('他')) && (
-                                <TextField placeholder="詳細..." fullWidth size="small" sx={{ mt: 1 }} value={(answers[`${item.id}_detail`] as string) || ''} onChange={e => handleAnswerChange(`${item.id}_detail`, e.target.value)} />
-                            )}
-                            {hasError && <FormHelperText error>{errors[item.id]}</FormHelperText>}
-                            </Box>
-                        )}
+                        <Box key={item.id} sx={{ p: 3, bgcolor: hasError ? 'background.danger' : 'transparent' }}>
+                          <DynamicFormField
+                            item={item}
+                            value={answers[item.id]}
+                            detailValue={String(answers[`${item.id}_detail`] ?? '')}
+                            error={errors[item.id]}
+                            onChange={(value) => handleAnswerChange(item.id, value)}
+                            onDetailChange={(value) => handleAnswerChange(`${item.id}_detail`, value)}
+                          />
                         </Box>
                     );
                     })}
@@ -699,7 +643,7 @@ export default function RecordPage() {
                     {images.map(img => (
                         <Box key={img.id} component="img" src={img.url} sx={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 1 }} />
                     ))}
-                    <IconButton color="primary" component="label" sx={{ width: 100, height: 100, border: '1px dashed #ccc', borderRadius: 1, flexDirection: 'column' }}>
+                    <IconButton color="primary" component="label" sx={{ width: 100, height: 100, border: '1px dashed', borderColor: 'divider', borderRadius: 1, flexDirection: 'column' }}>
                         <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!currentReportId} />
                         <PhotoCamera />
                         {!currentReportId && <Typography variant="caption" sx={{ fontSize: 9 }}>未保存</Typography>}
@@ -712,26 +656,15 @@ export default function RecordPage() {
         </Container>
       </Box>
 
-      <Dialog open={openCloseDialog} onClose={() => setOpenCloseDialog(false)}>
-          <DialogTitle>保存されていない変更があります</DialogTitle>
-          <DialogContent><DialogContentText>入力内容が保存されていません。<br/>下書きとして保存しますか？</DialogContentText></DialogContent>
-          <DialogActions><Button onClick={handleDialogDiscard} color="error">破棄して移動</Button><Button onClick={handleDialogSaveDraft} variant="contained" autoFocus>下書き保存</Button></DialogActions>
-      </Dialog>
-      <Dialog open={openApproveDialog} onClose={() => setOpenApproveDialog(false)}>
-          <DialogTitle>承認の確認</DialogTitle>
-          <DialogContent><DialogContentText>この記録を承認しますか？</DialogContentText></DialogContent>
-          <DialogActions><Button onClick={() => setOpenApproveDialog(false)}>キャンセル</Button><Button onClick={executeApprove} variant="contained" color="success" autoFocus>承認する</Button></DialogActions>
-      </Dialog>
-      <Dialog open={openRemandDialog} onClose={() => setOpenRemandDialog(false)}>
-          <DialogTitle>承認取消の確認</DialogTitle>
-          <DialogContent><DialogContentText>承認を取り消し、差し戻しますか？</DialogContentText></DialogContent>
-          <DialogActions><Button onClick={() => setOpenRemandDialog(false)}>キャンセル</Button><Button onClick={executeRemand} variant="contained" color="warning" autoFocus>差し戻す</Button></DialogActions>
-      </Dialog>
-      <Dialog open={openSubmitDialog} onClose={() => setOpenSubmitDialog(false)}>
-          <DialogTitle>送信の確認</DialogTitle>
-          <DialogContent><DialogContentText>記録を送信しますか？</DialogContentText></DialogContent>
-          <DialogActions><Button onClick={() => setOpenSubmitDialog(false)}>キャンセル</Button><Button onClick={executeSubmit} variant="contained" color="primary" autoFocus>送信する</Button></DialogActions>
-      </Dialog>
+      <AppDialog
+        open={openCloseDialog}
+        onClose={() => setOpenCloseDialog(false)}
+        title="保存されていない変更があります"
+        dividers={false}
+        actions={<><AppButton variant="text" intent="danger" onClick={handleDialogDiscard}>破棄して移動</AppButton><AppButton onClick={handleDialogSaveDraft} autoFocus>下書き保存</AppButton></>}
+      >
+        <Typography>入力内容が保存されていません。下書きとして保存しますか？</Typography>
+      </AppDialog>
     </Box>
   );
 }

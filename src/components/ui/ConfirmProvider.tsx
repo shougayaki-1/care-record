@@ -2,10 +2,10 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import {
-    Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
-    Button, TextField,
-} from '@mui/material';
+import { DialogContentText } from '@mui/material';
+import { AppButton } from './AppButton';
+import { AppDialog } from './AppDialog';
+import { AppTextField } from './Fields';
 
 export type ConfirmOptions = {
     title?: string;
@@ -50,14 +50,32 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
     return (
         <ConfirmContext.Provider value={{ confirm }}>
             {children}
-            <Dialog open={open} onClose={() => handleClose(false)} maxWidth="xs" fullWidth>
-                {options.title && <DialogTitle>{options.title}</DialogTitle>}
-                <DialogContent>
+            <AppDialog
+                open={open}
+                onClose={() => handleClose(false)}
+                maxWidth="xs"
+                title={options.title ?? '確認'}
+                dividers={false}
+                actions={(
+                    <>
+                        <AppButton variant="text" intent="secondary" onClick={() => handleClose(false)}>
+                            {options.cancelText ?? 'キャンセル'}
+                        </AppButton>
+                        <AppButton
+                            onClick={() => handleClose(true)}
+                            intent={options.confirmColor === 'error' ? 'danger' : options.confirmColor === 'warning' ? 'warning' : 'primary'}
+                            disabled={requireMismatch}
+                        >
+                            {options.confirmText ?? 'OK'}
+                        </AppButton>
+                    </>
+                )}
+            >
                     <DialogContentText component="div" sx={{ whiteSpace: 'pre-line' }}>
                         {options.message}
                     </DialogContentText>
                     {options.requireText != null && (
-                        <TextField
+                        <AppTextField
                             autoFocus
                             fullWidth
                             size="small"
@@ -68,21 +86,7 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
                             sx={{ mt: 2 }}
                         />
                     )}
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => handleClose(false)} color="inherit">
-                        {options.cancelText ?? 'キャンセル'}
-                    </Button>
-                    <Button
-                        onClick={() => handleClose(true)}
-                        color={options.confirmColor ?? 'primary'}
-                        variant="contained"
-                        disabled={requireMismatch}
-                    >
-                        {options.confirmText ?? 'OK'}
-                    </Button>
-                </DialogActions>
-            </Dialog>
+            </AppDialog>
         </ConfirmContext.Provider>
     );
 };

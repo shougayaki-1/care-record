@@ -3,10 +3,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { 
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
-  Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Stack, 
+  Chip, Button, TextField, Stack,
   IconButton, Select, MenuItem, FormControl, InputLabel, Menu, Alert, ListItemIcon,
   CircularProgress
-} from '@mui/material';
+} from '@/components/ui/mui';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -20,6 +20,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { createInvitation, updateAccountRole, removeAccount } from '@/app/actions/accounts';
+import { AppButton, AppDialog } from '@/components/ui';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -249,7 +250,7 @@ export default function AccountsPage() {
         <Typography variant="h6" fontWeight="bold" color="text.primary">アカウント(権限)管理</Typography>
       </Box>
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: '#f5f5f5' }}>
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
         <Box maxWidth="lg" mx="auto">
             <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
                 <Box>
@@ -263,7 +264,7 @@ export default function AccountsPage() {
 
             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, boxShadow: 'none' }}>
                 <Table>
-                    <TableHead sx={{ bgcolor: '#F0F5FF' }}>
+                    <TableHead sx={{ bgcolor: 'background.tint' }}>
                         <TableRow>
                             <TableCell sx={{ fontWeight: 'bold' }}>アカウント情報</TableCell>
                             <TableCell width="160" sx={{ fontWeight: 'bold' }}>システム権限</TableCell>
@@ -346,30 +347,16 @@ export default function AccountsPage() {
       </Menu>
 
       {/* --- 削除・取り消し確認ダイアログ (MUI UI) --- */}
-      <Dialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)} maxWidth="xs" fullWidth>
-          <DialogTitle sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
-              <ErrorOutlineIcon color="error" />
-              {selectedAccount?.status === 'active' ? 'アカウントの削除' : '招待の取り消し'}
-          </DialogTitle>
-          <DialogContent>
+      <AppDialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)} maxWidth="xs" title={<Stack direction="row" spacing={1} alignItems="center"><ErrorOutlineIcon color="error" />{selectedAccount?.status === 'active' ? 'アカウントの削除' : '招待の取り消し'}</Stack>} dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton><AppButton onClick={executeDelete} intent="danger">{selectedAccount?.status === 'active' ? '削除する' : '取り消す'}</AppButton></>}>
               <Typography variant="body2" paragraph>
                   {selectedAccount?.status === 'active' 
                       ? `本当に「${selectedAccount?.name}」さんのアカウントをシステムから削除しますか？\n（※この事業所へのログインができなくなります）` 
                       : `「${selectedAccount?.name}」さんへの招待リンクを無効にしますか？`}
               </Typography>
-          </DialogContent>
-          <DialogActions sx={{ p: 2 }}>
-              <Button onClick={() => setOpenDeleteDialog(false)} color="inherit">キャンセル</Button>
-              <Button onClick={executeDelete} variant="contained" color="error" sx={{ boxShadow: 'none' }}>
-                  {selectedAccount?.status === 'active' ? '削除する' : '取り消す'}
-              </Button>
-          </DialogActions>
-      </Dialog>
+      </AppDialog>
 
       {/* --- 権限変更ダイアログ --- */}
-      <Dialog open={openRoleDialog} onClose={() => setOpenRoleDialog(false)} maxWidth="xs" fullWidth>
-          <DialogTitle sx={{ fontWeight: 'bold' }}>権限の変更</DialogTitle>
-          <DialogContent>
+      <AppDialog open={openRoleDialog} onClose={() => setOpenRoleDialog(false)} maxWidth="xs" title="権限の変更" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenRoleDialog(false)}>キャンセル</AppButton><AppButton onClick={executeRoleChange}>変更を保存</AppButton></>}>
               <Box pt={1}>
                   <Typography variant="body2" mb={2}>
                       <b>{selectedAccount?.name}</b> さんのシステム権限を変更します。
@@ -388,17 +375,10 @@ export default function AccountsPage() {
                       </Alert>
                   )}
               </Box>
-          </DialogContent>
-          <DialogActions sx={{ p: 2 }}>
-              <Button onClick={() => setOpenRoleDialog(false)} color="inherit">キャンセル</Button>
-              <Button onClick={executeRoleChange} variant="contained" sx={{ boxShadow: 'none' }}>変更を保存</Button>
-          </DialogActions>
-      </Dialog>
+      </AppDialog>
 
       {/* --- 新規招待ダイアログ --- */}
-      <Dialog open={openInvite} onClose={() => setOpenInvite(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 'bold' }}>新しいアカウントの招待</DialogTitle>
-        <DialogContent dividers>
+      <AppDialog open={openInvite} onClose={() => setOpenInvite(false)} maxWidth="xs" title="新しいアカウントの招待" actions={<AppButton variant="text" intent="secondary" onClick={() => setOpenInvite(false)}>閉じる</AppButton>}>
           <Stack spacing={3} alignItems="center" py={1}>
              {!generatedLink ? (
                  <>
@@ -415,15 +395,13 @@ export default function AccountsPage() {
              ) : (
                  <>
                     <Typography variant="body2" textAlign="center">相手にこのQRコードを読み取ってもらうか、<br/>リンクを共有してください。</Typography>
-                    <Box component="img" src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(generatedLink)}`} alt="QR Code" sx={{ width: 150, height: 150, border: '1px solid #ddd', p: 1, borderRadius: 2 }} />
-                    <TextField value={generatedLink} fullWidth size="small" InputProps={{ readOnly: true, endAdornment: (<IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}><ContentCopyIcon /></IconButton>) }} />
+                    <Box component="img" src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(generatedLink)}`} alt="QR Code" sx={{ width: 150, height: 150, border: '1px solid', borderColor: 'divider', p: 1, borderRadius: 2 }} />
+                    <TextField value={generatedLink} fullWidth size="small" slotProps={{ input: { readOnly: true, endAdornment: (<IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}><ContentCopyIcon /></IconButton>) } }} />
                     <Button variant="outlined" startIcon={<ShareIcon />} fullWidth onClick={handleShare}>共有メニューを開く</Button>
                  </>
              )}
           </Stack>
-        </DialogContent>
-        <DialogActions sx={{ p: 2 }}><Button onClick={() => setOpenInvite(false)} color="inherit">閉じる</Button></DialogActions>
-      </Dialog>
+      </AppDialog>
     </Box>
   );
 }

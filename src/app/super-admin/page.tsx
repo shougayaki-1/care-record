@@ -6,7 +6,7 @@ import {
     Box, Typography, Paper, Table, TableBody, TableCell,
     TableContainer, TableHead, TableRow, Button, Chip,
     IconButton, Tooltip, CircularProgress, Alert
-} from '@mui/material';
+} from '@/components/ui/mui';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { getAllOrganizations, deleteOrganization } from '@/app/actions/super-admin';
@@ -38,7 +38,7 @@ export default function SuperAdminDashboard() {
         try {
             const data = await getAllOrganizations();
             setOrgs(data);
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error(error);
             setError('データの取得に失敗しました。管理者権限や環境変数を確認してください。');
         } finally {
@@ -69,7 +69,7 @@ export default function SuperAdminDashboard() {
     return (
         <Box>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-                <Typography variant="h4" fontWeight="bold" color="#333">
+                <Typography variant="h4" fontWeight="bold" color="text.primary">
                     事業所管理
                 </Typography>
                 <Button variant="outlined" startIcon={<RefreshIcon />} onClick={fetchData}>
@@ -85,7 +85,7 @@ export default function SuperAdminDashboard() {
                 <Paper sx={{ width: '100%', overflow: 'hidden', borderRadius: 2 }}>
                     <TableContainer>
                         <Table>
-                            <TableHead sx={{ bgcolor: '#e0e0e0' }}>
+                            <TableHead sx={{ bgcolor: 'background.muted' }}>
                                 <TableRow>
                                     <TableCell sx={{ fontWeight: 'bold' }}>事業所名</TableCell>
                                     <TableCell sx={{ fontWeight: 'bold' }}>登録日</TableCell>
@@ -98,7 +98,7 @@ export default function SuperAdminDashboard() {
                             <TableBody>
                                 {orgs.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={6} align="center" sx={{ py: 5, color: '#666' }}>
+                                        <TableCell colSpan={6} align="center" sx={{ py: 5, color: 'text.secondary' }}>
                                             登録されている事業所はありません
                                         </TableCell>
                                     </TableRow>

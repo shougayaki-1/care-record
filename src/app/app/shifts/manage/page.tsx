@@ -3,9 +3,10 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
     Box, Typography, Paper, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
-    Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControlLabel, Radio, RadioGroup, LinearProgress,
+    FormControlLabel, Radio, RadioGroup, LinearProgress,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem, Alert
-} from '@mui/material';
+} from '@/components/ui/mui';
+import { AppButton, AppDialog } from '@/components/ui';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -809,7 +810,7 @@ export default function ShiftManagePage() {
                 </Tabs>
             </Box>
 
-            <Box sx={{ position: 'relative', flexGrow: 1, p: 3, bgcolor: '#f5f5f5', overflowY: 'auto' }}>
+            <Box sx={{ position: 'relative', flexGrow: 1, p: 3, bgcolor: 'background.default', overflowY: 'auto' }}>
                 {isFetching && !initialLoading && (
                     <Box sx={{ position: 'absolute', top: 16, right: 30, zIndex: 10 }}>
                         <CircularProgress size={24} />
@@ -835,7 +836,7 @@ export default function ShiftManagePage() {
                                         {repairingFromBanner ? '修復中...' : '同期を修復する'}
                                     </Button>
                                 }
-                                sx={{ mb: 2, borderRadius: 3, boxShadow: 'none', border: '1px solid #ffe0b2' }}
+                                sx={{ mb: 2, borderRadius: 3, boxShadow: 'none', border: '1px solid', borderColor: 'warning.light' }}
                             >
                                 Googleカレンダーと同期されていない予定が <strong>{unsyncedCount} 件</strong> あります。前回の自動展開が途中で中断された場合はこちらから同期を再開できます。
                             </Alert>
@@ -845,13 +846,13 @@ export default function ShiftManagePage() {
                             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={2} spacing={2}>
                                 <Box flexGrow={1} width="100%">
                                     {tabIndex === 3 && (
-                                        <TextField select size="small" label="スタッフを選択" value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} sx={{ minWidth: 200, bgcolor: 'white' }}>
+                                        <TextField select size="small" label="スタッフを選択" value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} sx={{ minWidth: 200, bgcolor: 'background.paper' }}>
                                             <MenuItem value="all">全員を表示</MenuItem>
                                             {staffs.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
                                         </TextField>
                                     )}
                                     {tabIndex === 4 && (
-                                        <TextField select size="small" label="利用者を選択" value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} sx={{ minWidth: 200, bgcolor: 'white' }}>
+                                        <TextField select size="small" label="利用者を選択" value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} sx={{ minWidth: 200, bgcolor: 'background.paper' }}>
                                             <MenuItem value="all">全員を表示</MenuItem>
                                             {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                                         </TextField>
@@ -866,17 +867,17 @@ export default function ShiftManagePage() {
                                             startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />} 
                                             onClick={handleForceResyncCalendar} 
                                             disabled={resyncingCal || pdfGenerating}
-                                            sx={{ bgcolor: 'white' }}
+                                            sx={{ bgcolor: 'background.paper' }}
                                         >
                                             {resyncingCal ? '再同期中...' : 'Googleカレンダー全件再同期'}
                                         </Button>
                                     )}
                                     {tabIndex === 3 && selectedStaffId === 'all' && (
-                                        <Button variant="outlined" color="primary" startIcon={<GridOnIcon />} onClick={handleDownloadMatrixPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'white' }}>
+                                        <Button variant="outlined" color="primary" startIcon={<GridOnIcon />} onClick={handleDownloadMatrixPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'background.paper' }}>
                                             {pdfGenerating ? '作成中...' : '全体マトリックスPDF'}
                                         </Button>
                                     )}
-                                    <Button variant="outlined" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleDownloadPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'white' }}>
+                                    <Button variant="outlined" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleDownloadPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'background.paper' }}>
                                         {pdfGenerating ? '作成中...' : '表示中の形式でPDF出力'}
                                     </Button>
                                 </Stack>
@@ -885,10 +886,10 @@ export default function ShiftManagePage() {
 
                         {isAdmin && (
                             <Box sx={{ display: tabIndex === 0 ? 'block' : 'none' }}>
-                                <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: '#F0F5FF', borderColor: '#D0E0FF' }}>
+                                <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: 'background.tint', borderColor: 'divider' }}>
                                     <Typography variant="body2" sx={{ fontWeight: '500' }}>登録したひな形をベースに、指定月のカレンダーへシフトを一括展開・同期します。</Typography>
                                     <Stack direction="row" spacing={1.5} alignItems="center">
-                                        <TextField type="month" size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} sx={{ bgcolor: 'white' }} />
+                                        <TextField type="month" size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
                                         <Button variant="contained" color="secondary" startIcon={<PlayArrowIcon />} onClick={handleCalculatePreview} disabled={generating || patterns.length === 0} sx={{ boxShadow: 'none' }}>
                                             一括自動展開する
                                         </Button>
@@ -901,7 +902,7 @@ export default function ShiftManagePage() {
                                 <Typography variant="subtitle1" fontWeight="bold" mb={2}>登録済みのひな形パターン一覧</Typography>
                                 <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, mb: 4 }}>
                                     <Table>
-                                        <TableHead sx={{ bgcolor: '#fafafa' }}>
+                                        <TableHead sx={{ bgcolor: 'background.subtle' }}>
                                             <TableRow>
                                                 <TableCell sx={{ fontWeight: 'bold' }}>対象の利用者</TableCell>
                                                 <TableCell sx={{ fontWeight: 'bold' }}>デフォルト担当者</TableCell>
@@ -911,7 +912,7 @@ export default function ShiftManagePage() {
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
-                                            {patterns.length === 0 ? <TableRow><TableCell colSpan={5} align="center" sx={{ py: 5, color: '#666' }}>ひな形が登録されていません</TableCell></TableRow> : (
+                                            {patterns.length === 0 ? <TableRow><TableCell colSpan={5} align="center" sx={{ py: 5, color: 'text.secondary' }}>ひな形が登録されていません</TableCell></TableRow> : (
                                                 patterns.map((p) => (
                                                     <TableRow key={p.id} hover>
                                                         <TableCell sx={{ fontWeight: 'bold' }}>{p.clients?.name}</TableCell>
@@ -973,7 +974,7 @@ export default function ShiftManagePage() {
 
             {/* Googleカレンダー同期中のプログレス表示UI */}
             {syncProgress && (
-                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'white', p: 2.5, borderRadius: 3, boxShadow: 3, zIndex: 9999, border: '1px solid #E3E5E8', minWidth: 280 }}>
+                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'background.paper', p: 2.5, borderRadius: 3, boxShadow: 3, zIndex: 9999, border: '1px solid', borderColor: 'divider', minWidth: 280 }}>
                     <Typography variant="body2" fontWeight="bold" gutterBottom>Googleカレンダー同期中...</Typography>
                     <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                         {syncProgress.currentName}
@@ -1015,12 +1016,10 @@ export default function ShiftManagePage() {
                 initialData={selectedPattern}
             />
 
-            <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)} maxWidth="xs" fullWidth>
-                <DialogTitle sx={{ fontWeight: 'bold' }}>{targetMonth}月の展開シフトを消去</DialogTitle>
-                <DialogContent>
-                    <DialogContentText sx={{ mb: 2 }}>
+            <AppDialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)} maxWidth="xs" title={`${targetMonth}月の展開シフトを消去`} dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setClearDialogOpen(false)}>キャンセル</AppButton><AppButton onClick={executeClearMonthShifts} intent="danger">消去を実行</AppButton></>}>
+                    <Typography sx={{ mb: 2 }}>
                         消去方法を選択してください。
-                    </DialogContentText>
+                    </Typography>
                     <RadioGroup value={clearMode} onChange={(e) => setClearMode(e.target.value as 'unmodified' | 'all')}>
                         <FormControlLabel
                             value="unmodified"
@@ -1047,26 +1046,19 @@ export default function ShiftManagePage() {
                             }
                         />
                     </RadioGroup>
-                </DialogContent>
-                <DialogActions sx={{ p: 2 }}>
-                    <Button onClick={() => setClearDialogOpen(false)} color="inherit">キャンセル</Button>
-                    <Button onClick={executeClearMonthShifts} variant="contained" color="error">消去を実行</Button>
-                </DialogActions>
-            </Dialog>
+            </AppDialog>
 
-            <Dialog open={previewDialogOpen} onClose={() => setPreviewDialogOpen(false)} maxWidth="sm" fullWidth>
-                <DialogTitle sx={{ fontWeight: 'bold' }}>{targetMonth}月 シフト展開の確認</DialogTitle>
-                <DialogContent dividers>
+            <AppDialog open={previewDialogOpen} onClose={() => setPreviewDialogOpen(false)} maxWidth="sm" title={`${targetMonth}月 シフト展開の確認`} actions={<><AppButton variant="text" intent="secondary" onClick={() => setPreviewDialogOpen(false)}>閉じる</AppButton><AppButton onClick={executeGenerate} intent="secondary" autoFocus>確定してカレンダーに展開</AppButton></>}>
                     {previewDetails && (
                         <Stack spacing={2}>
                             <Typography variant="body2" paragraph>
                                 以下の内容でカレンダーにシフト実体を作成します。既存の未編集シフトは自動で上書き更新され、現場で編集済みの調整シフトは安全にスキップ（自動保護）されます。
                             </Typography>
-                            <Box p={2} bgcolor="#F0F5FF" borderRadius={2} border="1px solid #D0E0FF" mb={1.5}>
+                            <Box p={2} bgcolor="background.tint" borderRadius={2} border="1px solid" borderColor="divider" mb={1.5}>
                                 <Typography variant="subtitle2" fontWeight="bold" color="primary">展開予定の総シフト数： {previewDetails.total} 件</Typography>
                             </Box>
                             <Typography variant="subtitle2" fontWeight="bold">ひな形ごとの生成予定内訳:</Typography>
-                            <Stack spacing={1} sx={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', p: 1, borderRadius: 1, bgcolor: '#fbfbfb' }}>
+                            <Stack spacing={1} sx={{ maxHeight: 200, overflowY: 'auto', border: '1px solid', borderColor: 'divider', p: 1, borderRadius: 1, bgcolor: 'background.subtle' }}>
                                 {previewDetails.details.map((d, index) => (
                                     <Box key={index} display="flex" justifyContent="space-between" alignItems="center">
                                         <Typography variant="caption" fontWeight="bold">{d.title}</Typography>
@@ -1079,14 +1071,7 @@ export default function ShiftManagePage() {
                             </Stack>
                         </Stack>
                     )}
-                </DialogContent>
-                <DialogActions sx={{ p: 2 }}>
-                    <Button onClick={() => setPreviewDialogOpen(false)} color="inherit">閉じる</Button>
-                    <Button onClick={executeGenerate} variant="contained" color="secondary" autoFocus>
-                        確定してカレンダーに展開
-                    </Button>
-                </DialogActions>
-            </Dialog>
+            </AppDialog>
         </Box>
     );
 }

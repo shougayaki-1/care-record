@@ -3,12 +3,12 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Dialog, DialogTitle, DialogContent, DialogActions,
     Button, Typography, Box, FormControlLabel, Checkbox
-} from '@mui/material';
+} from '@/components/ui/mui';
 import { supabase } from '@/lib/supabase';
 import LaunchIcon from '@mui/icons-material/Launch';
 import { useToast } from '@/components/ui/ToastProvider';
+import { AppButton, AppDialog } from '@/components/ui';
 
 export const TermsAgreementModal = () => {
     const { showToast } = useToast();
@@ -61,18 +61,14 @@ export const TermsAgreementModal = () => {
     const TERMS_URL = "http://localhost:5500/index.html"; // ← ローカルテスト用や公開URL
 
     return (
-        <Dialog
+        <AppDialog
             open={open}
             disableEscapeKeyDown
-            fullWidth
             maxWidth="sm"
-            PaperProps={{ sx: { borderRadius: 3 } }}
+            title="利用規約への同意"
+            dividers={false}
+            actions={<AppButton size="large" fullWidth disabled={!checked} onClick={handleAgree}>同意してサービスを利用する</AppButton>}
         >
-            <DialogTitle sx={{ fontWeight: 'bold', textAlign: 'center', pt: 4 }}>
-                利用規約への同意
-            </DialogTitle>
-
-            <DialogContent>
                 <Box textAlign="center" py={2}>
                     <Typography variant="body1" paragraph>
                         サービスを利用開始する前に、<br />
@@ -90,7 +86,7 @@ export const TermsAgreementModal = () => {
                         規約・ポリシー全文を確認する
                     </Button>
 
-                    <Box mt={3} p={2} bgcolor="#f5f5f5" borderRadius={2} textAlign="left">
+                    <Box mt={3} p={2} bgcolor="background.muted" borderRadius={2} textAlign="left">
                         <FormControlLabel
                             control={
                                 <Checkbox
@@ -106,20 +102,6 @@ export const TermsAgreementModal = () => {
                         />
                     </Box>
                 </Box>
-            </DialogContent>
-
-            <DialogActions sx={{ p: 3, justifyContent: 'center' }}>
-                <Button
-                    variant="contained"
-                    size="large"
-                    fullWidth
-                    disabled={!checked}
-                    onClick={handleAgree}
-                    sx={{ borderRadius: 4, py: 1.5, fontWeight: 'bold' }}
-                >
-                    同意してサービスを利用する
-                </Button>
-            </DialogActions>
-        </Dialog>
+        </AppDialog>
     );
 };

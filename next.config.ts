@@ -11,9 +11,7 @@ const withPWA = require('next-pwa')({
 
 const nextConfig: NextConfig = {
   // 型付きルーティングを無効化してエラーを回避
-  experimental: {
-    typedRoutes: false,
-  },
+  typedRoutes: false,
   // PDFライブラリのための設定 (既存)
   webpack: (config) => {
     config.resolve.alias.canvas = false;

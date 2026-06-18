@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import {
     Box, Typography, Paper, TextField, Button, Stack, CircularProgress, Card, CardActionArea, Alert
-} from '@mui/material';
+} from '@/components/ui/mui';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { acceptInvitation } from '@/app/actions/accounts';
@@ -181,8 +181,8 @@ export default function SetupPage() {
     if (loading) return <Box p={5} textAlign="center"><CircularProgress /><Typography mt={2}>セットアップ情報を取得中...</Typography></Box>;
 
     return (
-        <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f5f5f5', p: 2 }}>
-            <Paper elevation={0} sx={{ p: 4, width: '100%', maxWidth: 480, borderRadius: 3, border: '1px solid #ddd' }}>
+        <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default', p: 2 }}>
+            <Paper elevation={0} sx={{ p: 4, width: '100%', maxWidth: 480, borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
                 
                 {step === 'join' && paramInviteCode && (
                     <Alert severity="info" sx={{ mb: 3 }}>
@@ -228,7 +228,7 @@ export default function SetupPage() {
                         <Card variant="outlined" sx={{ borderRadius: 2 }}>
                             <CardActionArea onClick={() => setStep('create')} sx={{ p: 2 }}>
                                 <Stack direction="row" alignItems="center" spacing={2}>
-                                    <Box sx={{ p: 1, bgcolor: '#e3f2fd', borderRadius: '50%', color: 'primary.main' }}>
+                                    <Box sx={{ p: 1, bgcolor: 'background.tint', borderRadius: '50%', color: 'primary.main' }}>
                                         <BusinessIcon />
                                     </Box>
                                     <Box>
@@ -242,7 +242,7 @@ export default function SetupPage() {
                         <Card variant="outlined" sx={{ borderRadius: 2 }}>
                             <CardActionArea onClick={() => setStep('join')} sx={{ p: 2 }}>
                                 <Stack direction="row" alignItems="center" spacing={2}>
-                                    <Box sx={{ p: 1, bgcolor: '#f3e5f5', borderRadius: '50%', color: 'secondary.main' }}>
+                                    <Box sx={{ p: 1, bgcolor: 'background.muted', borderRadius: '50%', color: 'secondary.main' }}>
                                         <GroupAddIcon />
                                     </Box>
                                     <Box>
