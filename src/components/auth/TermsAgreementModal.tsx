@@ -8,8 +8,10 @@ import {
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
 import LaunchIcon from '@mui/icons-material/Launch';
+import { useToast } from '@/components/ui/ToastProvider';
 
 export const TermsAgreementModal = () => {
+    const { showToast } = useToast();
     const [open, setOpen] = useState(false);
     const [checked, setChecked] = useState(false);
     const [userId, setUserId] = useState<string | null>(null);
@@ -50,7 +52,7 @@ export const TermsAgreementModal = () => {
             setOpen(false);
         } catch (error) {
             console.error(error);
-            alert('エラーが発生しました');
+            showToast('エラーが発生しました', 'error');
         }
     };
 

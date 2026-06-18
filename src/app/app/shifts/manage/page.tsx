@@ -27,6 +27,7 @@ import {
     getSyncStatus, syncUnsyncedBatch, forceSyncBatch, deleteShiftsBatch // 同期はチャンク方式のサーバーバッチに統一
 } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { ShiftFormModal, ClientData, StaffData, ShiftData } from '@/components/shifts/ShiftFormModal';
 import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
@@ -51,6 +52,7 @@ type FetchedPatternData = {
 export default function ShiftManagePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
+    const confirm = useConfirm();
     const calendarRef = useRef<FullCalendar>(null);
 
     const [initialLoading, setInitialLoading] = useState(true);
@@ -599,7 +601,7 @@ export default function ShiftManagePage() {
     };
 
     const handleDeletePattern = async (id: string) => {
-        if (!confirm('このひな形を削除しますか？\n（※すでに展開済みのカレンダー上のシフト実体は削除されません）')) return;
+        if (!(await confirm({ title: 'ひな形の削除', message: 'このひな形を削除しますか？\n（※すでに展開済みのカレンダー上のシフト実体は削除されません）', confirmText: '削除する', confirmColor: 'error' }))) return;
         try {
             await deleteShiftPattern(id);
             showToast('ひな形を削除しました');
@@ -750,7 +752,7 @@ export default function ShiftManagePage() {
     // 全件強制再同期（タイムアウト回避のためサーバー側チャンク処理をループ）
     const handleForceResyncCalendar = async () => {
         if (!currentOrg || rawShifts.length === 0) return;
-        if (!confirm(`カレンダーに登録されているすべての予定をGoogleカレンダーへ強制的に再同期します。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。`)) return;
+        if (!(await confirm({ message: `カレンダーに登録されているすべての予定をGoogleカレンダーへ強制的に再同期します。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。` }))) return;
 
         setResyncingCal(true);
         try {

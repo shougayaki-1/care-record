@@ -10,6 +10,8 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { ShiftPayload } from '@/app/actions/shift';
+import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 export type ClientData = { id: string; name: string };
 export type StaffData = { id: string; name: string };
@@ -44,6 +46,8 @@ const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_P
 export const ShiftFormModal = ({
     open, onClose, onSave, onToggleCancel, onDelete, clients, staffs, organizationId, initialData
 }: Props) => {
+    const { showToast } = useToast();
+    const confirm = useConfirm();
     const [loading, setLoading] = useState(false);
 
     const [clientId, setClientId] = useState('');
@@ -79,7 +83,7 @@ export const ShiftFormModal = ({
 
     const handleSave = async () => {
         if (!clientId || !startAt || !endAt || selectedStaffIds.length === 0) {
-            alert('必須項目（利用者、スタッフ、日時）をすべて入力してください');
+            showToast('必須項目（利用者、スタッフ、日時）をすべて入力してください', 'warning');
             return;
         }
         setLoading(true);
@@ -101,7 +105,7 @@ export const ShiftFormModal = ({
             onClose();
         } catch (error) {
             console.error(error);
-            alert('保存に失敗しました');
+            showToast('保存に失敗しました', 'error');
         } finally {
             setLoading(false);
         }
@@ -114,7 +118,7 @@ export const ShiftFormModal = ({
             ? 'この予定を「お休み（キャンセル）」扱いに変更しますか？'
             : 'キャンセルを取り消して、通常の稼働予定に復元しますか？';
 
-        if (!confirm(confirmMsg)) return;
+        if (!(await confirm({ message: confirmMsg }))) return;
 
         setLoading(true);
         try {
@@ -122,7 +126,7 @@ export const ShiftFormModal = ({
             onClose();
         } catch (error) {
             console.error(error);
-            alert('処理に失敗しました');
+            showToast('処理に失敗しました', 'error');
         } finally {
             setLoading(false);
         }
@@ -130,7 +134,11 @@ export const ShiftFormModal = ({
 
     const handleDelete = async () => {
         if (!initialData || !onDelete) return;
-        if (!confirm('このシフトをカレンダーから完全に削除しますか？\n※この操作は取り消せません。Googleカレンダーからも完全に消去されます。')) return;
+        if (!(await confirm({
+            title: 'シフトの削除',
+            message: 'このシフトをカレンダーから完全に削除しますか？\n※この操作は取り消せません。Googleカレンダーからも完全に消去されます。',
+            confirmText: '削除する', confirmColor: 'error',
+        }))) return;
 
         setLoading(true);
         try {
@@ -138,7 +146,7 @@ export const ShiftFormModal = ({
             onClose();
         } catch (error) {
             console.error(error);
-            alert('削除に失敗しました');
+            showToast('削除に失敗しました', 'error');
         } finally {
             setLoading(false);
         }
@@ -169,7 +177,7 @@ export const ShiftFormModal = ({
             <DialogContent dividers sx={{ py: 3 }}>
                 <Stack spacing={3}>
                     {initialData?.status === 'cancelled' && (
-                        <Box p={2} bgcolor="#ffebee" borderRadius={2} border="1px solid #ffcdd2" display="flex" flexDirection="column" gap={0.5}>
+                        <Box p={2} bgcolor="error.light" borderRadius={2} border="1px solid" borderColor="error.light" display="flex" flexDirection="column" gap={0.5}>
                             <Typography color="error" fontWeight="bold" variant="subtitle2">
                                 ⚠ この予定はキャンセル（お休み）に設定されています
                             </Typography>
@@ -245,7 +253,7 @@ export const ShiftFormModal = ({
                     {initialData && (
                         <>
                             <Divider sx={{ my: 1 }} />
-                            <Box p={2.5} border="1px solid #eee" borderRadius={2} bgcolor="#fafafa">
+                            <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
                                 <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
                                     お休み（キャンセル）の管理
                                 </Typography>

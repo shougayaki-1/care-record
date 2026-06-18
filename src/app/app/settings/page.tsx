@@ -25,6 +25,7 @@ import { callGasApi } from '@/app/actions/gas';
 import { deleteOrganization, leaveOrganization, getAuditLogs } from '@/app/actions/organization';
 import { getSyncStatus, syncUnsyncedBatch, forceSyncBatch } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getGoogleAuthUrlAction } from '@/app/actions/google';
 
 type AuditLog = {
@@ -52,6 +53,7 @@ function SettingsContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { showToast } = useToast();
+    const confirm = useConfirm();
 
     const [tabIndex, setTabIndex] = useState(0);
     const [orgName, setOrgName] = useState('');
@@ -192,7 +194,7 @@ function SettingsContent() {
     };
 
     const handleDisconnectDrive = async () => {
-        if (!confirm('連携を解除しますか？\n（Googleドライブ上のフォルダは削除されません。アプリからの参照のみ解除されます。）')) return;
+        if (!(await confirm({ message: '連携を解除しますか？\n（Googleドライブ上のフォルダは削除されません。アプリからの参照のみ解除されます。）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
             await supabase.from('organizations').update({ google_folder_id: null }).eq('id', currentOrg.id);
@@ -220,7 +222,7 @@ function SettingsContent() {
     };
 
     const handleDisconnectCalendar = async () => {
-        if (!confirm('カレンダーの連携を解除しますか？\n（作成されたカレンダー自体はGoogleに残り、トークンのみ破棄されます）')) return;
+        if (!(await confirm({ message: 'カレンダーの連携を解除しますか？\n（作成されたカレンダー自体はGoogleに残り、トークンのみ破棄されます）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
             await supabase.from('organizations').update({ 
@@ -294,7 +296,7 @@ function SettingsContent() {
     // 全件強制再同期をチャンク単位でループ実行する
     const handleForceResyncCalendar = async () => {
         if (!currentOrg) return;
-        if (!confirm('全ての予定（既に同期済みの予定も含む）をGoogleカレンダーに強制的に再同期します。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。')) return;
+        if (!(await confirm({ message: '全ての予定（既に同期済みの予定も含む）をGoogleカレンダーに強制的に再同期します。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。' }))) return;
 
         setResyncingCal(true);
         try {

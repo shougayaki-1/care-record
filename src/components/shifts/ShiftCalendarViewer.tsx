@@ -35,20 +35,20 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
     onEventClick, onDateSelect, onEventDrop, onEventResize, noEventsText
 }, ref) => {
     return (
-        <Paper sx={{
+        <Paper sx={(theme) => ({
             display: 'flex', flexDirection: 'column', height: 'calc(100vh - 180px)',
-            borderRadius: 3, p: 2, boxShadow: 'none', border: '1px solid #E3E5E8',
+            borderRadius: 3, p: 2, boxShadow: 'none', border: '1px solid', borderColor: 'divider',
             '& .fc': {
                 height: '100%',
-                bgcolor: 'white',
-                '--fc-button-bg-color': '#2255CC',
-                '--fc-button-border-color': '#2255CC',
-                '--fc-button-hover-bg-color': '#003399',
-                '--fc-button-hover-border-color': '#003399',
-                '--fc-button-active-bg-color': '#003399',
-                '--fc-button-active-border-color': '#003399',
-                '--fc-today-bg-color': '#F0F5FF',
-                '--fc-border-color': '#E3E5E8',
+                bgcolor: theme.palette.background.paper,
+                '--fc-button-bg-color': theme.palette.primary.main,
+                '--fc-button-border-color': theme.palette.primary.main,
+                '--fc-button-hover-bg-color': theme.palette.primary.dark,
+                '--fc-button-hover-border-color': theme.palette.primary.dark,
+                '--fc-button-active-bg-color': theme.palette.primary.dark,
+                '--fc-button-active-border-color': theme.palette.primary.dark,
+                '--fc-today-bg-color': theme.palette.background.tint,
+                '--fc-border-color': theme.palette.divider,
                 '--fc-event-text-color': '#fff',
                 fontFamily: 'inherit',
             },
@@ -56,12 +56,12 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
             '& .fc-toolbar-title': { fontSize: '1.25rem', fontWeight: 'bold', color: '#060607' },
             '& .fc-col-header-cell-cushion': { color: '#6D6F78', padding: '8px 0' },
             '& .fc-event-time': { fontWeight: 'bold', marginRight: '4px' },
-            '& .fc-list-day-cushion': { backgroundColor: '#F0F5FF !important', color: '#2255CC', fontWeight: 'bold' },
+            '& .fc-list-day-cushion': { backgroundColor: `${theme.palette.background.tint} !important`, color: theme.palette.primary.main, fontWeight: 'bold' },
             '& .fc-list-event:hover td': { backgroundColor: '#F8F9FA', cursor: 'pointer' },
             // ★ドラッグ＆ドロップ時のUI調整
             '& .fc-event-dragging': { opacity: 0.8 },
             '& .fc-event-resizing': { opacity: 0.8 },
-        }}>
+        })}>
             <FullCalendar
                 ref={ref}
                 // rrulePlugin を削除（実体化方式になったため不要）

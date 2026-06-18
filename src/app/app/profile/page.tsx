@@ -16,6 +16,7 @@ import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { deleteUserAccount } from '@/app/actions/user';
 
 const GoogleLogo = () => (
@@ -30,6 +31,7 @@ type UserIdentity = { provider: string; };
 export default function ProfilePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
+    const confirm = useConfirm();
     
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -132,7 +134,7 @@ export default function ProfilePage() {
     };
 
     const handleDeleteAccount = async () => {
-        if (!confirm('本当に退会しますか？\nアカウントと関連データが完全に削除され、復元できません。')) return;
+        if (!(await confirm({ title: 'アカウントの退会', message: '本当に退会しますか？\nアカウントと関連データが完全に削除され、復元できません。', confirmText: '退会する', confirmColor: 'error' }))) return;
         try {
             await deleteUserAccount();
             await supabase.auth.signOut();

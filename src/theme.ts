@@ -2,6 +2,16 @@
 'use client';
 import { createTheme } from '@mui/material/styles';
 
+// パレットに独自の意味的トークンを追加するための型拡張
+declare module '@mui/material/styles' {
+    interface TypeBackground {
+        // セクション等で使う薄いグレー背景（旧 #fafafa）
+        subtle: string;
+        // テーブルヘッダ・今日セルなどの淡いブランド背景（旧 #F0F5FF）
+        tint: string;
+    }
+}
+
 const theme = createTheme({
     palette: {
         mode: 'light',
@@ -10,9 +20,19 @@ const theme = createTheme({
             light: '#6699FF',
             dark: '#003399',
         },
+        error: {
+            main: '#d32f2f',
+            light: '#ffebee', // 警告セクション背景（旧 #ffebee/#ffcdd2）
+        },
+        warning: {
+            main: '#ed6c02',
+            light: '#fff8e1',
+        },
         background: {
             default: '#ffffff', // 全体の背景色（Google風の白基調）
             paper: '#ffffff',
+            subtle: '#fafafa',  // セクション等の薄背景
+            tint: '#F0F5FF',    // 淡いブランド背景
         },
         divider: '#e0e0e0',
         text: {

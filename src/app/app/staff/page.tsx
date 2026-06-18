@@ -22,6 +22,7 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 type StaffData = { id: string; name: string; positions: string[] | null; user_id: string | null; archived_at: string | null; sort_order: number | null; profiles?: { name: string } | null; };
 type AccountData = { id: string; name: string; };
@@ -29,6 +30,7 @@ type AccountData = { id: string; name: string; };
 export default function StaffPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
+  const confirm = useConfirm();
   
   const [isFetching, setIsFetching] = useState(true);
   const [staffList, setStaffList] = useState<StaffData[]>([]);
@@ -109,13 +111,13 @@ export default function StaffPage() {
   const handleOpenAdd = () => { setEditId(null); setStaffName(''); setStaffPositions([]); setLinkedUserId('none'); setModalOpen(true); };
   const handleOpenEdit = (staff: StaffData) => { setEditId(staff.id); setStaffName(staff.name); setStaffPositions(staff.positions || []); setLinkedUserId(staff.user_id || 'none'); setModalOpen(true); };
   const handleDelete = async (id: string, name: string) => {
-      if(!confirm(`「${name}」さんを名簿から削除しますか？\n（※過去のシフトや記録の担当者名も消える可能性があります）\n※退職者は「削除」ではなく「アーカイブ」を推奨します。`)) return;
+      if(!(await confirm({ title: 'スタッフの削除', message: `「${name}」さんを名簿から削除しますか？\n（※過去のシフトや記録の担当者名も消える可能性があります）\n※退職者は「削除」ではなく「アーカイブ」を推奨します。`, confirmText: '削除する', confirmColor: 'error' }))) return;
       try { await supabase.from('staffs').delete().eq('id', id); showToast('削除しました'); fetchData(); } catch (e) { console.error(e); showToast('削除に失敗しました', 'error'); }
   };
 
   // 退職スタッフをアーカイブ（過去の記録・シフトは残したまま、新規割当の選択肢から外す）
   const handleArchive = async (id: string, name: string) => {
-      if(!confirm(`「${name}」さんをアーカイブ（退職）しますか？\n過去のシフト・記録はそのまま残り、今後のシフトや記録の担当者選択には表示されなくなります。\n（いつでも復元できます）`)) return;
+      if(!(await confirm({ title: 'スタッフのアーカイブ', message: `「${name}」さんをアーカイブ（退職）しますか？\n過去のシフト・記録はそのまま残り、今後のシフトや記録の担当者選択には表示されなくなります。\n（いつでも復元できます）`, confirmText: 'アーカイブする' }))) return;
       try { await supabase.from('staffs').update({ archived_at: new Date().toISOString() }).eq('id', id); showToast('アーカイブしました'); fetchData(); } catch (e) { console.error(e); showToast('アーカイブに失敗しました', 'error'); }
   };
 

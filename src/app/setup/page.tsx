@@ -11,11 +11,13 @@ import { User } from '@supabase/supabase-js';
 import BusinessIcon from '@mui/icons-material/Business';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import PersonIcon from '@mui/icons-material/Person';
+import { useToast } from '@/components/ui/ToastProvider';
 
 type Step = 'profile' | 'choice' | 'create' | 'join';
 
 export default function SetupPage() {
     const router = useRouter();
+    const { showToast } = useToast();
     const searchParams = useSearchParams();
     const paramInviteCode = searchParams.get('inviteCode');
 
@@ -134,7 +136,7 @@ export default function SetupPage() {
             }
         } catch (e) {
             console.error('Profile Save Error:', e);
-            alert(`プロフィールの保存に失敗しました: ${getErrorMessage(e)}`);
+            showToast(`プロフィールの保存に失敗しました: ${getErrorMessage(e)}`, 'error');
         } finally {
             setSubmitting(false);
         }
@@ -154,7 +156,7 @@ export default function SetupPage() {
             window.location.href = '/app';
         } catch (e) {
             console.error('Create Org Error:', e);
-            alert(`事業所の作成に失敗しました: ${getErrorMessage(e)}`);
+            showToast(`事業所の作成に失敗しました: ${getErrorMessage(e)}`, 'error');
             setSubmitting(false);
         }
     };
@@ -166,12 +168,12 @@ export default function SetupPage() {
             // 招待の検証・メンバー登録・割り当てはサーバ(service role)で安全に処理する
             const res = await acceptInvitation(inviteCode.trim());
             if (res.alreadyMember) {
-                alert('すでにこの事業所に参加しています。移動します。');
+                showToast('すでにこの事業所に参加しています。移動します。', 'info');
             }
             window.location.href = '/app';
         } catch (e) {
             console.error('Join Org Error:', e);
-            alert(`参加に失敗しました: ${getErrorMessage(e)}`);
+            showToast(`参加に失敗しました: ${getErrorMessage(e)}`, 'error');
             setSubmitting(false);
         }
     };

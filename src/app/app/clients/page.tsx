@@ -17,6 +17,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 type Client = { 
     id: string; 
@@ -29,6 +30,7 @@ export default function ClientsPage() {
   const router = useRouter();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
+  const confirm = useConfirm();
   
   const [clients, setClients] = useState<Client[]>([]);
   const [showArchived, setShowArchived] = useState(false);
@@ -125,7 +127,7 @@ export default function ClientsPage() {
   };
 
   const handleDelete = async (id: string) => {
-      if(!confirm('本当に削除しますか？\nこの利用者の記録データも全て削除されます。\nこの操作は取り消せません。')) return;
+      if(!(await confirm({ title: '利用者の削除', message: '本当に削除しますか？\nこの利用者の記録データも全て削除されます。\nこの操作は取り消せません。', confirmText: '削除する', confirmColor: 'error' }))) return;
       try {
           const { error } = await supabase.from('clients').delete().eq('id', id);
           if (error) throw error;

@@ -10,6 +10,8 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { getAllOrganizations, deleteOrganization } from '@/app/actions/super-admin';
+import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 type Organization = {
     id: string;
@@ -20,6 +22,8 @@ type Organization = {
 };
 
 export default function SuperAdminDashboard() {
+    const { showToast } = useToast();
+    const confirm = useConfirm();
     const [orgs, setOrgs] = useState<Organization[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -43,15 +47,22 @@ export default function SuperAdminDashboard() {
     };
 
     const handleDelete = async (id: string, name: string) => {
-        if (!confirm(`【警告】\n本当に事業所「${name}」を削除しますか？\n\n所属するスタッフ、利用者、記録データなど、全ての関連データが永久に削除されます。この操作は取り消せません。`)) return;
+        const ok = await confirm({
+            title: '【警告】事業所の完全削除',
+            message: `本当に事業所「${name}」を削除しますか？\n\n所属するスタッフ、利用者、記録データなど、全ての関連データが永久に削除されます。この操作は取り消せません。\n\n確認のため、事業所名「${name}」を入力してください。`,
+            requireText: name,
+            confirmText: '完全に削除する',
+            confirmColor: 'error',
+        });
+        if (!ok) return;
 
         try {
             await deleteOrganization(id);
-            alert('削除しました');
+            showToast('削除しました');
             fetchData();
         } catch (error) {
             console.error(error);
-            alert('削除に失敗しました');
+            showToast('削除に失敗しました', 'error');
         }
     };
 

@@ -7,6 +7,7 @@ import { Inter, Poppins } from "next/font/google";
 import "./globals.css";
 import { TermsAgreementModal } from "@/components/auth/TermsAgreementModal";
 import { ToastProvider } from "@/components/ui/ToastProvider";
+import { ConfirmProvider } from "@/components/ui/ConfirmProvider";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -46,10 +47,12 @@ export default function RootLayout({
           <ThemeProvider theme={theme}>
             <CssBaseline />
             <ToastProvider>
-              <WorkspaceProvider>
-                <TermsAgreementModal />
-                {children}
-              </WorkspaceProvider>
+              <ConfirmProvider>
+                <WorkspaceProvider>
+                  <TermsAgreementModal />
+                  {children}
+                </WorkspaceProvider>
+              </ConfirmProvider>
             </ToastProvider>
           </ThemeProvider>
         </AppRouterCacheProvider>

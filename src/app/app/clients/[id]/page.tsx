@@ -36,6 +36,7 @@ import { callGasApi } from '@/app/actions/gas';
 import { STANDARD_TEMPLATES, COMPREHENSIVE_TEMPLATE, FormItem } from '@/constants/formTemplates';
 import { convertSchemaToReadable, FormItem as HelperFormItem } from '../../../../utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 type Staff = { id: string; name: string; type: 'member' | 'ghost' };
 
@@ -45,6 +46,7 @@ export default function ClientSettingsPage() {
     const clientId = params.id as string;
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
+    const confirm = useConfirm();
 
     const [loading, setLoading] = useState(true);
     const [clientName, setClientName] = useState('');
@@ -125,8 +127,8 @@ export default function ClientSettingsPage() {
         const newField: FormItem = { id: crypto.randomUUID(), label: '', type: 'checkbox', required: false, hasDetail: false };
         setFormItems([...formItems, newField]);
     };
-    const removeField = (index: number) => {
-        if (!confirm('この項目を削除しますか？')) return;
+    const removeField = async (index: number) => {
+        if (!(await confirm({ message: 'この項目を削除しますか？', confirmText: '削除する', confirmColor: 'error' }))) return;
         const newItems = [...formItems];
         newItems.splice(index, 1);
         setFormItems(newItems);
@@ -219,7 +221,7 @@ export default function ClientSettingsPage() {
     };
 
     const handleCopy = async (sourceType: 'standard' | 'client', sourceId: string) => {
-        if (!confirm('現在の設定はすべて上書きされます。よろしいですか？')) return;
+        if (!(await confirm({ message: '現在の設定はすべて上書きされます。よろしいですか？' }))) return;
 
         let newSchema: FormItem[] = [];
         if (sourceType === 'standard') {
@@ -238,7 +240,7 @@ export default function ClientSettingsPage() {
             setOpenCopyDialog(false);
             setMessage({ type: 'success', text: '設定を反映しました' });
         } else {
-            alert('テンプレートの取得に失敗しました');
+            showToast('テンプレートの取得に失敗しました', 'error');
         }
     };
 
@@ -246,7 +248,7 @@ export default function ClientSettingsPage() {
         if (!currentOrg || !clientName) return;
 
         if (templateId) {
-            if (!confirm('既にテンプレートIDが入力されています。新しく作成して上書きしますか？')) return;
+            if (!(await confirm({ message: '既にテンプレートIDが入力されています。新しく作成して上書きしますか？' }))) return;
         }
 
         setIsCreatingTemplate(true);

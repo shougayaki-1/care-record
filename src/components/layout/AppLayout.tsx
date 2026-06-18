@@ -6,7 +6,7 @@ import {
   ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge, Popover, CircularProgress,
   AppBar, Toolbar, Button, Menu, MenuItem
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
+import { useTheme, alpha, Theme } from '@mui/material/styles';
 import MenuIcon from '@mui/icons-material/Menu';
 import AddIcon from '@mui/icons-material/Add';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -82,14 +82,14 @@ const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | n
       transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       PaperProps={{ sx: { width: 320, maxHeight: 400 } }}
     >
-      <Box p={2} borderBottom="1px solid #eee">
+      <Box p={2} borderBottom="1px solid" borderColor="divider">
         <Typography fontWeight="bold">通知</Typography>
       </Box>
       {loading ? <Box p={2} textAlign="center"><CircularProgress size={20} /></Box> : (
         <List sx={{ p: 0 }}>
           {notifications.length === 0 && <Box p={2} textAlign="center" color="text.secondary">通知はありません</Box>}
           {notifications.map(n => (
-            <ListItemButton key={n.id} onClick={() => handleRead(n)} sx={{ bgcolor: n.is_read ? 'white' : '#f0f7ff', borderBottom: '1px solid #f5f5f5' }}>
+            <ListItemButton key={n.id} onClick={() => handleRead(n)} sx={{ bgcolor: n.is_read ? 'background.paper' : 'background.tint', borderBottom: '1px solid', borderColor: 'divider' }}>
               <ListItemIcon sx={{ minWidth: 32 }}>
                 {n.type === 'approve' ? <CheckCircleIcon color="success" fontSize="small" /> : <ErrorOutlineIcon color="error" fontSize="small" />}
               </ListItemIcon>
@@ -314,10 +314,10 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
     my: 0.25,
     borderRadius: '24px',
     color: active ? 'primary.main' : 'text.primary',
-    bgcolor: active ? 'rgba(34, 85, 204, 0.12)' : 'transparent',
+    bgcolor: active ? (t: Theme) => alpha(t.palette.primary.main, 0.12) : 'transparent',
     fontWeight: active ? 600 : 500,
     '&:hover': {
-      bgcolor: active ? 'rgba(34, 85, 204, 0.16)' : '#f1f3f4'
+      bgcolor: active ? (t: Theme) => alpha(t.palette.primary.main, 0.16) : 'action.hover'
     },
     '& .MuiListItemIcon-root': {
       color: active ? 'primary.main' : 'text.secondary',

@@ -9,6 +9,7 @@ import {
 } from '@mui/material';
 import { ShiftPatternPayload } from '@/app/actions/shift';
 import { ClientData, StaffData } from './ShiftFormModal';
+import { useToast } from '@/components/ui/ToastProvider';
 
 type Props = {
     open: boolean;
@@ -81,6 +82,7 @@ const ITEM_PADDING_TOP = 8;
 const MenuProps = { PaperProps: { style: { maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP, width: 250 } } };
 
 export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, organizationId, initialData }: Props) => {
+    const { showToast } = useToast();
     const [loading, setLoading] = useState(false);
     const [clientId, setClientId] = useState('');
     const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
@@ -120,7 +122,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
 
     const handleSave = async () => {
         if (!clientId || !startTime || !endTime || selectedStaffIds.length === 0 || selectedDays.length === 0) {
-            alert('必須項目（利用者、担当スタッフ、時間、繰り返し条件）をすべて指定してください');
+            showToast('必須項目（利用者、担当スタッフ、時間、繰り返し条件）をすべて指定してください', 'warning');
             return;
         }
 
@@ -129,7 +131,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
             rruleStr = `FREQ=WEEKLY;INTERVAL=${interval};BYDAY=${selectedDays.join(',')}`;
         } else {
             if (selectedWeeks.length === 0) {
-                alert('第何週に展開するか指定してください');
+                showToast('第何週に展開するか指定してください', 'warning');
                 return;
             }
             const byDayParams = selectedWeeks.flatMap(week => selectedDays.map(day => `${week}${day}`));
@@ -153,7 +155,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
             onClose();
         } catch (e) {
             console.error(e);
-            alert('ひな形の保存に失敗しました');
+            showToast('ひな形の保存に失敗しました', 'error');
         } finally {
             setLoading(false);
         }
@@ -234,7 +236,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                         />
                     </Stack>
 
-                    <Box p={2.5} border="1px solid #e0e0e0" borderRadius={2} bgcolor="#fafafa">
+                    <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
                         <Typography variant="subtitle2" fontWeight="bold" mb={2}>繰り返しのスケジュール設定</Typography>
                         <Stack spacing={2.5}>
                             <Stack direction="row" spacing={2}>

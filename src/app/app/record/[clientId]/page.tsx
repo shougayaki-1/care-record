@@ -22,6 +22,7 @@ import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useWorkspace } from '@/context/WorkspaceContext';
 
 type FormItem = {
@@ -90,6 +91,7 @@ export default function RecordPage() {
   const { clientId } = useParams();
   const searchParams = useSearchParams();
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   
   const paramReportId = searchParams.get('reportId');
@@ -161,7 +163,7 @@ export default function RecordPage() {
 
   const handlePartChange = async (part: 'part1' | 'part2') => {
       if (isDirty) {
-          if (!confirm('変更内容が保存されていません。切り替えてよろしいですか？')) return;
+          if (!(await confirm({ message: '変更内容が保存されていません。切り替えてよろしいですか？' }))) return;
       }
       setSelectedPart(part);
       setIsDirty(false);
@@ -396,8 +398,8 @@ export default function RecordPage() {
   };
 
   const handleDeleteReport = async () => {
-      if(!confirm('本当に削除しますか？')) return;
       if (currentStatus === 'approved') { showToast('承認済みの記録は削除できません', 'error'); return; }
+      if(!(await confirm({ title: '記録の削除', message: '本当に削除しますか？', confirmText: '削除する', confirmColor: 'error' }))) return;
       try {
         await supabase.from('reports').delete().eq('id', currentReportId);
         showToast('削除しました');
@@ -621,8 +623,8 @@ export default function RecordPage() {
                         <AccessTimeIcon fontSize="small" /> 提供時間 <Typography component="span" color="error">*</Typography>
                     </Typography>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                        <TextField label="サービス提供" type="number" fullWidth value={serviceTime} onChange={e => handleChange(setServiceTime, e.target.value)} error={!!errors.serviceTime} InputProps={{ endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }} inputProps={{ inputMode: 'decimal', step: '0.5' }} />
-                        <TextField label="移動" type="number" fullWidth value={travelTime} onChange={e => handleChange(setTravelTime, e.target.value)} InputProps={{ startAdornment: <DirectionsCarIcon color="action" fontSize="small" sx={{ mr: 1 }} />, endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }} inputProps={{ inputMode: 'decimal', step: '0.5' }} />
+                        <TextField label="サービス提供" type="number" fullWidth value={serviceTime} onChange={e => handleChange(setServiceTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} error={!!errors.serviceTime} InputProps={{ endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }} inputProps={{ inputMode: 'decimal', step: '0.5' }} />
+                        <TextField label="移動" type="number" fullWidth value={travelTime} onChange={e => handleChange(setTravelTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} InputProps={{ startAdornment: <DirectionsCarIcon color="action" fontSize="small" sx={{ mr: 1 }} />, endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }} inputProps={{ inputMode: 'decimal', step: '0.5' }} />
                     </Stack>
                 </Box>
                 </Stack>
@@ -653,7 +655,7 @@ export default function RecordPage() {
                         {['text', 'number', 'time'].includes(item.type) && (
                             <Box>
                             <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ mb: 1, display: 'block' }}>{item.label} {item.required && <Typography component="span" color="error">*</Typography>}</Typography>
-                            <TextField fullWidth variant="outlined" type={item.type === 'number' ? 'number' : 'text'} multiline={item.type === 'text'} minRows={item.type === 'text' ? 3 : 1} value={(answers[item.id] as string) || ''} onChange={e => handleAnswerChange(item.id, e.target.value)} error={hasError} helperText={errors[item.id]} placeholder={`${item.label}を入力`} />
+                            <TextField fullWidth variant="outlined" type={item.type === 'number' ? 'number' : 'text'} multiline={item.type === 'text'} minRows={item.type === 'text' ? 3 : 1} value={(answers[item.id] as string) || ''} onChange={e => handleAnswerChange(item.id, e.target.value)} onWheel={item.type === 'number' ? (e => (e.target as HTMLElement).blur()) : undefined} error={hasError} helperText={errors[item.id]} placeholder={`${item.label}を入力`} />
                             </Box>
                         )}
                         {item.type === 'multicheckbox' && (

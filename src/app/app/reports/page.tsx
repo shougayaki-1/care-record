@@ -26,6 +26,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 type ReportValuesData = Record<string, FormValue>;
@@ -45,6 +46,7 @@ export default function ReportsPage() {
   const searchParams = useSearchParams();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
+  const confirm = useConfirm();
   
   const [reports, setReports] = useState<Report[]>([]);
   const [clients, setClients] = useState<ClientData[]>([]);
@@ -128,7 +130,7 @@ export default function ReportsPage() {
 
   const handleBulkApprove = async () => {
       if (selected.length === 0) return;
-      if (!confirm(`${selected.length}件を一括承認しますか？`)) return;
+      if (!(await confirm({ message: `${selected.length}件を一括承認しますか？`, confirmText: '承認する' }))) return;
       setProcessing(true);
       try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -141,7 +143,8 @@ export default function ReportsPage() {
   };
 
   const handleBulkRemand = async () => {
-    if (selected.length === 0 || !confirm(`${selected.length}件を一括で差戻ししますか？`)) return;
+    if (selected.length === 0) return;
+    if (!(await confirm({ message: `${selected.length}件を一括で差戻ししますか？`, confirmText: '差し戻す' }))) return;
     setProcessing(true);
     try {
         await supabase.from('reports').update({ status: 'remanded', approved_by: null, approved_at: null }).in('id', selected);
@@ -155,13 +158,15 @@ export default function ReportsPage() {
   };
 
   const handleBulkDelete = async () => {
-    if (selected.length === 0 || !confirm(`${selected.length}件を削除しますか？\nこの操作は取り消せません。`)) return;
-    
+    if (selected.length === 0) return;
+
     const targets = reports.filter(r => selected.includes(r.id));
     if (targets.some(r => r.status === 'approved')) {
-        alert('選択項目の中に「承認済み」の記録が含まれています。\n承認を取り消してから削除してください。');
+        showToast('選択項目の中に「承認済み」の記録が含まれています。承認を取り消してから削除してください。', 'warning');
         return;
     }
+
+    if (!(await confirm({ message: `${selected.length}件を削除しますか？\nこの操作は取り消せません。`, confirmText: '削除する', confirmColor: 'error' }))) return;
 
     setProcessing(true);
     try {
@@ -194,8 +199,8 @@ export default function ReportsPage() {
 
   const handleExportCSV = async () => {
       const targetReports = getTargetReports();
-      if (targetReports.length === 0) { alert('出力するデータがありません。'); return; }
-      if (!confirm(`${targetReports.length}件のデータをエクスポートします。\n差し込み印刷用に全ての項目を列に展開します。よろしいですか？`)) return;
+      if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
+      if (!(await confirm({ message: `${targetReports.length}件のデータをエクスポートします。\n差し込み印刷用に全ての項目を列に展開します。よろしいですか？` }))) return;
       setProcessing(true);
       try {
         const clientIds = Array.from(new Set(targetReports.map(r => r.clients.id)));
@@ -277,14 +282,16 @@ export default function ReportsPage() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-      } catch (e) { console.error(e); alert('エクスポート中にエラーが発生しました'); } finally { setProcessing(false); }
+      } catch (e) { console.error(e); showToast('エクスポート中にエラーが発生しました', 'error'); } finally { setProcessing(false); }
   };
 
   const handleBulkDownloadPDF = async () => {
       const targetReports = getTargetReports();
-      if (targetReports.length === 0) { alert('出力するデータがありません'); return; }
-      if (targetReports.length > 50) { if (!confirm(`${targetReports.length}件のPDFを作成します。\n時間がかかる場合があります。`)) return; } 
-      else { if (!confirm(`${targetReports.length}件のPDFを出力しますか？`)) return; }
+      if (targetReports.length === 0) { showToast('出力するデータがありません', 'warning'); return; }
+      const pdfConfirmMsg = targetReports.length > 50
+        ? `${targetReports.length}件のPDFを作成します。\n時間がかかる場合があります。`
+        : `${targetReports.length}件のPDFを出力しますか？`;
+      if (!(await confirm({ message: pdfConfirmMsg }))) return;
 
       try {
         const pdfReports = await Promise.all(targetReports.map(async (report) => {
@@ -309,7 +316,7 @@ export default function ReportsPage() {
         link.href = URL.createObjectURL(blob);
         link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
         link.click();
-      } catch (e) { console.error(e); alert('PDF作成中にエラーが発生しました'); }
+      } catch (e) { console.error(e); showToast('PDF作成中にエラーが発生しました', 'error'); }
   };
 
   const preparePdfData = (
@@ -351,8 +358,8 @@ export default function ReportsPage() {
 
   const handleCreateGasPdf = async () => {
       const targetReports = getTargetReports();
-      if (targetReports.length === 0) { alert('出力するデータがありません。'); return; }
-      
+      if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
+
       const clientGroups: Record<string, Report[]> = {};
       targetReports.forEach(r => {
           const cid = r.clients.id;
@@ -375,9 +382,9 @@ export default function ReportsPage() {
       });
 
       const { data: orgInfo } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg!.id).single();
-      if (!orgInfo?.google_folder_id) { alert('事業所のGoogleドライブ連携が設定されていません。\n設定画面から連携を行ってください。'); return; }
+      if (!orgInfo?.google_folder_id) { showToast('事業所のGoogleドライブ連携が設定されていません。設定画面から連携を行ってください。', 'warning'); return; }
 
-      if (!confirm(`${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）`)) return;
+      if (!(await confirm({ message: `${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）` }))) return;
       setGasProgress({ total: targetReports.length, current: 0, currentName: '準備中...' });
 
       let lastOpenedFolderUrl: string | null = null;
@@ -456,10 +463,10 @@ export default function ReportsPage() {
                   setGasProgress({ total: targetReports.length, current: processedCount, currentName: '' });
               }
           }
-          alert('作成が完了しました。保存先のフォルダを開きます。');
+          showToast('作成が完了しました。保存先のフォルダを開きます。');
           if (lastOpenedFolderUrl) window.open(lastOpenedFolderUrl, '_blank');
 
-      } catch (e) { console.error(e); alert('エラーが発生しました: ' + e); } 
+      } catch (e) { console.error(e); showToast('エラーが発生しました: ' + e, 'error'); }
       finally { setGasProgress(null); }
   };
 

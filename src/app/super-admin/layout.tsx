@@ -6,9 +6,11 @@ import { Box, AppBar, Toolbar, Typography, Button, CircularProgress, Container }
 import LogoutIcon from '@mui/icons-material/Logout';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { useToast } from '@/components/ui/ToastProvider';
 
 export default function SuperAdminLayout({ children }: { children: React.ReactNode }) {
     const router = useRouter();
+    const { showToast } = useToast();
     const [loading, setLoading] = useState(true);
     const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
@@ -30,7 +32,7 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
             .single();
 
         if (profile?.role !== 'super_admin') {
-            alert('権限がありません');
+            showToast('権限がありません', 'error');
             router.push('/');
         } else {
             setIsSuperAdmin(true);
