@@ -23,8 +23,8 @@ import { supabase } from '@/lib/supabase';
 import {
     getShifts, createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely,
     ShiftPayload, getShiftPatterns, createShiftPattern, deleteShiftPattern, updateShiftPattern,
-    clearGeneratedShiftsForMonth, generateShiftsForMonth, previewShiftsForMonth, ShiftPatternPayload,
-    syncSingleShift, repairUnsyncedShifts, deleteShiftsDbOnly, forceSyncAllShifts // ★追加
+    generateShiftsForMonth, previewShiftsForMonth, ShiftPatternPayload,
+    getSyncStatus, syncUnsyncedBatch, forceSyncBatch, deleteShiftsBatch // 同期はチャンク方式のサーバーバッチに統一
 } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { ShiftFormModal, ClientData, StaffData, ShiftData } from '@/components/shifts/ShiftFormModal';
@@ -114,7 +114,7 @@ export default function ShiftManagePage() {
             const { data: c } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
             if (c) setClients(c as ClientData[]);
 
-            const { data: s } = await supabase.from('staffs').select('id, name, user_id').eq('organization_id', currentOrg.id);
+            const { data: s } = await supabase.from('staffs').select('id, name, user_id').eq('organization_id', currentOrg.id).is('archived_at', null).order('sort_order', { ascending: true, nullsFirst: false }).order('name', { ascending: true });
             if (s) {
                 const parsed = s.map(item => ({ id: item.id, name: item.name, type: item.user_id ? 'member' as const : 'ghost' as const }));
                 setStaffs(parsed);
@@ -223,6 +223,16 @@ export default function ShiftManagePage() {
             const docTitle = `${entityName} シフト表`;
             const fileName = `${entityName}_シフト表_${monthStr.replace(/\s+/g, '')}.pdf`;
 
+            // ヘッダーと表の間に表示するスタッフ名＋役職の一覧を取得（一覧表・カレンダー共通）
+            const { data: staffRows } = await supabase
+                .from('staffs')
+                .select('name, positions')
+                .eq('organization_id', currentOrg.id)
+                .is('archived_at', null)
+                .order('sort_order', { ascending: true, nullsFirst: false })
+                .order('name', { ascending: true });
+            const staffMembers = (staffRows || []).map(s => ({ name: s.name as string, positions: (s.positions as string[] | null) ?? [] }));
+
             let blob: Blob;
 
             if (viewType.includes('list')) {
@@ -271,7 +281,7 @@ export default function ShiftManagePage() {
                     }
                 });
                 pdfShifts.sort((a, b) => a.timestamp - b.timestamp);
-                blob = await pdf(<ShiftScheduleDocument title={docTitle} monthStr={monthStr} shifts={pdfShifts} orgName={currentOrg.name} />).toBlob();
+                blob = await pdf(<ShiftScheduleDocument title={docTitle} monthStr={monthStr} shifts={pdfShifts} orgName={currentOrg.name} staffMembers={staffMembers} />).toBlob();
             } else {
                 const activeStart = api.view.activeStart;
                 const activeEnd = api.view.activeEnd;
@@ -342,7 +352,8 @@ export default function ShiftManagePage() {
                     if (currentWeek.length === 7) { weeks.push(currentWeek); currentWeek = []; }
                 }
                 if (currentWeek.length > 0) weeks.push(currentWeek);
-                blob = await pdf(<ShiftCalendarDocument title={docTitle} monthStr={monthStr} weeks={weeks} orgName={currentOrg.name} />).toBlob();
+
+                blob = await pdf(<ShiftCalendarDocument title={docTitle} monthStr={monthStr} weeks={weeks} orgName={currentOrg.name} staffMembers={staffMembers} />).toBlob();
             }
 
             const link = document.createElement('a');
@@ -396,7 +407,18 @@ export default function ShiftManagePage() {
                 });
             });
 
-            const staffDataArray = Array.from(matrixMap.values()).sort((a, b) => a.staffName.localeCompare(b.staffName));
+            // スタッフ名簿で設定した並び順（sort_order）をそのまま採用する（staffs は既にその順序で取得済み）
+            const staffDataArray = Array.from(matrixMap.values());
+
+            // ヘッダーと表の間に表示するスタッフ名＋役職の一覧を取得
+            const { data: staffRows } = await supabase
+                .from('staffs')
+                .select('name, positions')
+                .eq('organization_id', currentOrg.id)
+                .is('archived_at', null)
+                .order('sort_order', { ascending: true, nullsFirst: false })
+                .order('name', { ascending: true });
+            const staffMembers = (staffRows || []).map(s => ({ name: s.name as string, positions: (s.positions as string[] | null) ?? [] }));
 
             const blob = await pdf(
                 <ShiftMatrixDocument
@@ -405,6 +427,7 @@ export default function ShiftManagePage() {
                     daysInMonth={daysInMonth}
                     staffData={staffDataArray}
                     orgName={currentOrg.name}
+                    staffMembers={staffMembers}
                 />
             ).toBlob();
 
@@ -536,47 +559,40 @@ export default function ShiftManagePage() {
                 return;
             }
 
-            // 2. カレンダーから安全に直列で1件ずつ同期削除を実行
+            // 2. チャンク単位でサーバーに削除を依頼（Googleから削除できた分のみDB削除＝孤児イベントを残さない）
             setGenerating(false);
-            setSyncProgress({ total: targetShifts.length, current: 0, currentName: '一括消去の同期処理を開始中...' });
+            const total = targetShifts.length;
+            setSyncProgress({ total, current: 0, currentName: '一括消去を開始中...' });
 
-            const preventTabClose = (e: BeforeUnloadEvent) => {
-                e.preventDefault();
-                e.returnValue = '一括消去が進行中です。ページを閉じると同期が途中で中断されます。';
-            };
-            window.addEventListener('beforeunload', preventTabClose);
-
-            let currentCount = 0;
             const shiftIds = targetShifts.map(s => s.id);
+            const CHUNK = 20;
+            let deleted = 0, failed = 0;
+            let errorKind: string | undefined;
 
-            for (const shift of targetShifts) {
-                setSyncProgress({
-                    total: targetShifts.length,
-                    current: currentCount,
-                    currentName: `Googleから削除中: ${shift.title || '予定'}`
-                });
-
-                // Googleカレンダーからイベントを個別に同期削除
-                await syncSingleShift(currentOrg.id, shift.id, 'delete');
-
-                currentCount++;
-                // APIアクセス制限回避のためのインターバル
-                await new Promise(resolve => setTimeout(resolve, 250));
+            for (let i = 0; i < shiftIds.length; i += CHUNK) {
+                const chunk = shiftIds.slice(i, i + CHUNK);
+                const res = await deleteShiftsBatch(currentOrg.id, chunk);
+                deleted += res.deleted;
+                failed += res.failed;
+                if (res.errorKind) errorKind = res.errorKind;
+                setSyncProgress({ total, current: Math.min(total, deleted + failed), currentName: `${Math.min(total, deleted + failed)} / ${total} 件 処理済み` });
+                if (errorKind === 'auth') break; // 認証切れは継続不可
             }
 
-            // 3. 同期消去がすべて完了した後に、DBから一斉高速消去
-            setSyncProgress({ total: targetShifts.length, current: targetShifts.length, currentName: 'DBから一括消去中...' });
-            await deleteShiftsDbOnly(shiftIds);
-
             setSyncProgress(null);
-            window.removeEventListener('beforeunload', preventTabClose);
 
-            showToast(`${targetMonth}月のシフトを ${targetShifts.length} 件、Googleカレンダーを含めて完全に消去しました。`, 'success');
+            if (errorKind === 'auth') {
+                showToast('Googleカレンダーの認証が切れています。設定画面から再接続後にもう一度お試しください。', 'error');
+            } else if (failed > 0) {
+                showToast(`${deleted} 件を消去しました。${failed} 件はGoogleカレンダーから削除できず残っています。通信状況を確認し再度お試しください。`, 'warning');
+            } else {
+                showToast(`${targetMonth}月のシフトを ${deleted} 件、Googleカレンダーを含めて消去しました。`, 'success');
+            }
             fetchData(true);
 
         } catch (error) {
             console.error('Clear Deployed Shifts Error:', error);
-            showToast('消去処理、またはカレンダーとの同期に失敗しました。', 'error');
+            showToast('消去処理中にエラーが発生しました。', 'error');
             setGenerating(false);
             setSyncProgress(null);
         }
@@ -609,54 +625,87 @@ export default function ShiftManagePage() {
         }
     };
 
-    // バックグラウンド同期実行用のノンブロッキング非同期関数
-    const runBackgroundSync = async (unsyncedShifts: { id: string; title: string | null }[]) => {
-        if (!currentOrg) return;
-
-        setSyncProgress({ total: unsyncedShifts.length, current: 0, currentName: '同期を開始しています...' });
-        let currentCount = 0;
-
-        // 同期進行中にユーザーがタブを閉じる/更新するのを防止する警告リスナー
-        const preventTabClose = (e: BeforeUnloadEvent) => {
-            e.preventDefault();
-            e.returnValue = 'Googleカレンダーとの同期が進行中です。ページを閉じると一部の予定が未同期のまま中断されますが、よろしいですか？';
-        };
-        window.addEventListener('beforeunload', preventTabClose);
-
-        try {
-            for (const shift of unsyncedShifts) {
-                setSyncProgress({
-                    total: unsyncedShifts.length,
-                    current: currentCount,
-                    currentName: `${shift.title || '予定'}`
-                });
-
-                // 1件ずつ直列でサーバー側の直接同期アクションを呼び出す
-                await syncSingleShift(currentOrg.id, shift.id);
-
-                currentCount++;
-                // APIのアクセス上限（Rate Limit）を回避するために300msの間隔を設ける
-                await new Promise(resolve => setTimeout(resolve, 300));
-            }
-
-            setSyncProgress(null);
-            showToast('Googleカレンダーへの同期が正常に完了しました！', 'success');
-            
-            // 件数表示をクリアするために最新データを軽くリフレッシュ
-            const { count: finalUnsynced } = await supabase
-                .from('shifts')
-                .select('id', { count: 'exact', head: true })
-                .eq('organization_id', currentOrg.id)
-                .is('google_event_id', null);
-            setUnsyncedCount(finalUnsynced || 0);
-
-        } catch (error) {
-            console.error('Background Sync Error:', error);
-            showToast('バックグラウンドでの同期処理中に一部エラーが発生しました。カレンダー上部の修復ボタン等から再接続してください。', 'warning');
-            setSyncProgress(null);
-        } finally {
-            window.removeEventListener('beforeunload', preventTabClose);
+    // 同期結果に応じたメッセージを表示する共通処理
+    const reportSyncResult = (done: number, failed: number, errorKind?: string) => {
+        if (errorKind === 'auth') {
+            showToast('Googleカレンダーの認証が切れています。設定画面から連携を再接続してください。', 'error');
+        } else if (failed > 0) {
+            showToast(`同期が一部失敗しました（成功 ${done} 件 / 失敗 ${failed} 件）。通信状況を確認し、しばらくしてから再同期してください。`, 'warning');
+        } else {
+            showToast(`Googleカレンダーへの同期が完了しました（${done} 件）。`, 'success');
         }
+    };
+
+    // 未同期件数をサーバーから取得して表示を更新
+    const refreshUnsyncedCount = async () => {
+        if (!currentOrg) return;
+        const status = await getSyncStatus(currentOrg.id);
+        setUnsyncedCount(status.unsynced);
+    };
+
+    // 未同期シフトをチャンク単位でサーバー一括同期するループ（タイムアウト回避・再開可能）
+    const runUnsyncedSyncLoop = async (): Promise<boolean> => {
+        if (!currentOrg) return false;
+        const status = await getSyncStatus(currentOrg.id);
+        if (!status.connected) {
+            showToast('Googleカレンダーが連携されていません。設定画面から接続してください。', 'warning');
+            return false;
+        }
+        const total = status.unsynced;
+        if (total === 0) { await refreshUnsyncedCount(); return true; }
+
+        setSyncProgress({ total, current: 0, currentName: 'Googleカレンダーへ同期中...' });
+        let done = 0, failed = 0;
+        let errorKind: string | undefined;
+        try {
+            for (;;) {
+                const res = await syncUnsyncedBatch(currentOrg.id, 20);
+                done += res.succeeded;
+                failed += res.failed;
+                if (res.errorKind) errorKind = res.errorKind;
+                setSyncProgress({ total, current: Math.min(total, done), currentName: `${Math.min(total, done)} / ${total} 件 同期済み` });
+                // 認証切れ・残件ゼロ・進捗が出ない（全件失敗）場合はループを抜ける
+                if (errorKind === 'auth' || res.remaining <= 0 || res.succeeded === 0) break;
+            }
+        } finally {
+            setSyncProgress(null);
+            await refreshUnsyncedCount();
+        }
+        reportSyncResult(done, failed, errorKind);
+        return failed === 0 && errorKind !== 'auth';
+    };
+
+    // 全件強制再同期をチャンク単位でサーバー処理するループ
+    const runForceSyncLoop = async (): Promise<boolean> => {
+        if (!currentOrg) return false;
+        const status = await getSyncStatus(currentOrg.id);
+        if (!status.connected) {
+            showToast('Googleカレンダーが連携されていません。設定画面から接続してください。', 'warning');
+            return false;
+        }
+        const total = status.total;
+        if (total === 0) return true;
+
+        setSyncProgress({ total, current: 0, currentName: '全件再同期の準備中...' });
+        let cursor: string | null = null;
+        let done = 0, failed = 0;
+        let errorKind: string | undefined;
+        try {
+            for (;;) {
+                const res = await forceSyncBatch(currentOrg.id, cursor, 20);
+                done += res.processed;
+                failed += res.failed;
+                cursor = res.nextCursor;
+                if (res.errorKind) errorKind = res.errorKind;
+                setSyncProgress({ total, current: Math.min(total, done), currentName: `${Math.min(total, done)} / ${total} 件 再同期済み` });
+                if (errorKind === 'auth' || res.remaining <= 0 || res.processed === 0) break;
+            }
+        } finally {
+            setSyncProgress(null);
+            await refreshUnsyncedCount();
+        }
+        reportSyncResult(done, failed, errorKind);
+        return failed === 0 && errorKind !== 'auth';
     };
 
     const executeGenerate = async () => {
@@ -671,91 +720,44 @@ export default function ShiftManagePage() {
             // 2. DB生成が完了した時点で、即座にローディングを解除してカレンダー画面を表示！
             setGenerating(false);
             setTabIndex(1);
-            showToast(`${targetMonth}月のシフト ${res.count} 件の生成が完了しました！カレンダーへの同期をバックグラウンドで開始します。`, 'success');
+            showToast(`${targetMonth}月のシフト ${res.count} 件を生成しました。続けてGoogleカレンダーへ同期します。`, 'success');
 
             // すぐにアプリ内カレンダーを最新情報に更新して描画
             fetchData(true);
 
-            // 3. 新たに作成され、まだカレンダーに連携されていないシフト（google_event_id IS NULL）を抽出
-            const { data: unsyncedShifts, error: queryError } = await supabase
-                .from('shifts')
-                .select('id, title')
-                .eq('organization_id', currentOrg.id)
-                .is('google_event_id', null);
-
-            if (queryError) throw queryError;
-
-            // 4. 未同期の予定が存在する場合、awaitを付けずに非同期（ノンブロッキング）で同期処理を裏側で走らせる
-            if (unsyncedShifts && unsyncedShifts.length > 0) {
-                runBackgroundSync(unsyncedShifts);
-            }
+            // 3. 未同期シフトをサーバー側のチャンクバッチで同期（タブを閉じても残件は後から再同期可能）
+            await runUnsyncedSyncLoop();
+            fetchData(true);
         } catch (error) {
             console.error(error);
-            showToast('自動展開またはカレンダーとの同期に失敗しました', 'error');
+            showToast('シフトの自動展開に失敗しました。', 'error');
             setGenerating(false);
         }
     };
 
-    // 警告バナーから手動で修復（再同期）を実行する関数
+    // 警告バナー / 同期ステータスから未同期シフトの再同期を実行する
     const handleRepairFromBanner = async () => {
         if (!currentOrg) return;
         setRepairingFromBanner(true);
-        // 修復プログレスも画面で表示するように同期化
-        setSyncProgress({ total: unsyncedCount, current: 0, currentName: '同期修復を開始しています...' });
         try {
-            const res = await repairUnsyncedShifts(currentOrg.id);
-            showToast(`カレンダー同期を修復しました。（修復されたシフト数: ${res.count} 件）`, 'success');
+            await runUnsyncedSyncLoop();
             fetchData(true);
-        } catch (e) {
-            console.error(e);
-            showToast('同期修復に失敗しました。接続設定を確認してください。', 'error');
         } finally {
             setRepairingFromBanner(false);
-            setSyncProgress(null);
         }
     };
 
-    // ★追加: フロントエンドのタイムアウトを考慮した安全な全件強制再同期処理
+    // 全件強制再同期（タイムアウト回避のためサーバー側チャンク処理をループ）
     const handleForceResyncCalendar = async () => {
         if (!currentOrg || rawShifts.length === 0) return;
-        if (!confirm(`カレンダーに登録・表示されているすべての予定 (${rawShifts.length} 件) をGoogleカレンダーへ強制的に再同期（最新状態に更新・追加）します。よろしいですか？\n※件数が多い場合は完了まで時間がかかる可能性があります。途中でブラウザを閉じないでください。`)) return;
+        if (!confirm(`カレンダーに登録されているすべての予定をGoogleカレンダーへ強制的に再同期します。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。`)) return;
 
         setResyncingCal(true);
-        setSyncProgress({ total: rawShifts.length, current: 0, currentName: '同期の準備中...' });
-
-        // 同期中に誤ってタブを閉じるのを防ぐ警告イベント登録
-        const preventTabClose = (e: BeforeUnloadEvent) => {
-            e.preventDefault();
-            e.returnValue = 'Googleカレンダーへの全件強制再同期が進行中です。';
-        };
-        window.addEventListener('beforeunload', preventTabClose);
-
         try {
-            let successCount = 0;
-            for (const shift of rawShifts) {
-                setSyncProgress({
-                    total: rawShifts.length,
-                    current: successCount,
-                    currentName: `強制同期中: ${shift.title || '予定'}`
-                });
-
-                // Googleカレンダーへ直接強制同期を実施
-                await syncSingleShift(currentOrg.id, shift.id);
-
-                successCount++;
-                // APIのアクセス制限（Rate Limit）を回避するために300msの遅延を挟む
-                await new Promise(resolve => setTimeout(resolve, 300));
-            }
-
-            showToast(`全件の強制再同期が完了しました。（同期されたシフト数: ${successCount} 件）`, 'success');
+            await runForceSyncLoop();
             fetchData(true);
-        } catch (e) {
-            console.error('Force Resync Error:', e);
-            showToast('再同期処理中にエラーが発生しました。カレンダーの連携状態を確認してください。', 'error');
         } finally {
             setResyncingCal(false);
-            setSyncProgress(null);
-            window.removeEventListener('beforeunload', preventTabClose);
         }
     };
 

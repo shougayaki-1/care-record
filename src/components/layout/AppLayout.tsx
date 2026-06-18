@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import {
   Box, Avatar, Tooltip, IconButton, Divider, List, ListItem, ListItemButton,
-  ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge, Popover, CircularProgress
+  ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge, Popover, CircularProgress,
+  AppBar, Toolbar, Button, Menu, MenuItem
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -30,8 +31,7 @@ import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-const RAIL_WIDTH = 72;
-const SIDEBAR_WIDTH = 240;
+const SIDEBAR_WIDTH = 256;
 
 type Notification = {
   id: string;
@@ -107,78 +107,178 @@ const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | n
   );
 };
 
-const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], currentOrg: Workspace | null, switchOrg: (id: string) => void }) => {
+// 上部 AppBar：組織切替ドロップダウン・通知・アカウントメニューを集約（Google Workspace 風）
+const TopAppBar = ({
+  orgList, currentOrg, switchOrg, onMenuClick, showMenuButton
+}: {
+  orgList: Workspace[],
+  currentOrg: Workspace | null,
+  switchOrg: (id: string) => void,
+  onMenuClick: () => void,
+  showMenuButton: boolean
+}) => {
   const router = useRouter();
+  const [userName, setUserName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const [orgAnchor, setOrgAnchor] = useState<null | HTMLElement>(null);
+  const [accountAnchor, setAccountAnchor] = useState<null | HTMLElement>(null);
+  const [notifAnchor, setNotifAnchor] = useState<null | HTMLElement>(null);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).single();
+        if (profile) {
+          setUserName(profile.name);
+          setAvatarUrl(profile.avatar_url);
+        }
+
+        const { count } = await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_read', false);
+        setUnreadCount(count || 0);
+
+        const channel = supabase.channel('notifications')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
+            setUnreadCount(prev => prev + 1);
+          })
+          .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+      }
+    };
+    fetchUser();
+  }, []);
+
+  const handleSwitchOrg = (id: string) => {
+    switchOrg(id);
+    setOrgAnchor(null);
+  };
+
+  const handleLogout = async () => {
+    setAccountAnchor(null);
+    await supabase.auth.signOut();
+    router.push('/');
+  };
 
   return (
-    <Box sx={{
-      width: RAIL_WIDTH,
-      bgcolor: '#E3E5E8',
-      borderRight: 'none',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      py: 2,
-      gap: 1.5,
-      overflowY: 'auto',
-      flexShrink: 0,
-      '&::-webkit-scrollbar': { display: 'none' }
-    }}>
-      {orgList.map(org => {
-        const isSelected = currentOrg?.id === org.id;
-        return (
-          <Tooltip key={org.id} title={org.name} placement="right">
-            <IconButton
-              onClick={() => switchOrg(org.id)}
-              sx={{
-                p: 0,
-                border: isSelected ? `2px solid #2255CC` : '2px solid transparent',
-                borderRadius: '50%',
-                transition: 'all 0.2s',
-                '&:hover': {
-                  borderColor: isSelected ? '#2255CC' : 'rgba(0,0,0,0.1)'
-                }
-              }}
-            >
-              <Avatar
-                sx={{
-                  bgcolor: isSelected ? '#2255CC' : '#F2F3F5',
-                  color: isSelected ? '#fff' : '#555',
-                  width: 48, height: 48,
-                  fontSize: '1rem',
-                  fontWeight: 'bold',
-                  boxShadow: isSelected ? 2 : 0,
-                  transition: 'all 0.2s',
-                  '&:hover': { bgcolor: isSelected ? '#2255CC' : '#fff' }
-                }}
-              >
-                {org.name.slice(0, 1)}
-              </Avatar>
-            </IconButton>
-          </Tooltip>
-        );
-      })}
+    <AppBar position="static">
+      <Toolbar sx={{ gap: 1 }}>
+        {showMenuButton && (
+          <IconButton edge="start" onClick={onMenuClick} sx={{ mr: 1 }} aria-label="メニューを開く">
+            <MenuIcon />
+          </IconButton>
+        )}
 
-      <Divider flexItem sx={{ mx: 2, borderColor: 'rgba(0,0,0,0.06)' }} />
-
-      <Tooltip title="事業所を追加 / 参加" placement="right">
-        <IconButton
-          sx={{
-            width: 48, height: 48,
-            bgcolor: '#F2F3F5', color: '#23A559',
-            transition: 'all 0.2s',
-            '&:hover': { bgcolor: '#23A559', color: '#fff' }
-          }}
-          onClick={() => router.push('/setup')}
+        <Typography
+          variant="h6"
+          noWrap
+          sx={{ fontWeight: 700, fontSize: '1.1rem', mr: 2, display: { xs: 'none', sm: 'block' } }}
         >
-          <AddIcon />
-        </IconButton>
-      </Tooltip>
-    </Box>
+          CareRecord
+        </Typography>
+
+        {/* 組織切替ドロップダウン */}
+        <Button
+          onClick={(e) => setOrgAnchor(e.currentTarget)}
+          startIcon={<BusinessIcon />}
+          endIcon={<ExpandMore />}
+          sx={{
+            color: 'text.primary',
+            textTransform: 'none',
+            borderRadius: 2,
+            px: 1.5,
+            maxWidth: { xs: 180, sm: 280 },
+            '& .MuiButton-startIcon': { color: 'primary.main' }
+          }}
+        >
+          <Typography noWrap sx={{ fontWeight: 600, fontSize: '0.95rem' }}>
+            {currentOrg?.name || '事業所を選択'}
+          </Typography>
+        </Button>
+        <Menu
+          anchorEl={orgAnchor}
+          open={Boolean(orgAnchor)}
+          onClose={() => setOrgAnchor(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          PaperProps={{ sx: { minWidth: 240 } }}
+        >
+          {orgList.map(org => (
+            <MenuItem
+              key={org.id}
+              selected={currentOrg?.id === org.id}
+              onClick={() => handleSwitchOrg(org.id)}
+            >
+              <ListItemIcon>
+                <Avatar sx={{ width: 28, height: 28, fontSize: '0.85rem', bgcolor: currentOrg?.id === org.id ? 'primary.main' : '#e0e0e0', color: currentOrg?.id === org.id ? '#fff' : '#555' }}>
+                  {org.name.slice(0, 1)}
+                </Avatar>
+              </ListItemIcon>
+              <ListItemText primary={org.name} primaryTypographyProps={{ noWrap: true }} />
+            </MenuItem>
+          ))}
+          <Divider />
+          <MenuItem onClick={() => { setOrgAnchor(null); router.push('/setup'); }}>
+            <ListItemIcon><AddIcon fontSize="small" sx={{ color: '#23A559' }} /></ListItemIcon>
+            <ListItemText primary="事業所を追加 / 参加" />
+          </MenuItem>
+        </Menu>
+
+        <Box sx={{ flexGrow: 1 }} />
+
+        {/* 通知 */}
+        <Tooltip title="通知">
+          <IconButton onClick={(e) => setNotifAnchor(e.currentTarget)}>
+            <Badge badgeContent={unreadCount} color="error" variant="dot">
+              <NotificationsIcon />
+            </Badge>
+          </IconButton>
+        </Tooltip>
+        <NotificationsPopover anchorEl={notifAnchor} onClose={() => setNotifAnchor(null)} />
+
+        {/* アカウントメニュー */}
+        <Tooltip title="アカウント">
+          <IconButton onClick={(e) => setAccountAnchor(e.currentTarget)} sx={{ ml: 0.5 }}>
+            <Avatar src={avatarUrl} sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: '0.85rem' }}>
+              {userName ? userName.slice(0, 1) : 'U'}
+            </Avatar>
+          </IconButton>
+        </Tooltip>
+        <Menu
+          anchorEl={accountAnchor}
+          open={Boolean(accountAnchor)}
+          onClose={() => setAccountAnchor(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          PaperProps={{ sx: { minWidth: 220 } }}
+        >
+          <Box sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Avatar src={avatarUrl} sx={{ width: 40, height: 40, bgcolor: 'primary.main' }}>
+              {userName ? userName.slice(0, 1) : 'U'}
+            </Avatar>
+            <Box sx={{ overflow: 'hidden' }}>
+              <Typography fontWeight="bold" fontSize="0.9rem" noWrap>{userName || 'アカウント'}</Typography>
+            </Box>
+          </Box>
+          <Divider />
+          <MenuItem onClick={() => { setAccountAnchor(null); router.push('/app/profile'); }}>
+            <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
+            <ListItemText primary="設定" />
+          </MenuItem>
+          <MenuItem onClick={handleLogout}>
+            <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
+            <ListItemText primary="ログアウト" />
+          </MenuItem>
+        </Menu>
+      </Toolbar>
+    </AppBar>
   );
 };
 
-const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onClose?: () => void }) => {
+// 左ナビゲーション（Google 風：白基調・丸ピルの選択スタイル）
+const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onClose?: () => void }) => {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -202,56 +302,39 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
   const isOwner = currentOrg.role === 'owner';
 
   const categoryStyle = {
-    px: 2, pt: 2.5, pb: 1,
+    px: 3, pt: 2.5, pb: 1,
     fontSize: '0.75rem',
-    fontWeight: 'bold',
-    color: '#6D6F78',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-    ml: 1
+    fontWeight: 500,
+    color: 'text.secondary'
   };
 
+  // Google（Gmail）風の丸ピル選択スタイル
   const itemStyle = (active: boolean) => ({
-    mx: 1,
-    borderRadius: '4px',
-    mb: 0.25,
-    color: active ? '#060607' : '#5C5E66',
-    bgcolor: active ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+    mx: 1.5,
+    my: 0.25,
+    borderRadius: '24px',
+    color: active ? 'primary.main' : 'text.primary',
+    bgcolor: active ? 'rgba(34, 85, 204, 0.12)' : 'transparent',
     fontWeight: active ? 600 : 500,
     '&:hover': {
-      bgcolor: active ? 'rgba(0, 0, 0, 0.04)' : 'rgba(0, 0, 0, 0.02)',
-      color: '#060607'
+      bgcolor: active ? 'rgba(34, 85, 204, 0.16)' : '#f1f3f4'
     },
     '& .MuiListItemIcon-root': {
-      color: active ? '#060607' : '#5C5E66',
-      minWidth: 32
+      color: active ? 'primary.main' : 'text.secondary',
+      minWidth: 36
     }
   });
 
   return (
     <Box sx={{
       width: SIDEBAR_WIDTH,
-      bgcolor: '#F2F3F5',
+      bgcolor: 'background.paper',
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      borderRight: 'none'
+      overflowY: 'auto'
     }}>
-      <Box sx={{
-        height: 48,
-        display: 'flex',
-        alignItems: 'center',
-        px: 2,
-        flexShrink: 0,
-        boxShadow: '0 1px 0 rgba(0,0,0,0.05)',
-        cursor: 'default'
-      }}>
-        <Typography variant="subtitle1" fontWeight="800" noWrap sx={{ color: '#060607' }}>
-          {currentOrg.name}
-        </Typography>
-      </Box>
-
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', py: 1 }}>
+      <Box sx={{ flexGrow: 1, py: 1 }}>
         <Typography sx={categoryStyle}>記録</Typography>
         <List disablePadding>
           <ListItem disablePadding>
@@ -281,7 +364,7 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
 
         {isAdmin && (
           <>
-            <Box onClick={() => setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: 'pointer', '&:hover': { color: '#060607' } }}>
+            <Box onClick={() => setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: 'pointer', '&:hover': { color: 'text.primary' } }}>
               提供記録一覧
               {openReports ? <ExpandLess fontSize="small" sx={{ ml: 'auto' }} /> : <ExpandMore fontSize="small" sx={{ ml: 'auto' }} />}
             </Box>
@@ -354,91 +437,6 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
   );
 };
 
-const UserPanel = ({ onClose }: { onClose?: () => void }) => {
-  const router = useRouter();
-  const [userName, setUserName] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
-
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [notifAnchor, setNotifAnchor] = useState<null | HTMLElement>(null);
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).single();
-        if (profile) {
-          setUserName(profile.name);
-          setAvatarUrl(profile.avatar_url);
-        }
-
-        const { count } = await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_read', false);
-        setUnreadCount(count || 0);
-
-        const channel = supabase.channel('notifications')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
-            setUnreadCount(prev => prev + 1);
-          })
-          .subscribe();
-
-        return () => { supabase.removeChannel(channel); };
-      }
-    };
-    fetchUser();
-  }, []);
-
-  const handleNav = (path: string) => { router.push(path); if (onClose) onClose(); };
-  const handleLogout = async () => { await supabase.auth.signOut(); router.push('/'); };
-
-  return (
-    <Box sx={{
-      height: 52,
-      bgcolor: '#EBEDEF',
-      display: 'flex',
-      alignItems: 'center',
-      px: 1.5,
-      flexShrink: 0,
-      width: '100%'
-    }}>
-      <Avatar
-        src={avatarUrl}
-        sx={{ width: 32, height: 32, bgcolor: '#2255CC', fontSize: '0.8rem', mr: 1.5 }}
-      >
-        {userName ? userName.slice(0, 1) : 'U'}
-      </Avatar>
-
-      <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
-        <Typography variant="caption" fontWeight="bold" noWrap sx={{ display: 'block', color: '#060607', fontSize: '0.85rem' }}>
-          {userName || 'アカウント'}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '0.7rem' }} noWrap>
-          オンライン
-        </Typography>
-      </Box>
-
-      <Tooltip title="通知">
-        <IconButton size="small" onClick={(e) => setNotifAnchor(e.currentTarget)}>
-          <Badge badgeContent={unreadCount} color="error" variant="dot">
-            <NotificationsIcon fontSize="small" />
-          </Badge>
-        </IconButton>
-      </Tooltip>
-      <NotificationsPopover anchorEl={notifAnchor} onClose={() => setNotifAnchor(null)} />
-
-      <Tooltip title="設定">
-        <IconButton size="small" onClick={() => handleNav('/app/profile')}>
-          <SettingsIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
-      <Tooltip title="ログアウト">
-        <IconButton size="small" onClick={handleLogout}>
-          <LogoutIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
-    </Box>
-  );
-};
-
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -446,58 +444,52 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { orgList, currentOrg, switchOrg } = useWorkspace();
 
   return (
-    <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', bgcolor: '#ffffff' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>
+      <TopAppBar
+        orgList={orgList}
+        currentOrg={currentOrg}
+        switchOrg={switchOrg}
+        onMenuClick={() => setMobileOpen(true)}
+        showMenuButton={isMobile}
+      />
 
-      {isMobile && (
-        <Box sx={{ position: 'fixed', top: 0, left: 0, right: 0, height: 48, bgcolor: '#F2F3F5', borderBottom: '1px solid #E3E5E8', display: 'flex', alignItems: 'center', px: 2, zIndex: 1200 }}>
-          <IconButton edge="start" onClick={() => setMobileOpen(true)} size="small" sx={{ mr: 2 }}><MenuIcon /></IconButton>
-          <Typography variant="subtitle1" fontWeight="bold" color="#060607">{currentOrg?.name || 'CareRecord'}</Typography>
+      <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
+        {/* デスクトップ：常時表示のナビ */}
+        <Box sx={{
+          width: SIDEBAR_WIDTH,
+          flexShrink: 0,
+          display: { xs: 'none', md: 'block' },
+          borderRight: '1px solid',
+          borderColor: 'divider',
+          height: '100%'
+        }}>
+          <NavDrawer currentOrg={currentOrg} />
         </Box>
-      )}
 
-      <Box sx={{
-        width: RAIL_WIDTH + SIDEBAR_WIDTH,
-        display: { xs: 'none', md: 'flex' },
-        flexDirection: 'column',
-        height: '100%',
-        bgcolor: '#E3E5E8'
-      }}>
-        <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
-          <ServerRail orgList={orgList} currentOrg={currentOrg} switchOrg={switchOrg} />
-          <ChannelSidebar currentOrg={currentOrg} />
+        {/* モバイル：一時的なドロワー */}
+        <Drawer
+          variant="temporary"
+          open={mobileOpen}
+          onClose={() => setMobileOpen(false)}
+          ModalProps={{ keepMounted: true }}
+          sx={{ display: { xs: 'block', md: 'none' }, '& .MuiDrawer-paper': { width: SIDEBAR_WIDTH } }}
+        >
+          <NavDrawer currentOrg={currentOrg} onClose={() => setMobileOpen(false)} />
+        </Drawer>
+
+        <Box
+          component="main"
+          sx={{
+            flexGrow: 1,
+            bgcolor: 'background.default',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}
+        >
+          {children}
         </Box>
-        <UserPanel />
-      </Box>
-
-      <Drawer
-        variant="temporary"
-        open={mobileOpen}
-        onClose={() => setMobileOpen(false)}
-        ModalProps={{ keepMounted: true }}
-        sx={{ display: { xs: 'block', md: 'none' }, '& .MuiDrawer-paper': { width: RAIL_WIDTH + SIDEBAR_WIDTH } }}
-      >
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
-            <ServerRail orgList={orgList} currentOrg={currentOrg} switchOrg={(id) => { switchOrg(id); setMobileOpen(false); }} />
-            <ChannelSidebar currentOrg={currentOrg} onClose={() => setMobileOpen(false)} />
-          </Box>
-          <UserPanel onClose={() => setMobileOpen(false)} />
-        </Box>
-      </Drawer>
-
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          bgcolor: '#FFFFFF',
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          pt: { xs: 6, md: 0 }
-        }}
-      >
-        {children}
       </Box>
     </Box>
   );

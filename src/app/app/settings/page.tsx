@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { 
-  Box, Typography, Paper, TextField, Button, Alert, CircularProgress, Stack, Divider, 
+  Box, Typography, Paper, TextField, Button, Alert, CircularProgress, LinearProgress, Stack, Divider,
   Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow, Dialog, 
   DialogTitle, DialogContent, DialogContentText, DialogActions
 } from '@mui/material';
@@ -23,7 +23,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { deleteOrganization, leaveOrganization, getAuditLogs } from '@/app/actions/organization';
-import { repairUnsyncedShifts, forceSyncAllShifts } from '@/app/actions/shift'; // ★修正: forceSyncAllShifts を追加
+import { getSyncStatus, syncUnsyncedBatch, forceSyncBatch } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
 import { getGoogleAuthUrlAction } from '@/app/actions/google';
 
@@ -64,6 +64,8 @@ function SettingsContent() {
     const [connectingCal, setConnectingCal] = useState(false);
     const [repairingCal, setRepairingCal] = useState(false);
     const [resyncingCal, setResyncingCal] = useState(false); // ★追加: 強制全件再同期中ステート
+    const [syncStatus, setSyncStatus] = useState<{ total: number; unsynced: number } | null>(null);
+    const [syncProgress, setSyncProgress] = useState<{ total: number; current: number } | null>(null);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
     const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -233,41 +235,91 @@ function SettingsContent() {
         }
     };
 
-    // 未同期シフトの再同期（修復）を実行
-    const handleRepairCalendar = async () => {
+    // 同期ステータス（未同期件数）を取得して表示を更新
+    const refreshSyncStatus = useCallback(async () => {
         if (!currentOrg) return;
-        if (!confirm('Googleカレンダーへの同期漏れ（未同期）になっている予定を検出し、一括で再接続（修復）します。よろしいですか？\n※件数が多い場合は時間がかかる場合があります。')) return;
-        
-        setRepairingCal(true);
         try {
-            const res = await repairUnsyncedShifts(currentOrg.id);
-            if (res.success) {
-                showToast(`同期修復が完了しました。（修復されたシフト数: ${res.count} 件）`, 'success');
-            }
+            const s = await getSyncStatus(currentOrg.id);
+            setSyncStatus({ total: s.total, unsynced: s.unsynced });
         } catch (e) {
-            console.error(e);
-            showToast('カレンダーの同期修復に失敗しました。再接続をお試しください。', 'error');
-        } finally {
-            setRepairingCal(false);
+            console.error('getSyncStatus error', e);
+        }
+    }, [currentOrg]);
+
+    useEffect(() => {
+        if (googleCalendarId) refreshSyncStatus();
+        else setSyncStatus(null);
+    }, [googleCalendarId, refreshSyncStatus]);
+
+    // 同期結果のメッセージ
+    const reportSyncResult = (done: number, failed: number, errorKind?: string) => {
+        if (errorKind === 'auth') {
+            showToast('Googleカレンダーの認証が切れています。「連携を解除」後に再接続してください。', 'error');
+        } else if (failed > 0) {
+            showToast(`同期が一部失敗しました（成功 ${done} 件 / 失敗 ${failed} 件）。通信状況を確認し、しばらくしてから再度お試しください。`, 'warning');
+        } else {
+            showToast(`Googleカレンダーへの同期が完了しました（${done} 件）。`, 'success');
         }
     };
 
-    // ★追加: 全件強制再同期（修復）を実行
-    const handleForceResyncCalendar = async () => {
+    // 未同期シフトのみをチャンク単位で同期する
+    const handleRepairCalendar = async () => {
         if (!currentOrg) return;
-        if (!confirm('全ての予定（既に同期済みの予定も含む）をGoogleカレンダーに強制的に再同期します。よろしいですか？\n※件数が多い場合は完了まで非常に時間がかかる可能性があります。')) return;
-        
-        setResyncingCal(true);
+        setRepairingCal(true);
         try {
-            const res = await forceSyncAllShifts(currentOrg.id);
-            if (res.success) {
-                showToast(`全件の強制再同期が完了しました。（同期されたシフト数: ${res.count} 件）`, 'success');
+            const status = await getSyncStatus(currentOrg.id);
+            const total = status.unsynced;
+            if (total === 0) { showToast('未同期の予定はありません。', 'info'); return; }
+            setSyncProgress({ total, current: 0 });
+            let done = 0, failed = 0;
+            let errorKind: string | undefined;
+            for (;;) {
+                const res = await syncUnsyncedBatch(currentOrg.id, 20);
+                done += res.succeeded; failed += res.failed;
+                if (res.errorKind) errorKind = res.errorKind;
+                setSyncProgress({ total, current: Math.min(total, done) });
+                if (errorKind === 'auth' || res.remaining <= 0 || res.succeeded === 0) break;
             }
+            reportSyncResult(done, failed, errorKind);
         } catch (e) {
             console.error(e);
-            showToast('全件強制再同期に失敗しました。再接続をお試しください。', 'error');
+            showToast('同期処理中にエラーが発生しました。', 'error');
+        } finally {
+            setRepairingCal(false);
+            setSyncProgress(null);
+            refreshSyncStatus();
+        }
+    };
+
+    // 全件強制再同期をチャンク単位でループ実行する
+    const handleForceResyncCalendar = async () => {
+        if (!currentOrg) return;
+        if (!confirm('全ての予定（既に同期済みの予定も含む）をGoogleカレンダーに強制的に再同期します。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。')) return;
+
+        setResyncingCal(true);
+        try {
+            const status = await getSyncStatus(currentOrg.id);
+            const total = status.total;
+            if (total === 0) { showToast('同期対象の予定がありません。', 'info'); return; }
+            setSyncProgress({ total, current: 0 });
+            let cursor: string | null = null;
+            let done = 0, failed = 0;
+            let errorKind: string | undefined;
+            for (;;) {
+                const res = await forceSyncBatch(currentOrg.id, cursor, 20);
+                done += res.processed; failed += res.failed; cursor = res.nextCursor;
+                if (res.errorKind) errorKind = res.errorKind;
+                setSyncProgress({ total, current: Math.min(total, done) });
+                if (errorKind === 'auth' || res.remaining <= 0 || res.processed === 0) break;
+            }
+            reportSyncResult(done, failed, errorKind);
+        } catch (e) {
+            console.error(e);
+            showToast('全件再同期中にエラーが発生しました。', 'error');
         } finally {
             setResyncingCal(false);
+            setSyncProgress(null);
+            refreshSyncStatus();
         }
     };
 
@@ -410,26 +462,47 @@ function SettingsContent() {
                                                 <Typography variant="caption" color="text.secondary" display="block">
                                                     ※Googleカレンダーアプリから「CareRecord_{orgName}」という名前のカレンダーを確認してください。
                                                 </Typography>
+
+                                                {/* 同期ステータス */}
+                                                {syncStatus && (
+                                                    syncStatus.unsynced > 0 ? (
+                                                        <Alert severity="warning" sx={{ mt: 1 }}>
+                                                            未同期の予定が <strong>{syncStatus.unsynced} 件</strong> あります（全 {syncStatus.total} 件中）。「未同期を同期」で解消できます。
+                                                        </Alert>
+                                                    ) : (
+                                                        <Alert severity="success" sx={{ mt: 1 }}>
+                                                            すべての予定（{syncStatus.total} 件）がGoogleカレンダーと同期済みです。
+                                                        </Alert>
+                                                    )
+                                                )}
+
+                                                {syncProgress && (
+                                                    <Box sx={{ mt: 1 }}>
+                                                        <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 3 }} />
+                                                        <Typography variant="caption" color="text.secondary">{syncProgress.current} / {syncProgress.total} 件 処理中...</Typography>
+                                                    </Box>
+                                                )}
+
                                                 <Stack direction="row" spacing={2} sx={{ mt: 1, flexWrap: 'wrap', gap: 1.5 }}>
-                                                    <Button 
-                                                        variant="contained" 
-                                                        color="warning" 
-                                                        startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />} 
-                                                        onClick={handleRepairCalendar} 
-                                                        disabled={repairingCal || resyncingCal}
+                                                    <Button
+                                                        variant="contained"
+                                                        color="warning"
+                                                        startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />}
+                                                        onClick={handleRepairCalendar}
+                                                        disabled={repairingCal || resyncingCal || (syncStatus?.unsynced === 0)}
                                                     >
-                                                        {repairingCal ? '同期修復中...' : '未同期のみ修復'}
+                                                        {repairingCal ? '同期中...' : `未同期を同期${syncStatus && syncStatus.unsynced > 0 ? `（${syncStatus.unsynced}件）` : ''}`}
                                                     </Button>
-                                                    {/* ★追加: 全件強制再同期ボタン */}
-                                                    <Button 
-                                                        variant="contained" 
-                                                        color="primary" 
-                                                        startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />} 
-                                                        onClick={handleForceResyncCalendar} 
+                                                    {/* 全件強制再同期（通常は未同期同期で十分。Google側で予定がずれた場合の最終手段） */}
+                                                    <Button
+                                                        variant="outlined"
+                                                        color="primary"
+                                                        startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
+                                                        onClick={handleForceResyncCalendar}
                                                         disabled={repairingCal || resyncingCal}
                                                         sx={{ boxShadow: 'none' }}
                                                     >
-                                                        {resyncingCal ? '全件再同期中...' : '全件強制再同期'}
+                                                        {resyncingCal ? '全件再同期中...' : '全件再同期'}
                                                     </Button>
                                                     <Button 
                                                         variant="outlined"

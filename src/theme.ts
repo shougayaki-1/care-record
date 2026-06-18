@@ -11,9 +11,10 @@ const theme = createTheme({
             dark: '#003399',
         },
         background: {
-            default: '#f8f9fa', // 全体の背景色
+            default: '#ffffff', // 全体の背景色（Google風の白基調）
             paper: '#ffffff',
         },
+        divider: '#e0e0e0',
         text: {
             primary: '#2c3e50',
             secondary: '#636e72',
@@ -40,6 +41,20 @@ const theme = createTheme({
         MuiPaper: {
             styleOverrides: {
                 root: { backgroundImage: 'none' }, // ダークモード時の透過防止
+            },
+        },
+        // Google風のフラットなトップバー：白背景・影なし・下境界線で区切る
+        MuiAppBar: {
+            defaultProps: {
+                elevation: 0,
+                color: 'inherit',
+            },
+            styleOverrides: {
+                root: {
+                    backgroundColor: '#ffffff',
+                    color: '#2c3e50',
+                    borderBottom: '1px solid #e0e0e0',
+                },
             },
         },
     },

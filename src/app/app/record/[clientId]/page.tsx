@@ -213,6 +213,8 @@ export default function RecordPage() {
         .from('staffs')
         .select('id, name, user_id')
         .eq('organization_id', currentOrg.id)
+        .is('archived_at', null)
+        .order('sort_order', { ascending: true, nullsFirst: false })
         .order('name', { ascending: true });
 
       const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id }));
@@ -230,42 +232,51 @@ export default function RecordPage() {
   const loadExistingData = useCallback(async (targetId: string) => {
     if (!targetId) return;
     try {
-      const { data: r } = await supabase.from('reports').select('*, shifts(start_at, end_at)').eq('id', targetId).single();
-      const { data: v } = await supabase.from('report_values').select('data').eq('report_id', targetId).single();
-      if (r && v) {
-        setStartDateTime(formatDatetimeLocal(new Date(r.start_at)));
-        setEndDateTime(formatDatetimeLocal(new Date(r.end_at)));
-        setCurrentStatus(r.status);
-        const data = v.data as FormAnswers & { service_time?: string; travel_time?: string; _helpers?: string[] };
-        setServiceTime(data.service_time || '');
-        setTravelTime(data.travel_time || '0');
-        setSelectedHelpers(data._helpers || []);
-        setAnswers(data);
-        setIsDirty(false);
+      // ★修正: reports と shifts には外部キーが無く埋め込み(shifts(...))が400になるため、shift_id で別途取得する
+      const { data: r, error: rError } = await supabase.from('reports').select('*').eq('id', targetId).maybeSingle();
+      if (rError) throw rError;
+      if (!r) { showToast('記録が見つかりませんでした', 'error'); return; }
 
-        if (r.shifts) {
-            const s = new Date(r.shifts.start_at);
-            const e = new Date(r.shifts.end_at);
-            const isCrossMonth = s.getMonth() !== e.getMonth();
-            setIsSpanningMonth(isCrossMonth);
-            setOriginalShiftTimes({ start_at: r.shifts.start_at, end_at: r.shifts.end_at });
-            
-            if (isCrossMonth) {
-                const isPart1 = new Date(r.start_at).getTime() === s.getTime();
-                setSelectedPart(isPart1 ? 'part1' : 'part2');
-            }
-        }
+      // ★修正: report_values が無い/読めない場合でも、基本情報（日時・ステータス）は表示する
+      setStartDateTime(formatDatetimeLocal(new Date(r.start_at)));
+      setEndDateTime(formatDatetimeLocal(new Date(r.end_at)));
+      setCurrentStatus(r.status);
+      setIsDirty(false);
 
-        const { data: imgData } = await supabase.from('report_images').select('*').eq('report_id', targetId);
-        if (imgData) {
-            setImages(imgData.map(i => ({ 
-                id: i.id, 
-                url: supabase.storage.from('report-images').getPublicUrl(i.storage_path).data.publicUrl 
-            })));
-        }
+      if (r.shift_id) {
+          const { data: shift } = await supabase.from('shifts').select('start_at, end_at').eq('id', r.shift_id).maybeSingle();
+          if (shift) {
+              const s = new Date(shift.start_at);
+              const e = new Date(shift.end_at);
+              const isCrossMonth = s.getMonth() !== e.getMonth();
+              setIsSpanningMonth(isCrossMonth);
+              setOriginalShiftTimes({ start_at: shift.start_at, end_at: shift.end_at });
+
+              if (isCrossMonth) {
+                  const isPart1 = new Date(r.start_at).getTime() === s.getTime();
+                  setSelectedPart(isPart1 ? 'part1' : 'part2');
+              }
+          }
       }
-    } catch (e) { console.error(e); }
-  }, []);
+
+      // ★修正: .single() だと行欠落/複数行でエラーになり全項目が空になるため maybeSingle に変更
+      const { data: v, error: vError } = await supabase.from('report_values').select('data').eq('report_id', targetId).maybeSingle();
+      if (vError) console.error('report_values load error:', vError);
+      const data = (v?.data || {}) as FormAnswers & { service_time?: string; travel_time?: string; _helpers?: string[] };
+      setServiceTime(data.service_time || '');
+      setTravelTime(data.travel_time || '0');
+      setSelectedHelpers(data._helpers || []);
+      setAnswers(data);
+
+      const { data: imgData } = await supabase.from('report_images').select('*').eq('report_id', targetId);
+      if (imgData) {
+          setImages(imgData.map(i => ({
+              id: i.id,
+              url: supabase.storage.from('report-images').getPublicUrl(i.storage_path).data.publicUrl
+          })));
+      }
+    } catch (e) { console.error(e); showToast('記録の読み込みに失敗しました', 'error'); }
+  }, [showToast]);
 
   useEffect(() => {
     const init = async () => {

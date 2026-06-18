@@ -33,6 +33,32 @@ const styles = StyleSheet.create({
     },
     title: { fontSize: 14, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 11 },
+    staffSection: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        marginBottom: 8,
+        paddingBottom: 6,
+        borderBottomWidth: 1,
+        borderColor: '#E3E5E8',
+    },
+    staffSectionLabel: {
+        fontSize: 9,
+        fontWeight: 'bold',
+        color: '#555',
+        marginRight: 6,
+    },
+    staffChip: {
+        flexDirection: 'row',
+        backgroundColor: '#F0F5FF',
+        borderRadius: 3,
+        paddingVertical: 2,
+        paddingHorizontal: 5,
+        marginRight: 5,
+        marginBottom: 3,
+    },
+    staffChipName: { fontSize: 9, fontWeight: 'bold', color: '#333' },
+    staffChipPosition: { fontSize: 8.5, color: '#2255CC', marginLeft: 3 },
     calendar: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
     dayHeaderRow: { flexDirection: 'row', backgroundColor: '#F0F5FF' },
     dayHeaderCell: { 
@@ -113,14 +139,20 @@ export type PdfCalendarDay = {
     events: PdfCalendarEvent[];
 };
 
+export type PdfStaffMember = {
+    name: string;
+    positions?: string[] | null;
+};
+
 type Props = {
     title: string;
     monthStr: string;
     weeks: PdfCalendarDay[][];
-    orgName: string; 
+    orgName: string;
+    staffMembers?: PdfStaffMember[];
 };
 
-export const ShiftCalendarDocument = ({ title, monthStr, weeks, orgName }: Props) => {
+export const ShiftCalendarDocument = ({ title, monthStr, weeks, orgName, staffMembers = [] }: Props) => {
     return (
         <Document>
             <Page size="A4" orientation="portrait" style={styles.page}>
@@ -128,6 +160,19 @@ export const ShiftCalendarDocument = ({ title, monthStr, weeks, orgName }: Props
                     <Text style={styles.title}>{title}</Text>
                     <Text style={styles.month}>{monthStr}</Text>
                 </View>
+
+                {staffMembers.length > 0 && (
+                    <View style={styles.staffSection}>
+                        <Text style={styles.staffSectionLabel}>スタッフ：</Text>
+                        {staffMembers.map((s, i) => (
+                            <View key={i} style={styles.staffChip}>
+                                <Text style={styles.staffChipName}>{s.name}</Text>
+                                {s.positions && s.positions.length > 0 ? <Text style={styles.staffChipPosition}>{s.positions.join('・')}</Text> : null}
+                            </View>
+                        ))}
+                    </View>
+                )}
+
                 <View style={styles.calendar}>
                     <View style={styles.dayHeaderRow}>
                         {['日', '月', '火', '水', '木', '金', '土'].map((d, i) => (
