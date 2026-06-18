@@ -39,7 +39,18 @@ export async function updateSession(request: NextRequest) {
         }
     );
 
-    await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    // 多層防御: 認証が必要なルートは未認証ならトップへリダイレクト
+    // （各ページ/サーバアクションでも認可するが、ここで早期に弾く）
+    const path = request.nextUrl.pathname;
+    const isProtected = path.startsWith('/app') || path.startsWith('/super-admin');
+    if (isProtected && !user) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/';
+        url.search = `next=${encodeURIComponent(path)}`;
+        return NextResponse.redirect(url);
+    }
 
     return response;
 }

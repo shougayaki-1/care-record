@@ -4,12 +4,10 @@ import { createServerClient } from '@supabase/ssr';
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get('code');
-  const next = requestUrl.searchParams.get('next') || '/app';
+  const nextParam = requestUrl.searchParams.get('next') || '/app';
+  // オープンリダイレクト防止: 同一オリジン内の絶対パスのみ許可
+  const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : '/app';
   const origin = requestUrl.origin;
-
-  console.log('--- Auth Callback Start ---');
-  console.log('Code present:', !!code);
-  console.log('Origin:', origin);
 
   if (!code) {
     console.error('No code provided');
@@ -23,13 +21,10 @@ export async function GET(request: NextRequest) {
     {
       cookies: {
         getAll() {
-          const cookies = request.cookies.getAll();
-          // console.log('Current Cookies:', cookies.map(c => c.name)); // 必要ならコメントアウト解除
-          return cookies;
+          return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll() {
           // ここでは何もしない（exchangeの結果を見るため）
-          console.log('Supabase requested to set cookies:', cookiesToSet.map(c => `${c.name} (secure: ${c.options?.secure})`));
         },
       },
     }
@@ -39,17 +34,14 @@ export async function GET(request: NextRequest) {
   const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
-    console.error('!!! Exchange Error !!!', error);
-    return NextResponse.redirect(`${origin}/?error=${error.name}&details=${error.message}`);
+    console.error('Auth exchange error:', error.name);
+    // 内部エラーメッセージは URL に反射させない（情報露出防止）
+    return NextResponse.redirect(`${origin}/?error=auth_exchange_failed`);
   }
 
   if (!data.session) {
-    console.error('!!! No session in data !!!');
     return NextResponse.redirect(`${origin}/?error=no_session_data`);
   }
-
-  console.log('Session exchanged successfully.');
-  console.log('User ID:', data.session.user.id);
 
   // 成功したので、実際にCookieをセットするレスポンスを作る
   const response = NextResponse.redirect(`${origin}${next}`);
@@ -71,8 +63,7 @@ export async function GET(request: NextRequest) {
                 ...options,
                 secure: !isLocal && options.secure, // ローカルならfalseへ強制
             };
-            
-            console.log(`Setting Cookie: ${name}, Secure: ${finalOptions.secure}, Path: ${finalOptions.path}`);
+
             response.cookies.set(name, value, finalOptions);
           });
         },
@@ -83,6 +74,5 @@ export async function GET(request: NextRequest) {
   // セッション情報をリフレッシュしてCookie書き込みをトリガー
   await supabaseForResponse.auth.setSession(data.session);
 
-  console.log('--- Auth Callback End ---');
   return response;
 }
