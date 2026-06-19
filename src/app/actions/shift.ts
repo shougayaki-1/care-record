@@ -4,6 +4,7 @@ import { google, calendar_v3 } from 'googleapis';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 import { rrulestr } from 'rrule';
 import { supabaseAdmin, assertOrgRole, assertResourceOrgRole } from '@/utils/supabase/auth';
+import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 
 /**
  * 複数 shiftId が呼び出し元のアクセス可能な事業所に属することを検証する。
@@ -20,7 +21,7 @@ async function assertShiftsAccessible(shiftIds: string[]): Promise<void> {
 
     const orgIds = Array.from(new Set((data || []).map(s => s.organization_id)));
     for (const orgId of orgIds) {
-        await assertOrgRole(orgId);
+        await assertOrgRole(orgId, ['owner', 'manager']);
     }
 }
 
@@ -158,7 +159,7 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
     }
 
     const oauth2Client = getGoogleOAuthClient();
-    oauth2Client.setCredentials({ refresh_token: orgData.google_refresh_token });
+    oauth2Client.setCredentials({ refresh_token: decryptGoogleToken(orgData.google_refresh_token) });
     const calendarApi = google.calendar({ version: 'v3', auth: oauth2Client });
 
     if (action === 'delete') {
@@ -285,6 +286,7 @@ async function processShiftsSequential(
  * UIの「同期ステータス」表示やバッチ同期のループ制御に使用する。
  */
 export async function getSyncStatus(organizationId: string) {
+    await assertOrgRole(organizationId, ['owner', 'manager']);
     const { data: orgData } = await supabaseAdmin
         .from('organizations')
         .select('google_calendar_id, google_refresh_token')
@@ -313,6 +315,9 @@ export async function getSyncStatus(organizationId: string) {
  * remaining が 0 になるまで繰り返し呼ぶ（タイムアウト回避＆再開可能）。
  */
 export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+        throw new Error('同期件数が不正です');
+    }
     const status = await getSyncStatus(organizationId);
     if (!status.connected) {
         return { processed: 0, succeeded: 0, failed: 0, remaining: status.unsynced, errorKind: 'skipped' as SyncErrorKind, connected: false };
@@ -354,6 +359,9 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
  * クライアントは remaining が 0 になるまで nextCursor を渡して繰り返す。
  */
 export async function forceSyncBatch(organizationId: string, cursor: string | null, limit = 20) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+        throw new Error('同期件数が不正です');
+    }
     const status = await getSyncStatus(organizationId);
     if (!status.connected) {
         return { processed: 0, succeeded: 0, failed: 0, nextCursor: cursor, remaining: 0, errorKind: 'skipped' as SyncErrorKind, connected: false };
@@ -395,7 +403,7 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
 
 // 認可チェックを伴う公開アクション
 export async function createShift(payload: ShiftPayload, awaitSync: boolean | 'skip' = true) {
-    await assertOrgRole(payload.organizationId);
+    await assertOrgRole(payload.organizationId, ['owner', 'manager']);
     return createShiftInternal(payload, awaitSync);
 }
 
@@ -434,7 +442,10 @@ async function createShiftInternal(payload: ShiftPayload, awaitSync: boolean | '
 
 // 認可チェックを伴う公開アクション
 export async function updateShift(shiftId: string, payload: Partial<ShiftPayload>, awaitSync: boolean | 'skip' = true) {
-    await assertResourceOrgRole('shifts', shiftId);
+    const { organizationId } = await assertResourceOrgRole('shifts', shiftId, ['owner', 'manager']);
+    if (payload.organizationId && payload.organizationId !== organizationId) {
+        throw new Error('シフトの事業所は変更できません');
+    }
     return updateShiftInternal(shiftId, payload, awaitSync);
 }
 
@@ -476,7 +487,7 @@ async function updateShiftInternal(shiftId: string, payload: Partial<ShiftPayloa
 }
 
 export async function updateShiftTimeOnly(shiftId: string, startAt: string, endAt: string) {
-    await assertResourceOrgRole('shifts', shiftId);
+    await assertResourceOrgRole('shifts', shiftId, ['owner', 'manager']);
     try {
         await supabaseAdmin.from('shifts').update({
             start_at: startAt,
@@ -492,7 +503,7 @@ export async function updateShiftTimeOnly(shiftId: string, startAt: string, endA
 }
 
 export async function toggleCancelShift(shiftId: string, isCancel: boolean, reason: string = '') {
-    await assertResourceOrgRole('shifts', shiftId);
+    await assertResourceOrgRole('shifts', shiftId, ['owner', 'manager']);
     try {
         const status = isCancel ? 'cancelled' : 'published';
         const cancelReason = isCancel ? reason : null;
@@ -628,6 +639,8 @@ export async function clearGeneratedShiftsForMonth(
  */
 export async function deleteShiftsBatch(organizationId: string, shiftIds: string[]) {
     if (!shiftIds || shiftIds.length === 0) return { success: true, deleted: 0, failed: 0 };
+    await assertOrgRole(organizationId, ['owner', 'manager']);
+    await assertShiftsAccessible(shiftIds);
     try {
         const { data: shifts } = await supabaseAdmin
             .from('shifts')
@@ -826,7 +839,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
 }
 
 export async function deleteShiftCompletely(shiftId: string) {
-    await assertResourceOrgRole('shifts', shiftId);
+    await assertResourceOrgRole('shifts', shiftId, ['owner', 'manager']);
     try {
         const { data: shiftData } = await supabaseAdmin
             .from('shifts')
@@ -895,7 +908,10 @@ export async function deleteShiftsBulk(shiftIds: string[]) {
  * （第3引数 action に 'sync' または 'delete' を指定。デフォルトは 'sync'）
  */
 export async function syncSingleShift(organizationId: string, shiftId: string, action: 'sync' | 'delete' = 'sync') {
-    await assertOrgRole(organizationId);
+    const resource = await assertResourceOrgRole('shifts', shiftId, ['owner', 'manager']);
+    if (resource.organizationId !== organizationId) {
+        throw new Error('指定された事業所のシフトではありません');
+    }
     try {
         await syncToGoogleCalendarDirect(organizationId, shiftId, action);
         return { success: true };

@@ -24,6 +24,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, AppTextField, CreatableMultiSelectField, SelectField } from '@/components/ui';
+import { reorderStaffs, saveStaff, setStaffArchived, softDeleteStaff } from '@/app/actions/staffs';
 
 type StaffData = { id: string; name: string; positions: string[] | null; user_id: string | null; archived_at: string | null; sort_order: number | null; profiles?: { name: string } | null; };
 type AccountData = { id: string; name: string; };
@@ -51,7 +52,7 @@ export default function StaffPage() {
       // 1. スタッフ一覧の取得
       const { data: staffsData, error: staffsError } = await supabase
         .from('staffs')
-        .select(`id, name, positions, user_id, archived_at, sort_order, profiles(name)`)
+        .select(`id, name, positions, user_id, archived_at, sort_order, profiles:profiles!user_id(name)`)
         .eq('organization_id', currentOrg.id)
         .order('sort_order', { ascending: true, nullsFirst: false })
         .order('name', { ascending: true });
@@ -80,9 +81,11 @@ export default function StaffPage() {
           }
       }
       setAccountList(accounts);
-    } catch (e) { 
-        console.error(e); 
-        showToast('データの取得に失敗しました', 'error');
+    } catch (e) {
+        const message = e && typeof e === 'object' && 'message' in e ? String(e.message) : '不明なエラー';
+        const code = e && typeof e === 'object' && 'code' in e ? String(e.code) : undefined;
+        console.error('スタッフデータの取得に失敗しました', { code, message });
+        showToast(`データの取得に失敗しました: ${message}`, 'error');
     } finally {
         setIsFetching(false);
     }
@@ -97,13 +100,8 @@ export default function StaffPage() {
     const finalPositions = Array.from(new Set(staffPositions.map(p => p.trim()).filter(Boolean)));
 
     try {
-        if (editId) {
-            await supabase.from('staffs').update({ name: staffName.trim(), positions: finalPositions, user_id: finalUserId }).eq('id', editId);
-            showToast('更新しました');
-        } else {
-            await supabase.from('staffs').insert({ organization_id: currentOrg.id, name: staffName.trim(), positions: finalPositions, user_id: finalUserId });
-            showToast('追加しました');
-        }
+        await saveStaff(currentOrg.id, { staffId: editId, name: staffName, positions: finalPositions, linkedUserId: finalUserId });
+        showToast(editId ? '更新しました' : '追加しました');
         setModalOpen(false);
         fetchData();
     } catch (e) { console.error(e); showToast('保存に失敗しました', 'error'); }
@@ -112,18 +110,18 @@ export default function StaffPage() {
   const handleOpenAdd = () => { setEditId(null); setStaffName(''); setStaffPositions([]); setLinkedUserId('none'); setModalOpen(true); };
   const handleOpenEdit = (staff: StaffData) => { setEditId(staff.id); setStaffName(staff.name); setStaffPositions(staff.positions || []); setLinkedUserId(staff.user_id || 'none'); setModalOpen(true); };
   const handleDelete = async (id: string, name: string) => {
-      if(!(await confirm({ title: 'スタッフの削除', message: `「${name}」さんを名簿から削除しますか？\n（※過去のシフトや記録の担当者名も消える可能性があります）\n※退職者は「削除」ではなく「アーカイブ」を推奨します。`, confirmText: '削除する', confirmColor: 'error' }))) return;
-      try { await supabase.from('staffs').delete().eq('id', id); showToast('削除しました'); fetchData(); } catch (e) { console.error(e); showToast('削除に失敗しました', 'error'); }
+      if(!(await confirm({ title: 'スタッフの削除', message: `「${name}」さんを名簿から削除しますか？\n過去のシフトや記録は法定保存期間中そのまま保持されます。`, confirmText: '削除する', confirmColor: 'error' }))) return;
+      try { await softDeleteStaff(currentOrg!.id, id, 'スタッフ管理画面から削除'); showToast('削除しました'); fetchData(); } catch (e) { console.error(e); showToast(e instanceof Error ? e.message : '削除に失敗しました', 'error'); }
   };
 
   // 退職スタッフをアーカイブ（過去の記録・シフトは残したまま、新規割当の選択肢から外す）
   const handleArchive = async (id: string, name: string) => {
       if(!(await confirm({ title: 'スタッフのアーカイブ', message: `「${name}」さんをアーカイブ（退職）しますか？\n過去のシフト・記録はそのまま残り、今後のシフトや記録の担当者選択には表示されなくなります。\n（いつでも復元できます）`, confirmText: 'アーカイブする' }))) return;
-      try { await supabase.from('staffs').update({ archived_at: new Date().toISOString() }).eq('id', id); showToast('アーカイブしました'); fetchData(); } catch (e) { console.error(e); showToast('アーカイブに失敗しました', 'error'); }
+      try { await setStaffArchived(currentOrg!.id, id, true); showToast('アーカイブしました'); fetchData(); } catch (e) { console.error(e); showToast('アーカイブに失敗しました', 'error'); }
   };
 
   const handleRestore = async (id: string) => {
-      try { await supabase.from('staffs').update({ archived_at: null }).eq('id', id); showToast('復元しました'); fetchData(); } catch (e) { console.error(e); showToast('復元に失敗しました', 'error'); }
+      try { await setStaffArchived(currentOrg!.id, id, false); showToast('復元しました'); fetchData(); } catch (e) { console.error(e); showToast('復元に失敗しました', 'error'); }
   };
 
   const activeStaff = staffList.filter(s => !s.archived_at);
@@ -143,9 +141,7 @@ export default function StaffPage() {
 
     try {
       // 連番で sort_order を書き込み、順序を確定する
-      await Promise.all(reordered.map((s, idx) =>
-        supabase.from('staffs').update({ sort_order: idx }).eq('id', s.id)
-      ));
+      await reorderStaffs(currentOrg!.id, reordered.map(s => s.id));
     } catch (e) {
       console.error(e);
       showToast('並び替えの保存に失敗しました', 'error');

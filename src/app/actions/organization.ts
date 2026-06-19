@@ -1,19 +1,90 @@
 'use server';
 
 import { supabaseAdmin, getAuthedUser, assertOrgRole } from '@/utils/supabase/auth';
+import { recordAuditEvent } from '@/utils/supabase/audit';
+import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
+import { getGoogleOAuthClient } from '@/utils/googleCalendar';
+
+export async function updateOrganizationName(orgId: string, name: string) {
+    const { userId } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const normalized = name.trim();
+    if (normalized.length < 1 || normalized.length > 100) throw new Error('事業所名は1〜100文字で入力してください');
+    const { error } = await supabaseAdmin.from('organizations').update({ name: normalized }).eq('id', orgId).is('deleted_at', null);
+    if (error) throw new Error(error.message);
+    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'organization.update', resourceType: 'organization', resourceId: orgId, details: { fields: ['name'] } });
+    return { success: true };
+}
+
+export async function updateOrganizationDriveFolder(orgId: string, folderId: string | null) {
+    const { userId } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const normalized = folderId?.trim() || null;
+    if (normalized && normalized.length > 255) throw new Error('フォルダIDが不正です');
+    const { error } = await supabaseAdmin.from('organizations').update({ google_folder_id: normalized }).eq('id', orgId).is('deleted_at', null);
+    if (error) throw new Error(error.message);
+    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: normalized ? 'integration.drive.connect' : 'integration.drive.disconnect', resourceType: 'organization', resourceId: orgId });
+    return { success: true };
+}
+
+export async function disconnectGoogleCalendar(orgId: string) {
+    const { userId } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const { data: org, error: readError } = await supabaseAdmin.from('organizations').select('google_refresh_token').eq('id', orgId).single();
+    if (readError) throw new Error(readError.message);
+    let revoked = false;
+    if (org.google_refresh_token) {
+        try {
+            await getGoogleOAuthClient().revokeToken(decryptGoogleToken(org.google_refresh_token));
+            revoked = true;
+        } catch (error) {
+            console.error('Google token revocation failed; local credentials will still be removed', error);
+        }
+    }
+    const { error } = await supabaseAdmin.from('organizations').update({ google_calendar_id: null, google_refresh_token: null }).eq('id', orgId);
+    if (error) throw new Error(error.message);
+    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'integration.calendar.disconnect', resourceType: 'organization', resourceId: orgId, details: { providerRevoked: revoked } });
+    return { success: true, providerRevoked: revoked };
+}
 
 export async function deleteOrganization(orgId: string) {
     // 権限チェック: 呼び出し元がこの事業所の owner であることをセッションから検証
-    await assertOrgRole(orgId, ['owner']);
+    const { userId } = await assertOrgRole(orgId, ['owner']);
+
+    const { data: organization, error: orgReadError } = await supabaseAdmin
+        .from('organizations')
+        .select('retention_years')
+        .eq('id', orgId)
+        .single();
+    if (orgReadError) throw new Error(orgReadError.message);
+    const deletedAt = new Date();
+    const retentionUntil = new Date(deletedAt);
+    retentionUntil.setUTCFullYear(retentionUntil.getUTCFullYear() + (organization.retention_years || 5));
+
+    await recordAuditEvent({
+        organizationId: orgId,
+        actorId: userId,
+        action: 'organization.soft_delete',
+        resourceType: 'organization',
+        resourceId: orgId,
+        details: { retentionUntil: retentionUntil.toISOString() },
+    });
 
     // 安全策: この事業所を「最後に開いた事業所」にしているユーザーの設定をクリア
     await supabaseAdmin.from('profiles')
         .update({ last_organization_id: null })
         .eq('last_organization_id', orgId);
 
-    // 削除実行
-    const { error } = await supabaseAdmin.from('organizations').delete().eq('id', orgId);
+    // 記録保持のため物理削除せず、利用不能化して全メンバーを外す。
+    const { error } = await supabaseAdmin.from('organizations').update({
+        deleted_at: deletedAt.toISOString(),
+        deleted_by: userId,
+        retention_until: retentionUntil.toISOString(),
+    }).eq('id', orgId).is('deleted_at', null);
     if (error) throw new Error(error.message);
+
+    const { error: memberError } = await supabaseAdmin
+        .from('organization_members')
+        .delete()
+        .eq('organization_id', orgId);
+    if (memberError) throw new Error(memberError.message);
     
     return { success: true };
 }
@@ -72,7 +143,7 @@ export async function getAuditLogs(orgId: string) {
     await assertOrgRole(orgId, ['owner', 'manager']);
     // SQLで profiles への FK を貼ったので結合可能になります
     const { data, error } = await supabaseAdmin
-        .from('audit_logs')
+        .from('audit_events')
         .select('*, profiles:actor_id(name)')
         .eq('organization_id', orgId)
         .order('created_at', { ascending: false })
@@ -85,11 +156,12 @@ export async function getAuditLogs(orgId: string) {
 export async function addAuditLog(params: { orgId: string, action: string, target?: string, details?: Record<string, unknown> }) {
     // actor はセッションから取得し、当該事業所のメンバーであることを検証（ログ偽造防止）
     const { userId } = await assertOrgRole(params.orgId);
-    await supabaseAdmin.from('audit_logs').insert({
-        organization_id: params.orgId,
-        actor_id: userId,
-        action_type: params.action,
-        target_resource: params.target,
-        details: params.details
+    await recordAuditEvent({
+        organizationId: params.orgId,
+        actorId: userId,
+        action: params.action,
+        resourceType: 'legacy',
+        resourceId: params.target,
+        details: params.details,
     });
 }

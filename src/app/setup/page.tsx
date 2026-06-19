@@ -12,6 +12,7 @@ import BusinessIcon from '@mui/icons-material/Business';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import PersonIcon from '@mui/icons-material/Person';
 import { useToast } from '@/components/ui/ToastProvider';
+import { createOrganization, updateOwnProfile } from '@/app/actions/user';
 
 type Step = 'profile' | 'choice' | 'create' | 'join';
 
@@ -24,7 +25,6 @@ export default function SetupPage() {
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [step, setStep] = useState<Step>('profile');
-    const [userId, setUserId] = useState('');
     const [hasMembership, setHasMembership] = useState(false);
     
     // 入力値
@@ -44,7 +44,6 @@ export default function SetupPage() {
         const processUser = async (user: User) => {
             if (!mounted) return;
             console.log('[SetupPage] Session confirmed for:', user.id);
-            setUserId(user.id);
 
             try {
                 const { data: profile, error: profileError } = await supabase.from('profiles').select('name').eq('id', user.id).single();
@@ -126,8 +125,7 @@ export default function SetupPage() {
         if (!userName.trim()) return;
         setSubmitting(true);
         try {
-            const { error } = await supabase.from('profiles').upsert({ id: userId, name: userName, is_agreed: true, agreed_at: new Date().toISOString() });
-            if (error) throw error;
+            await updateOwnProfile(userName, true);
             
             if (inviteCode) {
                 setStep('join');
@@ -146,13 +144,7 @@ export default function SetupPage() {
         if (!orgName.trim()) return;
         setSubmitting(true);
         try {
-            const { data: orgId, error } = await supabase.rpc('create_organization', { 
-                org_name: orgName 
-            });
-            
-            if (error) throw error;
-
-            await supabase.from('profiles').update({ last_organization_id: orgId }).eq('id', userId);
+            await createOrganization(orgName);
             window.location.href = '/app';
         } catch (e) {
             console.error('Create Org Error:', e);

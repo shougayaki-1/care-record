@@ -30,6 +30,7 @@ import KeyIcon from '@mui/icons-material/Key';
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { markNotificationRead } from '@/app/actions/user';
 
 const SIDEBAR_WIDTH = 256;
 
@@ -63,7 +64,7 @@ const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | n
 
   const handleRead = async (n: Notification) => {
     if (!n.is_read) {
-      await supabase.from('notifications').update({ is_read: true }).eq('id', n.id);
+      await markNotificationRead(n.id);
     }
     if (n.link_url) {
       router.push(n.link_url);

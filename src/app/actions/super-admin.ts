@@ -15,7 +15,8 @@ export async function getAllOrganizations() {
       created_at,
       profiles (count),
       clients (count)
-    `)
+        `)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
     if (error) throw new Error(error.message);
@@ -39,12 +40,29 @@ export async function getAllOrganizations() {
 
 // 事業所の削除（危険操作）
 export async function deleteOrganization(orgId: string) {
-    await assertSuperAdmin();
+    const { userId } = await assertSuperAdmin();
+    const { data: organization, error: readError } = await supabaseAdmin
+        .from('organizations')
+        .select('retention_years')
+        .eq('id', orgId)
+        .single();
+    if (readError) throw new Error(readError.message);
+
+    const deletedAt = new Date();
+    const retentionUntil = new Date(deletedAt);
+    retentionUntil.setUTCFullYear(retentionUntil.getUTCFullYear() + (organization.retention_years || 5));
     const { error } = await supabaseAdmin
         .from('organizations')
-        .delete()
-        .eq('id', orgId);
+        .update({
+            deleted_at: deletedAt.toISOString(),
+            deleted_by: userId,
+            retention_until: retentionUntil.toISOString(),
+        })
+        .eq('id', orgId)
+        .is('deleted_at', null);
 
     if (error) throw new Error(error.message);
+    await supabaseAdmin.from('profiles').update({ last_organization_id: null }).eq('last_organization_id', orgId);
+    await supabaseAdmin.from('organization_members').delete().eq('organization_id', orgId);
     return { success: true };
 }

@@ -37,6 +37,11 @@ import { convertSchemaToReadable, FormItem as HelperFormItem } from '../../../..
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, CheckboxGroupField } from '@/components/ui';
+import {
+    saveClientAssignments,
+    saveClientForm,
+    updateClientGoogleLink,
+} from '@/app/actions/clients';
 
 type Staff = { id: string; name: string; type: 'member' | 'ghost' };
 
@@ -151,14 +156,8 @@ export default function ClientSettingsPage() {
         setIsSaving(true);
         setMessage(null);
         try {
-            const { data: existing } = await supabase.from('form_templates').select('id').eq('client_id', clientId).maybeSingle();
-            if (existing) {
-                const { error } = await supabase.from('form_templates').update({ schema: formItems, updated_at: new Date() }).eq('client_id', clientId);
-                if (error) throw error;
-            } else {
-                const { error } = await supabase.from('form_templates').insert({ client_id: clientId, schema: formItems });
-                if (error) throw error;
-            }
+            if (!currentOrg) throw new Error('事業所が選択されていません');
+            await saveClientForm(currentOrg.id, clientId, formItems);
             setMessage({ type: 'success', text: 'フォーム設定を保存しました！' });
             setTimeout(() => setMessage(null), 3000);
         } catch (error) {
@@ -173,22 +172,13 @@ export default function ClientSettingsPage() {
         setIsSaving(true);
         setMessage(null);
         try {
-            const { error: deleteError } = await supabase.from('assignments').delete().eq('client_id', clientId);
-            if (deleteError) throw deleteError;
-
-            const inserts = assignedStaffIds.map(staffId => {
+            if (!currentOrg) throw new Error('事業所が選択されていません');
+            const assignments = assignedStaffIds.map(staffId => {
                 const staff = allStaffs.find(s => s.id === staffId);
-                return {
-                    client_id: clientId,
-                    helper_id: staff?.type === 'member' ? staffId : null,
-                    ghost_staff_id: staff?.type === 'ghost' ? staffId : null
-                };
+                if (!staff) throw new Error('担当スタッフが見つかりません');
+                return { id: staffId, type: staff.type };
             });
-
-            if (inserts.length > 0) {
-                const { error: insertError } = await supabase.from('assignments').insert(inserts);
-                if (insertError) throw insertError;
-            }
+            await saveClientAssignments(currentOrg.id, clientId, assignments);
 
             setMessage({ type: 'success', text: '担当スタッフを更新しました！' });
             setTimeout(() => setMessage(null), 3000);
@@ -205,7 +195,8 @@ export default function ClientSettingsPage() {
         setIsSaving(true);
         setMessage(null);
         try {
-            await supabase.from('clients').update({ google_template_id: templateId }).eq('id', clientId);
+            if (!currentOrg) throw new Error('事業所が選択されていません');
+            await updateClientGoogleLink(currentOrg.id, clientId, { templateId });
             setMessage({ type: 'success', text: 'テンプレートIDを保存しました' });
             setTimeout(() => setMessage(null), 3000);
         } catch (e) {
@@ -260,6 +251,8 @@ export default function ClientSettingsPage() {
 
             const folderRes = await callGasApi({
                 action: 'manage_client_folder',
+                organizationId: currentOrg.id,
+                clientId,
                 orgFolderId: orgData.google_folder_id,
                 clientName: clientName,
                 currentFolderId: clientData?.google_folder_id
@@ -268,13 +261,15 @@ export default function ClientSettingsPage() {
             if (folderRes.status !== 'success') throw new Error('フォルダ作成エラー: ' + folderRes.message);
             
             if (folderRes.folderId !== clientData?.google_folder_id) {
-                await supabase.from('clients').update({ google_folder_id: folderRes.folderId }).eq('id', clientId);
+                await updateClientGoogleLink(currentOrg.id, clientId, { folderId: folderRes.folderId });
             }
 
             const readableSchema = convertSchemaToReadable(formItems);
 
             const createRes = await callGasApi({
                 action: 'create_template_doc',
+                organizationId: currentOrg.id,
+                clientId,
                 folderId: folderRes.folderId,
                 clientName: clientName,
                 schema: readableSchema 
@@ -282,7 +277,7 @@ export default function ClientSettingsPage() {
 
             if (createRes.status === 'success') {
                 setTemplateId(createRes.docId);
-                await supabase.from('clients').update({ google_template_id: createRes.docId }).eq('id', clientId);
+                await updateClientGoogleLink(currentOrg.id, clientId, { templateId: createRes.docId });
                 setMessage({ type: 'success', text: 'テンプレートを作成し、連携しました！別タブで開きます。' });
                 window.open(createRes.docUrl, '_blank');
             } else {

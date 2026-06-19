@@ -15,6 +15,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, AppTextField, DataTable, PageHeader, StatusChip } from '@/components/ui';
+import { createClient, setClientArchived, softDeleteClient, updateClientName } from '@/app/actions/clients';
 
 type Client = { 
     id: string; 
@@ -49,6 +50,7 @@ export default function ClientsPage() {
         .from('clients')
         .select('*')
         .eq('organization_id', currentOrg.id)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       
       // アーカイブフィルタ
@@ -72,8 +74,7 @@ export default function ClientsPage() {
     if (!newName.trim() || !currentOrg) return;
     setIsSubmitting(true);
     try {
-      const { data, error } = await supabase.from('clients').insert([{ name: newName, organization_id: currentOrg.id }]).select().single();
-      if (error) throw error;
+      const data = await createClient(currentOrg.id, newName);
       setClients([data, ...clients]);
       setOpenAdd(false);
       setNewName('');
@@ -93,9 +94,8 @@ export default function ClientsPage() {
       if (!editName.trim()) return;
       setIsSubmitting(true);
       try {
-          const { error } = await supabase.from('clients').update({ name: editName }).eq('id', editId);
-          if (error) throw error;
-          setClients(clients.map(c => c.id === editId ? { ...c, name: editName } : c));
+          const result = await updateClientName(currentOrg!.id, editId, editName);
+          setClients(clients.map(c => c.id === editId ? { ...c, name: result.name } : c));
           setOpenEdit(false);
           showToast('更新しました');
       } catch (error) { 
@@ -108,12 +108,7 @@ export default function ClientsPage() {
 
   const handleArchive = async (id: string, isArchive: boolean) => {
       try {
-          const { error } = await supabase
-            .from('clients')
-            .update({ archived_at: isArchive ? new Date().toISOString() : null })
-            .eq('id', id);
-          
-          if (error) throw error;
+          await setClientArchived(currentOrg!.id, id, isArchive);
           
           showToast(isArchive ? 'アーカイブしました' : '復元しました');
           fetchClients();
@@ -124,11 +119,10 @@ export default function ClientsPage() {
   };
 
   const handleDelete = async (id: string) => {
-      if(!(await confirm({ title: '利用者の削除', message: '本当に削除しますか？\nこの利用者の記録データも全て削除されます。\nこの操作は取り消せません。', confirmText: '削除する', confirmColor: 'error' }))) return;
+      if(!(await confirm({ title: '利用者の削除', message: 'この利用者を削除状態にしますか？\n介護記録は保持期間中そのまま保存され、通常画面には表示されなくなります。', confirmText: '削除する', confirmColor: 'error' }))) return;
       try {
-          const { error } = await supabase.from('clients').delete().eq('id', id);
-          if (error) throw error;
-          showToast('完全に削除しました');
+          await softDeleteClient(currentOrg!.id, id, '利用者管理画面から削除');
+          showToast('削除状態にしました');
           fetchClients();
       } catch(e) { 
           console.error(e);

@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 // useRouterは使用していなかったので削除
 import { CircularProgress, Box } from '@mui/material';
+import { setLastOrganization } from '@/app/actions/user';
 
 export type OrganizationRole = 'owner' | 'manager' | 'staff';
 
@@ -123,10 +124,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
     const target = orgList.find(o => o.id === orgId);
     if (target) {
       setCurrentOrg(target);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from('profiles').update({ last_organization_id: orgId }).eq('id', user.id);
-      }
+      await setLastOrganization(orgId);
       window.location.href = '/app'; 
     }
   };

@@ -3,6 +3,7 @@ import { google } from 'googleapis';
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar';
+import { encryptGoogleToken } from '@/utils/googleTokenCrypto';
 
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
@@ -106,7 +107,7 @@ export async function GET(request: NextRequest) {
         const { error: updateError } = await supabaseAdmin
             .from('organizations')
             .update({
-                google_refresh_token: tokens.refresh_token,
+                google_refresh_token: encryptGoogleToken(tokens.refresh_token),
                 google_calendar_id: newCalendarId
             })
             .eq('id', organizationId);

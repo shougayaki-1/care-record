@@ -23,6 +23,8 @@ import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRe
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
+import { auditReportExport, softDeleteReports, transitionReports } from '@/app/actions/reports';
+import { updateClientGoogleLink } from '@/app/actions/clients';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -92,7 +94,7 @@ export default function ReportsPage() {
           helper:profiles!reports_helper_id_fkey ( name ),
           approved_by_user:profiles!reports_approved_by_fkey ( name ),
           report_values ( data )
-        `).eq('clients.organization_id', currentOrg.id).neq('status', 'draft'); 
+        `).eq('clients.organization_id', currentOrg.id).is('deleted_at', null).neq('status', 'draft');
 
       if (filterClientId !== 'all') query = query.eq('client_id', filterClientId);
       if (startDate) query = query.gte('start_at', `${startDate}T00:00:00`);
@@ -132,9 +134,8 @@ export default function ReportsPage() {
       if (!(await confirm({ message: `${selected.length}件を一括承認しますか？`, confirmText: '承認する' }))) return;
       setProcessing(true);
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        const updateData = { status: 'approved' as ReportStatus, approved_by: user?.id, approved_at: new Date().toISOString() };
-        await supabase.from('reports').update(updateData).in('id', selected);
+        const updateData = { status: 'approved' as ReportStatus, approved_at: new Date().toISOString() };
+        await transitionReports(currentOrg!.id, [...selected], 'approve');
         setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, ...updateData, approved_by_user: { name: 'あなた' } } : r));
         setSelected([]);
         showToast('一括承認しました');
@@ -146,7 +147,7 @@ export default function ReportsPage() {
     if (!(await confirm({ message: `${selected.length}件を一括で差戻ししますか？`, confirmText: '差し戻す' }))) return;
     setProcessing(true);
     try {
-        await supabase.from('reports').update({ status: 'remanded', approved_by: null, approved_at: null }).in('id', selected);
+        await transitionReports(currentOrg!.id, [...selected], 'remand');
         setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, status: 'remanded' as ReportStatus } : r));
         setSelected([]);
         showToast('差し戻しました');
@@ -169,7 +170,7 @@ export default function ReportsPage() {
 
     setProcessing(true);
     try {
-        await supabase.from('reports').delete().in('id', selected);
+        await softDeleteReports(currentOrg!.id, [...selected], '帳票一覧から削除');
         setReports(prev => prev.filter(r => !selected.includes(r.id)));
         setSelected([]);
         showToast('削除しました');
@@ -202,6 +203,7 @@ export default function ReportsPage() {
       if (!(await confirm({ message: `${targetReports.length}件のデータをエクスポートします。\n差し込み印刷用に全ての項目を列に展開します。よろしいですか？` }))) return;
       setProcessing(true);
       try {
+        await auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'csv');
         const clientIds = Array.from(new Set(targetReports.map(r => r.clients.id)));
         const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
 
@@ -293,6 +295,7 @@ export default function ReportsPage() {
       if (!(await confirm({ message: pdfConfirmMsg }))) return;
 
       try {
+        await auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'pdf');
         const pdfReports = await Promise.all(targetReports.map(async (report) => {
           const data = getReportData(report);
           if (!data) return null;
@@ -407,6 +410,8 @@ export default function ReportsPage() {
               
               const folderRes = await callGasApi({
                   action: 'manage_client_folder',
+                  organizationId: currentOrg!.id,
+                  clientId: client.id,
                   orgFolderId: orgInfo.google_folder_id,
                   clientName: client.name,
                   currentFolderId: client.google_folder_id
@@ -414,13 +419,15 @@ export default function ReportsPage() {
 
               if (folderRes.status !== 'success') throw new Error(`Folder Error: ${folderRes.message}`);
               if (folderRes.folderId !== client.google_folder_id) {
-                  await supabase.from('clients').update({ google_folder_id: folderRes.folderId }).eq('id', client.id);
+                  await updateClientGoogleLink(currentOrg!.id, client.id, { folderId: folderRes.folderId });
               }
               const clientRootFolderId = folderRes.folderId;
 
               setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: サブフォルダ作成中...` }));
               const subFolderRes = await callGasApi({
                   action: 'create_sub_folder',
+                  organizationId: currentOrg!.id,
+                  clientId: client.id,
                   parentId: clientRootFolderId,
                   folderName: exportFolderName
               });
@@ -453,6 +460,9 @@ export default function ReportsPage() {
 
                   await callGasApi({
                       action: 'create_pdf',
+                      organizationId: currentOrg!.id,
+                      clientId: client.id,
+                      reportId: report.id,
                       folderId: targetFolderId, 
                       templateId: client.google_template_id,
                       data: finalPayload, 

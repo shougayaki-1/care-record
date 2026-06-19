@@ -97,6 +97,7 @@ export default function HistoryPage() {
             let query = supabase.from('reports')
                 .select(`id, start_at, status, client_id, clients!inner(name, organization_id)`)
                 .eq('clients.organization_id', currentOrg.id)
+                .is('deleted_at', null)
                 .neq('status', 'draft')
                 .order('start_at', { ascending: false });
 

@@ -22,7 +22,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
-import { deleteOrganization, leaveOrganization, getAuditLogs } from '@/app/actions/organization';
+import { deleteOrganization, disconnectGoogleCalendar, getAuditLogs, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName } from '@/app/actions/organization';
 import { getSyncStatus, syncUnsyncedBatch, forceSyncBatch } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -32,7 +32,7 @@ type AuditLog = {
     id: string;
     created_at: string;
     action_type: string;
-    target_resource: string | null;
+    resource_id: string | null;
     details: Record<string, unknown> | null;
     profiles: { name: string } | null; 
 };
@@ -133,13 +133,13 @@ function SettingsContent() {
         setSaving(true);
         setMessage(null);
         try {
-            const { error } = await supabase.from('organizations').update({ name: orgName }).eq('id', currentOrg.id);
-            if (error) throw error;
+            await updateOrganizationName(currentOrg.id, orgName);
             
             if (googleFolderId) {
                 const { data: { user } } = await supabase.auth.getUser();
                 await callGasApi({
                     action: 'manage_org_folder',
+                    organizationId: currentOrg.id,
                     orgName: orgName,
                     orgId: currentOrg.id,
                     userEmail: user?.email,
@@ -166,6 +166,7 @@ function SettingsContent() {
             
             const result = await callGasApi({
                 action: 'manage_org_folder',
+                organizationId: currentOrg.id,
                 orgName: orgName,
                 orgId: currentOrg.id,
                 userEmail: user?.email,
@@ -174,10 +175,7 @@ function SettingsContent() {
 
             if (result.status === 'success' && result.folderId) {
                 const newFolderId = result.folderId;
-                await supabase
-                    .from('organizations')
-                    .update({ google_folder_id: newFolderId })
-                    .eq('id', currentOrg.id);
+                await updateOrganizationDriveFolder(currentOrg.id, newFolderId);
 
                 setGoogleFolderId(newFolderId);
                 if (result.folderUrl) setDriveUrl(result.folderUrl);
@@ -197,7 +195,7 @@ function SettingsContent() {
         if (!(await confirm({ message: '連携を解除しますか？\n（Googleドライブ上のフォルダは削除されません。アプリからの参照のみ解除されます。）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
-            await supabase.from('organizations').update({ google_folder_id: null }).eq('id', currentOrg.id);
+            await updateOrganizationDriveFolder(currentOrg.id, null);
             setGoogleFolderId(null);
             showToast('連携を解除しました');
         } catch(e) { 
@@ -225,10 +223,7 @@ function SettingsContent() {
         if (!(await confirm({ message: 'カレンダーの連携を解除しますか？\n（作成されたカレンダー自体はGoogleに残り、トークンのみ破棄されます）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
-            await supabase.from('organizations').update({ 
-                google_calendar_id: null,
-                google_refresh_token: null // トークンも破棄
-            }).eq('id', currentOrg.id);
+            await disconnectGoogleCalendar(currentOrg.id);
             setGoogleCalendarId(null);
             showToast('連携を解除しました');
         } catch(e) { 
@@ -589,7 +584,7 @@ function SettingsContent() {
                                                 <TableCell>{new Date(log.created_at).toLocaleString()}</TableCell>
                                                 <TableCell>{log.profiles?.name || '不明'}</TableCell>
                                                 <TableCell>{log.action_type}</TableCell>
-                                                <TableCell>{log.target_resource || '-'}</TableCell>
+                                                <TableCell>{log.resource_id || '-'}</TableCell>
                                             </TableRow>
                                         ))
                                     )}

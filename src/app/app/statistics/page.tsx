@@ -87,6 +87,7 @@ export default function StatisticsPage() {
                     helper:profiles!reports_helper_id_fkey (name),
                     report_values (data)
                 `)
+                .is('deleted_at', null)
                 .eq('clients.organization_id', currentOrg.id)
                 .in('status', ['pending', 'approved']) 
                 .gte('end_at', shiftStartRange)

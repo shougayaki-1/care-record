@@ -43,7 +43,7 @@ export default function RecordSelectPage() {
             setClients(targetClients);
 
             if (user && targetClients.length > 0) {
-                const { data: drafts } = await supabase.from('reports').select('id, client_id, created_at').eq('helper_id', user.id).eq('status', 'draft').in('client_id', targetClients.map(c => c.id)).order('created_at', { ascending: false });
+                const { data: drafts } = await supabase.from('reports').select('id, client_id, created_at').eq('helper_id', user.id).eq('status', 'draft').is('deleted_at', null).in('client_id', targetClients.map(c => c.id)).order('created_at', { ascending: false });
                 const draftsMap: Record<string, DraftReport[]> = {};
                 if (drafts) drafts.forEach((d) => { if (!draftsMap[d.client_id]) draftsMap[d.client_id] = []; draftsMap[d.client_id].push({ id: d.id, created_at: d.created_at }); });
                 setClientDrafts(draftsMap);

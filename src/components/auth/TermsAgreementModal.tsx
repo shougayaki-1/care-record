@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase';
 import LaunchIcon from '@mui/icons-material/Launch';
 import { useToast } from '@/components/ui/ToastProvider';
 import { AppButton, AppDialog } from '@/components/ui';
+import { acceptCurrentTerms } from '@/app/actions/user';
 
 export const TermsAgreementModal = () => {
     const { showToast } = useToast();
@@ -17,38 +18,26 @@ export const TermsAgreementModal = () => {
     const [userId, setUserId] = useState<string | null>(null);
 
     useEffect(() => {
-        checkAgreement();
+        const checkAgreement = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            setUserId(user.id);
+
+            const { data } = await supabase
+                .from('profiles')
+                .select('is_agreed')
+                .eq('id', user.id)
+                .single();
+
+            if (data && !data.is_agreed) setOpen(true);
+        };
+        void checkAgreement();
     }, []);
-
-    const checkAgreement = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        setUserId(user.id);
-
-        const { data } = await supabase
-            .from('profiles')
-            .select('is_agreed')
-            .eq('id', user.id)
-            .single();
-
-        // 同意していなければモーダルを開く
-        if (data && !data.is_agreed) {
-            setOpen(true);
-        }
-    };
 
     const handleAgree = async () => {
         if (!userId) return;
         try {
-            const { error } = await supabase
-                .from('profiles')
-                .update({
-                    is_agreed: true,
-                    agreed_at: new Date().toISOString()
-                })
-                .eq('id', userId);
-
-            if (error) throw error;
+            await acceptCurrentTerms();
             setOpen(false);
         } catch (error) {
             console.error(error);
