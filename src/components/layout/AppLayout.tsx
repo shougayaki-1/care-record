@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import {
   Box, Avatar, Tooltip, IconButton, Divider, List, ListItem, ListItemButton,
   ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge, Popover, CircularProgress,
-  AppBar, Toolbar, Button, Menu, MenuItem
+  Alert, AppBar, Toolbar, Button, Menu, MenuItem
 } from '@/components/ui/mui';
 import { useTheme, alpha, Theme } from '@mui/material/styles';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -33,8 +33,18 @@ import { supabase } from '@/lib/supabase';
 import { markNotificationRead } from '@/app/actions/user';
 import { recordLogout } from '@/app/actions/auth';
 import IdleTimeout from '@/components/auth/IdleTimeout';
+import { hasOrganizationPermission, type OrganizationPermission } from '@/utils/permissions';
 
 const SIDEBAR_WIDTH = 256;
+
+const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; permission: OrganizationPermission }> = [
+  { prefix: '/app/accounts', permission: 'viewAccounts' },
+  { prefix: '/app/settings', permission: 'viewAuditLogs' },
+  { prefix: '/app/clients', permission: 'manageClients' },
+  { prefix: '/app/staff', permission: 'manageStaffs' },
+  { prefix: '/app/reports', permission: 'viewReports' },
+  { prefix: '/app/statistics', permission: 'viewManagement' },
+];
 
 type Notification = {
   id: string;
@@ -303,8 +313,7 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
     return false;
   };
 
-  const isAdmin = ['owner', 'manager'].includes(currentOrg.role);
-  const isOwner = currentOrg.role === 'owner';
+  const isAdmin = hasOrganizationPermission(currentOrg.role, 'viewManagement');
 
   const categoryStyle = {
     px: 3, pt: 2.5, pb: 1,
@@ -398,7 +407,7 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
 
             <Typography sx={categoryStyle}>管理</Typography>
             <List disablePadding>
-              {isOwner && (
+              {isAdmin && (
                 <ListItem disablePadding>
                   <ListItemButton onClick={() => handleNav('/app/settings')} sx={itemStyle(isActive('/app/settings'))}>
                     <ListItemIcon><BusinessIcon fontSize="small" /></ListItemIcon>
@@ -420,7 +429,7 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
                 </ListItemButton>
               </ListItem>
 
-              {isAdmin && (
+              {hasOrganizationPermission(currentOrg.role, 'viewAccounts') && (
                 <ListItem disablePadding>
                   <ListItemButton onClick={() => handleNav('/app/accounts')} sx={itemStyle(isActive('/app/accounts'))}>
                     <ListItemIcon><KeyIcon fontSize="small" /></ListItemIcon>
@@ -444,9 +453,13 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
+  const router = useRouter();
+  const pathname = usePathname();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
   const { orgList, currentOrg, switchOrg } = useWorkspace();
+  const requiredPermission = PROTECTED_MANAGEMENT_ROUTES.find(({ prefix }) => pathname.startsWith(prefix))?.permission;
+  const accessDenied = Boolean(currentOrg && requiredPermission && !hasOrganizationPermission(currentOrg.role, requiredPermission));
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>
@@ -494,7 +507,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             overflow: 'hidden'
           }}
         >
-          {children}
+          {accessDenied ? (
+            <Box maxWidth={560} mx="auto" mt={8} px={2} width="100%">
+              <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => router.replace('/app')}>戻る</Button>}>
+                この画面を表示する権限がありません。
+              </Alert>
+            </Box>
+          ) : children}
         </Box>
       </Box>
     </Box>

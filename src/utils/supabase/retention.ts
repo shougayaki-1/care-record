@@ -14,6 +14,7 @@ type PurgeSummary = {
   reports: number;
   clients: number;
   staffs: number;
+  shifts: number;
   organizations: number;
   storageObjects: number;
   dryRun: boolean;
@@ -42,13 +43,14 @@ async function recordPurgeAudit(
 
 export async function purgeExpiredRecords(dryRun = false): Promise<PurgeSummary> {
   const nowIso = new Date().toISOString();
-  const summary: PurgeSummary = { reports: 0, clients: 0, staffs: 0, organizations: 0, storageObjects: 0, dryRun, more: false };
+  const summary: PurgeSummary = { reports: 0, clients: 0, staffs: 0, shifts: 0, organizations: 0, storageObjects: 0, dryRun, more: false };
 
   // 1) 期限切れの論理削除済みレポート: 画像実体 → 子レコード → 本体 の順で消す。
   const { data: reports } = await supabaseAdmin
     .from('reports')
     .select('id, client_id')
     .not('deleted_at', 'is', null)
+    .is('legal_hold_at', null)
     .lte('retention_until', nowIso)
     .limit(MAX_REPORTS_PER_RUN);
   if ((reports?.length ?? 0) >= MAX_REPORTS_PER_RUN) summary.more = true;
@@ -91,10 +93,25 @@ export async function purgeExpiredRecords(dryRun = false): Promise<PurgeSummary>
     }
   }
 
-  // 3) 古いログイン試行記録（レート制限用の一時データ）を掃除する。
+  // 3) 期限切れシフト。リーガルホールド中は消去しない。
+  const { data: shifts } = await supabaseAdmin.from('shifts').select('id, organization_id')
+    .not('deleted_at', 'is', null).is('legal_hold_at', null).lte('retention_until', nowIso).limit(MAX_ENTITIES_PER_RUN);
+  if ((shifts?.length ?? 0) >= MAX_ENTITIES_PER_RUN) summary.more = true;
+  for (const shift of shifts ?? []) {
+    if (!dryRun) {
+      const { error } = await supabaseAdmin.from('shifts').delete().eq('id', shift.id);
+      if (error) throw error;
+      await recordPurgeAudit(shift.organization_id, 'shift.purge', 'shift', shift.id, {});
+    }
+    summary.shifts += 1;
+  }
+
+  // 4) レート制限・nonce・失効済みセッション等の一時データを掃除する。
   if (!dryRun) {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     await supabaseAdmin.from('login_attempts').delete().lt('created_at', cutoff);
+    await supabaseAdmin.from('oauth_nonces').delete().lt('expires_at', nowIso);
+    await supabaseAdmin.from('user_session_activity').delete().lt('absolute_expires_at', nowIso);
   }
 
   return summary;

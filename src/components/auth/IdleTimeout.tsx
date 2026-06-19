@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { recordLogout } from '@/app/actions/auth';
+import { heartbeatSession, recordLogout } from '@/app/actions/auth';
 import { AppDialog } from '@/components/ui/AppDialog';
 import { AppButton } from '@/components/ui/AppButton';
 
@@ -16,15 +16,9 @@ import { AppButton } from '@/components/ui/AppButton';
 const IDLE_LIMIT_MS = 15 * 60 * 1000;
 // 警告表示から自動ログアウトまでの猶予（ミリ秒）。
 const WARNING_GRACE_MS = 60 * 1000;
-// アクティビティCookieとmiddlewareの閾値を合わせるためのCookie名。
-const ACTIVITY_COOKIE = 'cr_last_activity';
+const HEARTBEAT_INTERVAL_MS = 60 * 1000;
 
 const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'touchstart', 'scroll'] as const;
-
-function setActivityCookie() {
-  // middleware が参照する最終アクティビティ時刻。HttpOnlyにはできない（JS更新のため）。
-  document.cookie = `${ACTIVITY_COOKIE}=${Date.now()}; path=/; SameSite=Lax`;
-}
 
 export default function IdleTimeout() {
   const router = useRouter();
@@ -33,6 +27,7 @@ export default function IdleTimeout() {
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastHeartbeat = useRef(0);
 
   const logout = useCallback(async () => {
     if (countdownTimer.current) clearInterval(countdownTimer.current);
@@ -52,9 +47,13 @@ export default function IdleTimeout() {
 
   const resetIdle = useCallback(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current);
-    setActivityCookie();
+    const now = Date.now();
+    if (now - lastHeartbeat.current >= HEARTBEAT_INTERVAL_MS) {
+      lastHeartbeat.current = now;
+      void heartbeatSession().catch(() => logout());
+    }
     idleTimer.current = setTimeout(startWarning, IDLE_LIMIT_MS);
-  }, [startWarning]);
+  }, [logout, startWarning]);
 
   const stayActive = useCallback(() => {
     if (graceTimer.current) clearTimeout(graceTimer.current);

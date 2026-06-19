@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { recordAuditEvent } from '@/utils/supabase/audit';
+import { registerSessionActivity } from '@/utils/supabase/auth';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -15,7 +16,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/?error=no_code`);
   }
 
-  // クライアント作成
+  // exchangeCodeForSession が更新するCookieとキャッシュ抑止ヘッダーを、
+  // リダイレクトレスポンスへ直接反映する。
+  const response = NextResponse.redirect(`${origin}${next}`);
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -24,8 +27,17 @@ export async function GET(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll() {
-          // ここでは何もしない（exchangeの結果を見るため）
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            const isLocal = origin.startsWith('http://localhost');
+            response.cookies.set(name, value, {
+              ...options,
+              secure: !isLocal && options.secure,
+            });
+          });
+          response.headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate, max-age=0');
+          response.headers.set('Expires', '0');
+          response.headers.set('Pragma', 'no-cache');
         },
       },
     }
@@ -44,36 +56,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/?error=no_session_data`);
   }
 
-  // 成功したので、実際にCookieをセットするレスポンスを作る
-  const response = NextResponse.redirect(`${origin}${next}`);
-  
-  const supabaseForResponse = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            // 本番環境かどうかでSecure属性を調整するロジック（重要）
-            // localhost (http) の場合は secure: false にしないと保存されない
-            const isLocal = origin.startsWith('http://localhost');
-            const finalOptions = {
-                ...options,
-                secure: !isLocal && options.secure, // ローカルならfalseへ強制
-            };
-
-            response.cookies.set(name, value, finalOptions);
-          });
-        },
-      },
-    }
-  );
-  
-  // セッション情報をリフレッシュしてCookie書き込みをトリガー
-  await supabaseForResponse.auth.setSession(data.session);
+  const sessionId = await registerSessionActivity(data.session);
 
   // ログイン成功を監査記録（アクセスの記録）。失敗してもログインは継続する。
   try {
@@ -83,6 +66,7 @@ export async function GET(request: NextRequest) {
       action: 'auth.login',
       resourceType: 'auth',
       outcome: 'success',
+      sessionId,
       details: { method: 'oauth' },
     });
   } catch (auditError) {

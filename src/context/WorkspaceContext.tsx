@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 // useRouterは使用していなかったので削除
 import { CircularProgress, Box } from '@mui/material';
 import { setLastOrganization } from '@/app/actions/user';
+import { getMyWorkspaces } from '@/app/actions/workspace';
 
 export type OrganizationRole = 'owner' | 'manager' | 'staff';
 
@@ -15,14 +16,7 @@ export type Workspace = {
 };
 
 // Supabaseからの返り値の型定義
-type OrgMemberResponse = {
-  role: string;
-  organization_id: string;
-  organizations: {
-    id: string;
-    name: string;
-  } | null; // Left Join等の可能性を考慮してnull許容
-};
+export type WorkspaceLoadStatus = 'loading' | 'ready' | 'no_membership' | 'session_expired' | 'forbidden' | 'error';
 
 type WorkspaceContextType = {
   currentOrg: Workspace | null;
@@ -30,6 +24,8 @@ type WorkspaceContextType = {
   switchOrg: (orgId: string) => void;
   refreshWorkspace: () => Promise<void>;
   loading: boolean;
+  status: WorkspaceLoadStatus;
+  errorMessage: string | null;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined);
@@ -38,6 +34,8 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const [currentOrg, setCurrentOrg] = useState<Workspace | null>(null);
   const [orgList, setOrgList] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<WorkspaceLoadStatus>('loading');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     // 初回読み込み
@@ -52,6 +50,8 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         setCurrentOrg(null);
         setOrgList([]);
         setLoading(false);
+        setStatus('session_expired');
+        setErrorMessage(null);
       }
     });
 
@@ -63,58 +63,27 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const fetchWorkspaces = async () => {
     try {
       setLoading(true);
-      // getSessionでセッションの存在を確認（getUserより速く、クライアントサイド向き）
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.user) {
-        console.log('[WorkspaceProvider] No session.');
-        setOrgList([]);
-        setCurrentOrg(null);
-        return;
-      }
+      setStatus('loading');
+      setErrorMessage(null);
+      const result = await getMyWorkspaces();
 
-      const user = session.user;
-      console.log('[WorkspaceProvider] Fetching for user:', user.id);
-
-      const { data, error } = await supabase
-        .from('organization_members')
-        .select(`
-          role,
-          organization_id,
-          organizations (id, name)
-        `)
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-
-      const members = data as unknown as OrgMemberResponse[];
-
-      if (members && members.length > 0) {
-        const list: Workspace[] = members
-          .filter(m => m.organizations)
-          .map((m) => ({
-            id: m.organizations!.id,
-            name: m.organizations!.name,
-            role: m.role as OrganizationRole
-          }));
-        
+      if (result.status === 'success') {
+        const list: Workspace[] = result.workspaces;
         setOrgList(list);
-
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('last_organization_id')
-          .eq('id', user.id)
-          .single();
-
-        const lastOrgId = profile?.last_organization_id;
+        const lastOrgId = result.currentOrganizationId;
         const target = list.find(o => o.id === lastOrgId) || list[0];
         setCurrentOrg(target);
+        setStatus('ready');
       } else {
         setOrgList([]);
         setCurrentOrg(null);
+        setStatus(result.status);
+        setErrorMessage('message' in result ? result.message : null);
       }
     } catch (error) {
       console.error('Workspace fetch error:', error);
+      setStatus('error');
+      setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
     } finally {
       setLoading(false);
     }
@@ -134,7 +103,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   }
 
   return (
-    <WorkspaceContext.Provider value={{ currentOrg, orgList, switchOrg, refreshWorkspace: fetchWorkspaces, loading }}>
+    <WorkspaceContext.Provider value={{ currentOrg, orgList, switchOrg, refreshWorkspace: fetchWorkspaces, loading, status, errorMessage }}>
       {children}
     </WorkspaceContext.Provider>
   );

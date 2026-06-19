@@ -4,6 +4,7 @@ import { sanitizeDbError } from '@/utils/errors';
 
 import { randomUUID } from 'crypto';
 import { supabaseAdmin, createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
+import { recordAuditEvent } from '@/utils/supabase/audit';
 
 export async function updateOwnProfile(name: string, agreeToTerms = false) {
     const { id: userId } = await getAuthedUser();
@@ -68,10 +69,20 @@ export async function markNotificationRead(notificationId: string) {
 
 export async function deleteUserAccount() {
     // 退会できるのは本人のみ。対象 userId はセッションから取得する
-    const { id: userId } = await getAuthedUser();
-    // Authユーザー削除 (関連するpublicテーブルのデータはカスケード設定またはTriggerで削除される前提)
-    // ここではAuth削除のみ行う
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    const user = await getAuthedUser();
+    const userId = user.id;
+    await recordAuditEvent({ organizationId: null, actorId: userId, action: 'account.self_delete_request', resourceType: 'account', resourceId: userId, sessionId: user.sessionId });
+    const now = new Date().toISOString();
+    const { error: requestError } = await supabaseAdmin.from('user_deletion_requests').insert({
+        user_id: userId, retention_basis: '法令・契約上必要な記録と監査証跡を保全後、承認手順により消去',
+    });
+    if (requestError) throw sanitizeDbError(requestError, 'action.user');
+    const { error: profileError } = await supabaseAdmin.from('profiles').update({
+        deleted_at: now, deletion_reason: '本人による退会申請', last_organization_id: null,
+    }).eq('id', userId);
+    if (profileError) throw sanitizeDbError(profileError, 'action.user');
+    await supabaseAdmin.from('organization_members').delete().eq('user_id', userId);
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: '876000h' });
     if (error) throw sanitizeDbError(error, 'action.user');
     return { success: true };
 }

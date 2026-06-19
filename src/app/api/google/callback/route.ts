@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar';
 import { encryptGoogleToken } from '@/utils/googleTokenCrypto';
+import { consumeOAuthNonce } from '@/utils/supabase/oauthNonce';
 
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
@@ -67,6 +68,15 @@ export async function GET(request: NextRequest) {
             .single();
         if (member?.role !== 'owner') {
             console.error('User is not owner of target organization');
+            return failResponse;
+        }
+        if (!await consumeOAuthNonce({
+            nonce: state,
+            provider: 'google-calendar',
+            userId: user.id,
+            organizationId,
+        })) {
+            console.error('OAuth state was expired or already consumed');
             return failResponse;
         }
 

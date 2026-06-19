@@ -8,7 +8,7 @@ import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 
 export async function updateOrganizationName(orgId: string, name: string) {
-    const { userId } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const { userId } = await assertOrgRole(orgId, ['owner']);
     const normalized = name.trim();
     if (normalized.length < 1 || normalized.length > 100) throw new Error('事業所名は1〜100文字で入力してください');
     const { error } = await supabaseAdmin.from('organizations').update({ name: normalized }).eq('id', orgId).is('deleted_at', null);
@@ -18,7 +18,7 @@ export async function updateOrganizationName(orgId: string, name: string) {
 }
 
 export async function updateOrganizationDriveFolder(orgId: string, folderId: string | null) {
-    const { userId } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const { userId } = await assertOrgRole(orgId, ['owner']);
     const normalized = folderId?.trim() || null;
     if (normalized && normalized.length > 255) throw new Error('フォルダIDが不正です');
     const { error } = await supabaseAdmin.from('organizations').update({ google_folder_id: normalized }).eq('id', orgId).is('deleted_at', null);
@@ -28,7 +28,7 @@ export async function updateOrganizationDriveFolder(orgId: string, folderId: str
 }
 
 export async function disconnectGoogleCalendar(orgId: string) {
-    const { userId } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const { userId } = await assertOrgRole(orgId, ['owner']);
     const { data: org, error: readError } = await supabaseAdmin.from('organizations').select('google_refresh_token').eq('id', orgId).single();
     if (readError) throw new Error(readError.message);
     let revoked = false;

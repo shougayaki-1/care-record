@@ -26,24 +26,38 @@ async function getRequestContext(): Promise<RequestContext> {
  * 直近の失敗回数がしきい値以上かを返す。IP を解決できない（salt 未設定等）場合は
  * 安全側に倒さず通常通り認証へ進める（可用性のため）。
  */
-export async function isLoginRateLimited(): Promise<boolean> {
+async function recentFailureCount(email: string): Promise<number> {
   const { ipHash } = await getRequestContext();
-  if (!ipHash) return false;
+  const emailHash = hashNetworkIdentifier(email?.toLowerCase() || null);
+  if (!ipHash && !emailHash) return 0;
 
   const since = new Date(Date.now() - LOGIN_WINDOW_MINUTES * 60 * 1000).toISOString();
-  const { count, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('login_attempts')
     .select('id', { count: 'exact', head: true })
-    .eq('ip_hash', ipHash)
     .eq('outcome', 'failure')
     .gte('created_at', since);
+  if (ipHash && emailHash) query = query.or(`ip_hash.eq.${ipHash},email_hash.eq.${emailHash}`);
+  else if (ipHash) query = query.eq('ip_hash', ipHash);
+  else query = query.eq('email_hash', emailHash!);
+  const { count, error } = await query;
 
   if (error) {
     // 集計に失敗した場合はブロックしない（DoS 化を避ける）。
     console.error('login rate-limit check failed:', error.message);
-    return false;
+    return 0;
   }
-  return (count ?? 0) >= LOGIN_MAX_FAILURES;
+  return count ?? 0;
+}
+
+export async function isLoginRateLimited(email: string): Promise<boolean> {
+  return await recentFailureCount(email) >= LOGIN_MAX_FAILURES;
+}
+
+/** 失敗回数に応じた遅延。固定閾値の直前でも総当たり速度を落とす。 */
+export async function applyProgressiveLoginDelay(email: string): Promise<void> {
+  const failures = await recentFailureCount(email);
+  if (failures > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(failures * 500, 3000)));
 }
 
 /** ログイン試行を記録する（IP・メールはハッシュ化）。成功時は失敗カウントをリセットしない方針。 */

@@ -59,7 +59,7 @@ test.describe('統合フロー', () => {
     // 4. スタッフとして新規登録
     await page.getByRole('tab', { name: '新規登録' }).click();
     await page.getByLabel('メールアドレス').fill(staffEmail);
-    await page.getByLabel('パスワード').fill('password123');
+    await page.getByLabel('パスワード').fill('Test!1234');
     await page.getByRole('button', { name: 'アカウントを作成' }).click();
 
     // 5. セットアップ (参加フロー)

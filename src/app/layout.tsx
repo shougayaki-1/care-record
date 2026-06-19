@@ -9,6 +9,7 @@ import { TermsAgreementModal } from "@/components/auth/TermsAgreementModal";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import { ConfirmProvider } from "@/components/ui/ConfirmProvider";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { headers } from 'next/headers';
 
 const inter = Inter({ subsets: ["latin"] });
 const poppins = Poppins({
@@ -31,11 +32,12 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const nonce = (await headers()).get('x-nonce') || undefined;
   return (
     // suppressHydrationWarningを追加して拡張機能によるタグ書き換えエラーを抑制
     <html lang="ja" suppressHydrationWarning>
@@ -43,7 +45,7 @@ export default function RootLayout({
         className={`${inter.className} ${poppins.variable}`}
         suppressHydrationWarning // <body>タグ自体に注入される属性エラーも抑止
       >
-        <AppRouterCacheProvider>
+        <AppRouterCacheProvider options={{ nonce }}>
           <ThemeProvider theme={theme}>
             <CssBaseline />
             <ToastProvider>

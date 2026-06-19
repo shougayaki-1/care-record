@@ -11,6 +11,8 @@ export type AuditEventInput = {
   action: string;
   resourceType: string;
   resourceId?: string | null;
+  sessionId?: string | null;
+  reason?: string | null;
   outcome?: 'success' | 'failure';
   details?: Record<string, unknown>;
 };
@@ -39,6 +41,8 @@ export async function recordAuditEvent(input: AuditEventInput): Promise<void> {
     resource_id: input.resourceId || null,
     outcome: input.outcome || 'success',
     request_id: requestId,
+    session_id: input.sessionId || null,
+    reason: input.reason || null,
     ip_hash: hashNetworkIdentifier(forwardedFor),
     user_agent: requestHeaders.get('user-agent')?.slice(0, 500) || null,
     details: input.details || {},

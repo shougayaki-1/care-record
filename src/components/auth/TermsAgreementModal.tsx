@@ -47,7 +47,7 @@ export const TermsAgreementModal = () => {
 
     // LPのURL（ここにアップロード先のURLを入れてください）
     // まだなければ仮置きでOK
-    const TERMS_URL = "http://localhost:5500/index.html"; // ← ローカルテスト用や公開URL
+    const TERMS_URL = "/terms.html";
 
     return (
         <AppDialog

@@ -2,10 +2,22 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-export async function updateSession(request: NextRequest) {
+function authSessionId(accessToken: string): string | null {
+    try {
+        const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8')) as { session_id?: string };
+        return payload.session_id || null;
+    } catch {
+        return null;
+    }
+}
+
+export async function updateSession(request: NextRequest, nonce: string, csp: string) {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-nonce', nonce);
+    requestHeaders.set('Content-Security-Policy', csp);
     let response = NextResponse.next({
         request: {
-            headers: request.headers,
+            headers: requestHeaders,
         },
     });
 
@@ -27,19 +39,33 @@ export async function updateSession(request: NextRequest) {
 
                     response = NextResponse.next({
                         request: {
-                            headers: request.headers,
+                            headers: requestHeaders,
                         },
                     });
 
                     cookiesToSet.forEach(({ name, value, options }) =>
                         response.cookies.set(name, value, options),
                     );
+                    response.headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate, max-age=0');
+                    response.headers.set('Expires', '0');
+                    response.headers.set('Pragma', 'no-cache');
                 },
             },
         }
     );
 
     const { data: { user } } = await supabase.auth.getUser();
+
+    const redirectWithSession = (url: URL) => {
+        const redirect = NextResponse.redirect(url);
+        response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+        for (const name of ['cache-control', 'expires', 'pragma']) {
+            const value = response.headers.get(name);
+            if (value) redirect.headers.set(name, value);
+        }
+        redirect.headers.set('Content-Security-Policy', csp);
+        return redirect;
+    };
 
     // 多層防御: 認証が必要なルートは未認証ならトップへリダイレクト
     // （各ページ/サーバアクションでも認可するが、ここで早期に弾く）
@@ -49,24 +75,28 @@ export async function updateSession(request: NextRequest) {
         const url = request.nextUrl.clone();
         url.pathname = '/';
         url.search = `next=${encodeURIComponent(path)}`;
-        return NextResponse.redirect(url);
+        return redirectWithSession(url);
     }
 
-    // 多層防御(アイドルタイムアウト): クライアントの IdleTimeout が実際の signOut を行うが、
-    // 万一クライアントが動作しない場合に備え、最終アクティビティが著しく古ければ保護ルートを弾く。
-    // 閾値はクライアント側(15分 + 猶予)より少し長めに取り、正常操作を誤って遮断しない。
+    // ブラウザが書き換えられるCookieではなく、DB上のセッション活動を検証する。
     if (isProtected && user) {
-        const IDLE_LIMIT_MS = 16 * 60 * 1000;
-        const lastActivity = Number(request.cookies.get('cr_last_activity')?.value);
-        if (lastActivity && Date.now() - lastActivity > IDLE_LIMIT_MS) {
+        const { data: { session } } = await supabase.auth.getSession();
+        const sessionId = session?.access_token ? authSessionId(session.access_token) : null;
+        const idleCutoff = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+        const now = new Date().toISOString();
+        const { data: activity } = sessionId
+            ? await supabase.from('user_session_activity').select('session_hash')
+                .eq('auth_session_id', sessionId).eq('user_id', user.id).is('revoked_at', null)
+                .gte('last_activity', idleCutoff).gt('absolute_expires_at', now).maybeSingle()
+            : { data: null };
+        if (!activity) {
             const url = request.nextUrl.clone();
             url.pathname = '/';
             url.search = 'reason=idle_timeout';
-            const redirect = NextResponse.redirect(url);
-            redirect.cookies.delete('cr_last_activity');
-            return redirect;
+            return redirectWithSession(url);
         }
     }
 
+    response.headers.set('Content-Security-Policy', csp);
     return response;
 }

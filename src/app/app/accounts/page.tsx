@@ -16,11 +16,11 @@ import SyncAltIcon from '@mui/icons-material/SyncAlt';
 import KeyIcon from '@mui/icons-material/Key';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 
-import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
-import { createInvitation, updateAccountRole, removeAccount } from '@/app/actions/accounts';
+import { createInvitation, getAccountOverview, updateAccountRole, removeAccount } from '@/app/actions/accounts';
 import { AppButton, AppDialog } from '@/components/ui';
+import { hasOrganizationPermission } from '@/utils/permissions';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -32,10 +32,6 @@ type AccountProfile = {
     status: 'active' | 'invited'; 
     invitation_code?: string; 
 };
-
-type MemberRow = { user_id: string; role: string; };
-type ProfileRow = { id: string; name: string; email?: string; };
-type InvitationRow = { id: string; target_name: string | null; role: string; code: string; };
 
 export default function AccountsPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
@@ -62,51 +58,13 @@ export default function AccountsPage() {
   // ★追加：削除（取り消し）確認ダイアログ用
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
 
-  useEffect(() => {
-    const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) setCurrentUserId(user.id);
-    };
-    fetchUser();
-  }, []);
-
   const fetchData = useCallback(async () => {
     if (!currentOrg) return;
     setIsFetching(true);
     try {
-      const { data: membersData } = await supabase.from('organization_members').select('user_id, role').eq('organization_id', currentOrg.id);
-      const membersList = (membersData as unknown as MemberRow[]) || [];
-      const memberIds = membersList.map((m) => m.user_id);
-      
-      const profilesMap: Record<string, ProfileRow> = {};
-      if (memberIds.length > 0) {
-        const { data: profilesData } = await supabase.from('profiles').select('id, name').in('id', memberIds);
-        (profilesData as unknown as ProfileRow[] || []).forEach(p => { profilesMap[p.id] = p; });
-      }
-
-      const { data: invitationsData } = await supabase.from('invitations').select('*').eq('organization_id', currentOrg.id).eq('is_used', false);
-
-      const mergedList: AccountProfile[] = [];
-      
-      (invitationsData as unknown as InvitationRow[] || []).forEach((inv) => {
-        mergedList.push({ 
-            id: inv.id, 
-            name: inv.target_name || '名前未設定', 
-            role: inv.role, 
-            status: 'invited', 
-            invitation_code: inv.code 
-        });
-      });
-
-      membersList.forEach((m) => {
-        mergedList.push({ 
-            id: m.user_id, 
-            name: profilesMap[m.user_id]?.name || '名前未設定', 
-            email: profilesMap[m.user_id]?.email, 
-            role: m.role, 
-            status: 'active' 
-        });
-      });
+      const overview = await getAccountOverview(currentOrg.id);
+      setCurrentUserId(overview.currentUserId);
+      const mergedList: AccountProfile[] = overview.accounts;
       
       mergedList.sort((a, b) => {
           if (a.id === currentUserId) return -1;
@@ -241,7 +199,7 @@ export default function AccountsPage() {
   };
 
   if (wsLoading || !currentOrg) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
-  const isOwner = currentOrg.role === 'owner';
+  const isOwner = hasOrganizationPermission(currentOrg.role, 'manageAccounts');
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -257,9 +215,11 @@ export default function AccountsPage() {
                     <Typography variant="subtitle1" fontWeight="bold" color="text.primary">システムログインアカウント</Typography>
                     <Typography variant="caption" color="text.secondary">アプリにログインできるユーザーと、その権限を管理します。</Typography>
                 </Box>
-                <Button variant="contained" startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); setNewInviteName(''); setNewInviteRole('staff'); }} sx={{ boxShadow: 'none' }}>
-                    新しい人を招待
-                </Button>
+                {isOwner && (
+                  <Button variant="contained" startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); setNewInviteName(''); setNewInviteRole('staff'); }} sx={{ boxShadow: 'none' }}>
+                      新しい人を招待
+                  </Button>
+                )}
             </Paper>
 
             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, boxShadow: 'none' }}>
@@ -366,7 +326,9 @@ export default function AccountsPage() {
                       <Select value={editRole} onChange={(e) => setEditRole(e.target.value)} label="システム権限">
                           <MenuItem value="staff">一般(ヘルパー) - 記録の作成のみ</MenuItem>
                           <MenuItem value="manager">管理者 - シフト管理・利用者管理</MenuItem>
-                          <MenuItem value="owner">オーナー - 全ての権限・事業所設定</MenuItem>
+                          {selectedAccount?.status === 'active' && (
+                            <MenuItem value="owner">オーナー - 全ての権限・事業所設定</MenuItem>
+                          )}
                       </Select>
                   </FormControl>
                   {selectedAccount?.id === currentUserId && editRole !== 'owner' && (

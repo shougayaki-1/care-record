@@ -3,12 +3,61 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { randomUUID } from 'crypto';
-import { supabaseAdmin, getAuthedUser, assertOrgRole } from '@/utils/supabase/auth';
+import { supabaseAdmin, getAuthedUser, assertOrgRole, createSessionClient } from '@/utils/supabase/auth';
+import { recordAuditEvent } from '@/utils/supabase/audit';
 
 const VALID_ROLES = ['owner', 'manager', 'staff'] as const;
 type Role = (typeof VALID_ROLES)[number];
 
 type MemberRow = { user_id: string; role: string };
+
+export type AccountOverviewItem = {
+    id: string;
+    name: string;
+    role: Role;
+    status: 'active' | 'invited';
+    invitation_code?: string;
+};
+
+export async function getAccountOverview(orgId: string): Promise<{ currentUserId: string; accounts: AccountOverviewItem[] }> {
+    const { userId, role: actorRole } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const [{ data: members, error: membersError }, { data: invitations, error: invitationsError }] = await Promise.all([
+        supabaseAdmin.from('organization_members').select('user_id, role').eq('organization_id', orgId),
+        supabaseAdmin.from('invitations')
+            .select('id, target_name, role, code')
+            .eq('organization_id', orgId)
+            .eq('is_used', false)
+            .gt('expires_at', new Date().toISOString()),
+    ]);
+    if (membersError || invitationsError) throw new Error('アカウント情報を取得できませんでした');
+
+    const memberRows = (members || []) as MemberRow[];
+    const memberIds = memberRows.map((member) => member.user_id);
+    const { data: profiles, error: profilesError } = memberIds.length
+        ? await supabaseAdmin.from('profiles').select('id, name').in('id', memberIds)
+        : { data: [], error: null };
+    if (profilesError) throw new Error('プロフィール情報を取得できませんでした');
+    const profileNames = new Map((profiles || []).map((profile) => [profile.id, profile.name]));
+
+    const accounts: AccountOverviewItem[] = memberRows.map((member) => ({
+        id: member.user_id,
+        name: profileNames.get(member.user_id) || '名前未設定',
+        role: VALID_ROLES.includes(member.role as Role) ? member.role as Role : 'staff',
+        status: 'active',
+    }));
+    for (const invitation of invitations || []) {
+        const invitationRole = ['manager', 'staff'].includes(invitation.role) ? invitation.role as Role : 'staff';
+        accounts.push({
+            id: invitation.id,
+            name: invitation.target_name || '名前未設定',
+            role: invitationRole,
+            status: 'invited',
+            ...(actorRole === 'owner' ? { invitation_code: invitation.code } : {}),
+        });
+    }
+
+    return { currentUserId: userId, accounts };
+}
 
 /**
  * 招待コードで事業所に参加する。
@@ -16,50 +65,14 @@ type MemberRow = { user_id: string; role: string };
  * これにより organization_members への自己挿入(任意ロール化)を RLS で禁止できる。
  */
 export async function acceptInvitation(code: string) {
-    const { id: userId } = await getAuthedUser();
+    const user = await getAuthedUser();
     if (!code?.trim()) throw new Error('招待コードが不正です');
-
-    // 1. 未使用の招待を取得（コード一致 + is_used=false）
-    const { data: invite, error: inviteError } = await supabaseAdmin
-        .from('invitations')
-        .select('id, organization_id, role, is_used, target_client_ids')
-        .eq('code', code.trim())
-        .eq('is_used', false)
-        .single();
-    if (inviteError || !invite) throw new Error('無効な招待コード、または既に使用されています');
-
-    // 付与ロールは招待値を採用するが、想定外の値は staff に丸める
-    const role = (['manager', 'staff'].includes(invite.role) ? invite.role : 'staff') as Role;
-
-    // 2. 既にメンバーなら何もしない（再参加）
-    const { data: existing } = await supabaseAdmin
-        .from('organization_members')
-        .select('user_id')
-        .eq('organization_id', invite.organization_id)
-        .eq('user_id', userId)
-        .maybeSingle();
-
-    if (!existing) {
-        const { error: memberError } = await supabaseAdmin
-            .from('organization_members')
-            .insert({ organization_id: invite.organization_id, user_id: userId, role });
-        if (memberError) throw new Error(memberError.message);
-    }
-
-    // 3. 招待を使用済みに（競合時の二重使用を避けるため is_used=false を条件に更新）
-    await supabaseAdmin.from('invitations').update({ is_used: true }).eq('id', invite.id).eq('is_used', false);
-
-    // 4. 担当割り当て
-    const clientIds: string[] = invite.target_client_ids || [];
-    if (clientIds.length > 0) {
-        const assignments = clientIds.map((clientId) => ({ helper_id: userId, client_id: clientId }));
-        await supabaseAdmin.from('assignments').insert(assignments);
-    }
-
-    // 5. 最後に開いた事業所を更新
-    await supabaseAdmin.from('profiles').update({ last_organization_id: invite.organization_id }).eq('id', userId);
-
-    return { success: true, organizationId: invite.organization_id, alreadyMember: !!existing };
+    const supabase = await createSessionClient();
+    const { data: organizationId, error } = await supabase.rpc('accept_invitation_atomic', {
+        p_code: code.trim(), p_session_id: user.sessionId,
+    });
+    if (error || !organizationId) throw new Error('無効、期限切れ、または使用済みの招待コードです');
+    return { success: true, organizationId: String(organizationId), alreadyMember: false };
 }
 
 /**
@@ -81,8 +94,10 @@ export async function createInvitation(orgId: string, params: { targetName?: str
         created_by: userId,
         target_name: params.targetName || null,
         role: params.role,
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     });
     if (error) throw sanitizeDbError(error, 'action.accounts');
+    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.invitation_create', resourceType: 'invitation', details: { role: params.role } });
     return { success: true, code };
 }
 
@@ -94,9 +109,12 @@ export async function updateAccountRole(
     orgId: string,
     params: { targetId: string; status: 'active' | 'invited'; newRole: string }
 ) {
-    await assertOrgRole(orgId, ['owner']);
+    const { userId } = await assertOrgRole(orgId, ['owner']);
     const { targetId, status, newRole } = params;
     if (!VALID_ROLES.includes(newRole as Role)) throw new Error('権限が不正です');
+    if (status === 'invited' && newRole === 'owner') {
+        throw new Error('招待でオーナー権限は付与できません。参加後に権限を変更してください');
+    }
 
     if (status === 'active') {
         const { data: members } = await supabaseAdmin
@@ -135,6 +153,7 @@ export async function updateAccountRole(
             .eq('organization_id', orgId);
         if (error) throw sanitizeDbError(error, 'action.accounts');
     }
+    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.role_update', resourceType: 'account', resourceId: targetId, details: { status, newRole } });
     return { success: true };
 }
 
@@ -186,5 +205,6 @@ export async function removeAccount(
             .eq('organization_id', orgId);
         if (error) throw sanitizeDbError(error, 'action.accounts');
     }
+    await recordAuditEvent({ organizationId: orgId, actorId: callerId, action: status === 'active' ? 'account.remove' : 'account.invitation_revoke', resourceType: 'account', resourceId: targetId });
     return { success: true };
 }

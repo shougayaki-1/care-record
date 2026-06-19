@@ -6,7 +6,7 @@ import {
 } from '@/components/ui/mui';
 import { supabase } from '@/lib/supabase';
 import { useSearchParams } from 'next/navigation';
-import { loginWithPassword, RATE_LIMIT_MESSAGE } from '@/app/actions/auth';
+import { loginWithPassword, registerWithPassword, RATE_LIMIT_MESSAGE } from '@/app/actions/auth';
 import { validatePassword, PASSWORD_POLICY_HINT } from '@/utils/passwordPolicy';
 
 // ... (Logoコンポーネントは省略、そのまま使用) ...
@@ -76,22 +76,22 @@ export const AuthForm = () => {
                     setLoading(false);
                     return;
                 }
-                const { data, error } = await supabase.auth.signUp({
-                    email,
-                    password,
-                });
-
-                if (error) throw error;
-                
-                if (data.user && data.user.identities && data.user.identities.length === 0) {
+                const result = await registerWithPassword(email, password);
+                if (!result.ok && result.reason === 'already_registered') {
                     setMessage({ 
                         type: 'info', 
                         text: 'このメールアドレスは既に登録されています。ログインしてください。' 
                     });
                     setTabIndex(0);
-                } else if (data.user) {
-                    setMessage({ type: 'success', text: 'アカウントを作成しました。自動的にログインします...' });
+                } else if (!result.ok) {
+                    if (result.reason === 'rate_limited') throw new Error(RATE_LIMIT_MESSAGE);
+                    if (result.reason === 'invalid_password') throw new Error(result.message || PASSWORD_POLICY_HINT);
+                    throw new Error('アカウントを作成できませんでした。');
+                } else if (result.signedIn) {
+                    setMessage({ type: 'success', text: 'アカウントを作成しました。自動的にログインします…' });
                     setTimeout(() => { window.location.href = nextUrl; }, 1000);
+                } else {
+                    setMessage({ type: 'success', text: '確認メールを送信しました。メール内のリンクから登録を完了してください。' });
                 }
             } else {
                 // --- ログイン ---

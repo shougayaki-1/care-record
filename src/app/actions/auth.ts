@@ -5,26 +5,55 @@
 // - ログイン成功/失敗・ログアウトの監査記録（アクセスの記録）
 // パスワードログインをサーバーで行うことで、上記を確実に一元化する（@supabase/ssr のサーバーログインパターン）。
 
-import { createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
+import { createSessionClient, getAuthedUser, registerSessionActivity, revokeCurrentSession, touchCurrentSession } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import {
   isLoginRateLimited,
+  applyProgressiveLoginDelay,
   recordLoginAttempt,
   LOGIN_WINDOW_MINUTES,
 } from '@/utils/supabase/loginAttempts';
+import { validatePassword } from '@/utils/passwordPolicy';
 
 export type LoginResult =
   | { ok: true }
   | { ok: false; reason: 'rate_limited' | 'invalid_credentials' | 'email_unconfirmed' | 'error' };
+
+export type RegistrationResult =
+  | { ok: true; signedIn: boolean }
+  | { ok: false; reason: 'rate_limited' | 'invalid_password' | 'already_registered' | 'error'; message?: string };
+
+export async function registerWithPassword(email: string, password: string): Promise<RegistrationResult> {
+  const policy = validatePassword(password);
+  if (!policy.ok) return { ok: false, reason: 'invalid_password', message: policy.message };
+  if (await isLoginRateLimited(email)) return { ok: false, reason: 'rate_limited' };
+  await applyProgressiveLoginDelay(email);
+  const supabase = await createSessionClient();
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error || !data.user) {
+    await recordLoginAttempt(email, 'failure');
+    await recordAuditEvent({ organizationId: null, actorId: null, action: 'auth.register', resourceType: 'auth', outcome: 'failure' });
+    if (error?.message.includes('already registered')) return { ok: false, reason: 'already_registered' };
+    return { ok: false, reason: 'error' };
+  }
+  if ((data.user.identities || []).length === 0) return { ok: false, reason: 'already_registered' };
+  let sessionId: string | undefined;
+  if (data.session) sessionId = await registerSessionActivity(data.session);
+  await recordAuditEvent({ organizationId: null, actorId: data.user.id, action: 'auth.register', resourceType: 'auth',
+    outcome: 'success', sessionId, details: { emailConfirmationRequired: !data.session },
+  });
+  return { ok: true, signedIn: !!data.session };
+}
 
 /**
  * メール/パスワードでログインする。成功時はセッション Cookie が設定される。
  * レート制限・監査・試行記録をサーバー側で確実に実施する。
  */
 export async function loginWithPassword(email: string, password: string): Promise<LoginResult> {
-  if (await isLoginRateLimited()) {
+  if (await isLoginRateLimited(email)) {
     return { ok: false, reason: 'rate_limited' };
   }
+  await applyProgressiveLoginDelay(email);
 
   const supabase = await createSessionClient();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -44,6 +73,8 @@ export async function loginWithPassword(email: string, password: string): Promis
     return { ok: false, reason: 'error' };
   }
 
+  if (!data.session) return { ok: false, reason: 'error' };
+  const sessionId = await registerSessionActivity(data.session);
   await recordLoginAttempt(email, 'success');
   await recordAuditEvent({
     organizationId: null,
@@ -51,6 +82,7 @@ export async function loginWithPassword(email: string, password: string): Promis
     action: 'auth.login',
     resourceType: 'auth',
     outcome: 'success',
+    sessionId,
     details: { method: 'password' },
   });
   return { ok: true };
@@ -66,10 +98,17 @@ export async function recordLogout(): Promise<void> {
       action: 'auth.logout',
       resourceType: 'auth',
       outcome: 'success',
+      sessionId: user.sessionId,
     });
+    await revokeCurrentSession();
   } catch {
     // 既に未認証なら何もしない。
   }
+}
+
+/** アイドルタイムアウト用。ブラウザCookieではなくサーバー側セッション活動を更新する。 */
+export async function heartbeatSession(): Promise<void> {
+  await touchCurrentSession();
 }
 
 /** OAuth コールバックなど、確立済みセッションのログイン成功を記録する。 */

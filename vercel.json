@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/purge",
       "schedule": "0 17 * * *"
+    },
+    {
+      "path": "/api/cron/archive-audit",
+      "schedule": "15 * * * *"
     }
   ]
 }

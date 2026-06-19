@@ -4,7 +4,7 @@ export const generateUser = () => {
   const id = Date.now().toString().slice(-6);
   return {
     email: `user${id}@example.com`,
-    password: 'password123',
+    password: 'Test!1234',
     name: `User ${id}`,
     orgName: `Org ${id}`
   };
@@ -30,8 +30,8 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
   await page.getByLabel('事業所名').fill(user.orgName);
   await page.getByRole('button', { name: '作成して開始' }).click();
 
-  // 4. ダッシュボード遷移確認
-  await expect(page.getByText('本日の概況')).toBeVisible({ timeout: 30000 });
+  await page.waitForURL('**/app/record', { timeout: 30000 });
+  await expect(page.getByText(user.orgName).first()).toBeVisible();
 
   // ★追加: 利用規約モーダルが表示されていたら同意して閉じる
   const agreeButton = page.getByRole('button', { name: '同意してサービスを利用する' });
@@ -46,7 +46,7 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
 
   // ★修正: 重複エラー回避のため、可視状態の要素のみを対象にする
   // locator('text=... >> visible=true') という書き方でフィルタリングできます
-  await expect(page.locator('text=アカウント設定 >> visible=true')).toBeVisible({ timeout: 10000 });
+  await expect(page.locator('text=記録を作成 >> visible=true')).toBeVisible({ timeout: 10000 });
 };
 
 // メニューをクリックするヘルパー（モバイル対応）

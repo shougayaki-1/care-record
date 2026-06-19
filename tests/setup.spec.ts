@@ -7,7 +7,7 @@ test.describe('セットアップウィザード', () => {
 
   test('新規登録から事業所作成までのフロー', async ({ page }) => {
     const email = randomEmail();
-    const password = 'password123';
+    const password = 'Test!1234';
     const userName = 'テスト太郎';
     const orgName = 'テスト事業所自動作成';
 
@@ -43,7 +43,7 @@ test.describe('セットアップウィザード', () => {
     await page.getByRole('button', { name: '作成して開始' }).click();
 
     // 7. アプリ画面へ遷移したか確認
-    await page.waitForURL('**/app/dashboard'); // または /app/record
+    await page.waitForURL('**/app/record');
     
     // ヘッダー等に事業所名が表示されているか確認（実装に合わせて調整）
     // await expect(page.getByText(orgName)).toBeVisible();
