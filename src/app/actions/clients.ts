@@ -116,31 +116,33 @@ export async function saveClientForm(organizationId: string, clientId: string, s
 export async function saveClientAssignments(
   organizationId: string,
   clientId: string,
-  assignments: Array<{ id: string; type: 'member' | 'ghost' }>,
+  staffIds: string[],
 ) {
   const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
   await assertClientOrg(clientId, organizationId);
-  if (assignments.length > 200) throw new Error('担当者数が多すぎます');
-  const unique = Array.from(new Map(assignments.map((item) => [`${item.type}:${item.id}`, item])).values());
-  const memberIds = unique.filter((item) => item.type === 'member').map((item) => item.id);
-  const ghostIds = unique.filter((item) => item.type === 'ghost').map((item) => item.id);
-
-  if (memberIds.length > 0) {
-    const { data } = await supabaseAdmin.from('organization_members').select('user_id').eq('organization_id', organizationId).in('user_id', memberIds);
-    if ((data || []).length !== memberIds.length) throw new Error('事業所外のメンバーが含まれています');
-  }
-  if (ghostIds.length > 0) {
-    const { data } = await supabaseAdmin.from('ghost_staffs').select('id').eq('organization_id', organizationId).in('id', ghostIds);
-    if ((data || []).length !== ghostIds.length) throw new Error('事業所外のスタッフが含まれています');
-  }
+  if (staffIds.length > 200) throw new Error('担当者数が多すぎます');
+  const uniqueStaffIds = Array.from(new Set(staffIds.filter(Boolean)));
+  const { data: staffs, error: staffsError } = uniqueStaffIds.length > 0
+    ? await supabaseAdmin
+      .from('staffs')
+      .select('id, user_id')
+      .eq('organization_id', organizationId)
+      .in('id', uniqueStaffIds)
+      .is('archived_at', null)
+      .is('deleted_at', null)
+    : { data: [], error: null };
+  if (staffsError) throw new Error(staffsError.message);
+  if ((staffs || []).length !== uniqueStaffIds.length) throw new Error('事業所外または無効なスタッフが含まれています');
 
   const { error: deleteError } = await supabaseAdmin.from('assignments').delete().eq('client_id', clientId);
   if (deleteError) throw new Error(deleteError.message);
-  if (unique.length > 0) {
-    const { error } = await supabaseAdmin.from('assignments').insert(unique.map((item) => ({
+  if ((staffs || []).length > 0) {
+    const { error } = await supabaseAdmin.from('assignments').insert((staffs || []).map((staff) => ({
       client_id: clientId,
-      helper_id: item.type === 'member' ? item.id : null,
-      ghost_staff_id: item.type === 'ghost' ? item.id : null,
+      staff_id: staff.id,
+      // ログインユーザーの利用者アクセス制御は従来どおり helper_id でも維持する。
+      helper_id: staff.user_id,
+      ghost_staff_id: null,
     })));
     if (error) throw new Error(error.message);
   }
@@ -150,7 +152,7 @@ export async function saveClientAssignments(
     action: 'client.assignments_update',
     resourceType: 'client',
     resourceId: clientId,
-    details: { assignmentCount: unique.length },
+    details: { assignmentCount: uniqueStaffIds.length },
   });
   return { success: true };
 }

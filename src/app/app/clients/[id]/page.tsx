@@ -43,7 +43,7 @@ import {
     updateClientGoogleLink,
 } from '@/app/actions/clients';
 
-type Staff = { id: string; name: string; type: 'member' | 'ghost' };
+type Staff = { id: string; name: string; userId: string | null };
 
 export default function ClientSettingsPage() {
     const router = useRouter();
@@ -89,21 +89,27 @@ export default function ClientSettingsPage() {
             }
 
             if (currentOrg) {
-                let staffs: Staff[] = [];
-                const { data: members } = await supabase.from('organization_members').select('user_id').eq('organization_id', currentOrg.id);
-                if (members) {
-                    const userIds = members.map(m => m.user_id);
-                    const { data: profiles } = await supabase.from('profiles').select('id, name').in('id', userIds);
-                    if (profiles) staffs = [...staffs, ...profiles.map(p => ({ id: p.id, name: p.name, type: 'member' as const }))];
-                }
-                const { data: ghosts } = await supabase.from('ghost_staffs').select('id, name').eq('organization_id', currentOrg.id);
-                if (ghosts) staffs = [...staffs, ...ghosts.map(g => ({ id: g.id, name: g.name, type: 'ghost' as const }))];
-                
+                const { data: staffRows, error: staffsError } = await supabase
+                    .from('staffs')
+                    .select('id, name, user_id')
+                    .eq('organization_id', currentOrg.id)
+                    .is('archived_at', null)
+                    .order('sort_order', { ascending: true, nullsFirst: false })
+                    .order('name', { ascending: true });
+                if (staffsError) throw staffsError;
+                const staffs: Staff[] = (staffRows || []).map((staff) => ({
+                    id: staff.id,
+                    name: staff.name,
+                    userId: staff.user_id,
+                }));
                 setAllStaffs(staffs);
 
-                const { data: assigns } = await supabase.from('assignments').select('helper_id, ghost_staff_id').eq('client_id', clientId);
+                const { data: assigns } = await supabase.from('assignments').select('staff_id, helper_id').eq('client_id', clientId);
                 if (assigns) {
-                    const ids = assigns.map(a => a.helper_id || a.ghost_staff_id).filter(id => id !== null) as string[];
+                    const staffIdByUserId = new Map(staffs.filter((staff) => staff.userId).map((staff) => [staff.userId, staff.id]));
+                    const ids = assigns
+                        .map((assignment) => assignment.staff_id || staffIdByUserId.get(assignment.helper_id))
+                        .filter((id): id is string => Boolean(id));
                     setAssignedStaffIds(ids);
                 }
             }
@@ -173,12 +179,7 @@ export default function ClientSettingsPage() {
         setMessage(null);
         try {
             if (!currentOrg) throw new Error('事業所が選択されていません');
-            const assignments = assignedStaffIds.map(staffId => {
-                const staff = allStaffs.find(s => s.id === staffId);
-                if (!staff) throw new Error('担当スタッフが見つかりません');
-                return { id: staffId, type: staff.type };
-            });
-            await saveClientAssignments(currentOrg.id, clientId, assignments);
+            await saveClientAssignments(currentOrg.id, clientId, assignedStaffIds);
 
             setMessage({ type: 'success', text: '担当スタッフを更新しました！' });
             setTimeout(() => setMessage(null), 3000);
@@ -425,7 +426,7 @@ export default function ClientSettingsPage() {
                             <Stack spacing={3}>
                                 <CheckboxGroupField
                                     label="メンバー（ログインユーザー）"
-                                    options={allStaffs.filter((staff) => staff.type === 'member')}
+                                    options={allStaffs.filter((staff) => staff.userId !== null)}
                                     value={assignedStaffIds}
                                     onChange={setAssignedStaffIds}
                                     getOptionLabel={(staff) => staff.name}
@@ -433,7 +434,7 @@ export default function ClientSettingsPage() {
                                 />
                                 <CheckboxGroupField
                                     label="アカウントなし（転記用）"
-                                    options={allStaffs.filter((staff) => staff.type === 'ghost')}
+                                    options={allStaffs.filter((staff) => staff.userId === null)}
                                     value={assignedStaffIds}
                                     onChange={setAssignedStaffIds}
                                     getOptionLabel={(staff) => staff.name}
