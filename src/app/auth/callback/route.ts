@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { recordAuditEvent } from '@/utils/supabase/audit';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -73,6 +74,20 @@ export async function GET(request: NextRequest) {
   
   // セッション情報をリフレッシュしてCookie書き込みをトリガー
   await supabaseForResponse.auth.setSession(data.session);
+
+  // ログイン成功を監査記録（アクセスの記録）。失敗してもログインは継続する。
+  try {
+    await recordAuditEvent({
+      organizationId: null,
+      actorId: data.session.user.id,
+      action: 'auth.login',
+      resourceType: 'auth',
+      outcome: 'success',
+      details: { method: 'oauth' },
+    });
+  } catch (auditError) {
+    console.error('failed to record login audit:', auditError);
+  }
 
   return response;
 }

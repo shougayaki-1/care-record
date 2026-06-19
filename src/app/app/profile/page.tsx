@@ -14,6 +14,7 @@ import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import { supabase } from '@/lib/supabase';
+import { validatePassword, PASSWORD_POLICY_HINT } from '@/utils/passwordPolicy';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -76,6 +77,10 @@ export default function ProfilePage() {
         if (!name.trim()) return setMessage({ type: 'error', text: '名前を入力してください' });
         if ((newPassword || confirmPassword) && newPassword !== confirmPassword) {
             return setMessage({ type: 'error', text: 'パスワードが一致しません' });
+        }
+        if (newPassword) {
+            const policy = validatePassword(newPassword);
+            if (!policy.ok) return setMessage({ type: 'error', text: policy.message });
         }
         setSaving(true);
         try {
@@ -204,7 +209,7 @@ export default function ProfilePage() {
                                 <Box>
                                     <Typography variant="caption" color="text.secondary" gutterBottom>パスワード変更</Typography>
                                     <Stack spacing={2}>
-                                        <TextField label="新しいパスワード" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} fullWidth size="small" />
+                                        <TextField label="新しいパスワード" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} fullWidth size="small" helperText={newPassword ? PASSWORD_POLICY_HINT : ''} />
                                         <TextField label="確認" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} fullWidth size="small" />
                                     </Stack>
                                 </Box>

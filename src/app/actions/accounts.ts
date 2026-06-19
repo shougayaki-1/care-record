@@ -1,5 +1,7 @@
 'use server';
 
+import { sanitizeDbError } from '@/utils/errors';
+
 import { randomUUID } from 'crypto';
 import { supabaseAdmin, getAuthedUser, assertOrgRole } from '@/utils/supabase/auth';
 
@@ -80,7 +82,7 @@ export async function createInvitation(orgId: string, params: { targetName?: str
         target_name: params.targetName || null,
         role: params.role,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.accounts');
     return { success: true, code };
 }
 
@@ -115,7 +117,7 @@ export async function updateAccountRole(
             .update({ role: newRole })
             .eq('organization_id', orgId)
             .eq('user_id', targetId);
-        if (error) throw new Error(error.message);
+        if (error) throw sanitizeDbError(error, 'action.accounts');
     } else {
         // 招待のロール変更。invitation が当該 org のものか必ず確認する
         const { data: inv } = await supabaseAdmin
@@ -131,7 +133,7 @@ export async function updateAccountRole(
             .update({ role: newRole })
             .eq('id', targetId)
             .eq('organization_id', orgId);
-        if (error) throw new Error(error.message);
+        if (error) throw sanitizeDbError(error, 'action.accounts');
     }
     return { success: true };
 }
@@ -175,14 +177,14 @@ export async function removeAccount(
             .delete()
             .eq('organization_id', orgId)
             .eq('user_id', targetId);
-        if (error) throw new Error(error.message);
+        if (error) throw sanitizeDbError(error, 'action.accounts');
     } else {
         const { error } = await supabaseAdmin
             .from('invitations')
             .delete()
             .eq('id', targetId)
             .eq('organization_id', orgId);
-        if (error) throw new Error(error.message);
+        if (error) throw sanitizeDbError(error, 'action.accounts');
     }
     return { success: true };
 }

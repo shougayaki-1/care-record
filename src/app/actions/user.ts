@@ -1,5 +1,7 @@
 'use server';
 
+import { sanitizeDbError } from '@/utils/errors';
+
 import { randomUUID } from 'crypto';
 import { supabaseAdmin, createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 
@@ -10,14 +12,14 @@ export async function updateOwnProfile(name: string, agreeToTerms = false) {
     const values: Record<string, unknown> = { id: userId, name: normalized };
     if (agreeToTerms) Object.assign(values, { is_agreed: true, agreed_at: new Date().toISOString() });
     const { error } = await supabaseAdmin.from('profiles').upsert(values);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.user');
     return { success: true };
 }
 
 export async function acceptCurrentTerms() {
     const { id: userId } = await getAuthedUser();
     const { error } = await supabaseAdmin.from('profiles').update({ is_agreed: true, agreed_at: new Date().toISOString() }).eq('id', userId);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.user');
     return { success: true };
 }
 
@@ -26,7 +28,7 @@ export async function setLastOrganization(organizationId: string) {
     const { data: member } = await supabaseAdmin.from('organization_members').select('id').eq('organization_id', organizationId).eq('user_id', userId).maybeSingle();
     if (!member) throw new Error('この事業所へのアクセス権がありません');
     const { error } = await supabaseAdmin.from('profiles').update({ last_organization_id: organizationId }).eq('id', userId);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.user');
     return { success: true };
 }
 
@@ -53,14 +55,14 @@ export async function uploadOwnAvatar(formData: FormData) {
     if (uploadError) throw new Error(uploadError.message);
     const { data } = supabaseAdmin.storage.from('avatars').getPublicUrl(path);
     const { error } = await supabaseAdmin.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', userId);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.user');
     return { avatarUrl: data.publicUrl };
 }
 
 export async function markNotificationRead(notificationId: string) {
     const { id: userId } = await getAuthedUser();
     const { error } = await supabaseAdmin.from('notifications').update({ is_read: true }).eq('id', notificationId).eq('user_id', userId);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.user');
     return { success: true };
 }
 
@@ -70,6 +72,6 @@ export async function deleteUserAccount() {
     // Authユーザー削除 (関連するpublicテーブルのデータはカスケード設定またはTriggerで削除される前提)
     // ここではAuth削除のみ行う
     const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.user');
     return { success: true };
 }

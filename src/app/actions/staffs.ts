@@ -1,5 +1,7 @@
 'use server';
 
+import { sanitizeDbError } from '@/utils/errors';
+
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertOrgRole, supabaseAdmin } from '@/utils/supabase/auth';
 
@@ -36,7 +38,7 @@ export async function saveStaff(
   if (staffId) {
     await assertStaffOrg(staffId, organizationId);
     const { error } = await supabaseAdmin.from('staffs').update({ ...normalized, user_id: linkedUserId }).eq('id', staffId);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.staffs');
   } else {
     const { data, error } = await supabaseAdmin.from('staffs').insert({ organization_id: organizationId, ...normalized, user_id: linkedUserId }).select('id').single();
     if (error || !data) throw new Error(error?.message || 'スタッフを作成できませんでした');
@@ -56,7 +58,7 @@ export async function setStaffArchived(organizationId: string, staffId: string, 
   const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
   await assertStaffOrg(staffId, organizationId);
   const { error } = await supabaseAdmin.from('staffs').update({ archived_at: archived ? new Date().toISOString() : null }).eq('id', staffId);
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.staffs');
   await recordAuditEvent({ organizationId, actorId: userId, action: archived ? 'staff.archive' : 'staff.restore', resourceType: 'staff', resourceId: staffId });
   return { success: true };
 }
@@ -76,7 +78,7 @@ export async function softDeleteStaff(organizationId: string, staffId: string, r
     deletion_reason: normalizedReason,
     retention_until: retentionUntil.toISOString(),
   }).eq('id', staffId).is('deleted_at', null);
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.staffs');
   await recordAuditEvent({ organizationId, actorId: userId, action: 'staff.soft_delete', resourceType: 'staff', resourceId: staffId, details: { reason: normalizedReason } });
   return { success: true };
 }
@@ -89,7 +91,7 @@ export async function reorderStaffs(organizationId: string, staffIds: string[]) 
   if ((data || []).length !== ids.length) throw new Error('事業所外のスタッフが含まれています');
   for (let index = 0; index < ids.length; index += 1) {
     const { error } = await supabaseAdmin.from('staffs').update({ sort_order: index }).eq('id', ids[index]);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.staffs');
   }
   await recordAuditEvent({ organizationId, actorId: userId, action: 'staff.reorder', resourceType: 'staff', details: { count: ids.length } });
   return { success: true };

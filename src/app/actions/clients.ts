@@ -1,5 +1,7 @@
 'use server';
 
+import { sanitizeDbError } from '@/utils/errors';
+
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertOrgRole, supabaseAdmin } from '@/utils/supabase/auth';
 
@@ -39,7 +41,7 @@ export async function updateClientName(organizationId: string, clientId: string,
   await assertClientOrg(clientId, organizationId);
   const normalized = normalizeName(name);
   const { error } = await supabaseAdmin.from('clients').update({ name: normalized }).eq('id', clientId);
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.clients');
   await recordAuditEvent({ organizationId, actorId: userId, action: 'client.rename', resourceType: 'client', resourceId: clientId });
   return { success: true, name: normalized };
 }
@@ -48,7 +50,7 @@ export async function setClientArchived(organizationId: string, clientId: string
   const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
   await assertClientOrg(clientId, organizationId);
   const { error } = await supabaseAdmin.from('clients').update({ archived_at: archived ? new Date().toISOString() : null }).eq('id', clientId);
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.clients');
   await recordAuditEvent({
     organizationId,
     actorId: userId,
@@ -75,7 +77,7 @@ export async function softDeleteClient(organizationId: string, clientId: string,
     deletion_reason: normalizedReason,
     retention_until: retentionUntil.toISOString(),
   }).eq('id', clientId).is('deleted_at', null);
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.clients');
   await recordAuditEvent({
     organizationId,
     actorId: userId,
@@ -101,7 +103,7 @@ export async function saveClientForm(organizationId: string, clientId: string, s
     ? supabaseAdmin.from('form_templates').update({ schema, updated_at: new Date().toISOString() }).eq('client_id', clientId)
     : supabaseAdmin.from('form_templates').insert({ client_id: clientId, schema });
   const { error } = await query;
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.clients');
   await recordAuditEvent({
     organizationId,
     actorId: userId,
@@ -144,7 +146,7 @@ export async function saveClientAssignments(
       helper_id: staff.user_id,
       ghost_staff_id: null,
     })));
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.clients');
   }
   await recordAuditEvent({
     organizationId,
@@ -169,7 +171,7 @@ export async function updateClientGoogleLink(
   if ('templateId' in values) update.google_template_id = values.templateId?.trim() || null;
   if (Object.keys(update).length === 0) throw new Error('更新内容がありません');
   const { error } = await supabaseAdmin.from('clients').update(update).eq('id', clientId);
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.clients');
   await recordAuditEvent({ organizationId, actorId: userId, action: 'client.google_link_update', resourceType: 'client', resourceId: clientId });
   return { success: true };
 }

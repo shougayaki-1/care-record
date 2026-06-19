@@ -5,8 +5,9 @@ import { headers } from 'next/headers';
 import { supabaseAdmin } from './auth';
 
 export type AuditEventInput = {
-  organizationId: string;
-  actorId: string;
+  // 認証イベント（ログイン/ログアウト）は組織コンテキスト未確定でも記録するため null を許容する。
+  organizationId: string | null;
+  actorId: string | null;
   action: string;
   resourceType: string;
   resourceId?: string | null;
@@ -14,7 +15,8 @@ export type AuditEventInput = {
   details?: Record<string, unknown>;
 };
 
-function hashNetworkIdentifier(value: string | null): string | null {
+/** 個人識別子（IP・メール等）を salt 付き SHA256 でハッシュ化する。生値は保存しない。 */
+export function hashNetworkIdentifier(value: string | null): string | null {
   if (!value) return null;
   const salt = process.env.AUDIT_IP_HASH_SALT;
   if (!salt) return null;

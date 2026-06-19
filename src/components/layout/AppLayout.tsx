@@ -31,6 +31,8 @@ import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { markNotificationRead } from '@/app/actions/user';
+import { recordLogout } from '@/app/actions/auth';
+import IdleTimeout from '@/components/auth/IdleTimeout';
 
 const SIDEBAR_WIDTH = 256;
 
@@ -159,6 +161,8 @@ const TopAppBar = ({
 
   const handleLogout = async () => {
     setAccountAnchor(null);
+    // 監査記録はサインアウト前（まだ認証済みのうち）に行う。
+    await recordLogout();
     await supabase.auth.signOut();
     router.push('/');
   };
@@ -446,6 +450,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>
+      <IdleTimeout />
       <TopAppBar
         orgList={orgList}
         currentOrg={currentOrg}

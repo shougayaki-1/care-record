@@ -1,6 +1,8 @@
 // app/actions/super-admin.ts
 'use server';
 
+import { sanitizeDbError } from '@/utils/errors';
+
 import { supabaseAdmin, assertSuperAdmin } from '@/utils/supabase/auth';
 
 // 全事業所の一覧を取得
@@ -19,7 +21,7 @@ export async function getAllOrganizations() {
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.super-admin');
 
     // 整形して返す
     type OrgRow = {
@@ -61,7 +63,7 @@ export async function deleteOrganization(orgId: string) {
         .eq('id', orgId)
         .is('deleted_at', null);
 
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.super-admin');
     await supabaseAdmin.from('profiles').update({ last_organization_id: null }).eq('last_organization_id', orgId);
     await supabaseAdmin.from('organization_members').delete().eq('organization_id', orgId);
     return { success: true };

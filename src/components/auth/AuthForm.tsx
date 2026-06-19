@@ -6,6 +6,8 @@ import {
 } from '@/components/ui/mui';
 import { supabase } from '@/lib/supabase';
 import { useSearchParams } from 'next/navigation';
+import { loginWithPassword, RATE_LIMIT_MESSAGE } from '@/app/actions/auth';
+import { validatePassword, PASSWORD_POLICY_HINT } from '@/utils/passwordPolicy';
 
 // ... (Logoコンポーネントは省略、そのまま使用) ...
 const GoogleLogo = () => (
@@ -68,6 +70,12 @@ export const AuthForm = () => {
         try {
             if (isRegisterMode) {
                 // --- 新規アカウント作成 ---
+                const policy = validatePassword(password);
+                if (!policy.ok) {
+                    setMessage({ type: 'error', text: policy.message });
+                    setLoading(false);
+                    return;
+                }
                 const { data, error } = await supabase.auth.signUp({
                     email,
                     password,
@@ -87,17 +95,15 @@ export const AuthForm = () => {
                 }
             } else {
                 // --- ログイン ---
-                const { error } = await supabase.auth.signInWithPassword({ email, password });
-                if (error) {
-                    if (error.message.includes('Invalid login credentials')) {
-                        throw new Error('メールアドレスまたはパスワードが正しくありません。');
-                    }
-                    if (error.message.includes('Email not confirmed')) {
-                        throw new Error('メールアドレスの確認が完了していません。');
-                    }
-                    throw error;
+                // レート制限・監査・試行記録を確実に行うためサーバーアクション経由でログインする。
+                const result = await loginWithPassword(email, password);
+                if (!result.ok) {
+                    if (result.reason === 'rate_limited') throw new Error(RATE_LIMIT_MESSAGE);
+                    if (result.reason === 'email_unconfirmed') throw new Error('メールアドレスの確認が完了していません。');
+                    if (result.reason === 'invalid_credentials') throw new Error('メールアドレスまたはパスワードが正しくありません。');
+                    throw new Error('ログインに失敗しました。時間をおいて再度お試しください。');
                 }
-                // Routerではなくwindow.locationで確実にリロードさせる
+                // セッションCookieはサーバー側で設定済み。確実にリロードさせて反映する。
                 window.location.href = nextUrl;
             }
         } catch (err) {
@@ -189,7 +195,7 @@ export const AuthForm = () => {
                                 type="password" 
                                 fullWidth 
                                 required 
-                                helperText={isRegisterMode ? "6文字以上で設定してください" : ""} 
+                                helperText={isRegisterMode ? PASSWORD_POLICY_HINT : ""}
                                 value={password} 
                                 onChange={(e) => setPassword(e.target.value)} 
                                 size="small"

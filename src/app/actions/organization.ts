@@ -1,5 +1,7 @@
 'use server';
 
+import { sanitizeDbError } from '@/utils/errors';
+
 import { supabaseAdmin, getAuthedUser, assertOrgRole } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
@@ -10,7 +12,7 @@ export async function updateOrganizationName(orgId: string, name: string) {
     const normalized = name.trim();
     if (normalized.length < 1 || normalized.length > 100) throw new Error('事業所名は1〜100文字で入力してください');
     const { error } = await supabaseAdmin.from('organizations').update({ name: normalized }).eq('id', orgId).is('deleted_at', null);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.organization');
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'organization.update', resourceType: 'organization', resourceId: orgId, details: { fields: ['name'] } });
     return { success: true };
 }
@@ -20,7 +22,7 @@ export async function updateOrganizationDriveFolder(orgId: string, folderId: str
     const normalized = folderId?.trim() || null;
     if (normalized && normalized.length > 255) throw new Error('フォルダIDが不正です');
     const { error } = await supabaseAdmin.from('organizations').update({ google_folder_id: normalized }).eq('id', orgId).is('deleted_at', null);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.organization');
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: normalized ? 'integration.drive.connect' : 'integration.drive.disconnect', resourceType: 'organization', resourceId: orgId });
     return { success: true };
 }
@@ -39,7 +41,7 @@ export async function disconnectGoogleCalendar(orgId: string) {
         }
     }
     const { error } = await supabaseAdmin.from('organizations').update({ google_calendar_id: null, google_refresh_token: null }).eq('id', orgId);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.organization');
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'integration.calendar.disconnect', resourceType: 'organization', resourceId: orgId, details: { providerRevoked: revoked } });
     return { success: true, providerRevoked: revoked };
 }
@@ -78,7 +80,7 @@ export async function deleteOrganization(orgId: string) {
         deleted_by: userId,
         retention_until: retentionUntil.toISOString(),
     }).eq('id', orgId).is('deleted_at', null);
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.organization');
 
     const { error: memberError } = await supabaseAdmin
         .from('organization_members')
@@ -106,7 +108,7 @@ export async function leaveOrganization(orgId: string) {
     const { error } = await supabaseAdmin.from('organization_members')
         .delete().eq('organization_id', orgId).eq('user_id', userId);
     
-    if (error) throw new Error(error.message);
+    if (error) throw sanitizeDbError(error, 'action.organization');
     
     // プロフィールのlast_organization_idもクリア
     await supabaseAdmin.from('profiles')
@@ -139,18 +141,79 @@ export async function transferOwner(orgId: string, newOwnerId: string) {
     return { success: true };
 }
 
-export async function getAuditLogs(orgId: string) {
+export type AuditLogFilters = {
+    from?: string | null; // ISO日時。これ以降
+    to?: string | null;   // ISO日時。これ以前
+    actionType?: string | null; // 前方一致（例: 'report.' で記録系のみ）
+    outcome?: 'success' | 'failure' | null;
+    limit?: number;
+    offset?: number;
+};
+
+function applyAuditFilters<T extends { gte: (c: string, v: string) => T; lte: (c: string, v: string) => T; like: (c: string, v: string) => T; eq: (c: string, v: string) => T }>(
+    query: T,
+    filters: AuditLogFilters,
+): T {
+    let q = query;
+    if (filters.from) q = q.gte('created_at', filters.from);
+    if (filters.to) q = q.lte('created_at', filters.to);
+    if (filters.actionType) q = q.like('action_type', `${filters.actionType}%`);
+    if (filters.outcome) q = q.eq('outcome', filters.outcome);
+    return q;
+}
+
+export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {}) {
     await assertOrgRole(orgId, ['owner', 'manager']);
+    const limit = Math.min(Math.max(filters.limit ?? 100, 1), 200);
+    const offset = Math.max(filters.offset ?? 0, 0);
     // SQLで profiles への FK を貼ったので結合可能になります
-    const { data, error } = await supabaseAdmin
+    let query = supabaseAdmin
         .from('audit_events')
         .select('*, profiles:actor_id(name)')
-        .eq('organization_id', orgId)
+        .eq('organization_id', orgId);
+    query = applyAuditFilters(query as never, filters) as never;
+    const { data, error } = await query
         .order('created_at', { ascending: false })
-        .limit(100);
-    
-    if (error) throw new Error(error.message);
+        .range(offset, offset + limit - 1);
+
+    if (error) throw sanitizeDbError(error, 'action.organization');
     return data;
+}
+
+/** 監査ログをCSV化して返す。監査エビデンス出力自体も監査記録する。 */
+export async function exportAuditLogsCsv(orgId: string, filters: AuditLogFilters = {}): Promise<{ filename: string; csv: string }> {
+    const { userId } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const EXPORT_CAP = 10000;
+    let query = supabaseAdmin
+        .from('audit_events')
+        .select('created_at, action_type, resource_type, resource_id, outcome, actor_id, ip_hash, profiles:actor_id(name)')
+        .eq('organization_id', orgId);
+    query = applyAuditFilters(query as never, filters) as never;
+    const { data, error } = await query
+        .order('created_at', { ascending: false })
+        .limit(EXPORT_CAP);
+    if (error) throw sanitizeDbError(error, 'action.organization');
+
+    const rows = (data ?? []) as Array<Record<string, unknown> & { profiles?: { name?: string } | null }>;
+    const header = ['日時', '操作者', '操作内容', '対象種別', '対象ID', '結果', 'IPハッシュ'];
+    const escape = (v: unknown) => {
+        const s = v == null ? '' : String(v);
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = rows.map((r) => [
+        r.created_at, r.profiles?.name ?? '', r.action_type, r.resource_type, r.resource_id ?? '', r.outcome, r.ip_hash ?? '',
+    ].map(escape).join(','));
+    const csv = '﻿' + [header.join(','), ...lines].join('\r\n'); // BOM付きでExcel互換
+
+    await recordAuditEvent({
+        organizationId: orgId,
+        actorId: userId,
+        action: 'audit.export',
+        resourceType: 'audit',
+        details: { count: rows.length, filters },
+    });
+
+    return { filename: `audit_${orgId}_${new Date().toISOString().slice(0, 10)}.csv`, csv };
 }
 
 export async function addAuditLog(params: { orgId: string, action: string, target?: string, details?: Record<string, unknown> }) {

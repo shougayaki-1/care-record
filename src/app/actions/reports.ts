@@ -1,5 +1,7 @@
 'use server';
 
+import { sanitizeDbError } from '@/utils/errors';
+
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertOrgRole, supabaseAdmin } from '@/utils/supabase/auth';
 import { randomUUID } from 'crypto';
@@ -166,7 +168,7 @@ export async function transitionReports(
     .in('id', ids)
     .in('client_id', (clients || []).map((client) => client.id))
     .is('deleted_at', null);
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.reports');
   if ((reports || []).length !== ids.length) throw new Error('アクセスできない記録が含まれています');
   if (transition === 'approve' && (reports || []).some((report) => report.status === 'draft')) {
     throw new Error('下書きは承認できません');
@@ -227,7 +229,7 @@ export async function softDeleteReports(
     .select('id, status, helper_id, client_id, deleted_at')
     .in('id', uniqueIds)
     .in('client_id', clientIds);
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.reports');
 
   const reports = (data || []) as ReportForDeletion[];
   if (reports.length !== uniqueIds.length) {
@@ -315,7 +317,7 @@ export async function restoreReports(organizationId: string, reportIds: string[]
       updated_at: new Date().toISOString(),
     })
     .in('id', uniqueIds);
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.reports');
 
   await recordAuditEvent({
     organizationId,
@@ -408,7 +410,7 @@ export async function getReportImages(organizationId: string, reportId: string) 
     .from('report_images')
     .select('id, storage_path')
     .eq('report_id', reportId);
-  if (error) throw new Error(error.message);
+  if (error) throw sanitizeDbError(error, 'action.reports');
 
   const signedImages = await Promise.all((images || []).map(async (image) => {
     const { data, error: signedError } = await supabaseAdmin.storage

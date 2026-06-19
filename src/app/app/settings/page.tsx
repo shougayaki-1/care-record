@@ -22,7 +22,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
-import { deleteOrganization, disconnectGoogleCalendar, getAuditLogs, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName } from '@/app/actions/organization';
+import { deleteOrganization, disconnectGoogleCalendar, getAuditLogs, exportAuditLogsCsv, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName } from '@/app/actions/organization';
 import { getSyncStatus, syncUnsyncedBatch, forceSyncBatch } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -71,6 +71,8 @@ function SettingsContent() {
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
     const [logs, setLogs] = useState<AuditLog[]>([]);
+    const [logFrom, setLogFrom] = useState('');
+    const [logTo, setLogTo] = useState('');
 
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
     const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
@@ -97,10 +99,28 @@ function SettingsContent() {
     const fetchLogs = useCallback(async () => {
         if (!currentOrg) return;
         try {
-            const data = await getAuditLogs(currentOrg.id);
+            const data = await getAuditLogs(currentOrg.id, {
+                from: logFrom ? new Date(logFrom).toISOString() : null,
+                to: logTo ? new Date(logTo).toISOString() : null,
+            });
             setLogs((data as unknown as AuditLog[]) || []);
         } catch (e) { console.error(e); }
-    }, [currentOrg]);
+    }, [currentOrg, logFrom, logTo]);
+
+    const handleExportLogs = useCallback(async () => {
+        if (!currentOrg) return;
+        try {
+            const { filename, csv } = await exportAuditLogsCsv(currentOrg.id, {
+                from: logFrom ? new Date(logFrom).toISOString() : null,
+                to: logTo ? new Date(logTo).toISOString() : null,
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename; a.click();
+            URL.revokeObjectURL(url);
+        } catch (e) { console.error(e); }
+    }, [currentOrg, logFrom, logTo]);
 
     useEffect(() => {
         if (!wsLoading && currentOrg) {
@@ -566,6 +586,14 @@ function SettingsContent() {
 
                     {tabIndex === 1 && (
                         <Paper variant="outlined">
+                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} sx={{ p: 2 }}>
+                                <TextField label="開始日" type="date" size="small" value={logFrom} onChange={(e) => setLogFrom(e.target.value)} InputLabelProps={{ shrink: true }} />
+                                <TextField label="終了日" type="date" size="small" value={logTo} onChange={(e) => setLogTo(e.target.value)} InputLabelProps={{ shrink: true }} />
+                                <Button variant="outlined" onClick={fetchLogs}>絞り込み</Button>
+                                <Box sx={{ flexGrow: 1 }} />
+                                <Button variant="contained" onClick={handleExportLogs}>CSVエクスポート</Button>
+                            </Stack>
+                            <Divider />
                             <Table>
                                 <TableHead>
                                     <TableRow>

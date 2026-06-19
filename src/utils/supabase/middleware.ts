@@ -52,5 +52,21 @@ export async function updateSession(request: NextRequest) {
         return NextResponse.redirect(url);
     }
 
+    // 多層防御(アイドルタイムアウト): クライアントの IdleTimeout が実際の signOut を行うが、
+    // 万一クライアントが動作しない場合に備え、最終アクティビティが著しく古ければ保護ルートを弾く。
+    // 閾値はクライアント側(15分 + 猶予)より少し長めに取り、正常操作を誤って遮断しない。
+    if (isProtected && user) {
+        const IDLE_LIMIT_MS = 16 * 60 * 1000;
+        const lastActivity = Number(request.cookies.get('cr_last_activity')?.value);
+        if (lastActivity && Date.now() - lastActivity > IDLE_LIMIT_MS) {
+            const url = request.nextUrl.clone();
+            url.pathname = '/';
+            url.search = 'reason=idle_timeout';
+            const redirect = NextResponse.redirect(url);
+            redirect.cookies.delete('cr_last_activity');
+            return redirect;
+        }
+    }
+
     return response;
 }
