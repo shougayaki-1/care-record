@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
     Box, Button, TextField, Typography, Stack, Alert, CircularProgress, Divider, Tabs, Tab, Fade
 } from '@/components/ui/mui';
@@ -29,6 +29,7 @@ export const AuthForm = () => {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info', text: string } | null>(null);
     const [origin, setOrigin] = useState('');
+    const oauthInFlight = useRef(false);
 
     const isRegisterMode = tabIndex === 1;
     const nextUrl = searchParams.get('next') || '/app';
@@ -48,7 +49,8 @@ export const AuthForm = () => {
     };
 
     const handleOAuth = async (provider: 'google' | 'azure') => {
-        if (!origin) return;
+        if (!origin || oauthInFlight.current) return;
+        oauthInFlight.current = true;
         setLoading(true);
         const { error } = await supabase.auth.signInWithOAuth({
             provider,
@@ -58,6 +60,7 @@ export const AuthForm = () => {
             },
         });
         if (error) {
+            oauthInFlight.current = false;
             setMessage({ type: 'error', text: error.message });
             setLoading(false);
         }
@@ -169,10 +172,10 @@ export const AuthForm = () => {
                     )}
 
                     <Stack spacing={1.5} mb={3}>
-                        <Button variant="outlined" startIcon={<GoogleLogo />} onClick={() => handleOAuth('google')} fullWidth sx={{ color: '#3c4043', borderColor: '#dadce0', bgcolor: 'background.paper', textTransform: 'none', py: 1.2 }}>
+                        <Button disabled={loading} variant="outlined" startIcon={<GoogleLogo />} onClick={() => handleOAuth('google')} fullWidth sx={{ color: '#3c4043', borderColor: '#dadce0', bgcolor: 'background.paper', textTransform: 'none', py: 1.2 }}>
                             Google で{isRegisterMode ? '登録' : 'ログイン'}
                         </Button>
-                        <Button variant="contained" startIcon={<MicrosoftLogo />} onClick={() => handleOAuth('azure')} fullWidth sx={{ color: '#fff', bgcolor: '#2F2F2F', textTransform: 'none', py: 1.2, '&:hover': { bgcolor: '#1a1a1a' } }}>
+                        <Button disabled={loading} variant="contained" startIcon={<MicrosoftLogo />} onClick={() => handleOAuth('azure')} fullWidth sx={{ color: '#fff', bgcolor: '#2F2F2F', textTransform: 'none', py: 1.2, '&:hover': { bgcolor: '#1a1a1a' } }}>
                             Microsoft で{isRegisterMode ? '登録' : 'ログイン'}
                         </Button>
                     </Stack>

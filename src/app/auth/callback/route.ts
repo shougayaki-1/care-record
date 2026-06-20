@@ -1,8 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createServerClient } from '@supabase/ssr';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { registerSessionActivity } from '@/utils/supabase/auth';
-import { cookies } from 'next/headers';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -11,33 +10,33 @@ export async function GET(request: NextRequest) {
   // オープンリダイレクト防止: 同一オリジン内の絶対パスのみ許可
   const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : '/app';
   const origin = requestUrl.origin;
+  const isLocal = origin.startsWith('http://localhost');
 
   if (!code) {
     console.error('No code provided');
     return NextResponse.redirect(`${origin}/?error=no_code`);
   }
 
-  const cookieStore = await cookies();
-  const authCookies: Array<{ name: string; value: string; options: CookieOptions }> = [];
-  const isLocal = origin.startsWith('http://localhost');
+  // 認証Cookieは、実際にブラウザへ返すResponseへ一度だけ書き込む。
+  // cookies().set と response.cookies.set の併用は、チャンクCookieの重複や
+  // PKCE verifier/sessionの不整合をブラウザ間で起こし得る。
+  const response = NextResponse.redirect(`${origin}${next}`);
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
         getAll() {
-          return cookieStore.getAll();
+          return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
-            const normalizedOptions: CookieOptions = {
+            response.cookies.set(name, value, {
               ...options,
               path: options.path || '/',
               sameSite: options.sameSite || 'lax',
               secure: !isLocal,
-            };
-            authCookies.push({ name, value, options: normalizedOptions });
-            cookieStore.set(name, value, normalizedOptions);
+            });
           });
         },
       },
@@ -79,11 +78,7 @@ export async function GET(request: NextRequest) {
     console.error('failed to record login audit:', auditError);
   }
 
-  // exchange完了後に、実際に返すResponseへSet-Cookieを明示的に付与する。
-  const response = NextResponse.redirect(`${origin}${next}`);
-  authCookies.forEach(({ name, value, options }) => {
-    response.cookies.set(name, value, options);
-  });
+  // 念のためアプリ側でもキャッシュ禁止を保証する。
   response.headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate, max-age=0');
   response.headers.set('Expires', '0');
   response.headers.set('Pragma', 'no-cache');
