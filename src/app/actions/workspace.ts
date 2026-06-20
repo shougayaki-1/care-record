@@ -1,6 +1,6 @@
 'use server';
 
-import { getAuthedUser, supabaseAdmin, type OrgRole } from '@/utils/supabase/auth';
+import { getAuthedUser, getAuthedUserFromAccessToken, supabaseAdmin, type OrgRole } from '@/utils/supabase/auth';
 
 export type WorkspaceSummary = {
   id: string;
@@ -21,10 +21,15 @@ const VALID_ROLES: OrgRole[] = ['owner', 'manager', 'staff'];
  * ログイン直後の所属解決をRLSの成否に依存させないための境界。
  * 本人性とサーバー管理セッションを検証した後、その本人の所属だけを返す。
  */
-export async function getMyWorkspaces(): Promise<WorkspaceResult> {
+export async function getMyWorkspaces(accessToken?: string): Promise<WorkspaceResult> {
   let userId: string;
   try {
-    userId = (await getAuthedUser()).id;
+    try {
+      userId = (await getAuthedUser()).id;
+    } catch (cookieError) {
+      if (!accessToken) throw cookieError;
+      userId = (await getAuthedUserFromAccessToken(accessToken)).id;
+    }
   } catch (error) {
     console.warn('workspace session validation failed', error);
     return { status: 'session_expired', message: 'セッションの有効期限が切れています。再度ログインしてください。' };

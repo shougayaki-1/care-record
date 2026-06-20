@@ -24,8 +24,6 @@ const VALID_ROLES: OrgRole[] = ['owner', 'manager', 'staff'];
 export async function getMyWorkspaces(accessToken?: string): Promise<WorkspaceResult> {
   let userId: string;
   try {
-    // 通常はHttpOnly相当のCookieセッションを使う。VercelのServer Actionで
-    // Cookieが引き継がれない場合のみ、Authサーバー検証済みトークンへフォールバックする。
     try {
       userId = (await getAuthedUser()).id;
     } catch (cookieError) {

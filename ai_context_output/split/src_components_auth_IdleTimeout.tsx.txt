@@ -27,7 +27,8 @@ export default function IdleTimeout() {
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastHeartbeat = useRef(0);
+  // ログイン直後はCookie反映と画面遷移が並行するため、マウント直後のheartbeatを避ける。
+  const lastHeartbeat = useRef<number | null>(null);
 
   const logout = useCallback(async () => {
     if (countdownTimer.current) clearInterval(countdownTimer.current);
@@ -48,12 +49,18 @@ export default function IdleTimeout() {
   const resetIdle = useCallback(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current);
     const now = Date.now();
-    if (now - lastHeartbeat.current >= HEARTBEAT_INTERVAL_MS) {
+    if (lastHeartbeat.current === null) {
       lastHeartbeat.current = now;
-      void heartbeatSession().catch(() => logout());
+    } else if (now - lastHeartbeat.current >= HEARTBEAT_INTERVAL_MS) {
+      lastHeartbeat.current = now;
+      // heartbeatは補助的な活動記録。通信失敗やCookie反映待ちをログアウトと同一視しない。
+      // セッション失効の最終判定はProxy/Server Action側で行う。
+      void heartbeatSession().catch((error) => {
+        console.warn('session heartbeat failed', error);
+      });
     }
     idleTimer.current = setTimeout(startWarning, IDLE_LIMIT_MS);
-  }, [logout, startWarning]);
+  }, [startWarning]);
 
   const stayActive = useCallback(() => {
     if (graceTimer.current) clearTimeout(graceTimer.current);

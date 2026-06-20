@@ -65,7 +65,8 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       setLoading(true);
       setStatus('loading');
       setErrorMessage(null);
-      const result = await getMyWorkspaces();
+      const { data: { session } } = await supabase.auth.getSession();
+      const result = await getMyWorkspaces(session?.access_token);
 
       if (result.status === 'success') {
         const list: Workspace[] = result.workspaces;

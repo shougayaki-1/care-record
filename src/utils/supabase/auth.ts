@@ -136,6 +136,30 @@ export async function getAuthedUser(): Promise<{ id: string; email?: string; ses
     return { id: context.id, email: context.email, sessionId: context.authSessionId };
 }
 
+/** Cookie反映待ちのServer Action用。明示トークンも必ずAuthサーバーで検証する。 */
+export async function getAuthedUserFromAccessToken(
+    accessToken: string
+): Promise<{ id: string; email?: string; sessionId: string }> {
+    if (!accessToken) throw new Error('認証が必要です');
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(accessToken);
+    if (error || !user) throw new Error('認証が必要です');
+
+    const sessionId = getAuthSessionId(accessToken);
+    const idleCutoff = new Date(Date.now() - SESSION_IDLE_MINUTES * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+    const { data: activity, error: activityError } = await supabaseAdmin
+        .from('user_session_activity')
+        .select('session_hash')
+        .eq('auth_session_id', sessionId)
+        .eq('user_id', user.id)
+        .is('revoked_at', null)
+        .gte('last_activity', idleCutoff)
+        .gt('absolute_expires_at', now)
+        .maybeSingle();
+    if (activityError || !activity) throw new Error('セッションの有効期限が切れています');
+    return { id: user.id, email: user.email, sessionId };
+}
+
 /**
  * セッションのユーザーが対象 org のメンバーであり、許可ロールを満たすか検証する。
  * 満たさなければ例外。検証には *セッション由来の userId* のみを使う。

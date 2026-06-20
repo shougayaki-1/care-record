@@ -2788,8 +2788,6 @@ const VALID_ROLES: OrgRole[] = ['owner', 'manager', 'staff'];
 export async function getMyWorkspaces(accessToken?: string): Promise<WorkspaceResult> {
   let userId: string;
   try {
-    // 通常はHttpOnly相当のCookieセッションを使う。VercelのServer Actionで
-    // Cookieが引き継がれない場合のみ、Authサーバー検証済みトークンへフォールバックする。
     try {
       userId = (await getAuthedUser()).id;
     } catch (cookieError) {
@@ -9492,7 +9490,8 @@ export default function IdleTimeout() {
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastHeartbeat = useRef(0);
+  // ログイン直後はCookie反映と画面遷移が並行するため、マウント直後のheartbeatを避ける。
+  const lastHeartbeat = useRef<number | null>(null);
 
   const logout = useCallback(async () => {
     if (countdownTimer.current) clearInterval(countdownTimer.current);
@@ -9513,12 +9512,18 @@ export default function IdleTimeout() {
   const resetIdle = useCallback(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current);
     const now = Date.now();
-    if (now - lastHeartbeat.current >= HEARTBEAT_INTERVAL_MS) {
+    if (lastHeartbeat.current === null) {
       lastHeartbeat.current = now;
-      void heartbeatSession().catch(() => logout());
+    } else if (now - lastHeartbeat.current >= HEARTBEAT_INTERVAL_MS) {
+      lastHeartbeat.current = now;
+      // heartbeatは補助的な活動記録。通信失敗やCookie反映待ちをログアウトと同一視しない。
+      // セッション失効の最終判定はProxy/Server Action側で行う。
+      void heartbeatSession().catch((error) => {
+        console.warn('session heartbeat failed', error);
+      });
     }
     idleTimer.current = setTimeout(startWarning, IDLE_LIMIT_MS);
-  }, [logout, startWarning]);
+  }, [startWarning]);
 
   const stayActive = useCallback(() => {
     if (graceTimer.current) clearTimeout(graceTimer.current);
@@ -14135,91 +14140,43 @@ export const supabase = createBrowserClient(
 );
 
 
---- START OF FILE src/middleware.ts ---
+--- START OF FILE src/proxy.ts ---
 
-import { createServerClient } from '@supabase/ssr';
-import { NextResponse, type NextRequest } from 'next/server';
+import { type NextRequest } from 'next/server';
+import { updateSession } from '@/utils/supabase/middleware';
 
-function getAuthSessionId(accessToken: string): string | null {
-  try {
-    const payload = JSON.parse(
-      Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8')
-    ) as { session_id?: string };
-    return payload.session_id || null;
-  } catch {
-    return null;
-  }
+function createNonce(): string {
+  return btoa(crypto.randomUUID());
 }
 
-export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({ request });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => request.cookies.getAll(),
-        setAll: (cookiesToSet) => {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  // トークンリフレッシュを兼ねた認証確認（Auth サーバーに問い合わせる信頼できる検証）
-  const { data: { user } } = await supabase.auth.getUser();
-
-  const path = request.nextUrl.pathname;
-  const isProtected = path.startsWith('/app') || path.startsWith('/super-admin');
-
-  if (isProtected && !user) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/';
-    url.search = `next=${encodeURIComponent(path)}`;
-    const redirect = NextResponse.redirect(url);
-    response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
-    return redirect;
-  }
-
-  if (isProtected && user) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const sessionId = session?.access_token ? getAuthSessionId(session.access_token) : null;
-    const idleCutoff = new Date(Date.now() - 16 * 60 * 1000).toISOString();
-    const now = new Date().toISOString();
-
-    const { data: activity } = sessionId
-      ? await supabase
-          .from('user_session_activity')
-          .select('session_hash')
-          .eq('auth_session_id', sessionId)
-          .eq('user_id', user.id)
-          .is('revoked_at', null)
-          .gte('last_activity', idleCutoff)
-          .gt('absolute_expires_at', now)
-          .maybeSingle()
-      : { data: null };
-
-    if (!activity) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/';
-      url.search = 'reason=idle_timeout';
-      const redirect = NextResponse.redirect(url);
-      response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
-      return redirect;
-    }
-  }
-
-  return response;
+export async function proxy(request: NextRequest) {
+  const nonce = createNonce();
+  const developmentEval = process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : '';
+  const csp = [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${developmentEval}`,
+    `style-src 'self' 'nonce-${nonce}'`,
+    "img-src 'self' data: blob: https://*.supabase.co https://*.googleusercontent.com https://lh3.googleusercontent.com",
+    "font-src 'self' data:",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.googleapis.com https://accounts.google.com",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+    ...(process.env.NODE_ENV === 'production' ? ['upgrade-insecure-requests'] : []),
+  ].join('; ');
+  return updateSession(request, nonce, csp);
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    {
+      source: '/((?!api|_next/static|_next/image|favicon.ico|sw.js|workbox-.*\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf)$).*)',
+      missing: [
+        { type: 'header', key: 'next-router-prefetch' },
+        { type: 'header', key: 'purpose', value: 'prefetch' },
+      ],
+    },
   ],
 };
 
@@ -15077,23 +15034,6 @@ async function getVerifiedAuthContext(): Promise<{ id: string; email?: string; a
     return { id: user.id, email: user.email, authSessionId: getAuthSessionId(session.access_token), session };
 }
 
-async function assertActiveSession(userId: string, accessToken: string): Promise<string> {
-    const authSessionId = getAuthSessionId(accessToken);
-    const idleCutoff = new Date(Date.now() - SESSION_IDLE_MINUTES * 60 * 1000).toISOString();
-    const now = new Date().toISOString();
-    const { data, error } = await supabaseAdmin
-        .from('user_session_activity')
-        .select('session_hash')
-        .eq('auth_session_id', authSessionId)
-        .eq('user_id', userId)
-        .is('revoked_at', null)
-        .gte('last_activity', idleCutoff)
-        .gt('absolute_expires_at', now)
-        .maybeSingle();
-    if (error || !data) throw new Error('セッションの有効期限が切れています');
-    return authSessionId;
-}
-
 /** ログイン直後に、検証済みSupabaseセッションをサーバー管理の活動記録へ登録する。 */
 export async function registerSessionActivity(session: Session): Promise<string> {
     const sessionHash = hashAccessToken(session.access_token);
@@ -15139,21 +15079,42 @@ export async function revokeCurrentSession(): Promise<void> {
 /** 認証と、改ざんできないサーバー側のアイドル・絶対有効期限を検証する。 */
 export async function getAuthedUser(): Promise<{ id: string; email?: string; sessionId: string }> {
     const context = await getVerifiedAuthContext();
-    await assertActiveSession(context.id, context.session.access_token);
+    const idleCutoff = new Date(Date.now() - SESSION_IDLE_MINUTES * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+        .from('user_session_activity')
+        .select('session_hash')
+        .eq('auth_session_id', context.authSessionId)
+        .eq('user_id', context.id)
+        .is('revoked_at', null)
+        .gte('last_activity', idleCutoff)
+        .gt('absolute_expires_at', now)
+        .maybeSingle();
+    if (error || !data) throw new Error('セッションの有効期限が切れています');
     return { id: context.id, email: context.email, sessionId: context.authSessionId };
 }
 
-/**
- * Server Action に明示的に渡されたアクセストークンを Auth サーバーで検証する。
- * Cookie が欠落する実行環境でも本人性を維持するためのフォールバック。
- */
+/** Cookie反映待ちのServer Action用。明示トークンも必ずAuthサーバーで検証する。 */
 export async function getAuthedUserFromAccessToken(
     accessToken: string
 ): Promise<{ id: string; email?: string; sessionId: string }> {
     if (!accessToken) throw new Error('認証が必要です');
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(accessToken);
     if (error || !user) throw new Error('認証が必要です');
-    const sessionId = await assertActiveSession(user.id, accessToken);
+
+    const sessionId = getAuthSessionId(accessToken);
+    const idleCutoff = new Date(Date.now() - SESSION_IDLE_MINUTES * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+    const { data: activity, error: activityError } = await supabaseAdmin
+        .from('user_session_activity')
+        .select('session_hash')
+        .eq('auth_session_id', sessionId)
+        .eq('user_id', user.id)
+        .is('revoked_at', null)
+        .gte('last_activity', idleCutoff)
+        .gt('absolute_expires_at', now)
+        .maybeSingle();
+    if (activityError || !activity) throw new Error('セッションの有効期限が切れています');
     return { id: user.id, email: user.email, sessionId };
 }
 
@@ -15307,6 +15268,7 @@ export async function recordLoginAttempt(email: string, outcome: 'success' | 'fa
 
 // src/utils/supabase/middleware.ts
 import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 
 function authSessionId(accessToken: string): string | null {
@@ -15391,11 +15353,33 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
         const sessionId = session?.access_token ? authSessionId(session.access_token) : null;
         const idleCutoff = new Date(Date.now() - 16 * 60 * 1000).toISOString();
         const now = new Date().toISOString();
-        const { data: activity } = sessionId
-            ? await supabase.from('user_session_activity').select('session_hash')
+
+        // user と sessionId は直前に Auth サーバーで検証済み。
+        // システム管理テーブルの存在確認をRLSへ再依存させると、ログイン直後に
+        // false negativeとなり idle_timeout へ誤遷移するため、サーバー専用キーで照合する。
+        const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!serviceRoleKey) {
+            console.error('[proxy] SUPABASE_SERVICE_ROLE_KEY is not set');
+            const url = request.nextUrl.clone();
+            url.pathname = '/';
+            url.search = 'error=session_validation_unavailable';
+            return redirectWithSession(url);
+        }
+        const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+            auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+        });
+        const { data: activity, error: activityError } = sessionId
+            ? await supabaseAdmin.from('user_session_activity').select('session_hash')
                 .eq('auth_session_id', sessionId).eq('user_id', user.id).is('revoked_at', null)
                 .gte('last_activity', idleCutoff).gt('absolute_expires_at', now).maybeSingle()
-            : { data: null };
+            : { data: null, error: null };
+        if (activityError) {
+            console.error('[proxy] session activity lookup failed', activityError.message);
+            const url = request.nextUrl.clone();
+            url.pathname = '/';
+            url.search = 'error=session_validation_unavailable';
+            return redirectWithSession(url);
+        }
         if (!activity) {
             const url = request.nextUrl.clone();
             url.pathname = '/';

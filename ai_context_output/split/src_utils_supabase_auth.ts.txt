@@ -76,23 +76,6 @@ async function getVerifiedAuthContext(): Promise<{ id: string; email?: string; a
     return { id: user.id, email: user.email, authSessionId: getAuthSessionId(session.access_token), session };
 }
 
-async function assertActiveSession(userId: string, accessToken: string): Promise<string> {
-    const authSessionId = getAuthSessionId(accessToken);
-    const idleCutoff = new Date(Date.now() - SESSION_IDLE_MINUTES * 60 * 1000).toISOString();
-    const now = new Date().toISOString();
-    const { data, error } = await supabaseAdmin
-        .from('user_session_activity')
-        .select('session_hash')
-        .eq('auth_session_id', authSessionId)
-        .eq('user_id', userId)
-        .is('revoked_at', null)
-        .gte('last_activity', idleCutoff)
-        .gt('absolute_expires_at', now)
-        .maybeSingle();
-    if (error || !data) throw new Error('セッションの有効期限が切れています');
-    return authSessionId;
-}
-
 /** ログイン直後に、検証済みSupabaseセッションをサーバー管理の活動記録へ登録する。 */
 export async function registerSessionActivity(session: Session): Promise<string> {
     const sessionHash = hashAccessToken(session.access_token);
@@ -138,21 +121,42 @@ export async function revokeCurrentSession(): Promise<void> {
 /** 認証と、改ざんできないサーバー側のアイドル・絶対有効期限を検証する。 */
 export async function getAuthedUser(): Promise<{ id: string; email?: string; sessionId: string }> {
     const context = await getVerifiedAuthContext();
-    await assertActiveSession(context.id, context.session.access_token);
+    const idleCutoff = new Date(Date.now() - SESSION_IDLE_MINUTES * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+        .from('user_session_activity')
+        .select('session_hash')
+        .eq('auth_session_id', context.authSessionId)
+        .eq('user_id', context.id)
+        .is('revoked_at', null)
+        .gte('last_activity', idleCutoff)
+        .gt('absolute_expires_at', now)
+        .maybeSingle();
+    if (error || !data) throw new Error('セッションの有効期限が切れています');
     return { id: context.id, email: context.email, sessionId: context.authSessionId };
 }
 
-/**
- * Server Action に明示的に渡されたアクセストークンを Auth サーバーで検証する。
- * Cookie が欠落する実行環境でも本人性を維持するためのフォールバック。
- */
+/** Cookie反映待ちのServer Action用。明示トークンも必ずAuthサーバーで検証する。 */
 export async function getAuthedUserFromAccessToken(
     accessToken: string
 ): Promise<{ id: string; email?: string; sessionId: string }> {
     if (!accessToken) throw new Error('認証が必要です');
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(accessToken);
     if (error || !user) throw new Error('認証が必要です');
-    const sessionId = await assertActiveSession(user.id, accessToken);
+
+    const sessionId = getAuthSessionId(accessToken);
+    const idleCutoff = new Date(Date.now() - SESSION_IDLE_MINUTES * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+    const { data: activity, error: activityError } = await supabaseAdmin
+        .from('user_session_activity')
+        .select('session_hash')
+        .eq('auth_session_id', sessionId)
+        .eq('user_id', user.id)
+        .is('revoked_at', null)
+        .gte('last_activity', idleCutoff)
+        .gt('absolute_expires_at', now)
+        .maybeSingle();
+    if (activityError || !activity) throw new Error('セッションの有効期限が切れています');
     return { id: user.id, email: user.email, sessionId };
 }
 
