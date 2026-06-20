@@ -2,14 +2,10 @@
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
+import { decodeJwtSessionId } from '@/utils/jwt';
 
 function authSessionId(accessToken: string): string | null {
-    try {
-        const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8')) as { session_id?: string };
-        return payload.session_id || null;
-    } catch {
-        return null;
-    }
+    return decodeJwtSessionId(accessToken);
 }
 
 export async function updateSession(request: NextRequest, nonce: string, csp: string) {
