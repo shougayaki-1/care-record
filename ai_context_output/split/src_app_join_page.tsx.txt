@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Box, CircularProgress } from '@mui/material';
+import { Box, CircularProgress } from '@/components/ui/mui';
 
 export default function JoinPage() {
     const router = useRouter();

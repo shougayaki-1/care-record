@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import {
     Box, Typography, Paper, Stack, Chip, TextField, Tabs, Tab, Card, CardActionArea, Divider,
     Grid, IconButton, Tooltip
-} from '@mui/material';
+} from '@/components/ui/mui';
 import EditIcon from '@mui/icons-material/Edit';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ListIcon from '@mui/icons-material/List';
@@ -43,7 +43,7 @@ const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month
                     <Grid size={{ xs: 12/7 }} key={i}>
                         <Box 
                             sx={{ 
-                                height: 80, border: '1px solid #eee', borderRadius: 1, p: 0.5, 
+                                height: 80, border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 0.5,
                                 bgcolor: d ? 'white' : 'transparent',
                                 display: 'flex', flexDirection: 'column'
                             }}
@@ -59,7 +59,7 @@ const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month
                                                 <Box 
                                                     onClick={() => onSelect(ev)}
                                                     sx={{ 
-                                                        bgcolor: ev.status === 'approved' ? '#e8f5e9' : (ev.status === 'remanded' ? '#ffebee' : '#fff3e0'), 
+                                                        bgcolor: ev.status === 'approved' ? 'background.success' : (ev.status === 'remanded' ? 'background.danger' : 'background.warning'),
                                                         fontSize: 10, p: 0.2, borderRadius: 0.5, mb: 0.5, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
                                                         cursor: 'pointer',
                                                         '&:hover': { filter: 'brightness(0.95)' }
@@ -97,6 +97,7 @@ export default function HistoryPage() {
             let query = supabase.from('reports')
                 .select(`id, start_at, status, client_id, clients!inner(name, organization_id)`)
                 .eq('clients.organization_id', currentOrg.id)
+                .is('deleted_at', null)
                 .neq('status', 'draft')
                 .order('start_at', { ascending: false });
 
@@ -145,7 +146,7 @@ export default function HistoryPage() {
                         <Paper sx={{ p: 2, mb: 2 }}>
                             <TextField 
                                 type="date" label="日付絞り込み" size="small" fullWidth 
-                                InputLabelProps={{ shrink: true }} 
+                                slotProps={{ inputLabel: { shrink: true } }}
                                 value={filterDate} onChange={(e) => setFilterDate(e.target.value)} 
                             />
                         </Paper>

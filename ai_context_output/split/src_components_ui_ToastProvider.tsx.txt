@@ -1,7 +1,7 @@
 // src/components/ui/ToastProvider.tsx
 'use client';
 
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState, ReactNode } from 'react';
 import { Snackbar, Alert, AlertColor } from '@mui/material';
 
 type ToastContextType = {
@@ -15,16 +15,17 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
     const [msg, setMsg] = useState('');
     const [severity, setSeverity] = useState<AlertColor>('success');
 
-    const showToast = (message: string, type: AlertColor = 'success') => {
+    const showToast = useCallback((message: string, type: AlertColor = 'success') => {
         setMsg(message);
         setSeverity(type);
         setOpen(true);
-    };
+    }, []);
 
     const handleClose = () => setOpen(false);
+    const contextValue = useMemo(() => ({ showToast }), [showToast]);
 
     return (
-        <ToastContext.Provider value={{ showToast }}>
+        <ToastContext.Provider value={contextValue}>
             {children}
             <Snackbar
                 open={open}

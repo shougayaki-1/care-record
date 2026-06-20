@@ -1,5 +1,6 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/renderer';
+import type { PdfStaffMember } from './ShiftCalendarDocument';
 
 const getFontUrl = (filename: string) => {
     return typeof window !== 'undefined'
@@ -30,6 +31,27 @@ const styles = StyleSheet.create({
     },
     title: { fontSize: 14, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 12 },
+    staffSection: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        marginBottom: 6,
+        paddingBottom: 4,
+        borderBottomWidth: 1,
+        borderColor: '#E3E5E8',
+    },
+    staffSectionLabel: { fontSize: 7.5, fontWeight: 'bold', color: '#555', marginRight: 5 },
+    staffChip: {
+        flexDirection: 'row',
+        backgroundColor: '#F0F5FF',
+        borderRadius: 2,
+        paddingVertical: 1,
+        paddingHorizontal: 4,
+        marginRight: 4,
+        marginBottom: 2,
+    },
+    staffChipName: { fontSize: 7.5, fontWeight: 'bold', color: '#333' },
+    staffChipPosition: { fontSize: 7, color: '#2255CC', marginLeft: 2 },
     table: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
     row: { flexDirection: 'row' },
     headerRow: { backgroundColor: '#F0F5FF' },
@@ -89,10 +111,11 @@ type Props = {
     monthStr: string;
     daysInMonth: number;
     staffData: MatrixStaffData[];
-    orgName: string; 
+    orgName: string;
+    staffMembers?: PdfStaffMember[];
 };
 
-export const ShiftMatrixDocument = ({ title, monthStr, daysInMonth, staffData, orgName }: Props) => {
+export const ShiftMatrixDocument = ({ title, monthStr, daysInMonth, staffData, orgName, staffMembers = [] }: Props) => {
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
     return (
@@ -102,6 +125,19 @@ export const ShiftMatrixDocument = ({ title, monthStr, daysInMonth, staffData, o
                     <Text style={styles.title}>{title}</Text>
                     <Text style={styles.month}>{monthStr}</Text>
                 </View>
+
+                {staffMembers.length > 0 && (
+                    <View style={styles.staffSection}>
+                        <Text style={styles.staffSectionLabel}>スタッフ：</Text>
+                        {staffMembers.map((s, i) => (
+                            <View key={i} style={styles.staffChip}>
+                                <Text style={styles.staffChipName}>{s.name}</Text>
+                                {s.positions && s.positions.length > 0 ? <Text style={styles.staffChipPosition}>{s.positions.join('・')}</Text> : null}
+                            </View>
+                        ))}
+                    </View>
+                )}
+
                 <View style={styles.table}>
                     <View style={[styles.row, styles.headerRow]}>
                         <Text style={[styles.headerCell, { width: 50 }]}>スタッフ名</Text>

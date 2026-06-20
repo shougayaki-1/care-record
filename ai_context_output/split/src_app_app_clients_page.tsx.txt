@@ -1,11 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { 
-  Box, Typography, Button, Paper, Table, TableBody, TableCell, 
-  TableContainer, TableHead, TableRow, Dialog, DialogTitle, DialogContent, 
-  DialogActions, TextField, IconButton, Stack, Tooltip, Switch, FormControlLabel, Chip
-} from '@mui/material';
+import { Box, IconButton, Paper, Stack, Tooltip, Switch, FormControlLabel } from '@/components/ui/mui';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -17,6 +13,9 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { AppButton, AppDialog, AppTextField, DataTable, PageHeader, StatusChip } from '@/components/ui';
+import { createClient, setClientArchived, softDeleteClient, updateClientName } from '@/app/actions/clients';
 
 type Client = { 
     id: string; 
@@ -29,6 +28,7 @@ export default function ClientsPage() {
   const router = useRouter();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
+  const confirm = useConfirm();
   
   const [clients, setClients] = useState<Client[]>([]);
   const [showArchived, setShowArchived] = useState(false);
@@ -50,6 +50,7 @@ export default function ClientsPage() {
         .from('clients')
         .select('*')
         .eq('organization_id', currentOrg.id)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       
       // アーカイブフィルタ
@@ -73,8 +74,7 @@ export default function ClientsPage() {
     if (!newName.trim() || !currentOrg) return;
     setIsSubmitting(true);
     try {
-      const { data, error } = await supabase.from('clients').insert([{ name: newName, organization_id: currentOrg.id }]).select().single();
-      if (error) throw error;
+      const data = await createClient(currentOrg.id, newName);
       setClients([data, ...clients]);
       setOpenAdd(false);
       setNewName('');
@@ -94,9 +94,8 @@ export default function ClientsPage() {
       if (!editName.trim()) return;
       setIsSubmitting(true);
       try {
-          const { error } = await supabase.from('clients').update({ name: editName }).eq('id', editId);
-          if (error) throw error;
-          setClients(clients.map(c => c.id === editId ? { ...c, name: editName } : c));
+          const result = await updateClientName(currentOrg!.id, editId, editName);
+          setClients(clients.map(c => c.id === editId ? { ...c, name: result.name } : c));
           setOpenEdit(false);
           showToast('更新しました');
       } catch (error) { 
@@ -109,12 +108,7 @@ export default function ClientsPage() {
 
   const handleArchive = async (id: string, isArchive: boolean) => {
       try {
-          const { error } = await supabase
-            .from('clients')
-            .update({ archived_at: isArchive ? new Date().toISOString() : null })
-            .eq('id', id);
-          
-          if (error) throw error;
+          await setClientArchived(currentOrg!.id, id, isArchive);
           
           showToast(isArchive ? 'アーカイブしました' : '復元しました');
           fetchClients();
@@ -125,11 +119,10 @@ export default function ClientsPage() {
   };
 
   const handleDelete = async (id: string) => {
-      if(!confirm('本当に削除しますか？\nこの利用者の記録データも全て削除されます。\nこの操作は取り消せません。')) return;
+      if(!(await confirm({ title: '利用者の削除', message: 'この利用者を削除状態にしますか？\n介護記録は保持期間中そのまま保存され、通常画面には表示されなくなります。', confirmText: '削除する', confirmColor: 'error' }))) return;
       try {
-          const { error } = await supabase.from('clients').delete().eq('id', id);
-          if (error) throw error;
-          showToast('完全に削除しました');
+          await softDeleteClient(currentOrg!.id, id, '利用者管理画面から削除');
+          showToast('削除状態にしました');
           fetchClients();
       } catch(e) { 
           console.error(e);
@@ -143,43 +136,23 @@ export default function ClientsPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-        <PeopleIcon sx={{ color: 'action.active', mr: 2 }} />
-        <Typography variant="h6" fontWeight="bold" color="text.primary" sx={{ flexGrow: 1 }}>利用者管理</Typography>
-        <FormControlLabel 
-            control={<Switch checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />} 
-            label="アーカイブを表示" 
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, md: 3 }, bgcolor: 'background.default' }}>
+        <PageHeader
+          title={<Stack direction="row" alignItems="center" gap={1}><PeopleIcon color="action" />利用者管理</Stack>}
+          actions={<><FormControlLabel control={<Switch checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />} label="アーカイブを表示" /><AppButton startIcon={<AddIcon />} onClick={() => setOpenAdd(true)}>新規登録</AppButton></>}
         />
-      </Box>
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
-        <Box display="flex" justifyContent="flex-end" mb={3}>
-            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpenAdd(true)}>新規登録</Button>
-        </Box>
-
-        <TableContainer component={Paper} variant="outlined">
-            <Table>
-            <TableHead sx={{ bgcolor: '#f8f9fa' }}>
-                <TableRow>
-                <TableCell sx={{ fontWeight: 'bold' }}>利用者氏名</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>状態</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>操作</TableCell>
-                </TableRow>
-            </TableHead>
-            <TableBody>
-                {clients.length === 0 ? (
-                <TableRow><TableCell colSpan={3} align="center" sx={{ py: 5, color: '#999' }}>登録がありません</TableCell></TableRow>
-                ) : (
-                clients.map((client) => (
-                    <TableRow key={client.id} hover sx={{ opacity: client.archived_at ? 0.6 : 1, bgcolor: client.archived_at ? '#f9f9f9' : 'inherit' }}>
-                    <TableCell>{client.name}</TableCell>
-                    <TableCell>
-                        {client.archived_at ? 
-                            <Chip label="アーカイブ" size="small" /> : 
-                            <Chip label="有効" color="success" size="small" variant="outlined" />
-                        }
-                    </TableCell>
-                    <TableCell align="right">
+        <DataTable
+          component={Paper}
+          sx={{ border: 1, borderColor: 'divider', borderRadius: 3 }}
+          rows={clients}
+          getRowKey={(client) => client.id}
+          getRowSx={(client) => ({ opacity: client.archived_at ? 0.6 : 1, bgcolor: client.archived_at ? 'background.subtle' : 'inherit' })}
+          emptyTitle="利用者が登録されていません"
+          columns={[
+            { key: 'name', header: '利用者氏名', render: (client) => client.name },
+            { key: 'status', header: '状態', render: (client) => client.archived_at ? <StatusChip label="アーカイブ" /> : <StatusChip label="有効" tone="success" /> },
+            { key: 'actions', header: '操作', align: 'right', render: (client) => (
                         <Stack direction="row" justifyContent="flex-end" spacing={1}>
                             {!client.archived_at && (
                                 <>
@@ -197,26 +170,18 @@ export default function ClientsPage() {
                                 <Tooltip title="アーカイブ"><IconButton size="small" onClick={() => handleArchive(client.id, true)}><ArchiveIcon /></IconButton></Tooltip>
                             )}
                         </Stack>
-                    </TableCell>
-                    </TableRow>
-                ))
-                )}
-            </TableBody>
-            </Table>
-        </TableContainer>
+            )},
+          ]}
+        />
       </Box>
 
-      <Dialog open={openAdd} onClose={() => setOpenAdd(false)}>
-        <DialogTitle>利用者の追加</DialogTitle>
-        <DialogContent sx={{ minWidth: 300 }}><TextField autoFocus margin="dense" label="利用者氏名" fullWidth value={newName} onChange={(e) => setNewName(e.target.value)} /></DialogContent>
-        <DialogActions><Button onClick={() => setOpenAdd(false)}>キャンセル</Button><Button onClick={handleAddClient} variant="contained" disabled={isSubmitting}>登録</Button></DialogActions>
-      </Dialog>
+      <AppDialog open={openAdd} onClose={() => setOpenAdd(false)} title="利用者の追加" actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenAdd(false)}>キャンセル</AppButton><AppButton loading={isSubmitting} onClick={handleAddClient}>登録</AppButton></>}>
+        <AppTextField autoFocus margin="dense" label="利用者氏名" value={newName} onChange={(e) => setNewName(e.target.value)} />
+      </AppDialog>
 
-      <Dialog open={openEdit} onClose={() => setOpenEdit(false)}>
-        <DialogTitle>利用者名の変更</DialogTitle>
-        <DialogContent sx={{ minWidth: 300 }}><TextField autoFocus margin="dense" label="利用者氏名" fullWidth value={editName} onChange={(e) => setEditName(e.target.value)} /></DialogContent>
-        <DialogActions><Button onClick={() => setOpenEdit(false)}>キャンセル</Button><Button onClick={handleUpdateClient} variant="contained" disabled={isSubmitting}>保存</Button></DialogActions>
-      </Dialog>
+      <AppDialog open={openEdit} onClose={() => setOpenEdit(false)} title="利用者名の変更" actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenEdit(false)}>キャンセル</AppButton><AppButton loading={isSubmitting} onClick={handleUpdateClient}>保存</AppButton></>}>
+        <AppTextField autoFocus margin="dense" label="利用者氏名" value={editName} onChange={(e) => setEditName(e.target.value)} />
+      </AppDialog>
     </Box>
   );
 }

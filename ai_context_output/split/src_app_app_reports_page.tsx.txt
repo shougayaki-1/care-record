@@ -5,8 +5,7 @@ import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Button,
   CircularProgress, Stack, TextField, MenuItem, Checkbox, TableSortLabel, Switch, FormControlLabel, Divider,
   LinearProgress, Tooltip
-} from '@mui/material';
-import { alpha } from '@mui/material/styles';
+} from '@/components/ui/mui';
 import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -24,8 +23,11 @@ import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRe
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
+import { auditReportExport, softDeleteReports, transitionReports } from '@/app/actions/reports';
+import { updateClientGoogleLink } from '@/app/actions/clients';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 type ReportValuesData = Record<string, FormValue>;
@@ -45,6 +47,7 @@ export default function ReportsPage() {
   const searchParams = useSearchParams();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
+  const confirm = useConfirm();
   
   const [reports, setReports] = useState<Report[]>([]);
   const [clients, setClients] = useState<ClientData[]>([]);
@@ -91,7 +94,7 @@ export default function ReportsPage() {
           helper:profiles!reports_helper_id_fkey ( name ),
           approved_by_user:profiles!reports_approved_by_fkey ( name ),
           report_values ( data )
-        `).eq('clients.organization_id', currentOrg.id).neq('status', 'draft'); 
+        `).eq('clients.organization_id', currentOrg.id).is('deleted_at', null).neq('status', 'draft');
 
       if (filterClientId !== 'all') query = query.eq('client_id', filterClientId);
       if (startDate) query = query.gte('start_at', `${startDate}T00:00:00`);
@@ -128,12 +131,11 @@ export default function ReportsPage() {
 
   const handleBulkApprove = async () => {
       if (selected.length === 0) return;
-      if (!confirm(`${selected.length}件を一括承認しますか？`)) return;
+      if (!(await confirm({ message: `${selected.length}件を一括承認しますか？`, confirmText: '承認する' }))) return;
       setProcessing(true);
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        const updateData = { status: 'approved' as ReportStatus, approved_by: user?.id, approved_at: new Date().toISOString() };
-        await supabase.from('reports').update(updateData).in('id', selected);
+        const updateData = { status: 'approved' as ReportStatus, approved_at: new Date().toISOString() };
+        await transitionReports(currentOrg!.id, [...selected], 'approve');
         setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, ...updateData, approved_by_user: { name: 'あなた' } } : r));
         setSelected([]);
         showToast('一括承認しました');
@@ -141,10 +143,11 @@ export default function ReportsPage() {
   };
 
   const handleBulkRemand = async () => {
-    if (selected.length === 0 || !confirm(`${selected.length}件を一括で差戻ししますか？`)) return;
+    if (selected.length === 0) return;
+    if (!(await confirm({ message: `${selected.length}件を一括で差戻ししますか？`, confirmText: '差し戻す' }))) return;
     setProcessing(true);
     try {
-        await supabase.from('reports').update({ status: 'remanded', approved_by: null, approved_at: null }).in('id', selected);
+        await transitionReports(currentOrg!.id, [...selected], 'remand');
         setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, status: 'remanded' as ReportStatus } : r));
         setSelected([]);
         showToast('差し戻しました');
@@ -155,17 +158,19 @@ export default function ReportsPage() {
   };
 
   const handleBulkDelete = async () => {
-    if (selected.length === 0 || !confirm(`${selected.length}件を削除しますか？\nこの操作は取り消せません。`)) return;
-    
+    if (selected.length === 0) return;
+
     const targets = reports.filter(r => selected.includes(r.id));
     if (targets.some(r => r.status === 'approved')) {
-        alert('選択項目の中に「承認済み」の記録が含まれています。\n承認を取り消してから削除してください。');
+        showToast('選択項目の中に「承認済み」の記録が含まれています。承認を取り消してから削除してください。', 'warning');
         return;
     }
 
+    if (!(await confirm({ message: `${selected.length}件を削除しますか？\nこの操作は取り消せません。`, confirmText: '削除する', confirmColor: 'error' }))) return;
+
     setProcessing(true);
     try {
-        await supabase.from('reports').delete().in('id', selected);
+        await softDeleteReports(currentOrg!.id, [...selected], '帳票一覧から削除');
         setReports(prev => prev.filter(r => !selected.includes(r.id)));
         setSelected([]);
         showToast('削除しました');
@@ -194,10 +199,11 @@ export default function ReportsPage() {
 
   const handleExportCSV = async () => {
       const targetReports = getTargetReports();
-      if (targetReports.length === 0) { alert('出力するデータがありません。'); return; }
-      if (!confirm(`${targetReports.length}件のデータをエクスポートします。\n差し込み印刷用に全ての項目を列に展開します。よろしいですか？`)) return;
+      if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
+      if (!(await confirm({ message: `${targetReports.length}件のデータをエクスポートします。\n差し込み印刷用に全ての項目を列に展開します。よろしいですか？` }))) return;
       setProcessing(true);
       try {
+        await auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'csv');
         const clientIds = Array.from(new Set(targetReports.map(r => r.clients.id)));
         const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
 
@@ -277,16 +283,19 @@ export default function ReportsPage() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-      } catch (e) { console.error(e); alert('エクスポート中にエラーが発生しました'); } finally { setProcessing(false); }
+      } catch (e) { console.error(e); showToast('エクスポート中にエラーが発生しました', 'error'); } finally { setProcessing(false); }
   };
 
   const handleBulkDownloadPDF = async () => {
       const targetReports = getTargetReports();
-      if (targetReports.length === 0) { alert('出力するデータがありません'); return; }
-      if (targetReports.length > 50) { if (!confirm(`${targetReports.length}件のPDFを作成します。\n時間がかかる場合があります。`)) return; } 
-      else { if (!confirm(`${targetReports.length}件のPDFを出力しますか？`)) return; }
+      if (targetReports.length === 0) { showToast('出力するデータがありません', 'warning'); return; }
+      const pdfConfirmMsg = targetReports.length > 50
+        ? `${targetReports.length}件のPDFを作成します。\n時間がかかる場合があります。`
+        : `${targetReports.length}件のPDFを出力しますか？`;
+      if (!(await confirm({ message: pdfConfirmMsg }))) return;
 
       try {
+        await auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'pdf');
         const pdfReports = await Promise.all(targetReports.map(async (report) => {
           const data = getReportData(report);
           if (!data) return null;
@@ -309,7 +318,7 @@ export default function ReportsPage() {
         link.href = URL.createObjectURL(blob);
         link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
         link.click();
-      } catch (e) { console.error(e); alert('PDF作成中にエラーが発生しました'); }
+      } catch (e) { console.error(e); showToast('PDF作成中にエラーが発生しました', 'error'); }
   };
 
   const preparePdfData = (
@@ -351,8 +360,8 @@ export default function ReportsPage() {
 
   const handleCreateGasPdf = async () => {
       const targetReports = getTargetReports();
-      if (targetReports.length === 0) { alert('出力するデータがありません。'); return; }
-      
+      if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
+
       const clientGroups: Record<string, Report[]> = {};
       targetReports.forEach(r => {
           const cid = r.clients.id;
@@ -375,9 +384,9 @@ export default function ReportsPage() {
       });
 
       const { data: orgInfo } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg!.id).single();
-      if (!orgInfo?.google_folder_id) { alert('事業所のGoogleドライブ連携が設定されていません。\n設定画面から連携を行ってください。'); return; }
+      if (!orgInfo?.google_folder_id) { showToast('事業所のGoogleドライブ連携が設定されていません。設定画面から連携を行ってください。', 'warning'); return; }
 
-      if (!confirm(`${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）`)) return;
+      if (!(await confirm({ message: `${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）` }))) return;
       setGasProgress({ total: targetReports.length, current: 0, currentName: '準備中...' });
 
       let lastOpenedFolderUrl: string | null = null;
@@ -401,6 +410,8 @@ export default function ReportsPage() {
               
               const folderRes = await callGasApi({
                   action: 'manage_client_folder',
+                  organizationId: currentOrg!.id,
+                  clientId: client.id,
                   orgFolderId: orgInfo.google_folder_id,
                   clientName: client.name,
                   currentFolderId: client.google_folder_id
@@ -408,13 +419,15 @@ export default function ReportsPage() {
 
               if (folderRes.status !== 'success') throw new Error(`Folder Error: ${folderRes.message}`);
               if (folderRes.folderId !== client.google_folder_id) {
-                  await supabase.from('clients').update({ google_folder_id: folderRes.folderId }).eq('id', client.id);
+                  await updateClientGoogleLink(currentOrg!.id, client.id, { folderId: folderRes.folderId });
               }
               const clientRootFolderId = folderRes.folderId;
 
               setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: サブフォルダ作成中...` }));
               const subFolderRes = await callGasApi({
                   action: 'create_sub_folder',
+                  organizationId: currentOrg!.id,
+                  clientId: client.id,
                   parentId: clientRootFolderId,
                   folderName: exportFolderName
               });
@@ -447,6 +460,9 @@ export default function ReportsPage() {
 
                   await callGasApi({
                       action: 'create_pdf',
+                      organizationId: currentOrg!.id,
+                      clientId: client.id,
+                      reportId: report.id,
                       folderId: targetFolderId, 
                       templateId: client.google_template_id,
                       data: finalPayload, 
@@ -456,10 +472,10 @@ export default function ReportsPage() {
                   setGasProgress({ total: targetReports.length, current: processedCount, currentName: '' });
               }
           }
-          alert('作成が完了しました。保存先のフォルダを開きます。');
+          showToast('作成が完了しました。保存先のフォルダを開きます。');
           if (lastOpenedFolderUrl) window.open(lastOpenedFolderUrl, '_blank');
 
-      } catch (e) { console.error(e); alert('エラーが発生しました: ' + e); } 
+      } catch (e) { console.error(e); showToast('エラーが発生しました: ' + e, 'error'); }
       finally { setGasProgress(null); }
   };
 
@@ -478,24 +494,24 @@ export default function ReportsPage() {
         </Box>
 
        <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
-           <Paper sx={{ p: 2, mb: 3, bgcolor: '#F2F3F5', boxShadow: 'none' }}>
+           <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.muted', boxShadow: 'none' }}>
               <Stack spacing={2}>
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-                    <Box display="flex" alignItems="center" gap={1} color="#5C5E66">
+                    <Box display="flex" alignItems="center" gap={1} color="text.secondary">
                         <FilterListIcon fontSize="small" />
                         <Typography variant="subtitle2" fontWeight="bold">絞り込み:</Typography>
                     </Box>
-                    <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: 150, bgcolor: 'white' }}>
+                    <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: 150, bgcolor: 'background.paper' }}>
                         <MenuItem value="all">全員</MenuItem>
                         {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                     </TextField>
-                    <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 120, bgcolor: 'white' }}>
+                    <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 120, bgcolor: 'background.paper' }}>
                         <MenuItem value="all">全て</MenuItem><MenuItem value="pending">未承認</MenuItem><MenuItem value="approved">承認済</MenuItem>
                     </TextField>
                     <Box display="flex" alignItems="center" gap={1}>
-                        <TextField type="date" label="開始日" size="small" InputLabelProps={{ shrink: true }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'white' }} />
+                        <TextField type="date" label="開始日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
                         <Typography>～</Typography>
-                        <TextField type="date" label="終了日" size="small" InputLabelProps={{ shrink: true }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'white' }} />
+                        <TextField type="date" label="終了日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
                     </Box>
                     <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />
                     <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none' }}>検索</Button>
@@ -503,7 +519,7 @@ export default function ReportsPage() {
               </Stack>
            </Paper>
            
-           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? alpha('#2255CC', 0.1) : '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #E3E5E8', boxShadow: 'none' }}>
+           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? 'background.tint' : 'background.paper', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
                <Box>
                    <Typography variant="body1" fontWeight="bold">
                        {selected.length > 0 ? `${selected.length} 件選択中` : `検索結果: ${reports.length} 件`}
@@ -531,7 +547,7 @@ export default function ReportsPage() {
            </Paper>
 
            {gasProgress && (
-               <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'white', p: 2, borderRadius: 2, boxShadow: 3, zIndex: 9999 }}>
+               <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'background.paper', p: 2, borderRadius: 2, boxShadow: 3, zIndex: 9999 }}>
                    <Typography variant="body2" fontWeight="bold">帳票作成中...</Typography>
                    <Typography variant="caption" display="block" sx={{ mb: 1 }}>{gasProgress.currentName}</Typography>
                    <LinearProgress variant="determinate" value={(gasProgress.current / gasProgress.total) * 100} sx={{ width: 250 }} />
@@ -540,20 +556,20 @@ export default function ReportsPage() {
            )}
 
            {loading ? <CircularProgress /> : (
-             <TableContainer component={Paper} sx={{ boxShadow: 'none', border: '1px solid #E3E5E8' }}>
+             <TableContainer component={Paper} sx={{ boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
                <Table>
-                 <TableHead sx={{ bgcolor: '#F2F3F5' }}>
+                 <TableHead sx={{ bgcolor: 'background.muted' }}>
                    <TableRow>
                      <TableCell padding="checkbox"><Checkbox onChange={handleSelectAllClick} /></TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>ステータス</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>
+                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>ステータス</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>
                          <TableSortLabel active={orderBy === 'start_at'} direction={order} onClick={() => { setOrder(order === 'asc' ? 'desc' : 'asc'); setOrderBy('start_at'); }}>
                              開始 〜 終了日時
                          </TableSortLabel>
                      </TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>利用者</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>担当</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>操作</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>利用者</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>担当</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>操作</TableCell>
                    </TableRow>
                  </TableHead>
                  <TableBody>
@@ -569,7 +585,7 @@ export default function ReportsPage() {
                      };
 
                      return (
-                         <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 }, bgcolor: isAbnormal ? '#fff5f5' : 'inherit' }}>
+                         <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 }, bgcolor: isAbnormal ? 'background.danger' : 'inherit' }}>
                            <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
                            <TableCell><Chip label={row.status === 'approved' ? '承認済' : row.status === 'remanded' ? '差戻し' : '未承認'} color={row.status === 'approved' ? 'success' : row.status === 'remanded' ? 'error' : 'warning'} size="small" variant="outlined" /></TableCell>
                            
@@ -602,7 +618,7 @@ export default function ReportsPage() {
                          </TableRow>
                      );
                    })}
-                   {reports.length === 0 && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: '#999' }}>該当する記録がありません</TableCell></TableRow>}
+                   {reports.length === 0 && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: 'text.disabled' }}>該当する記録がありません</TableCell></TableRow>}
                  </TableBody>
                </Table>
              </TableContainer>

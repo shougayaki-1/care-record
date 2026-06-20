@@ -1,5 +1,6 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/renderer';
+import type { PdfStaffMember } from './ShiftCalendarDocument';
 
 const getFontUrl = (filename: string) => {
     return typeof window !== 'undefined'
@@ -33,6 +34,27 @@ const styles = StyleSheet.create({
     },
     title: { fontSize: 16, fontWeight: 'bold', color: '#2255CC' },
     month: { fontSize: 12 },
+    staffSection: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        marginBottom: 10,
+        paddingBottom: 6,
+        borderBottomWidth: 1,
+        borderColor: '#E3E5E8',
+    },
+    staffSectionLabel: { fontSize: 10, fontWeight: 'bold', color: '#555', marginRight: 6 },
+    staffChip: {
+        flexDirection: 'row',
+        backgroundColor: '#F0F5FF',
+        borderRadius: 3,
+        paddingVertical: 2,
+        paddingHorizontal: 6,
+        marginRight: 6,
+        marginBottom: 4,
+    },
+    staffChipName: { fontSize: 10, fontWeight: 'bold', color: '#333' },
+    staffChipPosition: { fontSize: 9.5, color: '#2255CC', marginLeft: 3 },
     table: { width: '100%', borderWidth: 1, borderColor: '#ddd' },
     tableHeader: { flexDirection: 'row', backgroundColor: '#F0F5FF', borderBottomWidth: 1, borderColor: '#ddd', fontWeight: 'bold' },
     tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#ddd', minHeight: 26, alignItems: 'center' },
@@ -71,10 +93,11 @@ type Props = {
     title: string;
     monthStr: string;
     shifts: PdfShiftData[];
-    orgName: string; 
+    orgName: string;
+    staffMembers?: PdfStaffMember[];
 };
 
-export const ShiftScheduleDocument = ({ title, monthStr, shifts, orgName }: Props) => {
+export const ShiftScheduleDocument = ({ title, monthStr, shifts, orgName, staffMembers = [] }: Props) => {
     return (
         <Document>
             <Page size="A4" style={styles.page}>
@@ -82,6 +105,18 @@ export const ShiftScheduleDocument = ({ title, monthStr, shifts, orgName }: Prop
                     <Text style={styles.title}>{title}</Text>
                     <Text style={styles.month}>{monthStr}</Text>
                 </View>
+
+                {staffMembers.length > 0 && (
+                    <View style={styles.staffSection}>
+                        <Text style={styles.staffSectionLabel}>スタッフ：</Text>
+                        {staffMembers.map((s, i) => (
+                            <View key={i} style={styles.staffChip}>
+                                <Text style={styles.staffChipName}>{s.name}</Text>
+                                {s.positions && s.positions.length > 0 ? <Text style={styles.staffChipPosition}>{s.positions.join('・')}</Text> : null}
+                            </View>
+                        ))}
+                    </View>
+                )}
 
                 <View style={styles.table}>
                     <View style={styles.tableHeader}>

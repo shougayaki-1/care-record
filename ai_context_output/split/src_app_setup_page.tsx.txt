@@ -3,25 +3,28 @@
 import { useState, useEffect } from 'react';
 import {
     Box, Typography, Paper, TextField, Button, Stack, CircularProgress, Card, CardActionArea, Alert
-} from '@mui/material';
+} from '@/components/ui/mui';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { acceptInvitation } from '@/app/actions/accounts';
 import { User } from '@supabase/supabase-js';
 import BusinessIcon from '@mui/icons-material/Business';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import PersonIcon from '@mui/icons-material/Person';
+import { useToast } from '@/components/ui/ToastProvider';
+import { createOrganization, updateOwnProfile } from '@/app/actions/user';
 
 type Step = 'profile' | 'choice' | 'create' | 'join';
 
 export default function SetupPage() {
     const router = useRouter();
+    const { showToast } = useToast();
     const searchParams = useSearchParams();
     const paramInviteCode = searchParams.get('inviteCode');
 
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [step, setStep] = useState<Step>('profile');
-    const [userId, setUserId] = useState('');
     const [hasMembership, setHasMembership] = useState(false);
     
     // 入力値
@@ -41,7 +44,6 @@ export default function SetupPage() {
         const processUser = async (user: User) => {
             if (!mounted) return;
             console.log('[SetupPage] Session confirmed for:', user.id);
-            setUserId(user.id);
 
             try {
                 const { data: profile, error: profileError } = await supabase.from('profiles').select('name').eq('id', user.id).single();
@@ -123,8 +125,7 @@ export default function SetupPage() {
         if (!userName.trim()) return;
         setSubmitting(true);
         try {
-            const { error } = await supabase.from('profiles').upsert({ id: userId, name: userName, is_agreed: true, agreed_at: new Date().toISOString() });
-            if (error) throw error;
+            await updateOwnProfile(userName, true);
             
             if (inviteCode) {
                 setStep('join');
@@ -133,7 +134,7 @@ export default function SetupPage() {
             }
         } catch (e) {
             console.error('Profile Save Error:', e);
-            alert(`プロフィールの保存に失敗しました: ${getErrorMessage(e)}`);
+            showToast(`プロフィールの保存に失敗しました: ${getErrorMessage(e)}`, 'error');
         } finally {
             setSubmitting(false);
         }
@@ -143,17 +144,11 @@ export default function SetupPage() {
         if (!orgName.trim()) return;
         setSubmitting(true);
         try {
-            const { data: orgId, error } = await supabase.rpc('create_organization', { 
-                org_name: orgName 
-            });
-            
-            if (error) throw error;
-
-            await supabase.from('profiles').update({ last_organization_id: orgId }).eq('id', userId);
+            await createOrganization(orgName);
             window.location.href = '/app';
         } catch (e) {
             console.error('Create Org Error:', e);
-            alert(`事業所の作成に失敗しました: ${getErrorMessage(e)}`);
+            showToast(`事業所の作成に失敗しました: ${getErrorMessage(e)}`, 'error');
             setSubmitting(false);
         }
     };
@@ -162,59 +157,15 @@ export default function SetupPage() {
         if (!inviteCode.trim()) return;
         setSubmitting(true);
         try {
-            const { data: invite, error: inviteError } = await supabase
-                .from('invitations')
-                .select('*')
-                .eq('code', inviteCode)
-                .eq('is_used', false)
-                .single();
-
-            if (inviteError || !invite) {
-                alert('無効な招待コード、または既に使用されています');
-                setSubmitting(false);
-                return;
+            // 招待の検証・メンバー登録・割り当てはサーバ(service role)で安全に処理する
+            const res = await acceptInvitation(inviteCode.trim());
+            if (res.alreadyMember) {
+                showToast('すでにこの事業所に参加しています。移動します。', 'info');
             }
-
-            const { data: existingMember } = await supabase
-                .from('organization_members')
-                .select('id')
-                .eq('organization_id', invite.organization_id)
-                .eq('user_id', userId)
-                .maybeSingle();
-
-            if (existingMember) {
-                await supabase.from('profiles').update({ last_organization_id: invite.organization_id }).eq('id', userId);
-                alert('すでにこの事業所に参加しています。移動します。');
-                window.location.href = '/app';
-                return;
-            }
-
-            const { error: memberError } = await supabase
-                .from('organization_members')
-                .insert({
-                    organization_id: invite.organization_id,
-                    user_id: userId,
-                    role: invite.role
-                });
-
-            if (memberError) throw memberError;
-
-            await supabase.from('invitations').update({ is_used: true }).eq('id', invite.id);
-
-            if (invite.target_client_ids && invite.target_client_ids.length > 0) {
-                const assignments = invite.target_client_ids.map((clientId: string) => ({
-                    helper_id: userId,
-                    client_id: clientId
-                }));
-                await supabase.from('assignments').insert(assignments);
-            }
-
-            await supabase.from('profiles').update({ last_organization_id: invite.organization_id }).eq('id', userId);
-
             window.location.href = '/app';
         } catch (e) {
             console.error('Join Org Error:', e);
-            alert(`参加に失敗しました: ${getErrorMessage(e)}`);
+            showToast(`参加に失敗しました: ${getErrorMessage(e)}`, 'error');
             setSubmitting(false);
         }
     };
@@ -222,8 +173,8 @@ export default function SetupPage() {
     if (loading) return <Box p={5} textAlign="center"><CircularProgress /><Typography mt={2}>セットアップ情報を取得中...</Typography></Box>;
 
     return (
-        <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f5f5f5', p: 2 }}>
-            <Paper elevation={0} sx={{ p: 4, width: '100%', maxWidth: 480, borderRadius: 3, border: '1px solid #ddd' }}>
+        <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default', p: 2 }}>
+            <Paper elevation={0} sx={{ p: 4, width: '100%', maxWidth: 480, borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
                 
                 {step === 'join' && paramInviteCode && (
                     <Alert severity="info" sx={{ mb: 3 }}>
@@ -269,7 +220,7 @@ export default function SetupPage() {
                         <Card variant="outlined" sx={{ borderRadius: 2 }}>
                             <CardActionArea onClick={() => setStep('create')} sx={{ p: 2 }}>
                                 <Stack direction="row" alignItems="center" spacing={2}>
-                                    <Box sx={{ p: 1, bgcolor: '#e3f2fd', borderRadius: '50%', color: 'primary.main' }}>
+                                    <Box sx={{ p: 1, bgcolor: 'background.tint', borderRadius: '50%', color: 'primary.main' }}>
                                         <BusinessIcon />
                                     </Box>
                                     <Box>
@@ -283,7 +234,7 @@ export default function SetupPage() {
                         <Card variant="outlined" sx={{ borderRadius: 2 }}>
                             <CardActionArea onClick={() => setStep('join')} sx={{ p: 2 }}>
                                 <Stack direction="row" alignItems="center" spacing={2}>
-                                    <Box sx={{ p: 1, bgcolor: '#f3e5f5', borderRadius: '50%', color: 'secondary.main' }}>
+                                    <Box sx={{ p: 1, bgcolor: 'background.muted', borderRadius: '50%', color: 'secondary.main' }}>
                                         <GroupAddIcon />
                                     </Box>
                                     <Box>

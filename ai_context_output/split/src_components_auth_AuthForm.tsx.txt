@@ -3,9 +3,12 @@
 import { useState, useEffect } from 'react';
 import {
     Box, Button, TextField, Typography, Stack, Alert, CircularProgress, Divider, Tabs, Tab, Fade
-} from '@mui/material';
+} from '@/components/ui/mui';
 import { supabase } from '@/lib/supabase';
 import { useSearchParams } from 'next/navigation';
+import { loginWithPassword, registerWithPassword } from '@/app/actions/auth';
+import { RATE_LIMIT_MESSAGE } from '@/utils/authConstants';
+import { validatePassword, PASSWORD_POLICY_HINT } from '@/utils/passwordPolicy';
 
 // ... (Logoコンポーネントは省略、そのまま使用) ...
 const GoogleLogo = () => (
@@ -68,36 +71,40 @@ export const AuthForm = () => {
         try {
             if (isRegisterMode) {
                 // --- 新規アカウント作成 ---
-                const { data, error } = await supabase.auth.signUp({
-                    email,
-                    password,
-                });
-
-                if (error) throw error;
-                
-                if (data.user && data.user.identities && data.user.identities.length === 0) {
+                const policy = validatePassword(password);
+                if (!policy.ok) {
+                    setMessage({ type: 'error', text: policy.message });
+                    setLoading(false);
+                    return;
+                }
+                const result = await registerWithPassword(email, password);
+                if (!result.ok && result.reason === 'already_registered') {
                     setMessage({ 
                         type: 'info', 
                         text: 'このメールアドレスは既に登録されています。ログインしてください。' 
                     });
                     setTabIndex(0);
-                } else if (data.user) {
-                    setMessage({ type: 'success', text: 'アカウントを作成しました。自動的にログインします...' });
+                } else if (!result.ok) {
+                    if (result.reason === 'rate_limited') throw new Error(RATE_LIMIT_MESSAGE);
+                    if (result.reason === 'invalid_password') throw new Error(result.message || PASSWORD_POLICY_HINT);
+                    throw new Error('アカウントを作成できませんでした。');
+                } else if (result.signedIn) {
+                    setMessage({ type: 'success', text: 'アカウントを作成しました。自動的にログインします…' });
                     setTimeout(() => { window.location.href = nextUrl; }, 1000);
+                } else {
+                    setMessage({ type: 'success', text: '確認メールを送信しました。メール内のリンクから登録を完了してください。' });
                 }
             } else {
                 // --- ログイン ---
-                const { error } = await supabase.auth.signInWithPassword({ email, password });
-                if (error) {
-                    if (error.message.includes('Invalid login credentials')) {
-                        throw new Error('メールアドレスまたはパスワードが正しくありません。');
-                    }
-                    if (error.message.includes('Email not confirmed')) {
-                        throw new Error('メールアドレスの確認が完了していません。');
-                    }
-                    throw error;
+                // レート制限・監査・試行記録を確実に行うためサーバーアクション経由でログインする。
+                const result = await loginWithPassword(email, password);
+                if (!result.ok) {
+                    if (result.reason === 'rate_limited') throw new Error(RATE_LIMIT_MESSAGE);
+                    if (result.reason === 'email_unconfirmed') throw new Error('メールアドレスの確認が完了していません。');
+                    if (result.reason === 'invalid_credentials') throw new Error('メールアドレスまたはパスワードが正しくありません。');
+                    throw new Error('ログインに失敗しました。時間をおいて再度お試しください。');
                 }
-                // Routerではなくwindow.locationで確実にリロードさせる
+                // セッションCookieはサーバー側で設定済み。確実にリロードさせて反映する。
                 window.location.href = nextUrl;
             }
         } catch (err) {
@@ -126,7 +133,7 @@ export const AuthForm = () => {
                 <Typography
                     variant="h4"
                     component="h1"
-                    sx={{ fontFamily: 'var(--font-poppins)', fontWeight: 700, color: '#2255CC', letterSpacing: '-0.5px' }}
+                    sx={{ fontFamily: 'var(--font-poppins)', fontWeight: 700, color: 'primary.main', letterSpacing: '-0.5px' }}
                 >
                     CareRecord
                 </Typography>
@@ -162,7 +169,7 @@ export const AuthForm = () => {
                     )}
 
                     <Stack spacing={1.5} mb={3}>
-                        <Button variant="outlined" startIcon={<GoogleLogo />} onClick={() => handleOAuth('google')} fullWidth sx={{ color: '#3c4043', borderColor: '#dadce0', bgcolor: '#fff', textTransform: 'none', py: 1.2 }}>
+                        <Button variant="outlined" startIcon={<GoogleLogo />} onClick={() => handleOAuth('google')} fullWidth sx={{ color: '#3c4043', borderColor: '#dadce0', bgcolor: 'background.paper', textTransform: 'none', py: 1.2 }}>
                             Google で{isRegisterMode ? '登録' : 'ログイン'}
                         </Button>
                         <Button variant="contained" startIcon={<MicrosoftLogo />} onClick={() => handleOAuth('azure')} fullWidth sx={{ color: '#fff', bgcolor: '#2F2F2F', textTransform: 'none', py: 1.2, '&:hover': { bgcolor: '#1a1a1a' } }}>
@@ -170,7 +177,7 @@ export const AuthForm = () => {
                         </Button>
                     </Stack>
 
-                    <Divider sx={{ mb: 3, fontSize: 12, color: '#666' }}>またはメールアドレス</Divider>
+                    <Divider sx={{ mb: 3, fontSize: 12, color: 'text.secondary' }}>またはメールアドレス</Divider>
 
                     <form onSubmit={handleAuth}>
                         <Stack spacing={2.5}>
@@ -189,7 +196,7 @@ export const AuthForm = () => {
                                 type="password" 
                                 fullWidth 
                                 required 
-                                helperText={isRegisterMode ? "6文字以上で設定してください" : ""} 
+                                helperText={isRegisterMode ? PASSWORD_POLICY_HINT : ""}
                                 value={password} 
                                 onChange={(e) => setPassword(e.target.value)} 
                                 size="small"
