@@ -14,12 +14,22 @@ export default function LoginPage() {
   // URLパラメータのエラーを表示
   const errorParam = searchParams.get('error');
   const detailsParam = searchParams.get('details');
+  const reasonParam = searchParams.get('reason');
 
   useEffect(() => {
     const checkSession = async () => {
       console.log('[LoginPage] Checking session...');
+
+      // サーバー側セッション検証でアイドルタイムアウト/期限切れと判定された場合は
+      // Supabase セッションも破棄してログイン画面を表示する（リダイレクトループ防止）
+      if (reasonParam === 'idle_timeout') {
+        await supabase.auth.signOut();
+        setChecking(false);
+        return;
+      }
+
       const { data: { session }, error } = await supabase.auth.getSession();
-      
+
       if (error) {
           console.error('[LoginPage] GetSession Error:', error);
       }
@@ -30,11 +40,10 @@ export default function LoginPage() {
       } else {
         console.log('[LoginPage] No session found.');
         setChecking(false);
-        // デバッグ用にコンソールだけでなく画面にも出す（必要なら）
       }
     };
     checkSession();
-  }, [router]);
+  }, [router, reasonParam]);
 
   if (checking) {
     return (

@@ -27,7 +27,7 @@ export const TermsAgreementModal = () => {
                 .from('profiles')
                 .select('is_agreed')
                 .eq('id', user.id)
-                .single();
+                .maybeSingle();
 
             if (data && !data.is_agreed) setOpen(true);
         };

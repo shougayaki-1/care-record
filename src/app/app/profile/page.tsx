@@ -59,7 +59,7 @@ export default function ProfilePage() {
                 const identities = user.identities as unknown as UserIdentity[];
                 setLinkedProviders(identities.map((id) => id.provider));
             }
-            const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).single();
+            const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).maybeSingle();
             if (profile) {
                 setName(profile.name);
                 setAvatarUrl(profile.avatar_url);

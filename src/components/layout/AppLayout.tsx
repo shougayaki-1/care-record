@@ -143,7 +143,7 @@ const TopAppBar = ({
     const fetchUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).single();
+        const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).maybeSingle();
         if (profile) {
           setUserName(profile.name);
           setAvatarUrl(profile.avatar_url);
