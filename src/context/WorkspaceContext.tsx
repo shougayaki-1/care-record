@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 // useRouterは使用していなかったので削除
 import { CircularProgress, Box } from '@mui/material';
@@ -37,21 +38,26 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    // 初回読み込み
-    fetchWorkspaces();
-
-    // 認証状態の変化を監視
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    // INITIAL_SESSIONを初回読み込みの唯一の起点にし、二重取得による状態上書きを防ぐ。
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log(`[WorkspaceProvider] Auth event: ${event}`);
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         // Authの内部ロック解放後に読み込む。コールバック内でAuth APIを再入させない。
-        setTimeout(() => void fetchWorkspaces(), 0);
+        setTimeout(() => void fetchWorkspaces(session), 0);
       } else if (event === 'SIGNED_OUT') {
-        setCurrentOrg(null);
-        setOrgList([]);
-        setLoading(false);
-        setStatus('session_expired');
-        setErrorMessage(null);
+        // トークン更新中の一時イベントで正常な表示を消さないよう、現在値を再確認する。
+        setTimeout(() => void (async () => {
+          const { data: { session: currentSession } } = await supabase.auth.getSession();
+          if (currentSession) {
+            await fetchWorkspaces(currentSession);
+            return;
+          }
+          setCurrentOrg(null);
+          setOrgList([]);
+          setLoading(false);
+          setStatus('session_expired');
+          setErrorMessage(null);
+        })(), 0);
       }
     });
 
@@ -60,12 +66,15 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
     };
   }, []);
 
-  const fetchWorkspaces = async () => {
+  const fetchWorkspaces = async (knownSession?: Session | null) => {
     try {
       setLoading(true);
       setStatus('loading');
       setErrorMessage(null);
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const sessionResult = knownSession === undefined
+        ? await supabase.auth.getSession()
+        : { data: { session: knownSession }, error: null };
+      const { data: { session }, error: sessionError } = sessionResult;
       if (sessionError || !session?.user) {
         setOrgList([]);
         setCurrentOrg(null);
@@ -127,6 +136,10 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
     }
   };
 
+  const refreshWorkspace = async () => {
+    await fetchWorkspaces();
+  };
+
   const switchOrg = async (orgId: string) => {
     const target = orgList.find(o => o.id === orgId);
     if (target) {
@@ -141,7 +154,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   }
 
   return (
-    <WorkspaceContext.Provider value={{ currentOrg, orgList, switchOrg, refreshWorkspace: fetchWorkspaces, loading, status, errorMessage }}>
+    <WorkspaceContext.Provider value={{ currentOrg, orgList, switchOrg, refreshWorkspace, loading, status, errorMessage }}>
       {children}
     </WorkspaceContext.Provider>
   );
