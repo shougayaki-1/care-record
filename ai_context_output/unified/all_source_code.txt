@@ -13685,7 +13685,6 @@ import { supabase } from '@/lib/supabase';
 // useRouterは使用していなかったので削除
 import { CircularProgress, Box } from '@mui/material';
 import { setLastOrganization } from '@/app/actions/user';
-import { getMyWorkspaces } from '@/app/actions/workspace';
 
 export type OrganizationRole = 'owner' | 'manager' | 'staff';
 
@@ -13725,7 +13724,8 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       console.log(`[WorkspaceProvider] Auth event: ${event}`);
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        fetchWorkspaces();
+        // Authの内部ロック解放後に読み込む。コールバック内でAuth APIを再入させない。
+        setTimeout(() => void fetchWorkspaces(), 0);
       } else if (event === 'SIGNED_OUT') {
         setCurrentOrg(null);
         setOrgList([]);
@@ -13745,22 +13745,59 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       setLoading(true);
       setStatus('loading');
       setErrorMessage(null);
-      const { data: { session } } = await supabase.auth.getSession();
-      const result = await getMyWorkspaces(session?.access_token);
-
-      if (result.status === 'success') {
-        const list: Workspace[] = result.workspaces;
-        setOrgList(list);
-        const lastOrgId = result.currentOrganizationId;
-        const target = list.find(o => o.id === lastOrgId) || list[0];
-        setCurrentOrg(target);
-        setStatus('ready');
-      } else {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session?.user) {
         setOrgList([]);
         setCurrentOrg(null);
-        setStatus(result.status);
-        setErrorMessage('message' in result ? result.message : null);
+        setStatus('session_expired');
+        setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
+        return;
       }
+
+      // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
+      const [{ data: members, error: memberError }, { data: profile, error: profileError }] = await Promise.all([
+        supabase
+          .from('organization_members')
+          .select('organization_id, role, organizations!inner(id, name)')
+          .eq('user_id', session.user.id),
+        supabase
+          .from('profiles')
+          .select('last_organization_id')
+          .eq('id', session.user.id)
+          .maybeSingle(),
+      ]);
+
+      if (memberError || profileError) {
+        console.error('Workspace lookup failed', { memberError, profileError });
+        setStatus('error');
+        setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
+        return;
+      }
+
+      const list: Workspace[] = [];
+      for (const member of members ?? []) {
+        const organization = Array.isArray(member.organizations)
+          ? member.organizations[0]
+          : member.organizations;
+        if (!organization || !['owner', 'manager', 'staff'].includes(member.role)) {
+          setStatus('forbidden');
+          setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
+          return;
+        }
+        list.push({ id: organization.id, name: organization.name, role: member.role as OrganizationRole });
+      }
+
+      if (list.length === 0) {
+        setOrgList([]);
+        setCurrentOrg(null);
+        setStatus('no_membership');
+        return;
+      }
+
+      setOrgList(list);
+      const target = list.find(o => o.id === profile?.last_organization_id) || list[0];
+      setCurrentOrg(target);
+      setStatus('ready');
     } catch (error) {
       console.error('Workspace fetch error:', error);
       setStatus('error');
@@ -14486,6 +14523,63 @@ export function decryptGoogleToken(value: string): string {
 
 
 
+--- START OF FILE src/utils/jwt.test.ts ---
+
+import { describe, expect, it } from 'vitest';
+import { decodeJwtPayload, decodeJwtSessionId } from './jwt';
+
+function tokenFor(payload: Record<string, unknown>): string {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `header.${encoded}.signature`;
+}
+
+describe('JWT payload decoder', () => {
+  it('Base64URLのpaddingなしpayloadからsession_idを取得する', () => {
+    expect(decodeJwtSessionId(tokenFor({ session_id: 'session-123' }))).toBe('session-123');
+  });
+
+  it('UTF-8のpayloadを復元する', () => {
+    expect(decodeJwtPayload(tokenFor({ name: '介護記録' }))?.name).toBe('介護記録');
+  });
+
+  it('不正なtokenはnullを返す', () => {
+    expect(decodeJwtPayload('invalid-token')).toBeNull();
+    expect(decodeJwtSessionId(tokenFor({ session_id: 123 }))).toBeNull();
+  });
+});
+
+
+
+--- START OF FILE src/utils/jwt.ts ---
+
+/**
+ * JWTのpayloadをBase64URLとしてデコードする。
+ * 署名検証は行わないため、必ずAuthサーバーでトークン検証した後に使うこと。
+ */
+export function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const encoded = token.split('.')[1];
+    if (!encoded) return null;
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - base64.length % 4) % 4), '=');
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+    const payload: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return payload !== null && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function decodeJwtSessionId(token: string): string | null {
+  const sessionId = decodeJwtPayload(token)?.session_id;
+  return typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
+}
+
+
+
 --- START OF FILE src/utils/passwordPolicy.ts ---
 
 // パスワードポリシー（3省2ガイドライン: 推測困難なパスワードの強制）。
@@ -14964,6 +15058,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
+import { decodeJwtSessionId } from '@/utils/jwt';
 
 export type OrgRole = 'owner' | 'manager' | 'staff';
 export const SESSION_IDLE_MINUTES = 16;
@@ -15016,13 +15111,9 @@ function hashAccessToken(accessToken: string): string {
 }
 
 function getAuthSessionId(accessToken: string): string {
-    try {
-        const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8')) as { session_id?: string };
-        if (!payload.session_id) throw new Error('missing session_id');
-        return payload.session_id;
-    } catch {
-        throw new Error('認証セッション識別子を検証できません');
-    }
+    const sessionId = decodeJwtSessionId(accessToken);
+    if (!sessionId) throw new Error('認証セッション識別子を検証できません');
+    return sessionId;
 }
 
 async function getVerifiedAuthContext(): Promise<{ id: string; email?: string; authSessionId: string; session: Session }> {
@@ -15270,14 +15361,10 @@ export async function recordLoginAttempt(email: string, outcome: 'success' | 'fa
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
+import { decodeJwtSessionId } from '@/utils/jwt';
 
 function authSessionId(accessToken: string): string | null {
-    try {
-        const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8')) as { session_id?: string };
-        return payload.session_id || null;
-    } catch {
-        return null;
-    }
+    return decodeJwtSessionId(accessToken);
 }
 
 export async function updateSession(request: NextRequest, nonce: string, csp: string) {

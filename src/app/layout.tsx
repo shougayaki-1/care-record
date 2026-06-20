@@ -9,6 +9,7 @@ import { TermsAgreementModal } from "@/components/auth/TermsAgreementModal";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import { ConfirmProvider } from "@/components/ui/ConfirmProvider";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { ServiceWorkerCleanup } from "@/components/ServiceWorkerCleanup";
 import { headers } from 'next/headers';
 
 const inter = Inter({ subsets: ["latin"] });
@@ -45,6 +46,7 @@ export default async function RootLayout({
         className={`${inter.className} ${poppins.variable}`}
         suppressHydrationWarning // <body>タグ自体に注入される属性エラーも抑止
       >
+        <ServiceWorkerCleanup />
         <AppRouterCacheProvider options={{ nonce }}>
           <ThemeProvider theme={theme}>
             <CssBaseline />

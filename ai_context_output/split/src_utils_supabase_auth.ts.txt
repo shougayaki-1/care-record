@@ -6,6 +6,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
+import { decodeJwtSessionId } from '@/utils/jwt';
 
 export type OrgRole = 'owner' | 'manager' | 'staff';
 export const SESSION_IDLE_MINUTES = 16;
@@ -58,13 +59,9 @@ function hashAccessToken(accessToken: string): string {
 }
 
 function getAuthSessionId(accessToken: string): string {
-    try {
-        const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8')) as { session_id?: string };
-        if (!payload.session_id) throw new Error('missing session_id');
-        return payload.session_id;
-    } catch {
-        throw new Error('認証セッション識別子を検証できません');
-    }
+    const sessionId = decodeJwtSessionId(accessToken);
+    if (!sessionId) throw new Error('認証セッション識別子を検証できません');
+    return sessionId;
 }
 
 async function getVerifiedAuthContext(): Promise<{ id: string; email?: string; authSessionId: string; session: Session }> {
