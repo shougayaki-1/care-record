@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { registerSessionActivity } from '@/utils/supabase/auth';
+import { cookies } from 'next/headers';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -16,29 +17,34 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/?error=no_code`);
   }
 
-  // exchangeCodeForSession が更新するCookieとキャッシュ抑止ヘッダーを、
-  // リダイレクトレスポンスへ直接反映する。
-  const response = NextResponse.redirect(`${origin}${next}`);
+  const cookieStore = await cookies();
+  const authCookies: Array<{ name: string; value: string; options: CookieOptions }> = [];
+  const isLocal = origin.startsWith('http://localhost');
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
         getAll() {
-          return request.cookies.getAll();
+          return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
-            const isLocal = origin.startsWith('http://localhost');
-            response.cookies.set(name, value, {
+            const normalizedOptions: CookieOptions = {
               ...options,
-              secure: !isLocal && options.secure,
-            });
+              path: options.path || '/',
+              sameSite: options.sameSite || 'lax',
+              secure: !isLocal,
+            };
+            authCookies.push({ name, value, options: normalizedOptions });
+            cookieStore.set(name, value, normalizedOptions);
           });
-          response.headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate, max-age=0');
-          response.headers.set('Expires', '0');
-          response.headers.set('Pragma', 'no-cache');
         },
+      },
+      cookieOptions: {
+        path: '/',
+        sameSite: 'lax',
+        secure: !isLocal,
       },
     }
   );
@@ -73,5 +79,13 @@ export async function GET(request: NextRequest) {
     console.error('failed to record login audit:', auditError);
   }
 
+  // exchange完了後に、実際に返すResponseへSet-Cookieを明示的に付与する。
+  const response = NextResponse.redirect(`${origin}${next}`);
+  authCookies.forEach(({ name, value, options }) => {
+    response.cookies.set(name, value, options);
+  });
+  response.headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate, max-age=0');
+  response.headers.set('Expires', '0');
+  response.headers.set('Pragma', 'no-cache');
   return response;
 }
