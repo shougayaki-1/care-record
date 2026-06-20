@@ -11,7 +11,6 @@ import {
   isLoginRateLimited,
   applyProgressiveLoginDelay,
   recordLoginAttempt,
-  LOGIN_WINDOW_MINUTES,
 } from '@/utils/supabase/loginAttempts';
 import { validatePassword } from '@/utils/passwordPolicy';
 
@@ -128,4 +127,3 @@ export async function recordOAuthLogin(method: string): Promise<void> {
   }
 }
 
-export const RATE_LIMIT_MESSAGE = `ログイン試行が一定回数を超えました。約${LOGIN_WINDOW_MINUTES}分後に再度お試しください。`;

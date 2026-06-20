@@ -6,7 +6,8 @@ import {
 } from '@/components/ui/mui';
 import { supabase } from '@/lib/supabase';
 import { useSearchParams } from 'next/navigation';
-import { loginWithPassword, registerWithPassword, RATE_LIMIT_MESSAGE } from '@/app/actions/auth';
+import { loginWithPassword, registerWithPassword } from '@/app/actions/auth';
+import { RATE_LIMIT_MESSAGE } from '@/utils/authConstants';
 import { validatePassword, PASSWORD_POLICY_HINT } from '@/utils/passwordPolicy';
 
 // ... (Logoコンポーネントは省略、そのまま使用) ...

@@ -313,12 +313,14 @@ export async function getSyncStatus(organizationId: string) {
     const { count: total } = await supabaseAdmin
         .from('shifts')
         .select('id', { count: 'exact', head: true })
-        .eq('organization_id', organizationId);
+        .eq('organization_id', organizationId)
+        .is('deleted_at', null);
 
     const { count: unsynced } = await supabaseAdmin
         .from('shifts')
         .select('id', { count: 'exact', head: true })
         .eq('organization_id', organizationId)
+        .is('deleted_at', null)
         .is('google_event_id', null);
 
     return { connected, total: total || 0, unsynced: unsynced || 0 };
@@ -608,54 +610,6 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
 }
 
 /**
- * 月次で一括展開されたシフトを消去する
- */
-export async function clearGeneratedShiftsForMonth(
-    organizationId: string,
-    yearMonth: string,
-    unmodifiedOnly: boolean = true
-) {
-    await assertOrgRole(organizationId, ['owner', 'manager']);
-    const [year, month] = yearMonth.split('-').map(Number);
-    const lastDayNum = new Date(year, month, 0).getDate();
-
-    const startDateISO = new Date(buildJstIsoString(year, month, 1, "00:00")).toISOString();
-    const endDateISO = new Date(buildJstIsoString(year, month, lastDayNum, "23:59")).toISOString();
-
-    try {
-        let query = supabaseAdmin.from('shifts')
-            .select('id')
-            .eq('organization_id', organizationId)
-            .not('pattern_id', 'is', null)
-            .or(`and(start_at.gte.${startDateISO},start_at.lte.${endDateISO})`);
-
-        if (unmodifiedOnly) {
-            query = query.eq('is_modified', false);
-        }
-
-        const { data: shifts, error } = await query;
-        if (error) throw error;
-        if (!shifts || shifts.length === 0) return { success: true, count: 0 };
-
-        const shiftIds = shifts.map(s => s.id);
-
-        // Googleカレンダーからの削除に成功（または不要）だったものだけをDBから削除する。
-        // 失敗分はDBに残し、未削除として再試行できるようにする（Google側に孤児イベントを残さない）。
-        const outcome = await processShiftsSequential(organizationId, shifts, 'delete');
-        const deletableIds = shiftIds.filter(id => !outcome.failedIds.includes(id));
-
-        if (deletableIds.length > 0) {
-            await softDeleteShiftIds(organizationId, deletableIds, '月次生成シフトの削除');
-        }
-
-        return { success: true, count: deletableIds.length, failed: outcome.failed, errorKind: outcome.errorKind };
-    } catch (error) {
-        console.error('Clear Deployed Shifts Error:', error);
-        throw error;
-    }
-}
-
-/**
  * 指定したシフトID群を「Googleから削除成功した分のみDB削除」する安全なチャンク削除。
  * クライアントは件数が多い場合に分割して繰り返し呼ぶ（タイムアウト回避）。
  */
@@ -724,8 +678,8 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
             const rule = rrulestr(ruleStr);
             const occurrences = rule.between(startDateJST, endDateJST, true);
 
-            const [eHour] = p.end_time.split(':').map(Number);
-            const isOvernight = eHour < sHour;
+            const [eHour, eMin] = p.end_time.split(':').map(Number);
+            const isOvernight = eHour * 60 + eMin <= sHour * 60 + sMin;
 
             let patternCount = 0;
             occurrences.forEach(() => {
@@ -806,7 +760,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
 
                 const [eHour, eMin] = p.end_time.split(':').map(Number);
                 const pad = (n: number) => String(n).padStart(2, '0');
-                const isOvernight = eHour < sHour;
+                const isOvernight = eHour * 60 + eMin <= sHour * 60 + sMin;
                 const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
                 const baseJstDateStr = `${yy}-${pad(mm)}-${pad(dd)}`;
 
@@ -891,51 +845,6 @@ export async function deleteShiftCompletely(shiftId: string) {
     }
 }
 
-export async function deleteShiftsBulk(shiftIds: string[]) {
-    await assertShiftsAccessible(shiftIds);
-    try {
-        const { data: shiftsData } = await supabaseAdmin
-            .from('shifts')
-            .select('id, organization_id')
-            .in('id', shiftIds);
-
-        if (!shiftsData || shiftsData.length === 0) return { success: true, deleted: 0, failed: 0 };
-
-        // 組織ごとにまとめて安全削除（Google削除成功分のみDB削除）
-        const byOrg = new Map<string, string[]>();
-        for (const s of shiftsData) {
-            const list = byOrg.get(s.organization_id) || [];
-            list.push(s.id);
-            byOrg.set(s.organization_id, list);
-        }
-
-        let deleted = 0;
-        let failed = 0;
-        let errorKind: SyncErrorKind | undefined;
-        for (const [orgId, ids] of byOrg) {
-            const actor = await assertOrgRole(orgId, ['owner', 'manager']);
-            const policy = await getRetentionPolicy(orgId, 'shift');
-            const outcome = await processShiftsSequential(orgId, ids.map(id => ({ id })), 'delete');
-            const deletableIds = ids.filter(id => !outcome.failedIds.includes(id));
-            if (deletableIds.length > 0) {
-                const { error } = await supabaseAdmin.from('shifts').update({
-                    deleted_at: new Date().toISOString(), deleted_by: actor.userId,
-                    deletion_reason: '管理者による一括削除', retention_until: retentionDeadline(policy.years),
-                }).in('id', deletableIds).is('deleted_at', null);
-                if (error) throw error;
-                await recordAuditEvent({ organizationId: orgId, actorId: actor.userId, action: 'shift.bulk_soft_delete', resourceType: 'shift', reason: '管理者による一括削除', details: { shiftIds: deletableIds, count: deletableIds.length, legalBasis: policy.legalBasis } });
-            }
-            deleted += deletableIds.length;
-            failed += outcome.failed;
-            if (outcome.errorKind) errorKind = outcome.errorKind;
-        }
-        return { success: true, deleted, failed, errorKind };
-    } catch (error) {
-        console.error('Delete Shifts Bulk Error:', error);
-        throw error;
-    }
-}
-
 /**
  * 単一のシフトをGoogleカレンダーに直接強制同期または削除する
  * （第3引数 action に 'sync' または 'delete' を指定。デフォルトは 'sync'）
@@ -950,59 +859,6 @@ export async function syncSingleShift(organizationId: string, shiftId: string, a
         return { success: true };
     } catch (error) {
         console.error('Sync Single Shift Action Error:', error);
-        throw error;
-    }
-}
-
-/**
- * 未同期（google_event_id IS NULL）のシフトを抽出し、Googleカレンダーへ一括再同期する
- */
-export async function repairUnsyncedShifts(organizationId: string) {
-    await assertOrgRole(organizationId, ['owner', 'manager']);
-    try {
-        // google_event_id が登録されていないシフトを検索
-        const { data: unsyncedShifts, error } = await supabaseAdmin
-            .from('shifts')
-            .select('id')
-            .eq('organization_id', organizationId)
-            .is('deleted_at', null)
-            .is('google_event_id', null);
-
-        if (error) throw error;
-        if (!unsyncedShifts || unsyncedShifts.length === 0) {
-            return { success: true, count: 0, failed: 0 };
-        }
-
-        const outcome = await processShiftsSequential(organizationId, unsyncedShifts, 'sync');
-        return { success: true, count: outcome.succeeded, failed: outcome.failed, errorKind: outcome.errorKind };
-    } catch (error) {
-        console.error('Repair Unsynced Shifts Error:', error);
-        throw error;
-    }
-}
-
-/**
- * 登録されている全てのシフト（google_event_idの有無に関わらず）を抽出し、Googleカレンダーへ強制的に全件再同期する
- */
-export async function forceSyncAllShifts(organizationId: string) {
-    await assertOrgRole(organizationId, ['owner', 'manager']);
-    try {
-        // google_event_id の有無にかかわらず、全てのシフトを検索
-        const { data: allShifts, error } = await supabaseAdmin
-            .from('shifts')
-            .select('id')
-            .eq('organization_id', organizationId)
-            .is('deleted_at', null);
-
-        if (error) throw error;
-        if (!allShifts || allShifts.length === 0) {
-            return { success: true, count: 0, failed: 0 };
-        }
-
-        const outcome = await processShiftsSequential(organizationId, allShifts, 'sync');
-        return { success: true, count: outcome.succeeded, failed: outcome.failed, errorKind: outcome.errorKind };
-    } catch (error) {
-        console.error('Force Sync All Shifts Error:', error);
         throw error;
     }
 }
