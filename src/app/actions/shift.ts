@@ -544,14 +544,36 @@ export async function toggleCancelShift(shiftId: string, isCancel: boolean, reas
     } catch (error) { console.error(error); throw error; }
 }
 
-export async function getShifts(organizationId: string, startDate: string, endDate: string) {
+export type ShiftQueryFilter = {
+    staffId?: string;
+    clientId?: string;
+};
+
+export async function getShifts(organizationId: string, startDate: string, endDate: string, filter: ShiftQueryFilter = {}) {
     await assertOrgRole(organizationId);
     try {
-        const { data, error } = await supabaseAdmin.from('shifts').select(`
-            *, clients (id, name), shift_staffs (staff_id, staffs (name))
+        const staffRelation = filter.staffId
+            ? 'shift_staffs!inner (staff_id, staffs (name))'
+            : 'shift_staffs (staff_id, staffs (name))';
+        let query = supabaseAdmin.from('shifts').select(`
+            id,
+            organization_id,
+            client_id,
+            title,
+            start_at,
+            end_at,
+            status,
+            cancel_reason,
+            clients (id, name),
+            ${staffRelation}
         `).eq('organization_id', organizationId)
             .is('deleted_at', null)
-            .gte('start_at', startDate).lte('start_at', endDate);
+            .gte('start_at', startDate).lte('start_at', endDate)
+            .order('start_at', { ascending: false });
+        if (filter.staffId) query = query.eq('shift_staffs.staff_id', filter.staffId);
+        if (filter.clientId) query = query.eq('client_id', filter.clientId);
+
+        const { data, error } = await query;
         if (error) throw error;
         return data;
     } catch (error) { console.error(error); throw error; }
@@ -560,8 +582,15 @@ export async function getShifts(organizationId: string, startDate: string, endDa
 export async function getShiftPatterns(organizationId: string) {
     await assertOrgRole(organizationId);
     const { data, error } = await supabaseAdmin.from('shift_patterns').select(`
-        *, clients (id, name), shift_pattern_staffs (staff_id, staffs (name))
-    `).eq('organization_id', organizationId).is('deleted_at', null);
+        id,
+        client_id,
+        title,
+        start_time,
+        end_time,
+        rrule,
+        clients (id, name),
+        shift_pattern_staffs (staff_id, staffs (name))
+    `).eq('organization_id', organizationId).is('deleted_at', null).order('start_time', { ascending: true });
     if (error) throw error;
     return data;
 }

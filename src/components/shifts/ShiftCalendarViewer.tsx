@@ -3,7 +3,7 @@
 import React, { forwardRef } from 'react';
 import { Paper } from '@/components/ui/mui';
 import FullCalendar from '@fullcalendar/react';
-import { EventInput, EventClickArg, DateSelectArg, EventDropArg } from '@fullcalendar/core';
+import { EventInput, EventClickArg, DateSelectArg, EventDropArg, DatesSetArg } from '@fullcalendar/core';
 import { EventResizeDoneArg } from '@fullcalendar/interaction';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -27,12 +27,13 @@ type Props = {
     onDateSelect?: (info: DateSelectArg) => void;
     onEventDrop?: (info: EventDropArg) => void;         // ★追加：D&D完了時
     onEventResize?: (info: EventResizeDoneArg) => void; // ★追加：リサイズ完了時
+    onDatesSet?: (info: DatesSetArg) => void;
     noEventsText?: string;
 };
 
 export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
     events, initialView, headerToolbar, buttonText, selectable = false, editable = false,
-    onEventClick, onDateSelect, onEventDrop, onEventResize, noEventsText
+    onEventClick, onDateSelect, onEventDrop, onEventResize, onDatesSet, noEventsText
 }, ref) => {
     return (
         <Paper sx={(theme) => ({
@@ -75,6 +76,7 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                 editable={editable}
                 eventDrop={onEventDrop}
                 eventResize={onEventResize}
+                datesSet={onDatesSet}
                 displayEventTime={true}
                 eventTimeFormat={{ hour: 'numeric', minute: '2-digit', meridiem: false, hour12: false }}
                 select={onDateSelect}

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, RefObject } from 'react';
 import { EventInput } from '@fullcalendar/core';
 import FullCalendar from '@fullcalendar/react';
 import { supabase } from '@/lib/supabase';
-import { getShifts, getShiftPatterns } from '@/app/actions/shift';
+import { getShifts, getShiftPatterns, type ShiftQueryFilter } from '@/app/actions/shift';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ClientData, StaffData } from '@/components/shifts/ShiftFormModal';
 
@@ -21,6 +21,11 @@ export type FetchedPatternData = {
 
 type TabId = 'patterns' | 'fullCalendar' | 'myShift' | 'byStaff' | 'byClient';
 
+export type ShiftDateRange = {
+    start: Date;
+    end: Date;
+};
+
 type UseShiftDataParams = {
     currentOrg: { id: string; role: string } | null;
     showToast: (msg: string, severity?: 'success' | 'info' | 'warning' | 'error') => void;
@@ -28,6 +33,14 @@ type UseShiftDataParams = {
     activeTab: TabId;
     selectedStaffId: string;
     selectedClientId: string;
+};
+
+const getCurrentMonthRange = (): ShiftDateRange => {
+    const now = new Date();
+    return {
+        start: new Date(now.getFullYear(), now.getMonth(), 1),
+        end: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+    };
 };
 
 export const useShiftData = ({
@@ -92,33 +105,73 @@ export const useShiftData = ({
         }
     }, [currentOrg, currentUserId]);
 
-    const fetchData = useCallback(async (isBackground = false) => {
+    const fetchUnsyncedCount = useCallback(async () => {
+        if (!currentOrg) return;
+        const { count: unsyncedCountResult } = await supabase
+            .from('shifts')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', currentOrg.id)
+            .is('google_event_id', null)
+            .is('deleted_at', null);
+        setUnsyncedCount(unsyncedCountResult || 0);
+    }, [currentOrg]);
+
+    const fetchPatterns = useCallback(async () => {
+        if (!currentOrg) return;
+        const fetchedPatterns = await getShiftPatterns(currentOrg.id);
+        setPatterns((fetchedPatterns as unknown as FetchedPatternData[]) || []);
+    }, [currentOrg]);
+
+    const getShiftFilter = useCallback((): ShiftQueryFilter | null => {
+        if (activeTab === 'myShift') {
+            return currentStaffId ? { staffId: currentStaffId } : null;
+        }
+        if (activeTab === 'byStaff' && selectedStaffId !== 'all') {
+            return { staffId: selectedStaffId };
+        }
+        if (activeTab === 'byClient' && selectedClientId !== 'all') {
+            return { clientId: selectedClientId };
+        }
+        return {};
+    }, [activeTab, currentStaffId, selectedStaffId, selectedClientId]);
+
+    const fetchData = useCallback(async (isBackground = false, range?: ShiftDateRange) => {
         if (!currentOrg) return;
         if (!isBackground) setInitialLoading(true);
         setIsFetching(true);
 
         const calendarApi = calendarRef.current?.getApi();
         const currentCalendarDate = calendarApi?.getDate();
+        const currentView = calendarApi?.view;
+        const targetRange = range || (currentView
+            ? { start: currentView.activeStart, end: currentView.activeEnd }
+            : getCurrentMonthRange());
 
         try {
-            const fetchedPatterns = await getShiftPatterns(currentOrg.id);
-            setPatterns((fetchedPatterns as unknown as FetchedPatternData[]) || []);
+            if (activeTab === 'patterns') {
+                await fetchPatterns();
+                return;
+            }
 
-            const start = new Date(); start.setMonth(start.getMonth() - 2);
-            const end = new Date(); end.setMonth(end.getMonth() + 6);
-            const fetchedShifts = await getShifts(currentOrg.id, start.toISOString(), end.toISOString());
+            const filter = getShiftFilter();
+            if (!filter) {
+                setRawShifts([]);
+                setEvents([]);
+                return;
+            }
+
+            const fetchedShifts = await getShifts(
+                currentOrg.id,
+                targetRange.start.toISOString(),
+                targetRange.end.toISOString(),
+                filter
+            );
             const typedShifts = (fetchedShifts as unknown as FetchedShiftData[]) || [];
 
-            typedShifts.sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime());
             setRawShifts(typedShifts);
-            setEvents(convertToCalendarEvents(typedShifts, false));
-
-            const { count: unsyncedCountResult } = await supabase
-                .from('shifts')
-                .select('id', { count: 'exact', head: true })
-                .eq('organization_id', currentOrg.id)
-                .is('google_event_id', null);
-            setUnsyncedCount(unsyncedCountResult || 0);
+            const isEditable = activeTab === 'fullCalendar' && ['owner', 'manager'].includes(currentOrg.role);
+            setEvents(convertToCalendarEvents(typedShifts, !isEditable));
+            void fetchUnsyncedCount().catch(console.error);
 
             if (calendarApi && currentCalendarDate) {
                 setTimeout(() => { calendarApi.gotoDate(currentCalendarDate); }, 10);
@@ -130,10 +183,15 @@ export const useShiftData = ({
             setInitialLoading(false);
             setIsFetching(false);
         }
-    }, [currentOrg, showToast, calendarRef]);
+    }, [currentOrg, showToast, calendarRef, activeTab, fetchPatterns, getShiftFilter, fetchUnsyncedCount]);
 
     useEffect(() => {
-        if (!currentUserId || rawShifts.length === 0) {
+        if (rawShifts.length === 0) {
+            setEvents([]);
+            return;
+        }
+
+        if (activeTab === 'myShift' && !currentStaffId) {
             setEvents([]);
             return;
         }
@@ -156,7 +214,7 @@ export const useShiftData = ({
 
         const isEditable = activeTab === 'fullCalendar' && ['owner', 'manager'].includes(currentOrg?.role || '');
         setEvents(convertToCalendarEvents(filtered, !isEditable));
-    }, [rawShifts, activeTab, selectedStaffId, selectedClientId, currentStaffId, currentUserId, currentOrg]);
+    }, [rawShifts, activeTab, selectedStaffId, selectedClientId, currentStaffId, currentOrg]);
 
     return {
         rawShifts,
@@ -172,5 +230,7 @@ export const useShiftData = ({
         setUnsyncedCount,
         fetchData,
         fetchMasterData,
+        fetchPatterns,
+        fetchUnsyncedCount,
     };
 };

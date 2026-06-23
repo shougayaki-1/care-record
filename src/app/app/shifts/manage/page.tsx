@@ -32,9 +32,10 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { ShiftFormModal, ShiftData } from '@/components/shifts/ShiftFormModal';
 import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
 import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
-import { useShiftData } from '@/hooks/useShiftData';
+import { useShiftData, type ShiftDateRange } from '@/hooks/useShiftData';
 import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
+import type { DatesSetArg } from '@fullcalendar/core';
 
 import type { FetchedPatternData } from '@/hooks/useShiftData';
 
@@ -92,7 +93,6 @@ export default function ShiftManagePage() {
     useEffect(() => {
         if (!wsLoading && currentOrg) {
             fetchMasterData();
-            fetchData();
             const isAdminRole = ['owner', 'manager'].includes(currentOrg.role);
             if (!isAdminRole && (activeTab === 'fullCalendar' || activeTab === 'patterns')) {
                 setActiveTab('myShift');
@@ -100,7 +100,20 @@ export default function ShiftManagePage() {
         }
     // activeTab を依存配列に入れない（初期補正のみ行う）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [wsLoading, currentOrg, fetchMasterData, fetchData]);
+    }, [wsLoading, currentOrg, fetchMasterData]);
+
+    useEffect(() => {
+        if (wsLoading || !currentOrg) return;
+        const isAdminRole = ['owner', 'manager'].includes(currentOrg.role);
+        if (!isAdminRole && (activeTab === 'fullCalendar' || activeTab === 'patterns')) return;
+        fetchData(!initialLoading);
+    }, [wsLoading, currentOrg, activeTab, selectedStaffId, selectedClientId, currentStaffId, fetchData, initialLoading]);
+
+    const handleCalendarDatesSet = useCallback((info: DatesSetArg) => {
+        if (activeTab === 'patterns') return;
+        const range: ShiftDateRange = { start: info.start, end: info.end };
+        fetchData(true, range);
+    }, [activeTab, fetchData]);
 
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
         setSyncProgress({ total: 1, current: 0, currentName: shiftId ? 'Googleカレンダーの予定を更新中...' : 'Googleカレンダーへ新規登録中...' });
@@ -513,6 +526,7 @@ export default function ShiftManagePage() {
                                     editable={activeTab === 'fullCalendar' && isAdmin}
                                     onEventDrop={handleEventChange}
                                     onEventResize={handleEventChange}
+                                    onDatesSet={handleCalendarDatesSet}
                                     onDateSelect={(info) => {
                                         if (activeTab !== 'fullCalendar' || !isAdmin) return;
                                         setSelectedShift({
