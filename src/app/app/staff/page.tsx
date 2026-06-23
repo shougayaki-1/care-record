@@ -6,9 +6,6 @@ import {
   Button, Stack,
   IconButton, Tooltip, CircularProgress, Chip
 } from '@/components/ui/mui';
-
-// 役職の入力候補（自由入力も可）
-const POSITION_OPTIONS = ['管理者', 'サービス管理責任者', '常勤', '非常勤', 'ヘルパー', 'サービス提供責任者', '看護師'];
 import BadgeIcon from '@mui/icons-material/Badge';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -26,7 +23,24 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, AppTextField, CreatableMultiSelectField, SelectField } from '@/components/ui';
 import { reorderStaffs, saveStaff, setStaffArchived, softDeleteStaff } from '@/app/actions/staffs';
 
-type StaffData = { id: string; name: string; positions: string[] | null; user_id: string | null; archived_at: string | null; sort_order: number | null; profiles?: { name: string } | null; };
+// 役職の入力候補（自由入力も可）
+const POSITION_OPTIONS = ['サービス提供責任者', 'ヘルパー', '管理者'];
+const EMPLOYMENT_TYPE_OPTIONS = ['常勤', '非常勤'] as const;
+const WORK_STYLE_OPTIONS = ['兼務', '専従'] as const;
+type EmploymentType = (typeof EMPLOYMENT_TYPE_OPTIONS)[number];
+type WorkStyle = (typeof WORK_STYLE_OPTIONS)[number];
+
+type StaffData = {
+  id: string;
+  name: string;
+  positions: string[] | null;
+  employment_type: string | null;
+  work_style: string | null;
+  user_id: string | null;
+  archived_at: string | null;
+  sort_order: number | null;
+  profiles?: { name: string } | null;
+};
 type AccountData = { id: string; name: string; };
 
 export default function StaffPage() {
@@ -42,6 +56,8 @@ export default function StaffPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [staffName, setStaffName] = useState('');
   const [staffPositions, setStaffPositions] = useState<string[]>([]);
+  const [employmentType, setEmploymentType] = useState<EmploymentType>('常勤');
+  const [workStyle, setWorkStyle] = useState<WorkStyle>('兼務');
   const [linkedUserId, setLinkedUserId] = useState<string>('none');
   const [showArchived, setShowArchived] = useState(false);
 
@@ -52,7 +68,7 @@ export default function StaffPage() {
       // 1. スタッフ一覧の取得
       const { data: staffsData, error: staffsError } = await supabase
         .from('staffs')
-        .select(`id, name, positions, user_id, archived_at, sort_order, profiles:profiles!user_id(name)`)
+        .select(`id, name, positions, employment_type, work_style, user_id, archived_at, sort_order, profiles:profiles!user_id(name)`)
         .eq('organization_id', currentOrg.id)
         .order('sort_order', { ascending: true, nullsFirst: false })
         .order('name', { ascending: true });
@@ -100,15 +116,30 @@ export default function StaffPage() {
     const finalPositions = Array.from(new Set(staffPositions.map(p => p.trim()).filter(Boolean)));
 
     try {
-        await saveStaff(currentOrg.id, { staffId: editId, name: staffName, positions: finalPositions, linkedUserId: finalUserId });
+        await saveStaff(currentOrg.id, {
+          staffId: editId,
+          name: staffName,
+          positions: finalPositions,
+          employmentType,
+          workStyle,
+          linkedUserId: finalUserId,
+        });
         showToast(editId ? '更新しました' : '追加しました');
         setModalOpen(false);
         fetchData();
     } catch (e) { console.error(e); showToast('保存に失敗しました', 'error'); }
   };
 
-  const handleOpenAdd = () => { setEditId(null); setStaffName(''); setStaffPositions([]); setLinkedUserId('none'); setModalOpen(true); };
-  const handleOpenEdit = (staff: StaffData) => { setEditId(staff.id); setStaffName(staff.name); setStaffPositions(staff.positions || []); setLinkedUserId(staff.user_id || 'none'); setModalOpen(true); };
+  const handleOpenAdd = () => { setEditId(null); setStaffName(''); setStaffPositions([]); setEmploymentType('常勤'); setWorkStyle('兼務'); setLinkedUserId('none'); setModalOpen(true); };
+  const handleOpenEdit = (staff: StaffData) => {
+    setEditId(staff.id);
+    setStaffName(staff.name);
+    setStaffPositions(staff.positions || []);
+    setEmploymentType(EMPLOYMENT_TYPE_OPTIONS.includes(staff.employment_type as EmploymentType) ? staff.employment_type as EmploymentType : '常勤');
+    setWorkStyle(WORK_STYLE_OPTIONS.includes(staff.work_style as WorkStyle) ? staff.work_style as WorkStyle : '兼務');
+    setLinkedUserId(staff.user_id || 'none');
+    setModalOpen(true);
+  };
   const handleDelete = async (id: string, name: string) => {
       if(!(await confirm({ title: 'スタッフの削除', message: `「${name}」さんを名簿から削除しますか？\n過去のシフトや記録は法定保存期間中そのまま保持されます。`, confirmText: '削除する', confirmColor: 'error' }))) return;
       try { await softDeleteStaff(currentOrg!.id, id, 'スタッフ管理画面から削除'); showToast('削除しました'); fetchData(); } catch (e) { console.error(e); showToast(e instanceof Error ? e.message : '削除に失敗しました', 'error'); }
@@ -159,7 +190,7 @@ export default function StaffPage() {
       </Box>
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
-        <Box maxWidth="md" mx="auto">
+        <Box maxWidth="lg" mx="auto">
             <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
                 <Box>
                     <Typography variant="subtitle1" fontWeight="bold" color="text.primary">現場スタッフ名簿</Typography>
@@ -189,6 +220,8 @@ export default function StaffPage() {
                     <TableHead sx={{ bgcolor: 'background.tint' }}>
                         <TableRow>
                             <TableCell sx={{ fontWeight: 'bold' }}>スタッフ名 (シフト表示用)</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>雇用形態</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold' }}>専従・兼務</TableCell>
                             <TableCell sx={{ fontWeight: 'bold' }}>役職</TableCell>
                             <TableCell sx={{ fontWeight: 'bold' }}>紐付いているアカウント (ログイン用)</TableCell>
                             <TableCell align="center" width="220" sx={{ fontWeight: 'bold' }}>操作</TableCell>
@@ -196,9 +229,9 @@ export default function StaffPage() {
                     </TableHead>
                     <TableBody>
                         {isFetching ? (
-                            <TableRow><TableCell colSpan={4} align="center" sx={{ py: 4 }}><CircularProgress size={24} /></TableCell></TableRow>
+                            <TableRow><TableCell colSpan={6} align="center" sx={{ py: 4 }}><CircularProgress size={24} /></TableCell></TableRow>
                         ) : visibleStaff.length === 0 ? (
-                            <TableRow><TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}>登録がありません</TableCell></TableRow>
+                            <TableRow><TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>登録がありません</TableCell></TableRow>
                         ) : (
                             visibleStaff.map((staff) => {
                                 // プロフィール名も安全に抽出
@@ -212,6 +245,12 @@ export default function StaffPage() {
                                                 <span>{staff.name}</span>
                                                 {isArchived && <Chip label="退職" size="small" color="default" sx={{ bgcolor: 'background.muted' }} />}
                                             </Stack>
+                                        </TableCell>
+                                        <TableCell>
+                                            {staff.employment_type ? <Chip label={staff.employment_type} size="small" variant="outlined" /> : <Typography variant="body2" color="text.disabled">—</Typography>}
+                                        </TableCell>
+                                        <TableCell>
+                                            {staff.work_style ? <Chip label={staff.work_style} size="small" variant="outlined" /> : <Typography variant="body2" color="text.disabled">—</Typography>}
                                         </TableCell>
                                         <TableCell>
                                             {staff.positions && staff.positions.length > 0 ? (
@@ -266,7 +305,9 @@ export default function StaffPage() {
       <AppDialog open={openModal} onClose={() => setModalOpen(false)} maxWidth="xs" title={editId ? 'スタッフの編集' : 'スタッフの追加'} actions={<><AppButton variant="text" intent="secondary" onClick={() => setModalOpen(false)}>キャンセル</AppButton><AppButton onClick={handleSave} disabled={!staffName.trim()}>保存</AppButton></>}>
               <Stack spacing={3} pt={1}>
                 <AppTextField autoFocus label="スタッフ名 (表示用)" value={staffName} onChange={e => setStaffName(e.target.value)} required />
-                <CreatableMultiSelectField options={POSITION_OPTIONS} value={staffPositions} onChange={setStaffPositions} label="役職 (任意・複数可)" placeholder="入力してEnter / 候補から選択" helperText="例: 管理者、サービス管理責任者、常勤、非常勤、ヘルパー など（複数登録可・自由入力可）" />
+                <SelectField value={employmentType} onChange={(value) => setEmploymentType(value as EmploymentType)} label="雇用形態" options={EMPLOYMENT_TYPE_OPTIONS.map((value) => ({ value, label: value }))} />
+                <SelectField value={workStyle} onChange={(value) => setWorkStyle(value as WorkStyle)} label="専従・兼務" options={WORK_STYLE_OPTIONS.map((value) => ({ value, label: value }))} />
+                <CreatableMultiSelectField options={POSITION_OPTIONS} value={staffPositions} onChange={setStaffPositions} label="役職 (複数可)" placeholder="入力してEnter / 候補から選択" helperText="候補にない役職も入力して追加できます" />
                 <SelectField value={linkedUserId} onChange={setLinkedUserId} label="紐付けるアカウント (任意)" options={[{ value: 'none', label: '紐付けない (転記・代理入力用)' }, ...accountList.map((account) => ({ value: account.id, label: account.name }))]} />
                 <Typography variant="caption" color="text.secondary">
                     ※システムにログインして自分で記録をつけるヘルパーの場合は、その人の「アカウント」を紐付けてください。事務員が代わりに記録を打ち込むだけのスタッフの場合は「紐付けない」を選択してください。

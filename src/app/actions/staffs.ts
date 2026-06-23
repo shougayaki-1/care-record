@@ -5,12 +5,28 @@ import { sanitizeDbError } from '@/utils/errors';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertOrgRole, supabaseAdmin } from '@/utils/supabase/auth';
 
-function normalizeStaffInput(name: string, positions: string[]) {
+const EMPLOYMENT_TYPES = ['常勤', '非常勤'] as const;
+const WORK_STYLES = ['兼務', '専従'] as const;
+
+type EmploymentType = (typeof EMPLOYMENT_TYPES)[number];
+type WorkStyle = (typeof WORK_STYLES)[number];
+
+function normalizeChoice<T extends readonly string[]>(value: string, allowedValues: T, label: string): T[number] {
+  if (!allowedValues.includes(value)) throw new Error(`${label}を選択してください`);
+  return value as T[number];
+}
+
+function normalizeStaffInput(name: string, positions: string[], employmentType: string, workStyle: string) {
   const normalizedName = name.trim();
   if (normalizedName.length < 1 || normalizedName.length > 100) throw new Error('スタッフ名は1〜100文字で入力してください');
   const normalizedPositions = Array.from(new Set(positions.map((item) => item.trim()).filter(Boolean)));
   if (normalizedPositions.length > 20 || normalizedPositions.some((item) => item.length > 50)) throw new Error('役職の入力が多すぎるか長すぎます');
-  return { name: normalizedName, positions: normalizedPositions };
+  return {
+    name: normalizedName,
+    positions: normalizedPositions,
+    employment_type: normalizeChoice(employmentType, EMPLOYMENT_TYPES, '雇用形態') as EmploymentType,
+    work_style: normalizeChoice(workStyle, WORK_STYLES, '専従・兼務') as WorkStyle,
+  };
 }
 
 async function assertStaffOrg(staffId: string, organizationId: string) {
@@ -27,10 +43,17 @@ async function validateLinkedUser(organizationId: string, linkedUserId: string |
 
 export async function saveStaff(
   organizationId: string,
-  values: { staffId?: string | null; name: string; positions: string[]; linkedUserId?: string | null },
+  values: {
+    staffId?: string | null;
+    name: string;
+    positions: string[];
+    employmentType: string;
+    workStyle: string;
+    linkedUserId?: string | null;
+  },
 ) {
   const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
-  const normalized = normalizeStaffInput(values.name, values.positions);
+  const normalized = normalizeStaffInput(values.name, values.positions, values.employmentType, values.workStyle);
   const linkedUserId = values.linkedUserId || null;
   await validateLinkedUser(organizationId, linkedUserId);
 
