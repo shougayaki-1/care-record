@@ -54,7 +54,7 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     staffChipName: { fontSize: 10, fontWeight: 'bold', color: '#333' },
-    staffChipPosition: { fontSize: 9.5, color: '#2255CC', marginLeft: 3 },
+    staffChipDetail: { fontSize: 9.5, color: '#2255CC', marginLeft: 3 },
     table: { width: '100%', borderWidth: 1, borderColor: '#ddd' },
     tableHeader: { flexDirection: 'row', backgroundColor: '#F0F5FF', borderBottomWidth: 1, borderColor: '#ddd', fontWeight: 'bold' },
     tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#ddd', minHeight: 26, alignItems: 'center' },
@@ -109,12 +109,23 @@ export const ShiftScheduleDocument = ({ title, monthStr, shifts, orgName, staffM
                 {staffMembers.length > 0 && (
                     <View style={styles.staffSection}>
                         <Text style={styles.staffSectionLabel}>スタッフ：</Text>
-                        {staffMembers.map((s, i) => (
-                            <View key={i} style={styles.staffChip}>
-                                <Text style={styles.staffChipName}>{s.name}</Text>
-                                {s.positions && s.positions.length > 0 ? <Text style={styles.staffChipPosition}>{s.positions.join('・')}</Text> : null}
-                            </View>
-                        ))}
+                        {staffMembers.map((s, i) => {
+                            const details = [
+                                s.employmentType,
+                                s.workStyle,
+                                ...(s.positions && s.positions.length > 0 ? [s.positions.join('/')] : []),
+                            ].filter(Boolean);
+                            return (
+                                <View key={i} style={styles.staffChip}>
+                                    <Text style={styles.staffChipName}>{s.name}</Text>
+                                    {details.length > 0 ? (
+                                        <Text style={styles.staffChipDetail}>
+                                            {details.join('・')}
+                                        </Text>
+                                    ) : null}
+                                </View>
+                            );
+                        })}
                     </View>
                 )}
 
