@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
@@ -48,6 +49,38 @@ type FetchedPatternData = {
     shift_pattern_staffs: { staff_id: string; staffs: { name: string } | null; }[];
 };
 
+type StaffMasterRow = {
+    id: string;
+    name: string;
+    user_id?: string | null;
+    employment_type?: string | null;
+    employment_status?: string | null;
+    employmentType?: string | null;
+    work_type?: string | null;
+    assignment_type?: string | null;
+    assignment_status?: string | null;
+    assignmentType?: string | null;
+    dedication_type?: string | null;
+    dedication_status?: string | null;
+    exclusive_type?: string | null;
+    concurrent_type?: string | null;
+};
+
+type StaffOption = StaffData & {
+    user_id?: string | null;
+    type: 'member' | 'ghost';
+    employmentType?: string;
+    assignmentType?: string;
+};
+
+const pickStaffAttribute = (staff: StaffMasterRow, keys: (keyof StaffMasterRow)[]) => {
+    for (const key of keys) {
+        const value = staff[key];
+        if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return '';
+};
+
 export default function ShiftManagePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
@@ -63,7 +96,7 @@ export default function ShiftManagePage() {
     const [events, setEvents] = useState<EventInput[]>([]);
 
     const [clients, setClients] = useState<ClientData[]>([]);
-    const [staffs, setStaffs] = useState<StaffData[]>([]);
+    const [staffs, setStaffs] = useState<StaffOption[]>([]);
 
     const [currentUserId, setCurrentUserId] = useState<string>('');
     const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
@@ -114,13 +147,21 @@ export default function ShiftManagePage() {
             const { data: c } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
             if (c) setClients(c as ClientData[]);
 
-            const { data: s } = await supabase.from('staffs').select('id, name, user_id').eq('organization_id', currentOrg.id);
+            const { data: s } = await supabase.from('staffs').select('*').eq('organization_id', currentOrg.id);
             if (s) {
-                const parsed = s.map(item => ({ id: item.id, name: item.name, type: item.user_id ? 'member' as const : 'ghost' as const }));
+                const rows = s as StaffMasterRow[];
+                const parsed = rows.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    user_id: item.user_id,
+                    type: item.user_id ? 'member' as const : 'ghost' as const,
+                    employmentType: pickStaffAttribute(item, ['employment_type', 'employment_status', 'employmentType', 'work_type']),
+                    assignmentType: pickStaffAttribute(item, ['assignment_type', 'assignment_status', 'assignmentType', 'dedication_type', 'dedication_status', 'exclusive_type', 'concurrent_type']),
+                }));
                 setStaffs(parsed);
 
                 if (currentUserId) {
-                    const me = parsed.find(item => s.find(sd => sd.id === item.id)?.user_id === currentUserId);
+                    const me = parsed.find(item => item.user_id === currentUserId);
                     if (me) setCurrentStaffId(me.id);
                 }
             }
@@ -373,7 +414,12 @@ export default function ShiftManagePage() {
             const fileName = `全体シフト表_${year}${String(month + 1).padStart(2, '0')}.pdf`;
 
             const matrixMap = new Map<string, MatrixStaffData>();
-            staffs.forEach(s => matrixMap.set(s.id, { staffName: s.name, shiftsByDay: {} }));
+            staffs.forEach(s => matrixMap.set(s.id, {
+                staffName: s.name,
+                employmentType: s.employmentType,
+                assignmentType: s.assignmentType,
+                shiftsByDay: {}
+            }));
 
             rawShifts.forEach(shift => {
                 if (shift.status === 'cancelled') return;
@@ -805,7 +851,7 @@ export default function ShiftManagePage() {
                 </Tabs>
             </Box>
 
-            <Box sx={{ position: 'relative', flexGrow: 1, p: 3, bgcolor: '#f5f5f5', overflowY: 'auto' }}>
+            <Box sx={{ position: 'relative', flexGrow: 1, p: 3, bgcolor: tokens.neutral.gray100, overflowY: 'auto' }}>
                 {isFetching && !initialLoading && (
                     <Box sx={{ position: 'absolute', top: 16, right: 30, zIndex: 10 }}>
                         <CircularProgress size={24} />
@@ -831,7 +877,7 @@ export default function ShiftManagePage() {
                                         {repairingFromBanner ? '修復中...' : '同期を修復する'}
                                     </Button>
                                 }
-                                sx={{ mb: 2, borderRadius: 3, boxShadow: 'none', border: '1px solid #ffe0b2' }}
+                                sx={{ mb: 2, borderRadius: 3, boxShadow: 'none', border: `1px solid ${tokens.status.warning.borderAlt}` }}
                             >
                                 Googleカレンダーと同期されていない予定が <strong>{unsyncedCount} 件</strong> あります。前回の自動展開が途中で中断された場合はこちらから同期を再開できます。
                             </Alert>
@@ -881,7 +927,7 @@ export default function ShiftManagePage() {
 
                         {isAdmin && (
                             <Box sx={{ display: tabIndex === 0 ? 'block' : 'none' }}>
-                                <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: '#F0F5FF', borderColor: '#D0E0FF' }}>
+                                <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: tokens.blueTint[50], borderColor: tokens.blueTint[300] }}>
                                     <Typography variant="body2" sx={{ fontWeight: '500' }}>登録したひな形をベースに、指定月のカレンダーへシフトを一括展開・同期します。</Typography>
                                     <Stack direction="row" spacing={1.5} alignItems="center">
                                         <TextField type="month" size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} sx={{ bgcolor: 'white' }} />
@@ -897,7 +943,7 @@ export default function ShiftManagePage() {
                                 <Typography variant="subtitle1" fontWeight="bold" mb={2}>登録済みのひな形パターン一覧</Typography>
                                 <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, mb: 4 }}>
                                     <Table>
-                                        <TableHead sx={{ bgcolor: '#fafafa' }}>
+                                        <TableHead sx={{ bgcolor: tokens.neutral.gray50 }}>
                                             <TableRow>
                                                 <TableCell sx={{ fontWeight: 'bold' }}>対象の利用者</TableCell>
                                                 <TableCell sx={{ fontWeight: 'bold' }}>デフォルト担当者</TableCell>
@@ -969,7 +1015,7 @@ export default function ShiftManagePage() {
 
             {/* Googleカレンダー同期中のプログレス表示UI */}
             {syncProgress && (
-                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'white', p: 2.5, borderRadius: 3, boxShadow: 3, zIndex: 9999, border: '1px solid #E3E5E8', minWidth: 280 }}>
+                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'white', p: 2.5, borderRadius: 3, boxShadow: 3, zIndex: 9999, border: `1px solid ${tokens.neutral.border}`, minWidth: 280 }}>
                     <Typography variant="body2" fontWeight="bold" gutterBottom>Googleカレンダー同期中...</Typography>
                     <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                         {syncProgress.currentName}
@@ -1058,11 +1104,11 @@ export default function ShiftManagePage() {
                             <Typography variant="body2" paragraph>
                                 以下の内容でカレンダーにシフト実体を作成します。既存の未編集シフトは自動で上書き更新され、現場で編集済みの調整シフトは安全にスキップ（自動保護）されます。
                             </Typography>
-                            <Box p={2} bgcolor="#F0F5FF" borderRadius={2} border="1px solid #D0E0FF" mb={1.5}>
+                            <Box p={2} bgcolor={tokens.blueTint[50]} borderRadius={2} border={`1px solid ${tokens.blueTint[300]}`} mb={1.5}>
                                 <Typography variant="subtitle2" fontWeight="bold" color="primary">展開予定の総シフト数： {previewDetails.total} 件</Typography>
                             </Box>
                             <Typography variant="subtitle2" fontWeight="bold">ひな形ごとの生成予定内訳:</Typography>
-                            <Stack spacing={1} sx={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', p: 1, borderRadius: 1, bgcolor: '#fbfbfb' }}>
+                            <Stack spacing={1} sx={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #eee', p: 1, borderRadius: 1, bgcolor: tokens.neutral.gray60 }}>
                                 {previewDetails.details.map((d, index) => (
                                     <Box key={index} display="flex" justifyContent="space-between" alignItems="center">
                                         <Typography variant="caption" fontWeight="bold">{d.title}</Typography>

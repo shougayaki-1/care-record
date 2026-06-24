@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { Fragment, ReactNode } from 'react';
 import {
@@ -46,7 +47,7 @@ const NumberBadge = ({ number }: { number: number }) => (
             width: 28,
             height: 28,
             borderRadius: '50%',
-            bgcolor: '#ff1744',
+            bgcolor: tokens.status.error.main,
             color: 'white',
             display: 'flex',
             alignItems: 'center',
@@ -64,16 +65,16 @@ const NumberBadge = ({ number }: { number: number }) => (
 
 const NavigationScreenMock = () => {
     return (
-        <Box sx={{ display: 'flex', height: 420, border: '1px solid #ddd', borderRadius: 2, overflow: 'hidden', bgcolor: '#f5f5f5', pointerEvents: 'none', userSelect: 'none' }}>
+        <Box sx={{ display: 'flex', height: 420, border: '1px solid #ddd', borderRadius: 2, overflow: 'hidden', bgcolor: tokens.neutral.gray100, pointerEvents: 'none', userSelect: 'none' }}>
             {/* 1. 左端レール */}
-            <Box sx={{ width: 55, bgcolor: '#E3E5E8', display: 'flex', flexDirection: 'column', alignItems: 'center', py: 1.5, gap: 1.5, borderRight: '1px solid #d0d0d0' }}>
-                <Avatar sx={{ bgcolor: '#2255CC', width: 35, height: 35, fontSize: '0.8rem' }}>社</Avatar>
-                <Avatar sx={{ bgcolor: '#fff', color: '#23A559', width: 35, height: 35 }}><AddIcon fontSize="small" /></Avatar>
+            <Box sx={{ width: 55, bgcolor: tokens.neutral.border, display: 'flex', flexDirection: 'column', alignItems: 'center', py: 1.5, gap: 1.5, borderRight: `1px solid ${tokens.neutral.gray300}` }}>
+                <Avatar sx={{ bgcolor: tokens.brand.primary, width: 35, height: 35, fontSize: '0.8rem' }}>社</Avatar>
+                <Avatar sx={{ bgcolor: '#fff', color: tokens.status.success.main, width: 35, height: 35 }}><AddIcon fontSize="small" /></Avatar>
             </Box>
 
             {/* 2. サイドバー */}
-            <Box sx={{ width: 200, bgcolor: '#F2F3F5', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e0e0e0' }}>
-                <Box p={1.5} borderBottom="1px solid #e0e0e0"><Typography variant="caption" fontWeight="bold" sx={{ fontSize: '0.75rem' }}>一般社団法人ケアワーク</Typography></Box>
+            <Box sx={{ width: 200, bgcolor: tokens.neutral.surface, display: 'flex', flexDirection: 'column', borderRight: `1px solid ${tokens.neutral.gray200}` }}>
+                <Box p={1.5} borderBottom={`1px solid ${tokens.neutral.gray200}`}><Typography variant="caption" fontWeight="bold" sx={{ fontSize: '0.75rem' }}>一般社団法人ケアワーク</Typography></Box>
                 <Box flexGrow={1} py={0.5}>
                     <Typography variant="caption" sx={{ px: 2, py: 0.5, color: '#666', fontWeight: 'bold', fontSize: '0.65rem' }}>記録</Typography>
                     <List dense disablePadding>
@@ -88,7 +89,7 @@ const NavigationScreenMock = () => {
                         {/* ★ここをクリックさせる */}
                         <Box sx={{ position: 'relative', mx: 1, mt: 0.2 }}>
                             <NumberBadge number={1} />
-                            <Box sx={{ border: '3px solid #ff1744', borderRadius: 1, bgcolor: 'rgba(255, 23, 68, 0.05)' }}>
+                            <Box sx={{ border: `3px solid ${tokens.status.error.main}`, borderRadius: 1, bgcolor: 'rgba(255, 23, 68, 0.05)' }}>
                                 <ListItemButton selected sx={{ borderRadius: 1, pl: 1, py: 0.5 }}>
                                     <ListItemIcon sx={{ minWidth: 28 }}><PeopleIcon fontSize="small" color="primary" /></ListItemIcon>
                                     <ListItemText primary={<Typography fontWeight="bold" color="primary.main" fontSize="0.75rem">利用者管理</Typography>} />
@@ -108,14 +109,14 @@ const NavigationScreenMock = () => {
                     </Stack>
                 </Box>
 
-                <Box sx={{ p: 2, flexGrow: 1, bgcolor: '#f9f9f9' }}>
+                <Box sx={{ p: 2, flexGrow: 1, bgcolor: tokens.neutral.gray75 }}>
                     <Box display="flex" justifyContent="flex-end" mb={1.5}>
                         <Button variant="contained" size="small" startIcon={<AddIcon />} sx={{ fontSize: '0.7rem' }}>新規登録</Button>
                     </Box>
 
                     <Paper variant="outlined" sx={{ borderRadius: 1, overflow: 'hidden' }}>
                         <Table size="small">
-                            <TableHead sx={{ bgcolor: '#f5f5f5' }}>
+                            <TableHead sx={{ bgcolor: tokens.neutral.gray100 }}>
                                 <TableRow>
                                     <TableCell sx={{ fontSize: '0.7rem', py: 0.5 }}>利用者氏名</TableCell>
                                     <TableCell align="right" sx={{ fontSize: '0.7rem', py: 0.5 }}>操作</TableCell>
@@ -131,8 +132,8 @@ const NavigationScreenMock = () => {
                                             {/* ★ここをクリックさせる */}
                                             <Box sx={{ position: 'relative' }}>
                                                 <NumberBadge number={2} />
-                                                <Box sx={{ border: '3px solid #ff1744', borderRadius: 1, display: 'inline-block' }}>
-                                                    <IconButton size="small" color="primary" sx={{ bgcolor: '#eef2ff', p: 0.3 }}>
+                                                <Box sx={{ border: `3px solid ${tokens.status.error.main}`, borderRadius: 1, display: 'inline-block' }}>
+                                                    <IconButton size="small" color="primary" sx={{ bgcolor: tokens.blueTint[100], p: 0.3 }}>
                                                         <SettingsIcon fontSize="small" />
                                                     </IconButton>
                                                 </Box>
@@ -155,7 +156,7 @@ const SettingsCardMock = ({
     type: 'section' | 'checkbox' | 'multicheckbox' | 'text' | 'number' | 'select' | 'time',
     label: string, required?: boolean, hasDetail?: boolean, options?: string
 }) => (
-    <Card sx={{ overflow: 'visible', borderLeft: type === 'section' ? '6px solid #2255CC' : 'none', bgcolor: type === 'section' ? '#eef2ff' : 'white', mb: 2, boxShadow: '0 2px 8px rgba(0,0,0,0.05)', borderRadius: 2 }}>
+    <Card sx={{ overflow: 'visible', borderLeft: type === 'section' ? `6px solid ${tokens.brand.primary}` : 'none', bgcolor: type === 'section' ? tokens.blueTint[100] : 'white', mb: 2, boxShadow: '0 2px 8px rgba(0,0,0,0.05)', borderRadius: 2 }}>
         <CardContent sx={{ p: '12px !important' }}>
             <Stack direction="row" alignItems="flex-start" spacing={1.5}>
                 <Stack direction="column" spacing={0.5}>
@@ -195,7 +196,7 @@ const TemplateDialogMock = ({ tabIndex }: { tabIndex: number }) => (
     <Box sx={{ position: 'relative', p: { xs: 1.5, md: 3 }, bgcolor: 'rgba(0,0,0,0.03)', borderRadius: 2, display: 'flex', justifyContent: 'center', my: 2 }}>
         <Paper elevation={3} sx={{ width: '100%', maxWidth: 500, borderRadius: 2, overflow: 'hidden', bgcolor: '#fff' }}>
             <Box sx={{ p: 1.5, px: 2, borderBottom: '1px solid #eee' }}><Typography variant="subtitle2" fontWeight="bold">記録項目の設定を読み込む</Typography></Box>
-            <Tabs value={tabIndex} variant="fullWidth" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#f8f9fa' }}>
+            <Tabs value={tabIndex} variant="fullWidth" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: tokens.neutral.bg }}>
                 <Tab label="標準テンプレート" />
                 <Tab label="他の利用者からコピー" />
             </Tabs>
@@ -228,7 +229,7 @@ const TemplateDialogMock = ({ tabIndex }: { tabIndex: number }) => (
 const RecordUIMock = ({ title, children }: { title?: string, children: ReactNode }) => (
     <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', bgcolor: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', maxWidth: 500, margin: '0 auto', width: '100%' }}>
         {title && (
-            <Box sx={{ bgcolor: '#f8f9fa', px: 2.5, py: 1.2, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
+            <Box sx={{ bgcolor: tokens.neutral.bg, px: 2.5, py: 1.2, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
                 <Box sx={{ width: 5, height: 22, bgcolor: 'primary.main', borderRadius: 1, mr: 1.5, flexShrink: 0 }} />
                 <Typography variant="subtitle2" color="text.primary" fontWeight="bold">{title}</Typography>
             </Box>
@@ -256,7 +257,7 @@ const RecordMultiCheckboxMock = ({ label, required, options }: { label: string, 
             {options.map((opt, i) => {
                 const checked = i === 0 || i === 2;
                 return (
-                    <FormControlLabel key={opt} control={<Checkbox size="small" checked={checked} />} label={<Typography variant="body2" fontSize="0.75rem" fontWeight={checked ? 'bold' : 'normal'}>{opt}</Typography>} sx={{ mr: 1, mb: 1, border: '1px solid', borderRadius: 1.5, px: 1, py: 0.2, mx: 0, bgcolor: checked ? '#eef2ff' : 'transparent', borderColor: checked ? 'primary.main' : 'divider' }} />
+                    <FormControlLabel key={opt} control={<Checkbox size="small" checked={checked} />} label={<Typography variant="body2" fontSize="0.75rem" fontWeight={checked ? 'bold' : 'normal'}>{opt}</Typography>} sx={{ mr: 1, mb: 1, border: '1px solid', borderRadius: 1.5, px: 1, py: 0.2, mx: 0, bgcolor: checked ? tokens.blueTint[100] : 'transparent', borderColor: checked ? 'primary.main' : 'divider' }} />
                 );
             })}
         </FormGroup>
@@ -282,7 +283,7 @@ const RecordTextMock = ({ label, required }: { label: string, required?: boolean
 );
 
 const RecordNumberMock = ({ label, required, error }: { label: string, required?: boolean, error?: boolean }) => (
-    <Box sx={{ p: 2.5, bgcolor: error ? '#fff5f5' : 'transparent' }}>
+    <Box sx={{ p: 2.5, bgcolor: error ? tokens.status.error.bg : 'transparent' }}>
         <Typography variant="caption" fontWeight="bold" gutterBottom sx={{ mb: 1, display: 'block' }}>{label} {required && <Typography component="span" color="error">*</Typography>}</Typography>
         <TextField fullWidth variant="outlined" type="number" size="small" placeholder={`${label}を入力`} error={error} helperText={error ? "必須項目です" : ""} />
     </Box>
@@ -314,13 +315,13 @@ const ComparisonBlock = ({
         <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems="stretch">
             {/* 設定UI */}
             <Box flex={1} sx={{ pointerEvents: 'none', userSelect: 'none' }}>
-                <Box p={2} bgcolor="#f8fafc" borderRadius={3} border="1px solid #e2e8f0" height="100%" display="flex" flexDirection="column" justifyContent="center">
+                <Box p={2} bgcolor={tokens.blueTint.slate50} borderRadius={3} border={`1px solid ${tokens.blueTint.slate200}`} height="100%" display="flex" flexDirection="column" justifyContent="center">
                     {settingUI}
                 </Box>
             </Box>
             {/* 入力UI */}
             <Box flex={1} sx={{ pointerEvents: 'none', userSelect: 'none' }}>
-                <Box p={2} bgcolor="#f8fafc" borderRadius={3} border="1px solid #e2e8f0" height="100%" display="flex" flexDirection="column" justifyContent="center">
+                <Box p={2} bgcolor={tokens.blueTint.slate50} borderRadius={3} border={`1px solid ${tokens.blueTint.slate200}`} height="100%" display="flex" flexDirection="column" justifyContent="center">
                     <RecordUIMock title={mockTitle || undefined}>
                         {inputUI}
                     </RecordUIMock>
@@ -350,8 +351,8 @@ export default function FormSettingsManual() {
                 <StepBlock title="0. フォーム設定画面の開き方" desc="アプリのメニューから、利用者ごとのフォーム設定画面を開く手順です。">
                     <Box sx={{ mb: 2 }}>
                         <Typography variant="subtitle2" fontWeight="bold" mb={2} sx={{ fontSize: '0.9rem' }}>
-                            <span style={{ color: '#ff1744', fontWeight: 'bold' }}>① サイドメニュー</span> から「利用者管理」を選択し、
-                            <span style={{ color: '#ff1744', fontWeight: 'bold', marginLeft: 8 }}>② 利用者一覧</span> の右側にある「詳細設定（青い歯車）」アイコンをクリックしてください。
+                            <span style={{ color: tokens.status.error.main, fontWeight: 'bold' }}>① サイドメニュー</span> から「利用者管理」を選択し、
+                            <span style={{ color: tokens.status.error.main, fontWeight: 'bold', marginLeft: 8 }}>② 利用者一覧</span> の右側にある「詳細設定（青い歯車）」アイコンをクリックしてください。
                         </Typography>
                     </Box>
                     <NavigationScreenMock />
@@ -461,13 +462,13 @@ export default function FormSettingsManual() {
 
                 {/* 6. 項目の追加・削除・並び替え */}
                 <StepBlock title="6. 項目の追加・削除・並び替え" desc="一番下にある点線の「＋ 項目を追加する」ボタンを押すと、新しい空の質問が追加されます。各項目の左下にある赤い「ゴミ箱」アイコンを押すと、その項目を削除できます。項目の左側にある「↑（上へ）」「↓（下へ）」ボタンをクリックすることで、質問の順番を入れ替えることができます。">
-                    <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: '#fafafa', borderRadius: 3, border: '1px dashed #e2e8f0', pointerEvents: 'none', userSelect: 'none' }}>
+                    <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: tokens.neutral.gray50, borderRadius: 3, border: `1px dashed ${tokens.blueTint.slate200}`, pointerEvents: 'none', userSelect: 'none' }}>
                         <SettingsCardMock type="text" label="特記事項" />
                         <Button variant="outlined" size="large" sx={{ border: '2px dashed #ccc', color: '#666', py: 1.5, width: '100%', bgcolor: '#fff', mb: 3 }}>
                             項目を追加する
                         </Button>
 
-                        <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3, bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                        <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3, bgcolor: tokens.blueTint.slate50, border: `1px solid ${tokens.blueTint.slate200}` }}>
                             <Stack alignItems="center" spacing={1}>
                                 <Typography variant="body2" color="error" fontWeight="bold" sx={{ fontSize: '0.85rem' }}>※ 設定が完了したら、忘れずに下のボタンを押して保存してください。</Typography>
                                 <Button variant="contained" size="large" sx={{ minWidth: 250, fontWeight: 'bold', height: 42, boxShadow: 'none' }}>設定を保存</Button>

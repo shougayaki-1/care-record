@@ -1,5 +1,6 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font, Svg, Polyline } from '@react-pdf/renderer';
+import { brand, blueTint, neutral } from '../../styles/tokens';
 
 // --- 型定義 ---
 type FormItem = {
@@ -58,14 +59,14 @@ const styles = StyleSheet.create({
     header: {
         marginBottom: 5,
         borderBottomWidth: 1.5,
-        borderColor: '#2255CC',
+        borderColor: brand.primary,
         paddingBottom: 2,
     },
     title: {
         fontSize: 14,
         fontWeight: 'bold',
         marginBottom: 3,
-        color: '#2255CC',
+        color: brand.primary,
         textAlign: 'center',
     },
     headerRow: {
@@ -80,12 +81,12 @@ const styles = StyleSheet.create({
     // ヘッダー内の情報ボックス
     infoBox: {
         flexDirection: 'row',
-        backgroundColor: '#F0F5FF',
+        backgroundColor: blueTint[50],
         padding: 4,
         borderRadius: 3,
         marginTop: 3,
         borderWidth: 0.5,
-        borderColor: '#D0E0FF',
+        borderColor: blueTint[300],
     },
     infoItem: { marginRight: 12, flexDirection: 'row', alignItems: 'flex-end' },
 
@@ -101,20 +102,20 @@ const styles = StyleSheet.create({
         width: '49%', // 2列配置
         marginBottom: 5,
         borderWidth: 0.5,
-        borderColor: '#B0C4DE',
+        borderColor: blueTint.steel,
         borderRadius: 3,
         overflow: 'hidden',
         backgroundColor: '#fff',
     },
     sectionHeader: {
-        backgroundColor: '#E6F0FF',
+        backgroundColor: blueTint[150],
         fontSize: 8,
         fontWeight: 'bold',
         padding: 3,
         paddingLeft: 5,
-        color: '#003399',
+        color: brand.primaryDark,
         borderBottomWidth: 0.5,
-        borderColor: '#D0E0FF',
+        borderColor: blueTint[300],
     },
     sectionContent: {
         padding: 4,
@@ -144,7 +145,7 @@ const styles = StyleSheet.create({
         width: 8,
         height: 8,
         borderWidth: 0.5,
-        borderColor: '#2255CC',
+        borderColor: brand.primary,
         marginRight: 4,
         justifyContent: 'center',
         alignItems: 'center',
@@ -171,9 +172,9 @@ const styles = StyleSheet.create({
         fontSize: 7.5, // 読みやすいサイズに統一
     },
     tagActive: { 
-        borderColor: '#2255CC', 
-        backgroundColor: '#F0F5FF', 
-        color: '#2255CC',
+        borderColor: brand.primary, 
+        backgroundColor: blueTint[50], 
+        color: brand.primary,
         fontWeight: 'bold'
     },
     tagInactive: { 
@@ -203,13 +204,13 @@ const styles = StyleSheet.create({
     footer: {
         marginTop: 4,
         borderTopWidth: 1,
-        borderColor: '#2255CC',
+        borderColor: brand.primary,
         paddingTop: 4,
     },
     noteBox: {
         minHeight: 30,
         borderWidth: 0.5, borderColor: '#ccc', borderRadius: 3,
-        padding: 3, backgroundColor: '#FAFAFA', marginBottom: 4
+        padding: 3, backgroundColor: neutral.gray50, marginBottom: 4
     },
     sealContainer: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 2 },
     sealBox: {
@@ -251,7 +252,7 @@ const CheckBox = ({ checked, label }: { checked: boolean, label: string }) => (
         <View style={styles.checkBoxContainer}>
             {checked && (
                 <Svg width="6" height="6" viewBox="0 0 10 10">
-                    <Polyline points="2,5 4,8 8,2" stroke="#2255CC" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                    <Polyline points="2,5 4,8 8,2" stroke={brand.primary} strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                 </Svg>
             )}
         </View>
@@ -388,7 +389,7 @@ export const ServiceRecordDocument = ({ reports }: { reports: PdfReportData[] })
 
                         {/* フッター */}
                         <View style={styles.footer}>
-                            <Text style={{ fontSize: 8, fontWeight: 'bold', marginBottom: 2, color: '#2255CC' }}>【特記事項】</Text>
+                            <Text style={{ fontSize: 8, fontWeight: 'bold', marginBottom: 2, color: brand.primary }}>【特記事項】</Text>
                             <View style={styles.noteBox}>
                                 <Text>{getValue('special_note') as string}</Text>
                                 <Text>{getValue('note') as string}</Text>

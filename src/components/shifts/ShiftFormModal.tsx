@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -169,7 +170,7 @@ export const ShiftFormModal = ({
             <DialogContent dividers sx={{ py: 3 }}>
                 <Stack spacing={3}>
                     {initialData?.status === 'cancelled' && (
-                        <Box p={2} bgcolor="#ffebee" borderRadius={2} border="1px solid #ffcdd2" display="flex" flexDirection="column" gap={0.5}>
+                        <Box p={2} bgcolor={tokens.status.error.bgAlt} borderRadius={2} border={`1px solid ${tokens.status.error.border}`} display="flex" flexDirection="column" gap={0.5}>
                             <Typography color="error" fontWeight="bold" variant="subtitle2">
                                 ⚠ この予定はキャンセル（お休み）に設定されています
                             </Typography>
@@ -245,7 +246,7 @@ export const ShiftFormModal = ({
                     {initialData && (
                         <>
                             <Divider sx={{ my: 1 }} />
-                            <Box p={2.5} border="1px solid #eee" borderRadius={2} bgcolor="#fafafa">
+                            <Box p={2.5} border="1px solid #eee" borderRadius={2} bgcolor={tokens.neutral.gray50}>
                                 <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
                                     お休み（キャンセル）の管理
                                 </Typography>

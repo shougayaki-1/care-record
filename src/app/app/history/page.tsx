@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useEffect, useState } from 'react';
 import {
@@ -59,7 +60,7 @@ const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month
                                                 <Box 
                                                     onClick={() => onSelect(ev)}
                                                     sx={{ 
-                                                        bgcolor: ev.status === 'approved' ? '#e8f5e9' : (ev.status === 'remanded' ? '#ffebee' : '#fff3e0'), 
+                                                        bgcolor: ev.status === 'approved' ? tokens.status.success.bg : (ev.status === 'remanded' ? tokens.status.error.bgAlt : tokens.status.warning.bg), 
                                                         fontSize: 10, p: 0.2, borderRadius: 0.5, mb: 0.5, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
                                                         cursor: 'pointer',
                                                         '&:hover': { filter: 'brightness(0.95)' }

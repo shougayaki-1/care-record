@@ -1,5 +1,6 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/renderer';
+import { brand, blueTint, neutral } from '../../styles/tokens';
 
 const getFontUrl = (filename: string) => {
     return typeof window !== 'undefined'
@@ -28,15 +29,15 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between', 
         marginBottom: 10, 
         borderBottomWidth: 1, 
-        borderColor: '#2255CC', 
+        borderColor: brand.primary, 
         paddingBottom: 5 
     },
-    title: { fontSize: 16, fontWeight: 'bold', color: '#2255CC' },
+    title: { fontSize: 16, fontWeight: 'bold', color: brand.primary },
     month: { fontSize: 12 },
     table: { width: '100%', borderWidth: 1, borderColor: '#ddd' },
-    tableHeader: { flexDirection: 'row', backgroundColor: '#F0F5FF', borderBottomWidth: 1, borderColor: '#ddd', fontWeight: 'bold' },
+    tableHeader: { flexDirection: 'row', backgroundColor: blueTint[50], borderBottomWidth: 1, borderColor: '#ddd', fontWeight: 'bold' },
     tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#ddd', minHeight: 26, alignItems: 'center' },
-    tableRowCancelled: { backgroundColor: '#f9f9f9', color: '#999' },
+    tableRowCancelled: { backgroundColor: neutral.gray75, color: '#999' },
     // 各列の文字を 10.5pt、行間 1.0（ぎりぎり重ならない密着度）にして詰め込みます
     colDate: { width: '15%', padding: 4, borderRightWidth: 1, borderColor: '#ddd', textAlign: 'center', fontSize: 10.5, lineHeight: 1.0 },
     colTime: { width: '20%', padding: 4, borderRightWidth: 1, borderColor: '#ddd', textAlign: 'center', fontSize: 10.5, lineHeight: 1.0 },

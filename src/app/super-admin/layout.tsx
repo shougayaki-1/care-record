@@ -1,5 +1,6 @@
 // app/super-admin/layout.tsx
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useEffect, useState } from 'react';
 import { Box, AppBar, Toolbar, Typography, Button, CircularProgress, Container } from '@mui/material';
@@ -45,14 +46,14 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
 
     if (loading || !isSuperAdmin) {
         return (
-            <Box height="100vh" display="flex" justifyContent="center" alignItems="center" bgcolor="#f5f5f5">
+            <Box height="100vh" display="flex" justifyContent="center" alignItems="center" bgcolor={tokens.neutral.gray100}>
                 <CircularProgress />
             </Box>
         );
     }
 
     return (
-        <Box sx={{ minHeight: '100vh', bgcolor: '#f0f0f0' }}>
+        <Box sx={{ minHeight: '100vh', bgcolor: tokens.neutral.gray150 }}>
             {/* --- ヘッダー --- */}
             <AppBar position="sticky" sx={{ bgcolor: '#333' }}>
                 <Toolbar>

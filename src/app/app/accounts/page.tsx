@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useEffect, useState, useCallback } from 'react';
 import { 
@@ -249,7 +250,7 @@ export default function AccountsPage() {
         <Typography variant="h6" fontWeight="bold" color="text.primary">アカウント(権限)管理</Typography>
       </Box>
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: '#f5f5f5' }}>
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: tokens.neutral.gray100 }}>
         <Box maxWidth="lg" mx="auto">
             <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
                 <Box>
@@ -263,7 +264,7 @@ export default function AccountsPage() {
 
             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, boxShadow: 'none' }}>
                 <Table>
-                    <TableHead sx={{ bgcolor: '#F0F5FF' }}>
+                    <TableHead sx={{ bgcolor: tokens.blueTint[50] }}>
                         <TableRow>
                             <TableCell sx={{ fontWeight: 'bold' }}>アカウント情報</TableCell>
                             <TableCell width="160" sx={{ fontWeight: 'bold' }}>システム権限</TableCell>

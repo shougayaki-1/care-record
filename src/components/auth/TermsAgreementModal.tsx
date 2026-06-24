@@ -1,5 +1,6 @@
 // src/components/auth/TermsAgreementModal.tsx
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useState, useEffect } from 'react';
 import {
@@ -88,7 +89,7 @@ export const TermsAgreementModal = () => {
                         規約・ポリシー全文を確認する
                     </Button>
 
-                    <Box mt={3} p={2} bgcolor="#f5f5f5" borderRadius={2} textAlign="left">
+                    <Box mt={3} p={2} bgcolor={tokens.neutral.gray100} borderRadius={2} textAlign="left">
                         <FormControlLabel
                             control={
                                 <Checkbox

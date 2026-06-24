@@ -1,5 +1,6 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/renderer';
+import { brand, blueTint, neutral } from '../../styles/tokens';
 
 const getFontUrl = (filename: string) => {
     return typeof window !== 'undefined'
@@ -28,13 +29,13 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between', 
         marginBottom: 8, 
         borderBottomWidth: 1, 
-        borderColor: '#2255CC', 
+        borderColor: brand.primary, 
         paddingBottom: 4 
     },
-    title: { fontSize: 14, fontWeight: 'bold', color: '#2255CC' },
+    title: { fontSize: 14, fontWeight: 'bold', color: brand.primary },
     month: { fontSize: 11 },
     calendar: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
-    dayHeaderRow: { flexDirection: 'row', backgroundColor: '#F0F5FF' },
+    dayHeaderRow: { flexDirection: 'row', backgroundColor: blueTint[50] },
     dayHeaderCell: { 
         width: '14.28%', 
         textAlign: 'center', 
@@ -62,7 +63,7 @@ const styles = StyleSheet.create({
         paddingRight: 4 
     },
     eventBox: { 
-        backgroundColor: '#E6F0FF', 
+        backgroundColor: blueTint[150], 
         padding: 1, 
         paddingHorizontal: 2, 
         marginBottom: 1, 
@@ -70,11 +71,11 @@ const styles = StyleSheet.create({
         minHeight: 36,        // 固定高さを廃止し、文字量に応じて自動で伸びるように変更
         justifyContent: 'center' 
     },
-    eventBoxCancelled: { backgroundColor: '#F2F3F5' },
+    eventBoxCancelled: { backgroundColor: neutral.surface },
     eventTime: { 
         fontSize: 8.5, 
         fontWeight: 'bold', 
-        color: '#2255CC', 
+        color: brand.primary, 
         marginBottom: 0.5
         // maxLines と textOverflow: 'ellipsis' を削除し、折り返しを許可
     },

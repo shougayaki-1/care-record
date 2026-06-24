@@ -1,5 +1,6 @@
 // app/super-admin/page.tsx
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useEffect, useState } from 'react';
 import {
@@ -74,7 +75,7 @@ export default function SuperAdminDashboard() {
                 <Paper sx={{ width: '100%', overflow: 'hidden', borderRadius: 2 }}>
                     <TableContainer>
                         <Table>
-                            <TableHead sx={{ bgcolor: '#e0e0e0' }}>
+                            <TableHead sx={{ bgcolor: tokens.neutral.gray200 }}>
                                 <TableRow>
                                     <TableCell sx={{ fontWeight: 'bold' }}>事業所名</TableCell>
                                     <TableCell sx={{ fontWeight: 'bold' }}>登録日</TableCell>

@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useState, useEffect } from 'react';
 import {
@@ -89,7 +90,7 @@ const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | n
         <List sx={{ p: 0 }}>
           {notifications.length === 0 && <Box p={2} textAlign="center" color="text.secondary">通知はありません</Box>}
           {notifications.map(n => (
-            <ListItemButton key={n.id} onClick={() => handleRead(n)} sx={{ bgcolor: n.is_read ? 'white' : '#f0f7ff', borderBottom: '1px solid #f5f5f5' }}>
+            <ListItemButton key={n.id} onClick={() => handleRead(n)} sx={{ bgcolor: n.is_read ? 'white' : tokens.blueTint.faint, borderBottom: `1px solid ${tokens.neutral.gray100}` }}>
               <ListItemIcon sx={{ minWidth: 32 }}>
                 {n.type === 'approve' ? <CheckCircleIcon color="success" fontSize="small" /> : <ErrorOutlineIcon color="error" fontSize="small" />}
               </ListItemIcon>
@@ -113,7 +114,7 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
   return (
     <Box sx={{
       width: RAIL_WIDTH,
-      bgcolor: '#E3E5E8',
+      bgcolor: tokens.neutral.border,
       borderRight: 'none',
       display: 'flex',
       flexDirection: 'column',
@@ -132,24 +133,24 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
               onClick={() => switchOrg(org.id)}
               sx={{
                 p: 0,
-                border: isSelected ? `2px solid #2255CC` : '2px solid transparent',
+                border: isSelected ? `2px solid ${tokens.brand.primary}` : '2px solid transparent',
                 borderRadius: '50%',
                 transition: 'all 0.2s',
                 '&:hover': {
-                  borderColor: isSelected ? '#2255CC' : 'rgba(0,0,0,0.1)'
+                  borderColor: isSelected ? tokens.brand.primary : 'rgba(0,0,0,0.1)'
                 }
               }}
             >
               <Avatar
                 sx={{
-                  bgcolor: isSelected ? '#2255CC' : '#F2F3F5',
+                  bgcolor: isSelected ? tokens.brand.primary : tokens.neutral.surface,
                   color: isSelected ? '#fff' : '#555',
                   width: 48, height: 48,
                   fontSize: '1rem',
                   fontWeight: 'bold',
                   boxShadow: isSelected ? 2 : 0,
                   transition: 'all 0.2s',
-                  '&:hover': { bgcolor: isSelected ? '#2255CC' : '#fff' }
+                  '&:hover': { bgcolor: isSelected ? tokens.brand.primary : '#fff' }
                 }}
               >
                 {org.name.slice(0, 1)}
@@ -165,9 +166,9 @@ const ServerRail = ({ orgList, currentOrg, switchOrg }: { orgList: Workspace[], 
         <IconButton
           sx={{
             width: 48, height: 48,
-            bgcolor: '#F2F3F5', color: '#23A559',
+            bgcolor: tokens.neutral.surface, color: tokens.status.success.main,
             transition: 'all 0.2s',
-            '&:hover': { bgcolor: '#23A559', color: '#fff' }
+            '&:hover': { bgcolor: tokens.status.success.main, color: '#fff' }
           }}
           onClick={() => router.push('/setup')}
         >
@@ -205,7 +206,7 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
     px: 2, pt: 2.5, pb: 1,
     fontSize: '0.75rem',
     fontWeight: 'bold',
-    color: '#6D6F78',
+    color: tokens.text.muted,
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
     ml: 1
@@ -215,15 +216,15 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
     mx: 1,
     borderRadius: '4px',
     mb: 0.25,
-    color: active ? '#060607' : '#5C5E66',
+    color: active ? tokens.text.strong : tokens.text.secondary,
     bgcolor: active ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
     fontWeight: active ? 600 : 500,
     '&:hover': {
       bgcolor: active ? 'rgba(0, 0, 0, 0.04)' : 'rgba(0, 0, 0, 0.02)',
-      color: '#060607'
+      color: tokens.text.strong
     },
     '& .MuiListItemIcon-root': {
-      color: active ? '#060607' : '#5C5E66',
+      color: active ? tokens.text.strong : tokens.text.secondary,
       minWidth: 32
     }
   });
@@ -231,7 +232,7 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
   return (
     <Box sx={{
       width: SIDEBAR_WIDTH,
-      bgcolor: '#F2F3F5',
+      bgcolor: tokens.neutral.surface,
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
@@ -246,7 +247,7 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
         boxShadow: '0 1px 0 rgba(0,0,0,0.05)',
         cursor: 'default'
       }}>
-        <Typography variant="subtitle1" fontWeight="800" noWrap sx={{ color: '#060607' }}>
+        <Typography variant="subtitle1" fontWeight="800" noWrap sx={{ color: tokens.text.strong }}>
           {currentOrg.name}
         </Typography>
       </Box>
@@ -281,7 +282,7 @@ const ChannelSidebar = ({ currentOrg, onClose }: { currentOrg: Workspace | null,
 
         {isAdmin && (
           <>
-            <Box onClick={() => setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: 'pointer', '&:hover': { color: '#060607' } }}>
+            <Box onClick={() => setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: 'pointer', '&:hover': { color: tokens.text.strong } }}>
               提供記録一覧
               {openReports ? <ExpandLess fontSize="small" sx={{ ml: 'auto' }} /> : <ExpandMore fontSize="small" sx={{ ml: 'auto' }} />}
             </Box>
@@ -393,7 +394,7 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
   return (
     <Box sx={{
       height: 52,
-      bgcolor: '#EBEDEF',
+      bgcolor: tokens.neutral.borderAlt,
       display: 'flex',
       alignItems: 'center',
       px: 1.5,
@@ -402,13 +403,13 @@ const UserPanel = ({ onClose }: { onClose?: () => void }) => {
     }}>
       <Avatar
         src={avatarUrl}
-        sx={{ width: 32, height: 32, bgcolor: '#2255CC', fontSize: '0.8rem', mr: 1.5 }}
+        sx={{ width: 32, height: 32, bgcolor: tokens.brand.primary, fontSize: '0.8rem', mr: 1.5 }}
       >
         {userName ? userName.slice(0, 1) : 'U'}
       </Avatar>
 
       <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
-        <Typography variant="caption" fontWeight="bold" noWrap sx={{ display: 'block', color: '#060607', fontSize: '0.85rem' }}>
+        <Typography variant="caption" fontWeight="bold" noWrap sx={{ display: 'block', color: tokens.text.strong, fontSize: '0.85rem' }}>
           {userName || 'アカウント'}
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '0.7rem' }} noWrap>
@@ -446,12 +447,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { orgList, currentOrg, switchOrg } = useWorkspace();
 
   return (
-    <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', bgcolor: '#ffffff' }}>
+    <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', bgcolor: tokens.neutral.white }}>
 
       {isMobile && (
-        <Box sx={{ position: 'fixed', top: 0, left: 0, right: 0, height: 48, bgcolor: '#F2F3F5', borderBottom: '1px solid #E3E5E8', display: 'flex', alignItems: 'center', px: 2, zIndex: 1200 }}>
+        <Box sx={{ position: 'fixed', top: 0, left: 0, right: 0, height: 48, bgcolor: tokens.neutral.surface, borderBottom: `1px solid ${tokens.neutral.border}`, display: 'flex', alignItems: 'center', px: 2, zIndex: 1200 }}>
           <IconButton edge="start" onClick={() => setMobileOpen(true)} size="small" sx={{ mr: 2 }}><MenuIcon /></IconButton>
-          <Typography variant="subtitle1" fontWeight="bold" color="#060607">{currentOrg?.name || 'CareRecord'}</Typography>
+          <Typography variant="subtitle1" fontWeight="bold" color={tokens.text.strong}>{currentOrg?.name || 'CareRecord'}</Typography>
         </Box>
       )}
 
@@ -460,7 +461,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         display: { xs: 'none', md: 'flex' },
         flexDirection: 'column',
         height: '100%',
-        bgcolor: '#E3E5E8'
+        bgcolor: tokens.neutral.border
       }}>
         <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
           <ServerRail orgList={orgList} currentOrg={currentOrg} switchOrg={switchOrg} />
@@ -489,7 +490,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         component="main"
         sx={{
           flexGrow: 1,
-          bgcolor: '#FFFFFF',
+          bgcolor: tokens.neutral.white,
           height: '100vh',
           display: 'flex',
           flexDirection: 'column',

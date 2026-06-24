@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -234,7 +235,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                         />
                     </Stack>
 
-                    <Box p={2.5} border="1px solid #e0e0e0" borderRadius={2} bgcolor="#fafafa">
+                    <Box p={2.5} border={`1px solid ${tokens.neutral.gray200}`} borderRadius={2} bgcolor={tokens.neutral.gray50}>
                         <Typography variant="subtitle2" fontWeight="bold" mb={2}>繰り返しのスケジュール設定</Typography>
                         <Stack spacing={2.5}>
                             <Stack direction="row" spacing={2}>

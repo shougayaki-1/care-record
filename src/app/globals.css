@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * 注意: CSS は src/styles/tokens.ts を import できないため、
+ * 以下の色は tokens.ts の値と「手動で同期」させること。
+ *   --primary-blue : tokens.brand.primary
+ *   body bg        : tokens.neutral.white
+ *   body color     : tokens.text.body
+ */
 :root {
   --primary-blue: #2255CC;
 }

@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useState } from 'react';
 import { Box, Typography, Paper, Stack, Chip } from '@mui/material';
@@ -35,19 +36,19 @@ export default function ManualPortalPage() {
     ];
 
     return (
-        <Box sx={{ display: 'flex', height: '100vh', bgcolor: '#f4f5f7', overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', height: '100vh', bgcolor: tokens.neutral.surfaceSoft, overflow: 'hidden' }}>
 
             {/* --- 左ペイン：目次サイドバー（マニュアル一覧） --- */}
             <Box sx={{
                 width: 320,
                 bgcolor: '#fff',
-                borderRight: '1px solid #e0e0e0',
+                borderRight: `1px solid ${tokens.neutral.gray200}`,
                 display: 'flex',
                 flexDirection: 'column',
                 flexShrink: 0,
                 height: '100%'
             }}>
-                <Box sx={{ p: 2.5, borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', gap: 1.5, bgcolor: '#F0F5FF' }}>
+                <Box sx={{ p: 2.5, borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', gap: 1.5, bgcolor: tokens.blueTint[50] }}>
                     <MenuBookIcon color="primary" />
                     <Typography variant="h6" fontWeight="bold" color="primary.main">サポートマニュアル</Typography>
                 </Box>
@@ -67,9 +68,9 @@ export default function ManualPortalPage() {
                                         cursor: 'pointer',
                                         borderRadius: 3,
                                         transition: 'all 0.2s',
-                                        border: isSelected ? '2px solid #2255CC' : '1px solid #e0e0e0',
-                                        bgcolor: isSelected ? '#eef2ff' : 'white',
-                                        '&:hover': { bgcolor: isSelected ? '#eef2ff' : '#f8fafc' }
+                                        border: isSelected ? `2px solid ${tokens.brand.primary}` : `1px solid ${tokens.neutral.gray200}`,
+                                        bgcolor: isSelected ? tokens.blueTint[100] : 'white',
+                                        '&:hover': { bgcolor: isSelected ? tokens.blueTint[100] : tokens.blueTint.slate50 }
                                     }}
                                 >
                                     <Stack direction="row" spacing={1.5} alignItems="center">
@@ -97,13 +98,13 @@ export default function ManualPortalPage() {
                         })}
                     </Stack>
                 </Box>
-                <Box p={2.5} borderTop="1px solid #eee" textAlign="center" bgcolor="#fafafa">
+                <Box p={2.5} borderTop="1px solid #eee" textAlign="center" bgcolor={tokens.neutral.gray50}>
                     <Typography variant="caption" color="text.secondary">&copy; CareRecord System Manual</Typography>
                 </Box>
             </Box>
 
             {/* --- 右ペイン：選択されたマニュアルコンテンツの表示エリア --- */}
-            <Box sx={{ flexGrow: 1, bgcolor: '#f4f5f7', overflowY: 'auto', p: { xs: 2, md: 5 } }}>
+            <Box sx={{ flexGrow: 1, bgcolor: tokens.neutral.surfaceSoft, overflowY: 'auto', p: { xs: 2, md: 5 } }}>
                 <Paper variant="outlined" sx={{ borderRadius: 4, bgcolor: '#fff', p: { xs: 3, md: 6 }, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.02)' }}>
 
                     {/* 選択されたIDに応じて、分離されたコンポーネントを動的にマウント */}

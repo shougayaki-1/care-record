@@ -1,5 +1,6 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/renderer';
+import { brand, blueTint } from '../../styles/tokens';
 
 const getFontUrl = (filename: string) => {
     return typeof window !== 'undefined'
@@ -28,11 +29,11 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between', 
         marginBottom: 6 
     },
-    title: { fontSize: 14, fontWeight: 'bold', color: '#2255CC' },
+    title: { fontSize: 14, fontWeight: 'bold', color: brand.primary },
     month: { fontSize: 12 },
     table: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
     row: { flexDirection: 'row' },
-    headerRow: { backgroundColor: '#F0F5FF' },
+    headerRow: { backgroundColor: blueTint[50] },
     headerCell: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#ccc', textAlign: 'center', paddingVertical: 4, fontWeight: 'bold' },
     staffCell: { 
         width: 45, 
@@ -41,6 +42,17 @@ const styles = StyleSheet.create({
         borderColor: '#ccc', 
         padding: 2, 
         justifyContent: 'center' 
+    },
+    staffName: {
+        fontSize: 6.5,
+        fontWeight: 'bold',
+        lineHeight: 1.05,
+    },
+    staffMeta: {
+        fontSize: 5.3,
+        color: '#555',
+        lineHeight: 1.05,
+        marginTop: 1,
     },
     dayCell: { 
         flex: 1, 
@@ -58,7 +70,7 @@ const styles = StyleSheet.create({
         textAlign: 'center' 
     },
     shiftBox: { 
-        backgroundColor: '#F0F5FF', 
+        backgroundColor: blueTint[50], 
         padding: 0.5, 
         marginBottom: 1, 
         borderRadius: 1 
@@ -79,6 +91,8 @@ const styles = StyleSheet.create({
 
 export type MatrixStaffData = {
     staffName: string;
+    employmentType?: string;
+    assignmentType?: string;
     shiftsByDay: {
         [day: number]: string[];
     };
@@ -112,7 +126,12 @@ export const ShiftMatrixDocument = ({ title, monthStr, daysInMonth, staffData, o
                     {staffData.map((staff, i) => (
                         <View key={i} style={styles.row}>
                             <View style={styles.staffCell}>
-                                <Text>{staff.staffName}</Text>
+                                <Text style={styles.staffName}>{staff.staffName}</Text>
+                                {(staff.employmentType || staff.assignmentType) && (
+                                    <Text style={styles.staffMeta}>
+                                        {[staff.employmentType, staff.assignmentType].filter(Boolean).join(' / ')}
+                                    </Text>
+                                )}
                             </View>
                             {days.map(d => {
                                 const shifts = staff.shiftsByDay[d] || [];

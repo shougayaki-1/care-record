@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { Box, AppBar, Toolbar, Typography, Button } from '@mui/material';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
@@ -6,7 +7,7 @@ import MenuBookIcon from '@mui/icons-material/MenuBook';
 export default function ManualLayout({ children }: { children: React.ReactNode }) {
     return (
         // ★ 修正: bodyのスクロール禁止を回避するため、ここに height と overflowY を追加
-        <Box sx={{ height: '100vh', overflowY: 'auto', bgcolor: '#f5f5f5', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ height: '100vh', overflowY: 'auto', bgcolor: tokens.neutral.gray100, display: 'flex', flexDirection: 'column' }}>
             
             {/* マニュアル専用の独立したヘッダー */}
             <AppBar position="sticky" elevation={1} sx={{ bgcolor: '#fff', color: '#333' }}>

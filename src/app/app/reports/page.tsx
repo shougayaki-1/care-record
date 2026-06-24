@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useEffect, useState, useCallback } from 'react';
 import {
@@ -478,10 +479,10 @@ export default function ReportsPage() {
         </Box>
 
        <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
-           <Paper sx={{ p: 2, mb: 3, bgcolor: '#F2F3F5', boxShadow: 'none' }}>
+           <Paper sx={{ p: 2, mb: 3, bgcolor: tokens.neutral.surface, boxShadow: 'none' }}>
               <Stack spacing={2}>
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-                    <Box display="flex" alignItems="center" gap={1} color="#5C5E66">
+                    <Box display="flex" alignItems="center" gap={1} color={tokens.text.secondary}>
                         <FilterListIcon fontSize="small" />
                         <Typography variant="subtitle2" fontWeight="bold">絞り込み:</Typography>
                     </Box>
@@ -503,7 +504,7 @@ export default function ReportsPage() {
               </Stack>
            </Paper>
            
-           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? alpha('#2255CC', 0.1) : '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #E3E5E8', boxShadow: 'none' }}>
+           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? alpha(tokens.brand.primary, 0.1) : '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: `1px solid ${tokens.neutral.border}`, boxShadow: 'none' }}>
                <Box>
                    <Typography variant="body1" fontWeight="bold">
                        {selected.length > 0 ? `${selected.length} 件選択中` : `検索結果: ${reports.length} 件`}
@@ -540,20 +541,20 @@ export default function ReportsPage() {
            )}
 
            {loading ? <CircularProgress /> : (
-             <TableContainer component={Paper} sx={{ boxShadow: 'none', border: '1px solid #E3E5E8' }}>
+             <TableContainer component={Paper} sx={{ boxShadow: 'none', border: `1px solid ${tokens.neutral.border}` }}>
                <Table>
-                 <TableHead sx={{ bgcolor: '#F2F3F5' }}>
+                 <TableHead sx={{ bgcolor: tokens.neutral.surface }}>
                    <TableRow>
                      <TableCell padding="checkbox"><Checkbox onChange={handleSelectAllClick} /></TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>ステータス</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>
+                     <TableCell sx={{ fontWeight: 'bold', color: tokens.text.secondary }}>ステータス</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: tokens.text.secondary }}>
                          <TableSortLabel active={orderBy === 'start_at'} direction={order} onClick={() => { setOrder(order === 'asc' ? 'desc' : 'asc'); setOrderBy('start_at'); }}>
                              開始 〜 終了日時
                          </TableSortLabel>
                      </TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>利用者</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>担当</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: '#5C5E66' }}>操作</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: tokens.text.secondary }}>利用者</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: tokens.text.secondary }}>担当</TableCell>
+                     <TableCell sx={{ fontWeight: 'bold', color: tokens.text.secondary }}>操作</TableCell>
                    </TableRow>
                  </TableHead>
                  <TableBody>
@@ -569,7 +570,7 @@ export default function ReportsPage() {
                      };
 
                      return (
-                         <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 }, bgcolor: isAbnormal ? '#fff5f5' : 'inherit' }}>
+                         <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 }, bgcolor: isAbnormal ? tokens.status.error.bg : 'inherit' }}>
                            <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
                            <TableCell><Chip label={row.status === 'approved' ? '承認済' : row.status === 'remanded' ? '差戻し' : '未承認'} color={row.status === 'approved' ? 'success' : row.status === 'remanded' ? 'error' : 'warning'} size="small" variant="outlined" /></TableCell>
                            

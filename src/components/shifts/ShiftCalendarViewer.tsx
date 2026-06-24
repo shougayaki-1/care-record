@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import React, { forwardRef } from 'react';
 import { Paper } from '@mui/material';
@@ -37,27 +38,27 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
     return (
         <Paper sx={{
             display: 'flex', flexDirection: 'column', height: 'calc(100vh - 180px)',
-            borderRadius: 3, p: 2, boxShadow: 'none', border: '1px solid #E3E5E8',
+            borderRadius: 3, p: 2, boxShadow: 'none', border: `1px solid ${tokens.neutral.border}`,
             '& .fc': {
                 height: '100%',
                 bgcolor: 'white',
-                '--fc-button-bg-color': '#2255CC',
-                '--fc-button-border-color': '#2255CC',
-                '--fc-button-hover-bg-color': '#003399',
-                '--fc-button-hover-border-color': '#003399',
-                '--fc-button-active-bg-color': '#003399',
-                '--fc-button-active-border-color': '#003399',
-                '--fc-today-bg-color': '#F0F5FF',
-                '--fc-border-color': '#E3E5E8',
+                '--fc-button-bg-color': tokens.brand.primary,
+                '--fc-button-border-color': tokens.brand.primary,
+                '--fc-button-hover-bg-color': tokens.brand.primaryDark,
+                '--fc-button-hover-border-color': tokens.brand.primaryDark,
+                '--fc-button-active-bg-color': tokens.brand.primaryDark,
+                '--fc-button-active-border-color': tokens.brand.primaryDark,
+                '--fc-today-bg-color': tokens.blueTint[50],
+                '--fc-border-color': tokens.neutral.border,
                 '--fc-event-text-color': '#fff',
                 fontFamily: 'inherit',
             },
             '& .fc-button': { textTransform: 'capitalize', borderRadius: '6px', fontWeight: 'bold', boxShadow: 'none !important' },
-            '& .fc-toolbar-title': { fontSize: '1.25rem', fontWeight: 'bold', color: '#060607' },
-            '& .fc-col-header-cell-cushion': { color: '#6D6F78', padding: '8px 0' },
+            '& .fc-toolbar-title': { fontSize: '1.25rem', fontWeight: 'bold', color: tokens.text.strong },
+            '& .fc-col-header-cell-cushion': { color: tokens.text.muted, padding: '8px 0' },
             '& .fc-event-time': { fontWeight: 'bold', marginRight: '4px' },
-            '& .fc-list-day-cushion': { backgroundColor: '#F0F5FF !important', color: '#2255CC', fontWeight: 'bold' },
-            '& .fc-list-event:hover td': { backgroundColor: '#F8F9FA', cursor: 'pointer' },
+            '& .fc-list-day-cushion': { backgroundColor: `${tokens.blueTint[50]} !important`, color: tokens.brand.primary, fontWeight: 'bold' },
+            '& .fc-list-event:hover td': { backgroundColor: tokens.neutral.bg, cursor: 'pointer' },
             // ★ドラッグ＆ドロップ時のUI調整
             '& .fc-event-dragging': { opacity: 0.8 },
             '& .fc-event-resizing': { opacity: 0.8 },

@@ -1,26 +1,60 @@
 // src/theme.ts
 'use client';
 import { createTheme } from '@mui/material/styles';
+import { brand, neutral, text, status, radius } from './styles/tokens';
+
+// --- TypeScript module augmentation -------------------------------------
+// tokens 由来のカスタム palette を MUI に型として認識させる。
+declare module '@mui/material/styles' {
+    interface Palette {
+        neutral: Palette['primary'];
+    }
+    interface PaletteOptions {
+        neutral?: PaletteOptions['primary'];
+    }
+}
+// Button などの color プロップで color="neutral" を使えるようにする。
+declare module '@mui/material/Button' {
+    interface ButtonPropsColorOverrides {
+        neutral: true;
+    }
+}
+// ------------------------------------------------------------------------
 
 const theme = createTheme({
     palette: {
         mode: 'light',
         primary: {
-            main: '#2255CC', // メインカラー
-            light: '#6699FF',
-            dark: '#003399',
+            main: brand.primary,
+            light: brand.primaryLight,
+            dark: brand.primaryDark,
+        },
+        success: {
+            main: status.success.main,
+        },
+        warning: {
+            main: status.warning.main,
+        },
+        error: {
+            main: status.error.main,
+            dark: status.error.dark,
+        },
+        neutral: {
+            main: neutral.surface,
+            contrastText: text.primary,
         },
         background: {
-            default: '#f8f9fa', // 全体の背景色
-            paper: '#ffffff',
+            default: neutral.bg, // 全体の背景色
+            paper: neutral.white,
         },
         text: {
-            primary: '#2c3e50',
-            secondary: '#636e72',
+            primary: text.primary,
+            secondary: text.secondaryAlt,
         },
+        divider: neutral.border,
     },
     shape: {
-        borderRadius: 12, // 角丸を強めにしてモダンに
+        borderRadius: radius.md, // 角丸を強めにしてモダンに
     },
     typography: {
         fontFamily: '"Helvetica Neue", Arial, sans-serif',
@@ -33,7 +67,7 @@ const theme = createTheme({
             styleOverrides: {
                 root: {
                     boxShadow: 'none',
-                    '&:hover': { boxShadow: '0 4px 8px rgba(34, 85, 204, 0.2)' },
+                    '&:hover': { boxShadow: `0 4px 8px rgba(34, 85, 204, 0.2)` },
                 },
             },
         },

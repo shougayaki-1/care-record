@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
@@ -227,17 +228,17 @@ export default function StatisticsPage() {
                 </Tabs>
             </Box>
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: '#f5f5f5' }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: tokens.neutral.gray100 }}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={3} spacing={2}>
                     <TextField type="month" label="対象月" size="small" InputLabelProps={{ shrink: true }} value={targetMonth} onChange={(e) => setTargetMonth(e.target.value)} sx={{ bgcolor: 'white', minWidth: 200 }} />
                     <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || aggregatedData.length === 0} sx={{ bgcolor: 'white' }}>CSVダウンロード</Button>
                 </Stack>
 
-                <Paper sx={{ p: 0, minHeight: 400, borderRadius: 3, overflow: 'hidden', boxShadow: 'none', border: '1px solid #E3E5E8' }}>
+                <Paper sx={{ p: 0, minHeight: 400, borderRadius: 3, overflow: 'hidden', boxShadow: 'none', border: `1px solid ${tokens.neutral.border}` }}>
                     {loading ? <Box display="flex" justifyContent="center" alignItems="center" height={300}><CircularProgress /></Box> : (
                         <TableContainer>
                             <Table>
-                                <TableHead sx={{ bgcolor: '#F0F5FF' }}>
+                                <TableHead sx={{ bgcolor: tokens.blueTint[50] }}>
                                     <TableRow>
                                         <TableCell sx={{ fontWeight: 'bold' }}>{tabIndex === 0 ? 'スタッフ名' : '利用者名'}</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>予定時間 (h)</TableCell>
@@ -254,8 +255,8 @@ export default function StatisticsPage() {
                                                 <TableRow key={i} hover>
                                                     <TableCell sx={{ fontWeight: 'bold' }}>{row.name}</TableCell>
                                                     <TableCell align="right">{row.plannedHours.toFixed(2)}</TableCell>
-                                                    <TableCell align="right" sx={{ fontWeight: 'bold', color: '#2255CC' }}>{row.actualHours.toFixed(2)}</TableCell>
-                                                    <TableCell align="right" sx={{ color: isAlert ? '#d32f2f' : 'inherit', fontWeight: isAlert ? 'bold' : 'normal' }}>{diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}</TableCell>
+                                                    <TableCell align="right" sx={{ fontWeight: 'bold', color: tokens.brand.primary }}>{row.actualHours.toFixed(2)}</TableCell>
+                                                    <TableCell align="right" sx={{ color: isAlert ? tokens.status.error.dark : 'inherit', fontWeight: isAlert ? 'bold' : 'normal' }}>{diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}</TableCell>
                                                 </TableRow>
                                             );
                                         })

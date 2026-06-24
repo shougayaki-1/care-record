@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useEffect, useState, useCallback } from 'react';
 import {
@@ -360,7 +361,7 @@ export default function ClientSettingsPage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ p: 2, borderBottom: '1px solid #e0e0e0', bgcolor: '#fff', flexShrink: 0 }}>
+            <Box sx={{ p: 2, borderBottom: `1px solid ${tokens.neutral.gray200}`, bgcolor: '#fff', flexShrink: 0 }}>
                 <Stack direction="row" alignItems="center" spacing={2} mb={2}>
                     <IconButton onClick={() => router.back()}><ArrowBackIcon /></IconButton>
                     <Box>
@@ -375,7 +376,7 @@ export default function ClientSettingsPage() {
                 </Tabs>
             </Box>
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: '#f5f5f5' }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: tokens.neutral.gray100 }}>
                 {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
                 {tabIndex === 0 && (
@@ -391,7 +392,7 @@ export default function ClientSettingsPage() {
                         </Box>
                         <Stack spacing={2} pb={2}>
                             {formItems.map((item, index) => (
-                                <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid #2255CC' : 'none', bgcolor: item.type === 'section' ? '#eef2ff' : 'white' }}>
+                                <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? `6px solid ${tokens.brand.primary}` : 'none', bgcolor: item.type === 'section' ? tokens.blueTint[100] : 'white' }}>
                                     <CardContent sx={{ p: '16px !important' }}>
                                         <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2}>
                                             <Stack direction="column" spacing={0.5}>
@@ -518,7 +519,7 @@ export default function ClientSettingsPage() {
 
                                     {renderTagList().map((group, gIdx) => (
                                         <Accordion key={gIdx} defaultExpanded={gIdx === 0}>
-                                            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: '#f8f9fa' }}>
+                                            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: tokens.neutral.bg }}>
                                                 <Typography fontWeight="bold">{group.title}</Typography>
                                             </AccordionSummary>
                                             <AccordionDetails>
@@ -573,7 +574,7 @@ export default function ClientSettingsPage() {
                                     ))}
                                     
                                     <Accordion>
-                                        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: '#f8f9fa' }}>
+                                        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: tokens.neutral.bg }}>
                                             <Typography fontWeight="bold">共通項目（日付・ヘルパー名など）</Typography>
                                         </AccordionSummary>
                                         <AccordionDetails>
@@ -606,7 +607,7 @@ export default function ClientSettingsPage() {
                         value={copyTab} 
                         onChange={(_, v) => setCopyTab(v)} 
                         variant="fullWidth" 
-                        sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: '#f8f9fa' }}
+                        sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: tokens.neutral.bg }}
                     >
                         <Tab icon={<LibraryBooksIcon />} label="標準テンプレート" />
                         <Tab icon={<PersonIcon />} label="他の利用者からコピー" />

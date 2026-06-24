@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useEffect, useState, useCallback } from 'react';
 import { 
@@ -159,7 +160,7 @@ export default function ClientsPage() {
 
         <TableContainer component={Paper} variant="outlined">
             <Table>
-            <TableHead sx={{ bgcolor: '#f8f9fa' }}>
+            <TableHead sx={{ bgcolor: tokens.neutral.bg }}>
                 <TableRow>
                 <TableCell sx={{ fontWeight: 'bold' }}>利用者氏名</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>状態</TableCell>
@@ -171,7 +172,7 @@ export default function ClientsPage() {
                 <TableRow><TableCell colSpan={3} align="center" sx={{ py: 5, color: '#999' }}>登録がありません</TableCell></TableRow>
                 ) : (
                 clients.map((client) => (
-                    <TableRow key={client.id} hover sx={{ opacity: client.archived_at ? 0.6 : 1, bgcolor: client.archived_at ? '#f9f9f9' : 'inherit' }}>
+                    <TableRow key={client.id} hover sx={{ opacity: client.archived_at ? 0.6 : 1, bgcolor: client.archived_at ? tokens.neutral.gray75 : 'inherit' }}>
                     <TableCell>{client.name}</TableCell>
                     <TableCell>
                         {client.archived_at ? 

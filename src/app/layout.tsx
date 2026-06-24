@@ -1,3 +1,4 @@
+import { tokens } from '@/styles/tokens';
 import type { Metadata, Viewport } from "next";
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
 import { ThemeProvider } from '@mui/material/styles';
@@ -22,7 +23,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#2255CC",
+  themeColor: tokens.brand.primary,
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,

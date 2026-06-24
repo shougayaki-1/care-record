@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useEffect, useState } from 'react';
 import { Box, Paper, CircularProgress, Container, Alert } from '@mui/material'; // Alert追加
@@ -40,7 +41,7 @@ export default function LoginPage() {
 
   if (checking) {
     return (
-      <Box height="100vh" display="flex" flexDirection="column" justifyContent="center" alignItems="center" bgcolor="#f8f9fa">
+      <Box height="100vh" display="flex" flexDirection="column" justifyContent="center" alignItems="center" bgcolor={tokens.neutral.bg}>
         <CircularProgress />
         <p style={{ marginTop: 10, color: '#666' }}>Checking Session...</p>
       </Box>
@@ -54,7 +55,7 @@ export default function LoginPage() {
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'center', 
-        bgcolor: '#f0f2f5',
+        bgcolor: tokens.neutral.surfaceAlt,
         py: 4
       }}
     >
@@ -72,10 +73,10 @@ export default function LoginPage() {
           sx={{ 
             p: { xs: 4, sm: 5 }, 
             borderRadius: 4, 
-            border: '1px solid #e0e0e0', 
+            border: `1px solid ${tokens.neutral.gray200}`, 
             boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
             width: '100%',
-            bgcolor: '#ffffff'
+            bgcolor: tokens.neutral.white
           }}
         >
           <AuthForm />

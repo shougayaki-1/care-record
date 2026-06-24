@@ -1,4 +1,5 @@
 'use client';
+import { tokens } from '@/styles/tokens';
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { 
@@ -338,7 +339,7 @@ function SettingsContent() {
                             </Paper>
 
                             {/* Google Drive連携 */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? '#F0F5FF' : '#fff' }}>
+                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? tokens.blueTint[50] : '#fff' }}>
                                 <Stack direction="row" alignItems="center" gap={2} mb={2}>
                                     <CloudQueueIcon color="primary" fontSize="large" />
                                     <Box>
@@ -386,7 +387,7 @@ function SettingsContent() {
                             </Paper>
 
                             {/* Googleカレンダー連携 (OAuth方式) */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleCalendarId ? '#4caf50' : 'divider', bgcolor: googleCalendarId ? '#f1f8e9' : '#fff' }}>
+                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleCalendarId ? tokens.status.success.alt : 'divider', bgcolor: googleCalendarId ? tokens.status.success.bgAlt : '#fff' }}>
                                 <Stack direction="row" alignItems="center" gap={2} mb={2}>
                                     <CalendarMonthIcon color="success" fontSize="large" />
                                     <Box>
@@ -457,7 +458,7 @@ function SettingsContent() {
                             </Paper>
 
                             {/* 危険な設定 */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.light', bgcolor: '#fff5f5' }}>
+                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.light', bgcolor: tokens.status.error.bg }}>
                                 <Stack direction="row" alignItems="center" gap={1} mb={2}>
                                     <WarningIcon color="error" />
                                     <Typography variant="h6" fontWeight="bold" color="error">危険な設定</Typography>

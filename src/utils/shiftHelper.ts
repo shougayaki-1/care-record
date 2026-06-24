@@ -1,4 +1,5 @@
 import { EventInput } from '@fullcalendar/core';
+import { brand, neutral } from '../styles/tokens';
 
 export type FetchedShiftData = {
     id: string;
@@ -39,9 +40,9 @@ export const convertToCalendarEvents = (shifts: FetchedShiftData[], isListView: 
             title: displayTitle,
             start: shift.start_at,
             end: shift.end_at,
-            backgroundColor: isCancelled ? (isListView ? 'transparent' : '#F2F3F5') : '#2255CC',
-            borderColor: isCancelled ? (isListView ? 'transparent' : '#E3E5E8') : '#2255CC',
-            textColor: isCancelled ? '#999' : '#ffffff',
+            backgroundColor: isCancelled ? (isListView ? 'transparent' : neutral.surface) : brand.primary,
+            borderColor: isCancelled ? (isListView ? 'transparent' : neutral.border) : brand.primary,
+            textColor: isCancelled ? '#999' : neutral.white,
             extendedProps: {
                 shiftData: shift,
                 shiftId: shift.id,
