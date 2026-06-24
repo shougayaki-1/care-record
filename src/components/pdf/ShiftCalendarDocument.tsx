@@ -143,6 +143,7 @@ export type PdfStaffMember = {
     name: string;
     employmentType?: string | null;
     workStyle?: string | null;
+    positions?: string[] | null;
 };
 
 type Props = {
@@ -165,16 +166,23 @@ export const ShiftCalendarDocument = ({ title, monthStr, weeks, orgName, staffMe
                 {staffMembers.length > 0 && (
                     <View style={styles.staffSection}>
                         <Text style={styles.staffSectionLabel}>スタッフ：</Text>
-                        {staffMembers.map((s, i) => (
-                            <View key={i} style={styles.staffChip}>
-                                <Text style={styles.staffChipName}>{s.name}</Text>
-                                {[s.employmentType, s.workStyle].filter(Boolean).length > 0 ? (
-                                    <Text style={styles.staffChipDetail}>
-                                        {[s.employmentType, s.workStyle].filter(Boolean).join('・')}
-                                    </Text>
-                                ) : null}
-                            </View>
-                        ))}
+                        {staffMembers.map((s, i) => {
+                            const details = [
+                                s.employmentType,
+                                s.workStyle,
+                                ...(s.positions && s.positions.length > 0 ? [s.positions.join('/')] : []),
+                            ].filter(Boolean);
+                            return (
+                                <View key={i} style={styles.staffChip}>
+                                    <Text style={styles.staffChipName}>{s.name}</Text>
+                                    {details.length > 0 ? (
+                                        <Text style={styles.staffChipDetail}>
+                                            {details.join('・')}
+                                        </Text>
+                                    ) : null}
+                                </View>
+                            );
+                        })}
                     </View>
                 )}
 

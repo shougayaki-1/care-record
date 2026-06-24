@@ -43,7 +43,7 @@ export const downloadShiftPdf = async ({
 
     const { data: staffRows } = await supabase
         .from('staffs')
-        .select('name, employment_type, work_style')
+        .select('name, employment_type, work_style, positions')
         .eq('organization_id', currentOrg.id)
         .is('archived_at', null)
         .order('sort_order', { ascending: true, nullsFirst: false })
@@ -52,6 +52,7 @@ export const downloadShiftPdf = async ({
         name: s.name as string,
         employmentType: s.employment_type as string | null,
         workStyle: s.work_style as string | null,
+        positions: s.positions as string[] | null,
     }));
 
     let blob: Blob;
@@ -215,7 +216,7 @@ export const downloadShiftMatrixPdf = async ({
 
     const { data: staffRows } = await supabase
         .from('staffs')
-        .select('name, employment_type, work_style')
+        .select('name, employment_type, work_style, positions')
         .eq('organization_id', currentOrg.id)
         .is('archived_at', null)
         .order('sort_order', { ascending: true, nullsFirst: false })
@@ -224,6 +225,7 @@ export const downloadShiftMatrixPdf = async ({
         name: s.name as string,
         employmentType: s.employment_type as string | null,
         workStyle: s.work_style as string | null,
+        positions: s.positions as string[] | null,
     }));
 
     const blob = await pdf(React.createElement(ShiftMatrixDocument, {
