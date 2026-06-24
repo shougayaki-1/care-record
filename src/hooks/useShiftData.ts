@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, RefObject } from 'react';
+import { useState, useEffect, useCallback, useRef, RefObject } from 'react';
 import { EventInput } from '@fullcalendar/core';
 import FullCalendar from '@fullcalendar/react';
 import { supabase } from '@/lib/supabase';
@@ -135,14 +135,19 @@ export const useShiftData = ({
         return {};
     }, [activeTab, currentStaffId, selectedStaffId, selectedClientId]);
 
+    const fetchSeqRef = useRef(0);
+
     const fetchData = useCallback(async (isBackground = false, range?: ShiftDateRange) => {
         if (!currentOrg) return;
         if (!isBackground) setInitialLoading(true);
         setIsFetching(true);
 
-        const calendarApi = calendarRef.current?.getApi();
-        const currentCalendarDate = calendarApi?.getDate();
-        const currentView = calendarApi?.view;
+        // 取得が複数同時に走った際、古い月のレスポンスが後着して
+        // 新しい月の表示を上書きしないよう、最新リクエストだけ反映する
+        const seq = ++fetchSeqRef.current;
+        const isStale = () => seq !== fetchSeqRef.current;
+
+        const currentView = calendarRef.current?.getApi()?.view;
         const targetRange = range || (currentView
             ? { start: currentView.activeStart, end: currentView.activeEnd }
             : getCurrentMonthRange());
@@ -155,6 +160,7 @@ export const useShiftData = ({
 
             const filter = getShiftFilter();
             if (!filter) {
+                if (isStale()) return;
                 setRawShifts([]);
                 setEvents([]);
                 return;
@@ -166,22 +172,21 @@ export const useShiftData = ({
                 targetRange.end.toISOString(),
                 filter
             );
+            if (isStale()) return;
             const typedShifts = (fetchedShifts as unknown as FetchedShiftData[]) || [];
 
             setRawShifts(typedShifts);
             const isEditable = activeTab === 'fullCalendar' && ['owner', 'manager'].includes(currentOrg.role);
             setEvents(convertToCalendarEvents(typedShifts, !isEditable));
             void fetchUnsyncedCount().catch(console.error);
-
-            if (calendarApi && currentCalendarDate) {
-                setTimeout(() => { calendarApi.gotoDate(currentCalendarDate); }, 10);
-            }
         } catch (error) {
             console.error(error);
             showToast('データの取得に失敗しました', 'error');
         } finally {
-            setInitialLoading(false);
-            setIsFetching(false);
+            if (!isStale()) {
+                setInitialLoading(false);
+                setIsFetching(false);
+            }
         }
     }, [currentOrg, showToast, calendarRef, activeTab, fetchPatterns, getShiftFilter, fetchUnsyncedCount]);
 
