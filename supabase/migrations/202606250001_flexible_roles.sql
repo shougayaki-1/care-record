@@ -35,10 +35,14 @@ DECLARE
 BEGIN
   FOR org_rec IN SELECT id FROM public.organizations LOOP
     INSERT INTO public.organization_roles (organization_id, name, color, is_preset, permissions)
-    VALUES (org_rec.id, '管理者', '#6366f1', true, mgr_perm) RETURNING id INTO mgr_id;
+    VALUES (org_rec.id, '管理者', '#6366f1', true, mgr_perm)
+    ON CONFLICT (organization_id, name) DO UPDATE SET is_preset = EXCLUDED.is_preset
+    RETURNING id INTO mgr_id;
 
     INSERT INTO public.organization_roles (organization_id, name, color, is_preset, permissions)
-    VALUES (org_rec.id, '一般スタッフ', '#10b981', true, stf_perm) RETURNING id INTO stf_id;
+    VALUES (org_rec.id, '一般スタッフ', '#10b981', true, stf_perm)
+    ON CONFLICT (organization_id, name) DO UPDATE SET is_preset = EXCLUDED.is_preset
+    RETURNING id INTO stf_id;
 
     INSERT INTO public.organization_member_roles (organization_id, user_id, role_id)
     SELECT om.organization_id, om.user_id, mgr_id FROM public.organization_members om
@@ -59,25 +63,30 @@ ALTER TABLE public.organization_members ADD CONSTRAINT organization_members_role
 -- 6. private.get_member_record_view_scope
 CREATE OR REPLACE FUNCTION private.get_member_record_view_scope(p_org_id uuid, p_user_id uuid)
 RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = private, public STABLE AS $$
-  SELECT CASE
-    WHEN om.role = 'owner' THEN 'all'
-    WHEN EXISTS (SELECT 1 FROM public.organization_member_roles omr JOIN public.organization_roles r ON r.id = omr.role_id WHERE omr.organization_id = p_org_id AND omr.user_id = p_user_id AND (r.permissions -> 'records' ->> 'view') = 'all') THEN 'all'
-    WHEN EXISTS (SELECT 1 FROM public.organization_member_roles omr JOIN public.organization_roles r ON r.id = omr.role_id WHERE omr.organization_id = p_org_id AND omr.user_id = p_user_id AND (r.permissions -> 'records' ->> 'view') = 'assigned') THEN 'assigned'
-    ELSE 'none'
-  END FROM public.organization_members om WHERE om.organization_id = p_org_id AND om.user_id = p_user_id
+  SELECT COALESCE(
+    (SELECT CASE
+      WHEN om.role = 'owner' THEN 'all'
+      WHEN EXISTS (SELECT 1 FROM public.organization_member_roles omr JOIN public.organization_roles r ON r.id = omr.role_id WHERE omr.organization_id = p_org_id AND omr.user_id = p_user_id AND (r.permissions -> 'records' ->> 'view') = 'all') THEN 'all'
+      WHEN EXISTS (SELECT 1 FROM public.organization_member_roles omr JOIN public.organization_roles r ON r.id = omr.role_id WHERE omr.organization_id = p_org_id AND omr.user_id = p_user_id AND (r.permissions -> 'records' ->> 'view') = 'assigned') THEN 'assigned'
+      ELSE 'none'
+    END FROM public.organization_members om WHERE om.organization_id = p_org_id AND om.user_id = p_user_id),
+    'none'
+  )
 $$;
 
 -- 7. Updated can_access_client
 CREATE OR REPLACE FUNCTION private.can_access_client(p_client_id uuid)
 RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path = private, public STABLE AS $$
+  WITH scope AS (
+    SELECT private.get_member_record_view_scope(c.organization_id, auth.uid()) AS s
+    FROM public.clients c
+    WHERE c.id = p_client_id AND c.deleted_at IS NULL
+    AND EXISTS (SELECT 1 FROM public.organization_members om WHERE om.organization_id = c.organization_id AND om.user_id = auth.uid())
+  )
   SELECT EXISTS (
-    SELECT 1 FROM public.clients c
-    JOIN public.organization_members om ON om.organization_id = c.organization_id AND om.user_id = auth.uid()
-    WHERE c.id = p_client_id AND c.deleted_at IS NULL AND (
-      private.get_member_record_view_scope(c.organization_id, auth.uid()) = 'all'
-      OR (private.get_member_record_view_scope(c.organization_id, auth.uid()) = 'assigned'
-          AND EXISTS (SELECT 1 FROM public.assignments a WHERE a.client_id = p_client_id AND a.helper_id = auth.uid()))
-    )
+    SELECT 1 FROM scope
+    WHERE scope.s = 'all'
+      OR (scope.s = 'assigned' AND EXISTS (SELECT 1 FROM public.assignments a WHERE a.client_id = p_client_id AND a.helper_id = auth.uid()))
   )
 $$;
 
