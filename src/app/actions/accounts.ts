@@ -71,6 +71,15 @@ export async function acceptInvitation(code: string) {
     const { data: organizationId, error } = await supabase.rpc('accept_invitation_atomic', {
         p_code: code.trim(), p_session_id: user.sessionId,
     });
+    if (error?.message === 'already_member') {
+        // 招待は消費されていないので code から org_id を逆引きできる
+        const { data: invite } = await supabaseAdmin
+            .from('invitations')
+            .select('organization_id')
+            .eq('code', code.trim())
+            .maybeSingle();
+        return { success: true, organizationId: invite?.organization_id ?? '', alreadyMember: true };
+    }
     if (error || !organizationId) throw new Error('無効、期限切れ、または使用済みの招待コードです');
     return { success: true, organizationId: String(organizationId), alreadyMember: false };
 }
@@ -197,6 +206,13 @@ export async function removeAccount(
             .eq('organization_id', orgId)
             .eq('user_id', targetId);
         if (error) throw sanitizeDbError(error, 'action.accounts');
+        // アカウント紐付けを解除してスタッフ台帳の参照を残さない
+        await supabaseAdmin
+            .from('staffs')
+            .update({ user_id: null })
+            .eq('organization_id', orgId)
+            .eq('user_id', targetId)
+            .is('deleted_at', null);
     } else {
         const { error } = await supabaseAdmin
             .from('invitations')

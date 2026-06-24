@@ -98,8 +98,10 @@ export async function leaveOrganization(orgId: string) {
     const { data: members } = await supabaseAdmin.from('organization_members')
         .select('role, user_id').eq('organization_id', orgId);
 
+    const me = members?.find(m => m.user_id === userId);
+    if (!me) throw new Error('この事業所のメンバーではありません');
+
     const owners = members?.filter(m => m.role === 'owner') || [];
-    const me = members?.find(m => m.user_id === userId); 
 
     if (me?.role === 'owner' && owners.length <= 1 && (members?.length || 0) > 1) {
         throw new Error('あなたが唯一のオーナーです。脱退する前に他のメンバーにオーナー権限を譲渡するか、事業所を削除してください。');
@@ -122,21 +124,17 @@ export async function leaveOrganization(orgId: string) {
 export async function transferOwner(orgId: string, newOwnerId: string) {
     // 譲渡できるのは現 owner 本人のみ。現 owner はセッションから取得する
     const { userId: currentOwnerId } = await assertOrgRole(orgId, ['owner']);
-    if (newOwnerId === currentOwnerId) throw new Error('譲渡先が不正です');
 
-    // 譲渡先が同じ事業所のメンバーであることを確認
-    const { data: target } = await supabaseAdmin.from('organization_members')
-        .select('user_id').eq('organization_id', orgId).eq('user_id', newOwnerId).single();
-    if (!target) throw new Error('譲渡先がこの事業所のメンバーではありません');
-
-    // トランザクション的に処理
-    const { error: error1 } = await supabaseAdmin.from('organization_members')
-        .update({ role: 'owner' }).eq('organization_id', orgId).eq('user_id', newOwnerId);
-    if (error1) throw error1;
-
-    const { error: error2 } = await supabaseAdmin.from('organization_members')
-        .update({ role: 'manager' }).eq('organization_id', orgId).eq('user_id', currentOwnerId);
-    if (error2) throw error2;
+    // 両方の UPDATE を単一トランザクション内で原子的に実行する RPC を使用
+    // 分割 UPDATE だと1件目成功・2件目失敗で2オーナー状態になりうるため
+    const { error } = await supabaseAdmin.rpc('transfer_owner_atomic', {
+        p_org_id: orgId,
+        p_new_owner_id: newOwnerId,
+        p_current_owner_id: currentOwnerId,
+    });
+    if (error?.message === 'invalid_transfer_target') throw new Error('譲渡先が不正です');
+    if (error?.message === 'target_not_member') throw new Error('譲渡先がこの事業所のメンバーではありません');
+    if (error) throw sanitizeDbError(error, 'action.organization');
 
     return { success: true };
 }

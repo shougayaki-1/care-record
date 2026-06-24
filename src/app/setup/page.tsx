@@ -74,18 +74,6 @@ export default function SetupPage() {
             }
         };
 
-        const initSetup = async () => {
-            console.log('[SetupPage] Checking user session...');
-            const { data: { session } } = await supabase.auth.getSession();
-
-            if (!session) {
-                console.log('[SetupPage] No initial session, waiting for auth state change...');
-                // ここではまだリダイレクトせず、イベント発火を少し待つ
-            } else {
-                await processUser(session.user);
-            }
-        };
-
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
             console.log(`[SetupPage] Auth Event: ${event}`);
             
@@ -101,8 +89,6 @@ export default function SetupPage() {
                 if (mounted) router.replace('/');
             }
         });
-
-        initSetup();
 
         return () => {
             mounted = false;

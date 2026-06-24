@@ -35,10 +35,15 @@ async function assertStaffOrg(staffId: string, organizationId: string) {
   return data;
 }
 
-async function validateLinkedUser(organizationId: string, linkedUserId: string | null) {
+async function validateLinkedUser(organizationId: string, linkedUserId: string | null, excludeStaffId?: string | null) {
   if (!linkedUserId) return;
   const { data } = await supabaseAdmin.from('organization_members').select('user_id').eq('organization_id', organizationId).eq('user_id', linkedUserId).maybeSingle();
   if (!data) throw new Error('事業所外のアカウントは紐付けできません');
+  // 同一アカウントが別スタッフに既紐付きでないか確認（更新時は自分自身を除外）
+  let dupeQuery = supabaseAdmin.from('staffs').select('id').eq('organization_id', organizationId).eq('user_id', linkedUserId).is('deleted_at', null);
+  if (excludeStaffId) dupeQuery = dupeQuery.neq('id', excludeStaffId);
+  const { data: existing } = await dupeQuery.maybeSingle();
+  if (existing) throw new Error('このアカウントはすでに別のスタッフに紐付けられています');
 }
 
 export async function saveStaff(
@@ -55,7 +60,7 @@ export async function saveStaff(
   const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
   const normalized = normalizeStaffInput(values.name, values.positions, values.employmentType, values.workStyle);
   const linkedUserId = values.linkedUserId || null;
-  await validateLinkedUser(organizationId, linkedUserId);
+  await validateLinkedUser(organizationId, linkedUserId, values.staffId);
 
   let staffId = values.staffId || null;
   if (staffId) {

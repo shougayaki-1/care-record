@@ -63,12 +63,15 @@ export default function AccountsPage() {
     setIsFetching(true);
     try {
       const overview = await getAccountOverview(currentOrg.id);
-      setCurrentUserId(overview.currentUserId);
+      // fetchedUserId をローカル変数で保持し sort に使うことで
+      // currentUserId state への依存を断ち、二重フェッチループを防ぐ
+      const fetchedUserId = overview.currentUserId;
+      setCurrentUserId(fetchedUserId);
       const mergedList: AccountProfile[] = overview.accounts;
-      
+
       mergedList.sort((a, b) => {
-          if (a.id === currentUserId) return -1;
-          if (b.id === currentUserId) return 1;
+          if (a.id === fetchedUserId) return -1;
+          if (b.id === fetchedUserId) return 1;
           if (a.role === 'owner' && b.role !== 'owner') return -1;
           if (a.role !== 'owner' && b.role === 'owner') return 1;
           if (a.status === 'active' && b.status !== 'active') return -1;
@@ -77,13 +80,13 @@ export default function AccountsPage() {
       });
 
       setAccountList(mergedList);
-    } catch (e) { 
-        console.error(e); 
+    } catch (e) {
+        console.error(e);
         showToast('データの取得に失敗しました', 'error');
     } finally {
         setIsFetching(false);
     }
-  }, [currentOrg, currentUserId, showToast]);
+  }, [currentOrg, showToast]);
 
   useEffect(() => { if (!wsLoading && currentOrg) fetchData(); }, [wsLoading, currentOrg, fetchData]);
 
@@ -356,8 +359,7 @@ export default function AccountsPage() {
                  </>
              ) : (
                  <>
-                    <Typography variant="body2" textAlign="center">相手にこのQRコードを読み取ってもらうか、<br/>リンクを共有してください。</Typography>
-                    <Box component="img" src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(generatedLink)}`} alt="QR Code" sx={{ width: 150, height: 150, border: '1px solid', borderColor: 'divider', p: 1, borderRadius: 2 }} />
+                    <Typography variant="body2" textAlign="center">以下のリンクを相手に共有してください。</Typography>
                     <TextField value={generatedLink} fullWidth size="small" slotProps={{ input: { readOnly: true, endAdornment: (<IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}><ContentCopyIcon /></IconButton>) } }} />
                     <Button variant="outlined" startIcon={<ShareIcon />} fullWidth onClick={handleShare}>共有メニューを開く</Button>
                  </>
