@@ -54,7 +54,7 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     staffChipName: { fontSize: 10, fontWeight: 'bold', color: '#333' },
-    staffChipPosition: { fontSize: 9.5, color: '#2255CC', marginLeft: 3 },
+    staffChipDetail: { fontSize: 9.5, color: '#2255CC', marginLeft: 3 },
     table: { width: '100%', borderWidth: 1, borderColor: '#ddd' },
     tableHeader: { flexDirection: 'row', backgroundColor: '#F0F5FF', borderBottomWidth: 1, borderColor: '#ddd', fontWeight: 'bold' },
     tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#ddd', minHeight: 26, alignItems: 'center' },
@@ -112,7 +112,11 @@ export const ShiftScheduleDocument = ({ title, monthStr, shifts, orgName, staffM
                         {staffMembers.map((s, i) => (
                             <View key={i} style={styles.staffChip}>
                                 <Text style={styles.staffChipName}>{s.name}</Text>
-                                {s.positions && s.positions.length > 0 ? <Text style={styles.staffChipPosition}>{s.positions.join('・')}</Text> : null}
+                                {[s.employmentType, s.workStyle].filter(Boolean).length > 0 ? (
+                                    <Text style={styles.staffChipDetail}>
+                                        {[s.employmentType, s.workStyle].filter(Boolean).join('・')}
+                                    </Text>
+                                ) : null}
                             </View>
                         ))}
                     </View>

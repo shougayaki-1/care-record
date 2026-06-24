@@ -51,7 +51,7 @@ const styles = StyleSheet.create({
         marginBottom: 2,
     },
     staffChipName: { fontSize: 7.5, fontWeight: 'bold', color: '#333' },
-    staffChipPosition: { fontSize: 7, color: '#2255CC', marginLeft: 2 },
+    staffChipDetail: { fontSize: 7, color: '#2255CC', marginLeft: 2 },
     table: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
     row: { flexDirection: 'row' },
     headerRow: { backgroundColor: '#F0F5FF' },
@@ -132,7 +132,11 @@ export const ShiftMatrixDocument = ({ title, monthStr, daysInMonth, staffData, o
                         {staffMembers.map((s, i) => (
                             <View key={i} style={styles.staffChip}>
                                 <Text style={styles.staffChipName}>{s.name}</Text>
-                                {s.positions && s.positions.length > 0 ? <Text style={styles.staffChipPosition}>{s.positions.join('・')}</Text> : null}
+                                {[s.employmentType, s.workStyle].filter(Boolean).length > 0 ? (
+                                    <Text style={styles.staffChipDetail}>
+                                        {[s.employmentType, s.workStyle].filter(Boolean).join('・')}
+                                    </Text>
+                                ) : null}
                             </View>
                         ))}
                     </View>

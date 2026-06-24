@@ -43,12 +43,16 @@ export const downloadShiftPdf = async ({
 
     const { data: staffRows } = await supabase
         .from('staffs')
-        .select('name, positions')
+        .select('name, employment_type, work_style')
         .eq('organization_id', currentOrg.id)
         .is('archived_at', null)
         .order('sort_order', { ascending: true, nullsFirst: false })
         .order('name', { ascending: true });
-    const staffMembers = (staffRows || []).map(s => ({ name: s.name as string, positions: (s.positions as string[] | null) ?? [] }));
+    const staffMembers = (staffRows || []).map(s => ({
+        name: s.name as string,
+        employmentType: s.employment_type as string | null,
+        workStyle: s.work_style as string | null,
+    }));
 
     let blob: Blob;
     const days = ['日', '月', '火', '水', '木', '金', '土'];
@@ -211,12 +215,16 @@ export const downloadShiftMatrixPdf = async ({
 
     const { data: staffRows } = await supabase
         .from('staffs')
-        .select('name, positions')
+        .select('name, employment_type, work_style')
         .eq('organization_id', currentOrg.id)
         .is('archived_at', null)
         .order('sort_order', { ascending: true, nullsFirst: false })
         .order('name', { ascending: true });
-    const staffMembers = (staffRows || []).map(s => ({ name: s.name as string, positions: (s.positions as string[] | null) ?? [] }));
+    const staffMembers = (staffRows || []).map(s => ({
+        name: s.name as string,
+        employmentType: s.employment_type as string | null,
+        workStyle: s.work_style as string | null,
+    }));
 
     const blob = await pdf(React.createElement(ShiftMatrixDocument, {
         title: docTitle,

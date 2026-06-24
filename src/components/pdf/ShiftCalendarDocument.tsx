@@ -58,7 +58,7 @@ const styles = StyleSheet.create({
         marginBottom: 3,
     },
     staffChipName: { fontSize: 9, fontWeight: 'bold', color: '#333' },
-    staffChipPosition: { fontSize: 8.5, color: '#2255CC', marginLeft: 3 },
+    staffChipDetail: { fontSize: 8.5, color: '#2255CC', marginLeft: 3 },
     calendar: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
     dayHeaderRow: { flexDirection: 'row', backgroundColor: '#F0F5FF' },
     dayHeaderCell: { 
@@ -141,7 +141,8 @@ export type PdfCalendarDay = {
 
 export type PdfStaffMember = {
     name: string;
-    positions?: string[] | null;
+    employmentType?: string | null;
+    workStyle?: string | null;
 };
 
 type Props = {
@@ -167,7 +168,11 @@ export const ShiftCalendarDocument = ({ title, monthStr, weeks, orgName, staffMe
                         {staffMembers.map((s, i) => (
                             <View key={i} style={styles.staffChip}>
                                 <Text style={styles.staffChipName}>{s.name}</Text>
-                                {s.positions && s.positions.length > 0 ? <Text style={styles.staffChipPosition}>{s.positions.join('・')}</Text> : null}
+                                {[s.employmentType, s.workStyle].filter(Boolean).length > 0 ? (
+                                    <Text style={styles.staffChipDetail}>
+                                        {[s.employmentType, s.workStyle].filter(Boolean).join('・')}
+                                    </Text>
+                                ) : null}
                             </View>
                         ))}
                     </View>
