@@ -63,6 +63,9 @@ const MGMT_ITEMS: Array<{ label: string; key: keyof RolePermissions['management'
   { label: '連携設定', key: 'integrations' },
   { label: '監査ログ', key: 'auditLogs' },
   { label: 'レポート閲覧', key: 'reports' },
+  { label: 'ロール管理', key: 'roles' },
+  { label: '事業所削除', key: 'organizationDelete' },
+  { label: 'オーナー移譲', key: 'ownerTransfer' },
 ];
 
 export default function RolePermissionsMatrix({ value, onChange, disabled }: Props) {

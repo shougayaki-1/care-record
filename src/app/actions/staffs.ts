@@ -3,7 +3,7 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertOrgRole, assertOrgPermission, assertOwner, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgRole, assertOrgPermission, supabaseAdmin } from '@/utils/supabase/auth';
 
 const EMPLOYMENT_TYPES = ['常勤', '非常勤'] as const;
 const WORK_STYLES = ['兼務', '専従'] as const;
@@ -92,7 +92,7 @@ export async function setStaffArchived(organizationId: string, staffId: string, 
 }
 
 export async function softDeleteStaff(organizationId: string, staffId: string, reason: string) {
-  const { userId } = await assertOwner(organizationId);
+  const { userId } = await assertOrgPermission(organizationId, 'staffs');
   await assertStaffOrg(staffId, organizationId);
   const normalizedReason = reason.trim();
   if (normalizedReason.length < 2 || normalizedReason.length > 500) throw new Error('削除理由を2〜500文字で入力してください');

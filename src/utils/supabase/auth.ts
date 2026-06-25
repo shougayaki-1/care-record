@@ -8,7 +8,7 @@ import { createClient, type Session, type SupabaseClient } from '@supabase/supab
 import { createHash } from 'crypto';
 import { decodeJwtSessionId } from '@/utils/jwt';
 import {
-  mergePermissions, FULL_PERMISSIONS,
+  mergePermissions,
   type RolePermissions, type ManagementArea,
 } from '@/utils/permissions';
 
@@ -226,7 +226,8 @@ export async function assertSuperAdmin(): Promise<{ userId: string }> {
 
 /**
  * 組織メンバーの有効な権限を返す。
- * オーナーは FULL_PERMISSIONS。メンバーは割り当てられたロールをマージして返す。
+ * 割り当てられたロールをマージして有効権限を返す。
+ * owner は所有権の識別であり、日常操作権限はロールで決まる。
  */
 export async function getEffectivePermissions(
   organizationId: string,
@@ -239,8 +240,6 @@ export async function getEffectivePermissions(
     .eq('user_id', userId)
     .single();
   if (error || !member) throw new Error('この事業所へのアクセス権がありません');
-  if (member.role === 'owner') return { isOwner: true, permissions: FULL_PERMISSIONS };
-
   const { data: roleLinks } = await supabaseAdmin
     .from('organization_member_roles')
     .select('organization_roles(permissions)')
@@ -252,7 +251,7 @@ export async function getEffectivePermissions(
     .map((r: any) => (Array.isArray(r.organization_roles) ? r.organization_roles[0]?.permissions : r.organization_roles?.permissions) as RolePermissions | undefined)
     .filter((p): p is RolePermissions => p != null);
 
-  return { isOwner: false, permissions: mergePermissions(rolePerms) };
+  return { isOwner: member.role === 'owner', permissions: mergePermissions(rolePerms) };
 }
 
 /**
@@ -266,7 +265,7 @@ export async function assertOrgPermission(
   if (!organizationId) throw new Error('organizationId が不正です');
   const user = await getAuthedUser();
   const { isOwner, permissions } = await getEffectivePermissions(organizationId, user.id);
-  if (!isOwner && !permissions.management[area]) throw new Error('この操作を行う権限がありません');
+  if (!permissions.management[area]) throw new Error('この操作を行う権限がありません');
   return { userId: user.id, isOwner };
 }
 

@@ -3,7 +3,7 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertOrgRole, assertOrgPermission, assertOwner, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgRole, assertOrgPermission, supabaseAdmin } from '@/utils/supabase/auth';
 
 async function assertClientOrg(clientId: string, organizationId: string) {
   const { data, error } = await supabaseAdmin
@@ -62,7 +62,7 @@ export async function setClientArchived(organizationId: string, clientId: string
 }
 
 export async function softDeleteClient(organizationId: string, clientId: string, reason: string) {
-  const { userId } = await assertOwner(organizationId);
+  const { userId } = await assertOrgPermission(organizationId, 'clients');
   const client = await assertClientOrg(clientId, organizationId);
   if (!client.archived_at) throw new Error('完全削除の前に利用者をアーカイブしてください');
   const normalizedReason = reason.trim();

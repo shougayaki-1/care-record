@@ -1,10 +1,11 @@
 'use server';
 
-import { supabaseAdmin, assertOwner } from '@/utils/supabase/auth';
+import { supabaseAdmin, assertOrgPermission } from '@/utils/supabase/auth';
 import { type RolePermissions, PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS } from '@/utils/permissions';
+import { assertRoleManagerRemains } from '@/utils/supabase/roleSafety';
 
 export async function getOrgRolesFull(orgId: string) {
-  await assertOwner(orgId);
+  await assertOrgPermission(orgId, 'roles');
   const { data, error } = await supabaseAdmin
     .from('organization_roles')
     .select('*')
@@ -20,7 +21,7 @@ export async function createOrgRole(
   color: string | null,
   permissions: RolePermissions
 ): Promise<{ id: string }> {
-  await assertOwner(orgId);
+  await assertOrgPermission(orgId, 'roles');
   const { data, error } = await supabaseAdmin
     .from('organization_roles')
     .insert({ organization_id: orgId, name, color, is_preset: false, permissions })
@@ -35,7 +36,10 @@ export async function updateOrgRole(
   roleId: string,
   patch: Partial<{ name: string; color: string | null; permissions: RolePermissions }>
 ): Promise<void> {
-  await assertOwner(orgId);
+  await assertOrgPermission(orgId, 'roles');
+  if (patch.permissions) {
+    await assertRoleManagerRemains(orgId, { updatedRole: { roleId, permissions: patch.permissions } });
+  }
   const { error } = await supabaseAdmin
     .from('organization_roles')
     .update(patch)
@@ -45,7 +49,8 @@ export async function updateOrgRole(
 }
 
 export async function deleteOrgRole(orgId: string, roleId: string): Promise<void> {
-  await assertOwner(orgId);
+  await assertOrgPermission(orgId, 'roles');
+  await assertRoleManagerRemains(orgId, { deletedRoleId: roleId });
   const { error } = await supabaseAdmin
     .from('organization_roles')
     .delete()
@@ -59,8 +64,9 @@ export async function resetPresetRole(
   roleId: string,
   preset: 'manager' | 'staff'
 ): Promise<void> {
-  await assertOwner(orgId);
+  await assertOrgPermission(orgId, 'roles');
   const permissions = preset === 'manager' ? PRESET_MANAGER_PERMISSIONS : PRESET_STAFF_PERMISSIONS;
+  await assertRoleManagerRemains(orgId, { updatedRole: { roleId, permissions } });
   const { error } = await supabaseAdmin
     .from('organization_roles')
     .update({ permissions })

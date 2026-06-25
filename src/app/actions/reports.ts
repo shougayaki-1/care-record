@@ -3,7 +3,7 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertOrgRole, assertOrgPermission, assertOwner, createSessionClient, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgRole, assertOrgPermission, createSessionClient, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
 import { randomUUID } from 'crypto';
 import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';

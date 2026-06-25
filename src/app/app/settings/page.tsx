@@ -126,7 +126,7 @@ function SettingsContent() {
 
     useEffect(() => {
         if (!wsLoading && currentOrg) {
-            if (currentOrg.role !== 'owner' && !Object.values(currentOrg.effectivePermissions.management).some(Boolean)) {
+            if (!Object.values(currentOrg.effectivePermissions.management).some(Boolean)) {
                 router.push('/app');
                 return;
             }
@@ -369,7 +369,10 @@ function SettingsContent() {
     };
 
     if (wsLoading || !currentOrg) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
-    const isOwner = currentOrg.role === 'owner';
+    const canEditOrganization = checkManagementPermission(currentOrg.effectivePermissions, 'organization');
+    const canManageIntegrations = checkManagementPermission(currentOrg.effectivePermissions, 'integrations');
+    const canViewAuditLogs = checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs');
+    const canDeleteOrganization = checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete');
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -380,7 +383,7 @@ function SettingsContent() {
                 </Stack>
                 <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="scrollable" allowScrollButtonsMobile>
                     <Tab label="基本設定" />
-                    {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs')) && <Tab label="操作ログ" icon={<ListAltIcon fontSize="small" />} iconPosition="start" />}
+                    {canViewAuditLogs && <Tab label="操作ログ" icon={<ListAltIcon fontSize="small" />} iconPosition="start" />}
                 </Tabs>
             </Box>
 
@@ -396,10 +399,10 @@ function SettingsContent() {
                                 <Stack spacing={4}>
                                     <Box>
                                         <Typography variant="subtitle2" fontWeight="bold" gutterBottom>事業所名</Typography>
-                                        <TextField fullWidth value={orgName} onChange={(e) => setOrgName(e.target.value)} disabled={!isOwner} />
+                                        <TextField fullWidth value={orgName} onChange={(e) => setOrgName(e.target.value)} disabled={!canEditOrganization} />
                                     </Box>
                                     <Divider />
-                                    {isOwner && (
+                                    {canEditOrganization && (
                                         <Box sx={{ display: 'flex', justifyContent: { xs: 'stretch', sm: 'flex-end' } }}>
                                             <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                 {saving ? '保存中...' : '変更を保存'}
@@ -421,7 +424,7 @@ function SettingsContent() {
                                 </Stack>
                                 
                                 <Box sx={{ mt: 2, p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider', minWidth: 0 }}>
-                                    {isOwner ? (
+                                    {canManageIntegrations ? (
                                         googleFolderId ? (
                                             <Stack spacing={2}>
                                                 <Typography variant="body2">
@@ -454,7 +457,7 @@ function SettingsContent() {
                                         )
                                     ) : (
                                         <Typography variant="caption" color="text.secondary">
-                                            管理者のみ設定を変更できます。
+                                            連携設定権限を持つメンバーのみ設定を変更できます。
                                         </Typography>
                                     )}
                                 </Box>
@@ -472,7 +475,7 @@ function SettingsContent() {
                                 </Stack>
                                 
                                 <Box sx={{ mt: 2, p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider', minWidth: 0 }}>
-                                    {isOwner ? (
+                                    {canManageIntegrations ? (
                                         googleCalendarId ? (
                                             <Stack spacing={2}>
                                                 <Typography variant="body2">
@@ -549,14 +552,14 @@ function SettingsContent() {
                                         )
                                     ) : (
                                         <Typography variant="caption" color="text.secondary">
-                                            管理者のみ設定を変更できます。
+                                            連携設定権限を持つメンバーのみ設定を変更できます。
                                         </Typography>
                                     )}
                                 </Box>
                             </Paper>
 
                             {/* 労働時間ルール */}
-                            {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'organization')) && (
+                            {canEditOrganization && (
                                 <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
                                     <Typography variant="h6" fontWeight="bold" gutterBottom>労働時間ルール</Typography>
                                     <Typography variant="body2" color="text.secondary" mb={2}>
@@ -582,7 +585,7 @@ function SettingsContent() {
                                             脱退する
                                         </Button>
                                     </Box>
-                                    {isOwner && (
+                                    {canDeleteOrganization && (
                                         <>
                                             <Divider />
                                             <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} flexDirection={{ xs: 'column', sm: 'row' }} gap={1.5}>

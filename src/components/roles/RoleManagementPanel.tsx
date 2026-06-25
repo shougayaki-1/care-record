@@ -18,7 +18,7 @@ import {
 import RolePermissionsMatrix from '@/components/roles/RolePermissionsMatrix';
 import ColorPresetPicker from '@/components/roles/ColorPresetPicker';
 import type { RolePermissions } from '@/utils/permissions';
-import { EMPTY_PERMISSIONS } from '@/utils/permissions';
+import { checkManagementPermission, EMPTY_PERMISSIONS } from '@/utils/permissions';
 
 type OrgRole = {
   id: string;
@@ -66,7 +66,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
 
   useEffect(() => { void fetchRoles(); }, [fetchRoles]);
 
-  if (currentOrg?.role !== 'owner') {
+  if (!currentOrg || !checkManagementPermission(currentOrg.effectivePermissions, 'roles')) {
     return (
       <Box sx={{ p: embedded ? 0 : { xs: 2, sm: 3 } }}>
         <Typography>この機能はオーナーのみ利用できます。</Typography>

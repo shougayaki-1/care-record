@@ -141,7 +141,7 @@ export default function AccountsPage() {
 
   const openRoleEditDialog = () => {
     if (!selectedAccount) return;
-    setEditRole(selectedAccount.role);
+    setEditRole(selectedAccount.role === 'owner' ? 'owner' : 'member');
     setEditOrgRoleIds(selectedAccount.roles?.map(r => r.id) ?? []);
     setOpenRoleDialog(true);
     handleMenuClose();
@@ -165,7 +165,7 @@ export default function AccountsPage() {
         newRole: editRole,
       });
 
-      if (selectedAccount.status === 'active' && editRole !== 'owner') {
+      if (selectedAccount.status === 'active') {
         await updateMemberRoles(currentOrg.id, selectedAccount.id, editOrgRoleIds);
       }
 
@@ -173,7 +173,7 @@ export default function AccountsPage() {
       setOpenRoleDialog(false);
       fetchData();
 
-      if (selectedAccount.id === currentUserId && editRole !== 'owner') {
+      if (selectedAccount.id === currentUserId) {
         setTimeout(() => window.location.reload(), 1000);
       }
     } catch (error) {
@@ -220,8 +220,8 @@ export default function AccountsPage() {
   };
 
   if (wsLoading || !currentOrg) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
-  const canManageAccounts = currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'accounts');
-  const canManageRoles = currentOrg.role === 'owner';
+  const canManageAccounts = checkManagementPermission(currentOrg.effectivePermissions, 'accounts');
+  const canManageRoles = checkManagementPermission(currentOrg.effectivePermissions, 'roles');
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -423,19 +423,18 @@ export default function AccountsPage() {
           <FormControl fullWidth size="small">
             <InputLabel>システム権限</InputLabel>
             <Select value={editRole} onChange={(e) => setEditRole(e.target.value)} label="システム権限">
-              <MenuItem value="staff">一般 - 記録の作成のみ</MenuItem>
-              <MenuItem value="manager">管理者 - シフト管理・利用者管理</MenuItem>
+              <MenuItem value="member">メンバー - 権限はロールで管理</MenuItem>
               {selectedAccount?.status === 'active' && (
-                <MenuItem value="owner">オーナー - 全ての権限・事業所設定</MenuItem>
+                <MenuItem value="owner">オーナー - 所有者</MenuItem>
               )}
             </Select>
           </FormControl>
           {selectedAccount?.id === currentUserId && editRole !== 'owner' && (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              自分の権限を降格させると、再度オーナーに戻ることはできません。
+              自分の所有者区分を変更すると、再度オーナーに戻るには別のオーナーによる移譲が必要です。
             </Alert>
           )}
-          {availableRoles.length > 0 && editRole !== 'owner' && (
+          {availableRoles.length > 0 && selectedAccount?.status === 'active' && (
             <>
               <Divider sx={{ my: 2 }} />
               <Typography variant="subtitle2" mb={1}>割り当てるロール</Typography>

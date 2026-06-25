@@ -3,12 +3,11 @@
 import { randomBytes } from 'crypto';
 import { cookies } from 'next/headers';
 import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar';
-import { assertOrgRole } from '@/utils/supabase/auth';
+import { assertOrgPermission } from '@/utils/supabase/auth';
 import { storeOAuthNonce } from '@/utils/supabase/oauthNonce';
 
 export async function getGoogleAuthUrlAction(organizationId: string) {
-    // 呼び出し元がこの事業所の owner であることを検証（カレンダー連携は owner 操作）
-    const { userId } = await assertOrgRole(organizationId, ['owner']);
+    const { userId } = await assertOrgPermission(organizationId, 'integrations');
 
     // CSRF 対策: 推測不能な nonce を生成し、orgId と紐づけて httpOnly Cookie に保存。
     // コールバック時に state(nonce) と Cookie を突合し、orgId は Cookie 側を信頼する。

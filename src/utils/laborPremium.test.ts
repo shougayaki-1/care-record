@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getNightMinutes, getOvertimeMinutes } from './laborPremium';
+import { aggregatePremiumMinutes, getNightMinutes, getOvertimeMinutes, type LaborPremiumType } from './laborPremium';
 
 describe('getNightMinutes', () => {
   it('counts minutes in 22:00-01:00 (crosses midnight)', () => {
@@ -18,5 +18,50 @@ describe('getOvertimeMinutes', () => {
   it('returns excess above daily threshold', () => {
     const slots = [{ start: new Date('2026-01-01T08:00:00'), end: new Date('2026-01-01T18:00:00') }];
     expect(getOvertimeMinutes(slots, 8, null)).toBe(120);
+  });
+});
+
+describe('aggregatePremiumMinutes', () => {
+  const types: LaborPremiumType[] = [
+    {
+      id: 'night',
+      name: '深夜',
+      is_enabled: true,
+      rate: 25,
+      calc_method: 'additive',
+      builtin_type: 'night',
+      night_start_hour: 22,
+      night_end_hour: 5,
+      overtime_daily_threshold_hours: null,
+      overtime_weekly_threshold_hours: null,
+    },
+    {
+      id: 'overtime',
+      name: '時間外',
+      is_enabled: true,
+      rate: 25,
+      calc_method: 'additive',
+      builtin_type: 'overtime',
+      night_start_hour: null,
+      night_end_hour: null,
+      overtime_daily_threshold_hours: 8,
+      overtime_weekly_threshold_hours: null,
+    },
+  ];
+
+  it('can compare planned and actual premium minutes', () => {
+    const planned = aggregatePremiumMinutes(types, [
+      { start_at: '2026-01-01T09:00:00', end_at: '2026-01-01T17:00:00' },
+      { start_at: '2026-01-01T22:00:00', end_at: '2026-01-02T00:00:00' },
+    ]);
+    const actual = aggregatePremiumMinutes(types, [
+      { start_at: '2026-01-01T09:00:00', end_at: '2026-01-01T19:00:00' },
+      { start_at: '2026-01-01T22:00:00', end_at: '2026-01-02T01:00:00' },
+    ]);
+
+    expect(planned.night).toBe(120);
+    expect(actual.night).toBe(180);
+    expect(actual.night - planned.night).toBe(60);
+    expect(actual.overtime).toBeGreaterThan(planned.overtime);
   });
 });

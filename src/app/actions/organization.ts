@@ -6,9 +6,10 @@ import { supabaseAdmin, getAuthedUser, assertOrgRole, assertOrgPermission, asser
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
+import { assertRoleManagerRemains } from '@/utils/supabase/roleSafety';
 
 export async function updateOrganizationName(orgId: string, name: string) {
-    const { userId } = await assertOwner(orgId);
+    const { userId } = await assertOrgPermission(orgId, 'organization');
     const normalized = name.trim();
     if (normalized.length < 1 || normalized.length > 100) throw new Error('事業所名は1〜100文字で入力してください');
     const { error } = await supabaseAdmin.from('organizations').update({ name: normalized }).eq('id', orgId).is('deleted_at', null);
@@ -18,7 +19,7 @@ export async function updateOrganizationName(orgId: string, name: string) {
 }
 
 export async function updateOrganizationDriveFolder(orgId: string, folderId: string | null) {
-    const { userId } = await assertOwner(orgId);
+    const { userId } = await assertOrgPermission(orgId, 'integrations');
     const normalized = folderId?.trim() || null;
     if (normalized && normalized.length > 255) throw new Error('フォルダIDが不正です');
     const { error } = await supabaseAdmin.from('organizations').update({ google_folder_id: normalized }).eq('id', orgId).is('deleted_at', null);
@@ -28,7 +29,7 @@ export async function updateOrganizationDriveFolder(orgId: string, folderId: str
 }
 
 export async function disconnectGoogleCalendar(orgId: string) {
-    const { userId } = await assertOwner(orgId);
+    const { userId } = await assertOrgPermission(orgId, 'integrations');
     const { data: org, error: readError } = await supabaseAdmin.from('organizations').select('google_refresh_token').eq('id', orgId).single();
     if (readError) throw new Error(readError.message);
     let revoked = false;
@@ -48,7 +49,7 @@ export async function disconnectGoogleCalendar(orgId: string) {
 
 export async function deleteOrganization(orgId: string) {
     // 権限チェック: 呼び出し元がこの事業所の owner であることをセッションから検証
-    const { userId } = await assertOwner(orgId);
+    const { userId } = await assertOrgPermission(orgId, 'organizationDelete');
 
     const { data: organization, error: orgReadError } = await supabaseAdmin
         .from('organizations')
@@ -106,6 +107,7 @@ export async function leaveOrganization(orgId: string) {
     if (me?.role === 'owner' && owners.length <= 1 && (members?.length || 0) > 1) {
         throw new Error('あなたが唯一のオーナーです。脱退する前に他のメンバーにオーナー権限を譲渡するか、事業所を削除してください。');
     }
+    await assertRoleManagerRemains(orgId, { removedMemberId: userId });
 
     const { error } = await supabaseAdmin.from('organization_members')
         .delete().eq('organization_id', orgId).eq('user_id', userId);
@@ -124,6 +126,7 @@ export async function leaveOrganization(orgId: string) {
 export async function transferOwner(orgId: string, newOwnerId: string) {
     // 譲渡できるのは現 owner 本人のみ。現 owner はセッションから取得する
     const { userId: currentOwnerId } = await assertOwner(orgId);
+    await assertOrgPermission(orgId, 'ownerTransfer');
 
     // 両方の UPDATE を単一トランザクション内で原子的に実行する RPC を使用
     // 分割 UPDATE だと1件目成功・2件目失敗で2オーナー状態になりうるため

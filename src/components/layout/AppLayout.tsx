@@ -40,9 +40,9 @@ import { checkManagementPermission, type ManagementArea } from '@/utils/permissi
 const SIDEBAR_WIDTH = 256;
 const SIDEBAR_COLLAPSED_WIDTH = 72;
 
-const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; area: ManagementArea | 'owner' }> = [
+const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; area: ManagementArea }> = [
   { prefix: '/app/accounts', area: 'accounts' },
-  { prefix: '/app/settings/roles', area: 'owner' },
+  { prefix: '/app/settings/roles', area: 'roles' },
   { prefix: '/app/settings', area: 'auditLogs' },
   { prefix: '/app/clients', area: 'clients' },
   { prefix: '/app/staff', area: 'staffs' },
@@ -328,7 +328,7 @@ const NavDrawer = ({
     return false;
   };
 
-  const isAdmin = currentOrg.role === 'owner' || Object.values(currentOrg.effectivePermissions.management).some(Boolean);
+  const isAdmin = Object.values(currentOrg.effectivePermissions.management).some(Boolean);
 
   const categoryStyle = {
     px: 3,
@@ -436,7 +436,7 @@ const NavDrawer = ({
               {navButton('利用者管理', <PeopleIcon fontSize="small" />, '/app/clients')}
               {navButton('スタッフ(名簿)管理', <BadgeIcon fontSize="small" />, '/app/staff')}
 
-              {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'accounts')) && (
+              {checkManagementPermission(currentOrg.effectivePermissions, 'accounts') && (
                 navButton('アカウント・権限管理', <KeyIcon fontSize="small" />, '/app/accounts')
               )}
               {navButton('統計・予実管理', <AssessmentIcon fontSize="small" />, '/app/statistics')}
@@ -477,9 +477,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const matchedRoute = PROTECTED_MANAGEMENT_ROUTES.find(({ prefix }) => pathname.startsWith(prefix));
   const accessDenied = Boolean(
     currentOrg && matchedRoute && !(
-      matchedRoute.area === 'owner'
-        ? currentOrg.role === 'owner'
-        : currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, matchedRoute.area as ManagementArea)
+      checkManagementPermission(currentOrg.effectivePermissions, matchedRoute.area)
     )
   );
 

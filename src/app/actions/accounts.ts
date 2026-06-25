@@ -5,6 +5,7 @@ import { sanitizeDbError } from '@/utils/errors';
 import { randomUUID } from 'crypto';
 import { supabaseAdmin, getAuthedUser, assertOrgRole, assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
+import { assertRoleManagerRemains } from '@/utils/supabase/roleSafety';
 
 const VALID_ROLES = ['owner', 'member'] as const;
 type Role = (typeof VALID_ROLES)[number];
@@ -128,14 +129,14 @@ export async function createInvitation(orgId: string, params: { targetName?: str
 }
 
 /**
- * メンバー/招待のロールを変更する。owner のみ。
+ * メンバー/招待の所有者区分を変更する。
  * 最後の owner の降格はサーバ側でも拒否する。
  */
 export async function updateAccountRole(
     orgId: string,
     params: { targetId: string; status: 'active' | 'invited'; newRole: string }
 ) {
-    const { userId } = await assertOrgRole(orgId, ['owner']);
+    const { userId } = await assertOrgPermission(orgId, 'accounts');
     const { targetId, status, newRole } = params;
     if (!VALID_ROLES.includes(newRole as Role)) throw new Error('権限が不正です');
     if (status === 'invited' && newRole === 'owner') {
@@ -199,8 +200,8 @@ export async function removeAccount(
         // 自己脱退: メンバーであればよい
         await assertOrgRole(orgId);
     } else {
-        // 他メンバーの除名 / 招待取消は owner のみ
-        await assertOrgRole(orgId, ['owner']);
+        // 他メンバーの除名 / 招待取消はアカウント管理権限が必要
+        await assertOrgPermission(orgId, 'accounts');
     }
 
     if (status === 'active') {
@@ -216,6 +217,7 @@ export async function removeAccount(
             const owners = list.filter((m) => m.role === 'owner');
             if (owners.length <= 1) throw new Error('最後のオーナーは削除できません');
         }
+        await assertRoleManagerRemains(orgId, { removedMemberId: targetId });
 
         const { error } = await supabaseAdmin
             .from('organization_members')
@@ -264,7 +266,8 @@ export async function updateMemberRoles(orgId: string, targetUserId: string, rol
     const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
     void isOwner; // used for audit; permission already checked
     const { data: targetMember } = await supabaseAdmin.from('organization_members').select('role').eq('organization_id', orgId).eq('user_id', targetUserId).single();
-    if (targetMember?.role === 'owner') throw new Error('オーナーのロールは変更できません');
+    if (!targetMember) throw new Error('対象のメンバーが見つかりません');
+    await assertRoleManagerRemains(orgId, { replacedMemberRoles: { userId: targetUserId, roleIds } });
     await supabaseAdmin.from('organization_member_roles').delete().eq('organization_id', orgId).eq('user_id', targetUserId);
     if (roleIds.length > 0) {
         const rows = roleIds.map(rid => ({ organization_id: orgId, user_id: targetUserId, role_id: rid }));

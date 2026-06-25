@@ -4,7 +4,7 @@
 // 直接削除（softDeleteReports）に加え、申請→owner承認→論理削除の経路を提供する。
 // deletion_requests は service_role のみアクセス可（RLSで REVOKE 済み）。
 
-import { assertOrgRole, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgPermission, assertOrgRole, supabaseAdmin } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { sanitizeDbError } from '@/utils/errors';
 
@@ -69,9 +69,9 @@ export async function listDeletionRequests(organizationId: string, status: 'requ
   return data;
 }
 
-/** 削除申請を承認し、実際の論理削除を実行する（owner のみ）。 */
+/** 削除申請を承認し、実際の論理削除を実行する（レポート管理権限）。 */
 export async function approveDeletionRequest(organizationId: string, requestId: string) {
-  const { userId } = await assertOrgRole(organizationId, ['owner']);
+  const { userId } = await assertOrgPermission(organizationId, 'reports');
 
   const { data: req, error: reqError } = await supabaseAdmin
     .from('deletion_requests')
@@ -124,9 +124,9 @@ export async function approveDeletionRequest(organizationId: string, requestId: 
   return { success: true };
 }
 
-/** 削除申請を却下する（owner のみ）。 */
+/** 削除申請を却下する（レポート管理権限）。 */
 export async function rejectDeletionRequest(organizationId: string, requestId: string, reason: string) {
-  const { userId } = await assertOrgRole(organizationId, ['owner']);
+  const { userId } = await assertOrgPermission(organizationId, 'reports');
   const normalized = normalizeReason(reason);
 
   const { data: req, error: reqError } = await supabaseAdmin

@@ -4,7 +4,17 @@
 export type RecordScope = 'all' | 'assigned' | 'none';
 export type RecordAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
 export type ShiftAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
-export type ManagementArea = 'staffs' | 'clients' | 'accounts' | 'organization' | 'integrations' | 'auditLogs' | 'reports';
+export type ManagementArea =
+  | 'staffs'
+  | 'clients'
+  | 'accounts'
+  | 'organization'
+  | 'integrations'
+  | 'auditLogs'
+  | 'reports'
+  | 'roles'
+  | 'organizationDelete'
+  | 'ownerTransfer';
 
 export type RolePermissions = {
   records: Record<RecordAction, RecordScope>;
@@ -17,27 +27,71 @@ export type RolePermissions = {
 export const EMPTY_PERMISSIONS: RolePermissions = {
   records: { view: 'none', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
   shifts:  { view: 'none', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
-  management: { staffs: false, clients: false, accounts: false, organization: false, integrations: false, auditLogs: false, reports: false },
+  management: {
+    staffs: false,
+    clients: false,
+    accounts: false,
+    organization: false,
+    integrations: false,
+    auditLogs: false,
+    reports: false,
+    roles: false,
+    organizationDelete: false,
+    ownerTransfer: false,
+  },
 };
 
 export const FULL_PERMISSIONS: RolePermissions = {
   records: { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
   shifts:  { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
-  management: { staffs: true, clients: true, accounts: true, organization: true, integrations: true, auditLogs: true, reports: true },
+  management: {
+    staffs: true,
+    clients: true,
+    accounts: true,
+    organization: true,
+    integrations: true,
+    auditLogs: true,
+    reports: true,
+    roles: true,
+    organizationDelete: true,
+    ownerTransfer: true,
+  },
 };
 
 /** 管理者プリセット */
 export const PRESET_MANAGER_PERMISSIONS: RolePermissions = {
   records: { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
   shifts:  { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
-  management: { staffs: true, clients: true, accounts: false, organization: false, integrations: false, auditLogs: true, reports: true },
+  management: {
+    staffs: true,
+    clients: true,
+    accounts: false,
+    organization: false,
+    integrations: false,
+    auditLogs: true,
+    reports: true,
+    roles: false,
+    organizationDelete: false,
+    ownerTransfer: false,
+  },
 };
 
 /** 一般スタッフプリセット */
 export const PRESET_STAFF_PERMISSIONS: RolePermissions = {
   records: { view: 'assigned', create: 'assigned', edit: 'assigned', delete: 'none', approve: 'none' },
   shifts:  { view: 'assigned', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
-  management: { staffs: false, clients: false, accounts: false, organization: false, integrations: false, auditLogs: false, reports: false },
+  management: {
+    staffs: false,
+    clients: false,
+    accounts: false,
+    organization: false,
+    integrations: false,
+    auditLogs: false,
+    reports: false,
+    roles: false,
+    organizationDelete: false,
+    ownerTransfer: false,
+  },
 };
 
 // ─── スコープ優先順 ───────────────────────────────────────────────────────────
@@ -72,7 +126,7 @@ export function mergePermissions(roles: RolePermissions[]): RolePermissions {
       result.shifts[action] = mergeScope(result.shifts[action], role.shifts[action]);
     }
     for (const area of Object.keys(result.management) as ManagementArea[]) {
-      result.management[area] = result.management[area] || role.management[area];
+      result.management[area] = result.management[area] || Boolean(role.management?.[area]);
     }
   }
 

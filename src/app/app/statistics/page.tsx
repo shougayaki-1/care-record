@@ -3,10 +3,12 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
     Box, Typography, Paper, CircularProgress, Tabs, Tab, Stack, TextField, Button,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, IconButton, Collapse, Divider
 } from '@/components/ui/mui';
 import DownloadIcon from '@mui/icons-material/Download';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
@@ -27,6 +29,16 @@ type ReportData = {
 };
 
 type AggregatedRow = { name: string; plannedHours: number; actualHours: number; };
+type PremiumComparison = Record<string, { planned: number; actual: number; diff: number }>;
+type StaffDetailItem = {
+    id: string;
+    kind: 'planned' | 'actual';
+    clientName: string;
+    startAt: string;
+    endAt: string;
+    hours: number;
+    status?: string;
+};
 
 type ShiftWithLinks = {
     id: string; start_at: string; end_at: string; client_id: string;
@@ -40,6 +52,24 @@ function getOverlappingHours(start: Date, end: Date, monthStart: Date, monthEnd:
     const overlapEnd = end < monthEnd ? end : monthEnd;
     if (overlapStart >= overlapEnd) return 0;
     return (overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60);
+}
+
+function clipSlotToMonth(startAt: string, endAt: string, monthStart: Date, monthEnd: Date): { start_at: string; end_at: string } | null {
+    const start = new Date(startAt);
+    const end = new Date(endAt);
+    const overlapStart = start > monthStart ? start : monthStart;
+    const overlapEnd = end < monthEnd ? end : monthEnd;
+    if (overlapStart >= overlapEnd) return null;
+    return { start_at: overlapStart.toISOString(), end_at: overlapEnd.toISOString() };
+}
+
+function formatDetailDateTime(value: string): string {
+    return new Date(value).toLocaleString('ja-JP', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 }
 
 export default function StatisticsPage() {
@@ -57,6 +87,7 @@ export default function StatisticsPage() {
     const [rawReports, setRawReports] = useState<ReportData[]>([]);
     const [premiumTypes, setPremiumTypes] = useState<LaborPremiumType[]>([]);
     const [rawShiftsWithLinks, setRawShiftsWithLinks] = useState<ShiftWithLinks[]>([]);
+    const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
     const fetchStatisticsData = useCallback(async () => {
         if (!currentOrg || !targetMonth) return;
@@ -145,15 +176,22 @@ export default function StatisticsPage() {
     }, [wsLoading, currentOrg, fetchStatisticsData]);
 
     const aggregatedData = useMemo(() => {
-        if (!targetMonth) return { rows: [], premiumMinsPerStaff: {} };
+        if (!targetMonth) {
+            return {
+                rows: [] as AggregatedRow[],
+                premiumComparisonPerStaff: {} as Record<string, PremiumComparison>,
+                detailItemsPerStaff: {} as Record<string, StaffDetailItem[]>,
+            };
+        }
 
         const [yearStr, monthStr] = targetMonth.split('-');
         const monthStart = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, 1, 0, 0, 0);
         const monthEnd = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10), 0, 23, 59, 59, 999);
 
         const statsMap: Record<string, AggregatedRow> = {};
-        // Per-staff actual report slots for premium calculation (staff tab only)
+        const staffShiftsMap: Record<string, Array<{ start_at: string; end_at: string }>> = {};
         const staffReportsMap: Record<string, Array<{ start_at: string; end_at: string }>> = {};
+        const detailItemsPerStaff: Record<string, StaffDetailItem[]> = {};
 
         const addHours = (name: string, type: 'planned' | 'actual', hours: number) => {
             if (!name) return;
@@ -161,16 +199,26 @@ export default function StatisticsPage() {
             if (type === 'planned') statsMap[name].plannedHours += hours;
             else statsMap[name].actualHours += hours;
         };
-        const addStaffReport = (name: string, start_at: string, end_at: string) => {
+        const addStaffSlot = (
+            map: Record<string, Array<{ start_at: string; end_at: string }>>,
+            name: string,
+            start_at: string,
+            end_at: string,
+        ) => {
             if (!name) return;
-            (staffReportsMap[name] ??= []).push({ start_at, end_at });
+            (map[name] ??= []).push({ start_at, end_at });
+        };
+        const addDetailItem = (name: string, item: StaffDetailItem) => {
+            if (!name) return;
+            (detailItemsPerStaff[name] ??= []).push(item);
         };
 
-        // ① 単発シフトの集計 (予定時間)
+        // ① 単発シフトの集計 (予定時間・予定割増)
         rawShifts.forEach(shift => {
             const shiftStart = new Date(shift.start_at);
             const shiftEnd = new Date(shift.end_at);
             const hours = getOverlappingHours(shiftStart, shiftEnd, monthStart, monthEnd);
+            const clipped = clipSlotToMonth(shift.start_at, shift.end_at, monthStart, monthEnd);
                 
             if (hours > 0) {
                 if (tabIndex === 1 && shift.clients?.name) {
@@ -178,14 +226,35 @@ export default function StatisticsPage() {
                     addHours(clientName, 'planned', hours);
                 }
                 if (tabIndex === 0) {
+                    const clientName = Array.isArray(shift.clients) ? shift.clients[0]?.name : shift.clients?.name;
                     if (shift.shift_staffs && shift.shift_staffs.length > 0) {
                         shift.shift_staffs.forEach(staff => {
                             const sName = Array.isArray(staff.staffs) ? staff.staffs[0]?.name : staff.staffs?.name;
-                            if (sName) addHours(sName, 'planned', hours);
-                            else addHours('未設定(スタッフ名なし)', 'planned', hours);
+                            const targetName = sName || '未設定(スタッフ名なし)';
+                            addHours(targetName, 'planned', hours);
+                            if (clipped) addStaffSlot(staffShiftsMap, targetName, clipped.start_at, clipped.end_at);
+                            addDetailItem(targetName, {
+                                id: `planned-${shift.id}-${targetName}`,
+                                kind: 'planned',
+                                clientName: clientName ?? '—',
+                                startAt: shift.start_at,
+                                endAt: shift.end_at,
+                                hours,
+                                status: shift.status,
+                            });
                         });
                     } else {
                         addHours('未設定(シフト担当者なし)', 'planned', hours);
+                        if (clipped) addStaffSlot(staffShiftsMap, '未設定(シフト担当者なし)', clipped.start_at, clipped.end_at);
+                        addDetailItem('未設定(シフト担当者なし)', {
+                            id: `planned-${shift.id}-unassigned`,
+                            kind: 'planned',
+                            clientName: clientName ?? '—',
+                            startAt: shift.start_at,
+                            endAt: shift.end_at,
+                            hours,
+                            status: shift.status,
+                        });
                     }
                 }
             }
@@ -216,23 +285,46 @@ export default function StatisticsPage() {
                 }
                 if (tabIndex === 0) {
                     const actualHelpers = dataObj?._helpers || [];
+                    const clipped = clipSlotToMonth(report.start_at, report.end_at, monthStart, monthEnd);
+                    const clientName = Array.isArray(report.clients) ? report.clients[0]?.name : report.clients?.name;
+                    const addActualForStaff = (helperName: string) => {
+                        addHours(helperName, 'actual', actualHours);
+                        if (clipped) addStaffSlot(staffReportsMap, helperName, clipped.start_at, clipped.end_at);
+                        addDetailItem(helperName, {
+                            id: `actual-${report.id}-${helperName}`,
+                            kind: 'actual',
+                            clientName: clientName ?? '—',
+                            startAt: report.start_at,
+                            endAt: report.end_at,
+                            hours: actualHours,
+                            status: report.status,
+                        });
+                    };
 
                     if (Array.isArray(actualHelpers) && actualHelpers.length > 0) {
                         actualHelpers.forEach(helperName => {
                             if (helperName) {
-                                addHours(String(helperName), 'actual', actualHours);
-                                addStaffReport(String(helperName), report.start_at, report.end_at);
+                                addActualForStaff(String(helperName));
                             }
                         });
                     } else if (report.helper?.name) {
                         // 古いデータなどで _helpers がない場合のフォールバック
                         const fallbackName = Array.isArray(report.helper) ? report.helper[0]?.name : report.helper.name;
                         if (fallbackName) {
-                            addHours(fallbackName, 'actual', actualHours);
-                            addStaffReport(fallbackName, report.start_at, report.end_at);
+                            addActualForStaff(fallbackName);
                         }
                     } else {
                         addHours('未設定(担当者不明)', 'actual', actualHours);
+                        if (clipped) addStaffSlot(staffReportsMap, '未設定(担当者不明)', clipped.start_at, clipped.end_at);
+                        addDetailItem('未設定(担当者不明)', {
+                            id: `actual-${report.id}-unknown`,
+                            kind: 'actual',
+                            clientName: clientName ?? '—',
+                            startAt: report.start_at,
+                            endAt: report.end_at,
+                            hours: actualHours,
+                            status: report.status,
+                        });
                     }
                 }
             }
@@ -240,24 +332,41 @@ export default function StatisticsPage() {
 
         const rows = Object.values(statsMap).sort((a, b) => a.name.localeCompare(b.name));
 
-        // Compute premium minutes per staff (staff tab only)
-        const premiumMinsPerStaff: Record<string, Record<string, number>> = {};
+        const premiumComparisonPerStaff: Record<string, PremiumComparison> = {};
         if (tabIndex === 0) {
-            for (const staffName of Object.keys(staffReportsMap)) {
-                premiumMinsPerStaff[staffName] = aggregatePremiumMinutes(premiumTypes, staffReportsMap[staffName]);
+            for (const staffName of Object.keys(statsMap)) {
+                const planned = aggregatePremiumMinutes(premiumTypes, staffShiftsMap[staffName] ?? []);
+                const actual = aggregatePremiumMinutes(premiumTypes, staffReportsMap[staffName] ?? []);
+                premiumComparisonPerStaff[staffName] = {};
+                for (const type of premiumTypes) {
+                    const plannedMinutes = planned[type.id] ?? 0;
+                    const actualMinutes = actual[type.id] ?? 0;
+                    premiumComparisonPerStaff[staffName][type.id] = {
+                        planned: plannedMinutes,
+                        actual: actualMinutes,
+                        diff: actualMinutes - plannedMinutes,
+                    };
+                }
             }
         }
 
-        return { rows, premiumMinsPerStaff };
+        return { rows, premiumComparisonPerStaff, detailItemsPerStaff };
     }, [rawShifts, rawReports, targetMonth, tabIndex, premiumTypes]);
 
     const handleExportCSV = () => {
-        const { rows: aggRows, premiumMinsPerStaff } = aggregatedData;
-        const premiumHeaders = tabIndex === 0 ? premiumTypes.map(t => `${t.name}(h)`) : [];
+        const { rows: aggRows, premiumComparisonPerStaff } = aggregatedData;
+        const premiumHeaders = tabIndex === 0 ? premiumTypes.flatMap(t => [`${t.name}予定(h)`, `${t.name}実績(h)`, `${t.name}差異(h)`]) : [];
         const header = ['氏名', '予定時間(h)', '実績時間(h)', '差異(h)', ...premiumHeaders];
         const csvRows = aggRows.map(row => {
             const premiumCells = tabIndex === 0
-                ? premiumTypes.map(t => ((premiumMinsPerStaff[row.name]?.[t.id] ?? 0) / 60).toFixed(2))
+                ? premiumTypes.flatMap(t => {
+                    const premium = premiumComparisonPerStaff[row.name]?.[t.id] ?? { planned: 0, actual: 0, diff: 0 };
+                    return [
+                        (premium.planned / 60).toFixed(2),
+                        (premium.actual / 60).toFixed(2),
+                        (premium.diff / 60).toFixed(2),
+                    ];
+                })
                 : [];
             return [
                 `"${row.name}"`,
@@ -313,7 +422,7 @@ export default function StatisticsPage() {
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>実績時間 (h)</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>差異 (h)</TableCell>
                                         {tabIndex === 0 && premiumTypes.map(t => (
-                                            <TableCell key={t.id} align="right" sx={{ fontWeight: 'bold' }}>{t.name}(h)</TableCell>
+                                            <TableCell key={t.id} align="right" sx={{ fontWeight: 'bold' }}>{t.name}<br />予定/実績/差異(h)</TableCell>
                                         ))}
                                     </TableRow>
                                 </TableHead>
@@ -321,19 +430,60 @@ export default function StatisticsPage() {
                                     {aggregatedData.rows.length === 0 ? <TableRow><TableCell colSpan={4 + (tabIndex === 0 ? premiumTypes.length : 0)} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow> : (
                                         aggregatedData.rows.map((row, i) => {
                                             const diff = row.actualHours - row.plannedHours;
-                                            const isAlert = diff < -2 || diff > 2;
+                                            const premiumDiff = premiumTypes.some(t => Math.abs(aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id]?.diff ?? 0) >= 1);
+                                            const hasDiff = Math.abs(diff) >= 0.01 || premiumDiff;
+                                            const isExpanded = Boolean(expandedRows[row.name]);
+                                            const isAlert = diff < -2 || diff > 2 || premiumDiff;
                                             return (
-                                                <TableRow key={i} hover>
-                                                    <TableCell sx={{ fontWeight: 'bold' }}>{row.name}</TableCell>
-                                                    <TableCell align="right">{row.plannedHours.toFixed(2)}</TableCell>
-                                                    <TableCell align="right" sx={{ fontWeight: 'bold', color: 'primary.main' }}>{row.actualHours.toFixed(2)}</TableCell>
-                                                    <TableCell align="right" sx={{ color: isAlert ? 'error.main' : 'inherit', fontWeight: isAlert ? 'bold' : 'normal' }}>{diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}</TableCell>
-                                                    {tabIndex === 0 && premiumTypes.map(t => (
-                                                        <TableCell key={t.id} align="right">
-                                                            {((aggregatedData.premiumMinsPerStaff[row.name]?.[t.id] ?? 0) / 60).toFixed(1)}
+                                                <React.Fragment key={row.name}>
+                                                    <TableRow hover>
+                                                        <TableCell sx={{ fontWeight: 'bold' }}>
+                                                            <Stack direction="row" spacing={0.5} alignItems="center">
+                                                                <IconButton
+                                                                    size="small"
+                                                                    disabled={!hasDiff}
+                                                                    onClick={() => setExpandedRows(prev => ({ ...prev, [row.name]: !prev[row.name] }))}
+                                                                    aria-label={isExpanded ? '差異詳細を閉じる' : '差異詳細を開く'}
+                                                                >
+                                                                    {isExpanded ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
+                                                                </IconButton>
+                                                                <Typography fontWeight="bold">{row.name}</Typography>
+                                                            </Stack>
                                                         </TableCell>
-                                                    ))}
-                                                </TableRow>
+                                                        <TableCell align="right">{row.plannedHours.toFixed(2)}</TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 'bold', color: 'primary.main' }}>{row.actualHours.toFixed(2)}</TableCell>
+                                                        <TableCell align="right" sx={{ color: isAlert ? 'error.main' : 'inherit', fontWeight: isAlert ? 'bold' : 'normal' }}>{diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}</TableCell>
+                                                        {tabIndex === 0 && premiumTypes.map(t => {
+                                                            const premium = aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id] ?? { planned: 0, actual: 0, diff: 0 };
+                                                            const diffHours = premium.diff / 60;
+                                                            return (
+                                                                <TableCell key={t.id} align="right" sx={{ color: Math.abs(diffHours) >= 0.1 ? 'error.main' : 'inherit' }}>
+                                                                    {(premium.planned / 60).toFixed(1)} / {(premium.actual / 60).toFixed(1)} / {diffHours >= 0 ? '+' : ''}{diffHours.toFixed(1)}
+                                                                </TableCell>
+                                                            );
+                                                        })}
+                                                    </TableRow>
+                                                    <TableRow>
+                                                        <TableCell colSpan={4 + (tabIndex === 0 ? premiumTypes.length : 0)} sx={{ p: 0, borderBottom: isExpanded ? undefined : 0 }}>
+                                                            <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                                                                <Box sx={{ px: 3, py: 2, bgcolor: 'background.tint' }}>
+                                                                    <Typography variant="subtitle2" fontWeight="bold" mb={1}>差異対象シフト・実績</Typography>
+                                                                    <Stack spacing={1}>
+                                                                        {(aggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => (
+                                                                            <Box key={item.id} sx={{ display: 'grid', gridTemplateColumns: '90px 1fr 110px', gap: 1, alignItems: 'center' }}>
+                                                                                <Chip size="small" label={item.kind === 'planned' ? '予定' : '実績'} color={item.kind === 'planned' ? 'default' : 'primary'} variant={item.kind === 'planned' ? 'outlined' : 'filled'} />
+                                                                                <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
+                                                                                    {item.clientName} {formatDetailDateTime(item.startAt)} - {formatDetailDateTime(item.endAt)}
+                                                                                </Typography>
+                                                                                <Typography variant="body2" align="right">{item.hours.toFixed(2)}h</Typography>
+                                                                            </Box>
+                                                                        ))}
+                                                                    </Stack>
+                                                                </Box>
+                                                            </Collapse>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                </React.Fragment>
                                             );
                                         })
                                     )}
@@ -345,10 +495,23 @@ export default function StatisticsPage() {
                                 <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>データがありません</Box>
                             ) : aggregatedData.rows.map((row, i) => {
                                 const diff = row.actualHours - row.plannedHours;
-                                const isAlert = diff < -2 || diff > 2;
+                                const premiumDiff = premiumTypes.some(t => Math.abs(aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id]?.diff ?? 0) >= 1);
+                                const hasDiff = Math.abs(diff) >= 0.01 || premiumDiff;
+                                const isExpanded = Boolean(expandedRows[row.name]);
+                                const isAlert = diff < -2 || diff > 2 || premiumDiff;
                                 return (
                                     <Box key={i} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
-                                        <Typography fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{row.name}</Typography>
+                                        <Stack direction="row" alignItems="center" spacing={0.5}>
+                                            <IconButton
+                                                size="small"
+                                                disabled={!hasDiff}
+                                                onClick={() => setExpandedRows(prev => ({ ...prev, [row.name]: !prev[row.name] }))}
+                                                aria-label={isExpanded ? '差異詳細を閉じる' : '差異詳細を開く'}
+                                            >
+                                                {isExpanded ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
+                                            </IconButton>
+                                            <Typography fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{row.name}</Typography>
+                                        </Stack>
                                         <Box display="grid" gridTemplateColumns="repeat(3, minmax(0, 1fr))" gap={1} mt={1.5}>
                                             <Box>
                                                 <Typography variant="caption" color="text.secondary">予定</Typography>
@@ -367,16 +530,37 @@ export default function StatisticsPage() {
                                         </Box>
                                         {tabIndex === 0 && premiumTypes.length > 0 && (
                                             <Stack direction="row" gap={1} flexWrap="wrap" mt={1.5}>
-                                                {premiumTypes.map(t => (
-                                                    <Chip
-                                                        key={t.id}
-                                                        size="small"
-                                                        variant="outlined"
-                                                        label={`${t.name}: ${((aggregatedData.premiumMinsPerStaff[row.name]?.[t.id] ?? 0) / 60).toFixed(1)}h`}
-                                                    />
-                                                ))}
+                                                {premiumTypes.map(t => {
+                                                    const premium = aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id] ?? { planned: 0, actual: 0, diff: 0 };
+                                                    const diffHours = premium.diff / 60;
+                                                    return (
+                                                        <Chip
+                                                            key={t.id}
+                                                            size="small"
+                                                            variant="outlined"
+                                                            color={Math.abs(diffHours) >= 0.1 ? 'error' : 'default'}
+                                                            label={`${t.name}: ${(premium.planned / 60).toFixed(1)} / ${(premium.actual / 60).toFixed(1)} / ${diffHours >= 0 ? '+' : ''}${diffHours.toFixed(1)}h`}
+                                                        />
+                                                    );
+                                                })}
                                             </Stack>
                                         )}
+                                        <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                                            <Divider sx={{ my: 1.5 }} />
+                                            <Stack spacing={1}>
+                                                {(aggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => (
+                                                    <Box key={item.id}>
+                                                        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                                                            <Chip size="small" label={item.kind === 'planned' ? '予定' : '実績'} color={item.kind === 'planned' ? 'default' : 'primary'} variant={item.kind === 'planned' ? 'outlined' : 'filled'} />
+                                                            <Typography variant="body2" fontWeight="bold">{item.hours.toFixed(2)}h</Typography>
+                                                        </Stack>
+                                                        <Typography variant="body2" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
+                                                            {item.clientName} {formatDetailDateTime(item.startAt)} - {formatDetailDateTime(item.endAt)}
+                                                        </Typography>
+                                                    </Box>
+                                                ))}
+                                            </Stack>
+                                        </Collapse>
                                     </Box>
                                 );
                             })}

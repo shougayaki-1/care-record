@@ -5,6 +5,7 @@ import { createServerClient } from '@supabase/ssr';
 import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar';
 import { encryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { consumeOAuthNonce } from '@/utils/supabase/oauthNonce';
+import { mergePermissions, type RolePermissions } from '@/utils/permissions';
 
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
@@ -66,8 +67,20 @@ export async function GET(request: NextRequest) {
             .eq('organization_id', organizationId)
             .eq('user_id', user.id)
             .single();
-        if (member?.role !== 'owner') {
-            console.error('User is not owner of target organization');
+        const { data: roleLinks } = await supabaseAdmin
+            .from('organization_member_roles')
+            .select('organization_roles(permissions)')
+            .eq('organization_id', organizationId)
+            .eq('user_id', user.id);
+        const permissions = mergePermissions((roleLinks ?? [])
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .map((row: any) => {
+                const role = Array.isArray(row.organization_roles) ? row.organization_roles[0] : row.organization_roles;
+                return role?.permissions as RolePermissions | undefined;
+            })
+            .filter((value): value is RolePermissions => value != null));
+        if (!member || !permissions.management.integrations) {
+            console.error('User cannot manage integrations for target organization');
             return failResponse;
         }
         if (!await consumeOAuthNonce({
