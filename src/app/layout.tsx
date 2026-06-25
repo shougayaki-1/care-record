@@ -3,7 +3,7 @@ import { AppRouterCacheProvider } from '@mui/material-nextjs/v15-appRouter';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import theme from '@/theme';
-import { Inter, Poppins } from "next/font/google";
+import { Roboto } from "next/font/google";
 import "./globals.css";
 import { TermsAgreementModal } from "@/components/auth/TermsAgreementModal";
 import { ToastProvider } from "@/components/ui/ToastProvider";
@@ -12,11 +12,9 @@ import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { ServiceWorkerCleanup } from "@/components/ServiceWorkerCleanup";
 import { headers } from 'next/headers';
 
-const inter = Inter({ subsets: ["latin"] });
-const poppins = Poppins({
-  weight: ['700'],
+const roboto = Roboto({
   subsets: ['latin'],
-  variable: '--font-poppins'
+  weight: ['300', '400', '500', '700'],
 });
 
 export const metadata: Metadata = {
@@ -25,7 +23,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#2255CC",
+  themeColor: "#1A73E8",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -43,7 +41,7 @@ export default async function RootLayout({
     // suppressHydrationWarningを追加して拡張機能によるタグ書き換えエラーを抑制
     <html lang="ja" suppressHydrationWarning>
       <body
-        className={`${inter.className} ${poppins.variable}`}
+        className={roboto.className}
         suppressHydrationWarning // <body>タグ自体に注入される属性エラーも抑止
       >
         <ServiceWorkerCleanup />
