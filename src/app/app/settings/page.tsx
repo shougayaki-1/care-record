@@ -550,7 +550,7 @@ function SettingsContent() {
                             </Paper>
 
                             {/* 労働時間ルール */}
-                            {(currentOrg.role === 'owner' || currentOrg.role === 'manager') && (
+                            {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'organization')) && (
                                 <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
                                     <Typography variant="h6" fontWeight="bold" gutterBottom>労働時間ルール</Typography>
                                     <Typography variant="body2" color="text.secondary" mb={2}>

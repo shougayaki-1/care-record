@@ -1,5 +1,5 @@
 'use server';
-import { supabaseAdmin, assertOrgRole } from '@/utils/supabase/auth';
+import { supabaseAdmin, assertOrgRole, assertOrgPermission } from '@/utils/supabase/auth';
 
 export async function getLaborPremiumTypes(orgId: string) {
   await assertOrgRole(orgId);
@@ -26,7 +26,7 @@ export async function updateLaborPremiumType(
     overtime_weekly_threshold_hours?: number | null;
   }
 ): Promise<void> {
-  await assertOrgRole(orgId, ['owner', 'manager']);
+  await assertOrgPermission(orgId, 'organization');
   const { error } = await supabaseAdmin
     .from('labor_premium_types')
     .update({ ...patch, updated_at: new Date().toISOString() })
@@ -45,7 +45,7 @@ export async function createLaborPremiumType(
     night_end_hour: number;
   }
 ): Promise<void> {
-  await assertOrgRole(orgId, ['owner', 'manager']);
+  await assertOrgPermission(orgId, 'organization');
   const { data: last } = await supabaseAdmin
     .from('labor_premium_types')
     .select('display_order')
@@ -65,7 +65,7 @@ export async function createLaborPremiumType(
 }
 
 export async function disableLaborPremiumType(orgId: string, typeId: string): Promise<void> {
-  await assertOrgRole(orgId, ['owner', 'manager']);
+  await assertOrgPermission(orgId, 'organization');
   await supabaseAdmin
     .from('labor_premium_types')
     .update({ is_enabled: false, updated_at: new Date().toISOString() })
