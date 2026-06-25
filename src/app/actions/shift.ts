@@ -34,6 +34,7 @@ async function softDeleteShiftIds(organizationId: string, shiftIds: string[], re
     const { error } = await supabaseAdmin.from('shifts').update({
         deleted_at: new Date().toISOString(), deleted_by: actor.userId,
         deletion_reason: reason, retention_until: retentionDeadline(policy.years),
+        google_sync_status: 'synced', google_sync_error: null, google_synced_at: new Date().toISOString(),
     }).eq('organization_id', organizationId).in('id', shiftIds).is('deleted_at', null);
     if (error) throw error;
     await recordAuditEvent({ organizationId, actorId: actor.userId, action: 'shift.bulk_soft_delete',
@@ -73,8 +74,54 @@ type ShiftUpdateData = {
     status?: 'published' | 'cancelled';
     cancel_reason?: string | null;
     updated_at?: string;
-    google_event_id?: string;
+    google_event_id?: string | null;
+    google_sync_status?: GoogleSyncStatus;
+    google_sync_error?: string | null;
+    google_synced_at?: string | null;
     is_modified?: boolean;
+};
+
+type GoogleSyncStatus = 'synced' | 'pending_upsert' | 'pending_delete' | 'failed';
+
+type GoogleSyncStats = {
+    created: number;
+    updated: number;
+    linked: number;
+    deletedRemote: number;
+    deduped: number;
+};
+
+const emptyGoogleSyncStats = (): GoogleSyncStats => ({
+    created: 0,
+    updated: 0,
+    linked: 0,
+    deletedRemote: 0,
+    deduped: 0,
+});
+
+function mergeGoogleSyncStats(target: GoogleSyncStats, source?: Partial<GoogleSyncStats>) {
+    if (!source) return;
+    target.created += source.created || 0;
+    target.updated += source.updated || 0;
+    target.linked += source.linked || 0;
+    target.deletedRemote += source.deletedRemote || 0;
+    target.deduped += source.deduped || 0;
+}
+
+const GOOGLE_PROP_SHIFT_ID = 'careRecordShiftId';
+const GOOGLE_PROP_ORG_ID = 'careRecordOrgId';
+
+type GoogleCalendarClient = ReturnType<typeof google.calendar>;
+type ShiftForGoogle = {
+    id: string;
+    title: string | null;
+    start_at: string;
+    end_at: string;
+    status: 'published' | 'cancelled';
+    cancel_reason: string | null;
+    google_event_id: string | null;
+    deleted_at?: string | null;
+    shift_staffs?: { staff_id: string | null }[] | null;
 };
 
 /**
@@ -157,18 +204,186 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 4): Promise<T> {
     }
 }
 
+function buildGoogleEventBody(organizationId: string, shiftData: ShiftForGoogle): calendar_v3.Schema$Event {
+    const staffIds = (shiftData.shift_staffs || []).map(s => s.staff_id).filter(Boolean) as string[];
+    let colorId: string | undefined = undefined;
+
+    if (shiftData.status === 'cancelled') colorId = '8';
+    else if (staffIds.length > 0 && staffIds[0]) {
+        const staffId = staffIds[0];
+        let hash = 0;
+        for (let i = 0; i < staffId.length; i++) hash = staffId.charCodeAt(i) + ((hash << 5) - hash);
+        colorId = ((Math.abs(hash) % 11) + 1).toString();
+    }
+
+    const title = shiftData.title || 'シフト';
+    const eventTitle = shiftData.status === 'cancelled' ? `【休】${title}` : title;
+
+    return {
+        summary: eventTitle,
+        description: shiftData.cancel_reason ? `キャンセル理由: ${shiftData.cancel_reason}` : '',
+        start: {
+            dateTime: new Date(shiftData.start_at).toISOString(),
+            timeZone: 'Asia/Tokyo'
+        },
+        end: {
+            dateTime: new Date(shiftData.end_at).toISOString(),
+            timeZone: 'Asia/Tokyo'
+        },
+        colorId,
+        extendedProperties: {
+            private: {
+                [GOOGLE_PROP_SHIFT_ID]: shiftData.id,
+                [GOOGLE_PROP_ORG_ID]: organizationId,
+            }
+        }
+    };
+}
+
+function getGoogleEventPrivateProp(event: calendar_v3.Schema$Event, key: string): string | undefined {
+    return event.extendedProperties?.private?.[key] || undefined;
+}
+
+function getGoogleEventStart(event: calendar_v3.Schema$Event): string {
+    return event.start?.dateTime || event.start?.date || '';
+}
+
+function getGoogleEventEnd(event: calendar_v3.Schema$Event): string {
+    return event.end?.dateTime || event.end?.date || '';
+}
+
+function getLegacyEventSignature(event: calendar_v3.Schema$Event): string {
+    return `${event.summary || ''}::${normalizeGoogleEventDate(getGoogleEventStart(event))}::${normalizeGoogleEventDate(getGoogleEventEnd(event))}`;
+}
+
+function normalizeGoogleEventDate(value: string): string {
+    if (!value) return '';
+    const time = Date.parse(value);
+    return Number.isNaN(time) ? value : new Date(time).toISOString();
+}
+
+function getEventBodySignature(eventBody: calendar_v3.Schema$Event): string {
+    return `${eventBody.summary || ''}::${normalizeGoogleEventDate(eventBody.start?.dateTime || eventBody.start?.date || '')}::${normalizeGoogleEventDate(eventBody.end?.dateTime || eventBody.end?.date || '')}`;
+}
+
+function isActiveGoogleEvent(event: calendar_v3.Schema$Event): boolean {
+    return !!event.id && event.status !== 'cancelled';
+}
+
+function choosePrimaryGoogleEvent(events: calendar_v3.Schema$Event[], preferredId?: string | null) {
+    const activeEvents = events.filter(isActiveGoogleEvent);
+    if (preferredId) {
+        const preferred = activeEvents.find(event => event.id === preferredId);
+        if (preferred) return preferred;
+    }
+    return activeEvents.sort((a, b) => {
+        const aUpdated = a.updated ? Date.parse(a.updated) : 0;
+        const bUpdated = b.updated ? Date.parse(b.updated) : 0;
+        return bUpdated - aUpdated;
+    })[0];
+}
+
+async function listGoogleEventsByShiftId(
+    calendarApi: GoogleCalendarClient,
+    calendarId: string,
+    organizationId: string,
+    shiftId: string,
+): Promise<calendar_v3.Schema$Event[]> {
+    const events: calendar_v3.Schema$Event[] = [];
+    let pageToken: string | undefined;
+    do {
+        const res = await withRetry(() => calendarApi.events.list({
+            calendarId,
+            maxResults: 2500,
+            pageToken,
+            showDeleted: false,
+            privateExtendedProperty: [
+                `${GOOGLE_PROP_SHIFT_ID}=${shiftId}`,
+                `${GOOGLE_PROP_ORG_ID}=${organizationId}`,
+            ],
+        }));
+        events.push(...(res.data.items || []).filter(isActiveGoogleEvent));
+        pageToken = res.data.nextPageToken || undefined;
+    } while (pageToken);
+    return events;
+}
+
+async function listAllActiveGoogleEvents(
+    calendarApi: GoogleCalendarClient,
+    calendarId: string,
+): Promise<calendar_v3.Schema$Event[]> {
+    const events: calendar_v3.Schema$Event[] = [];
+    let pageToken: string | undefined;
+    do {
+        const res = await withRetry(() => calendarApi.events.list({
+            calendarId,
+            maxResults: 2500,
+            pageToken,
+            showDeleted: false,
+        }));
+        events.push(...(res.data.items || []).filter(isActiveGoogleEvent));
+        pageToken = res.data.nextPageToken || undefined;
+    } while (pageToken);
+    return events;
+}
+
+async function deleteGoogleEventIfExists(
+    calendarApi: GoogleCalendarClient,
+    calendarId: string,
+    eventId: string,
+): Promise<boolean> {
+    try {
+        await withRetry(() => calendarApi.events.delete({ calendarId, eventId }));
+        return true;
+    } catch (e: unknown) {
+        const se = classifyGoogleError(e);
+        if (se.code === 404 || se.code === 410) return false;
+        throw se;
+    }
+}
+
+async function deleteDuplicateGoogleEvents(
+    calendarApi: GoogleCalendarClient,
+    calendarId: string,
+    events: calendar_v3.Schema$Event[],
+    keepEventId: string,
+): Promise<number> {
+    let deduped = 0;
+    for (const event of events) {
+        if (!event.id || event.id === keepEventId || event.status === 'cancelled') continue;
+        await deleteGoogleEventIfExists(calendarApi, calendarId, event.id);
+        deduped++;
+    }
+    return deduped;
+}
+
+async function markShiftGoogleSync(
+    shiftId: string,
+    status: GoogleSyncStatus,
+    options: { eventId?: string | null; error?: string | null } = {},
+) {
+    const updateData: ShiftUpdateData = {
+        google_sync_status: status,
+        google_sync_error: options.error ?? null,
+        google_synced_at: status === 'synced' ? new Date().toISOString() : null,
+    };
+    if ('eventId' in options) updateData.google_event_id = options.eventId ?? null;
+    await supabaseAdmin.from('shifts').update(updateData).eq('id', shiftId);
+}
+
 /**
  * Googleカレンダーへの同期処理。
  * 失敗時は SyncError を投げる（呼び出し側で握りつぶさず判断できるようにする）。
  * 連携未設定やシフト不在の場合は kind='skipped' の SyncError を投げる。
  */
-async function syncToGoogleCalendarDirect(organizationId: string, shiftId: string, action: 'sync' | 'delete') {
+async function syncToGoogleCalendarDirect(organizationId: string, shiftId: string, action: 'sync' | 'delete'): Promise<GoogleSyncStats> {
+    const stats = emptyGoogleSyncStats();
     const { data: orgData } = await supabaseAdmin.from('organizations').select('google_calendar_id, google_refresh_token').eq('id', organizationId).single();
     if (!orgData?.google_calendar_id || !orgData?.google_refresh_token) {
         throw new SyncError('Google calendar not connected', 'skipped');
     }
 
-    const { data: shiftData } = await supabaseAdmin.from('shifts').select('id, title, start_at, end_at, status, cancel_reason, google_event_id, shift_staffs(staff_id)').eq('id', shiftId).single();
+    const { data: shiftData } = await supabaseAdmin.from('shifts').select('id, title, start_at, end_at, status, cancel_reason, google_event_id, deleted_at, shift_staffs(staff_id)').eq('id', shiftId).single();
     if (!shiftData) {
         throw new SyncError('Shift not found', 'skipped');
     }
@@ -177,67 +392,60 @@ async function syncToGoogleCalendarDirect(organizationId: string, shiftId: strin
     oauth2Client.setCredentials({ refresh_token: decryptGoogleToken(orgData.google_refresh_token) });
     const calendarApi = google.calendar({ version: 'v3', auth: oauth2Client });
 
-    if (action === 'delete') {
+    if (action === 'delete' || shiftData.deleted_at) {
         if (shiftData.google_event_id) {
-            try {
-                await withRetry(() => calendarApi.events.delete({ calendarId: orgData.google_calendar_id!, eventId: shiftData.google_event_id! }));
-            } catch (e: unknown) {
-                const se = classifyGoogleError(e);
-                // 404/410 はイベントが既に消えている＝削除成功とみなす
-                if (se.code !== 404 && se.code !== 410) throw se;
-            }
+            const deleted = await deleteGoogleEventIfExists(calendarApi, orgData.google_calendar_id, shiftData.google_event_id);
+            if (deleted) stats.deletedRemote++;
         }
-        return;
+        const linkedEvents = await listGoogleEventsByShiftId(calendarApi, orgData.google_calendar_id, organizationId, shiftId);
+        for (const event of linkedEvents) {
+            if (!event.id || event.id === shiftData.google_event_id) continue;
+            const deleted = await deleteGoogleEventIfExists(calendarApi, orgData.google_calendar_id, event.id);
+            if (deleted) stats.deletedRemote++;
+        }
+        await markShiftGoogleSync(shiftId, 'synced', { eventId: null });
+        return stats;
     }
 
-        const staffIds = (shiftData.shift_staffs || []).map(s => s.staff_id).filter(Boolean);
-        let colorId: string | undefined = undefined;
-
-        if (shiftData.status === 'cancelled') colorId = '8';
-        else if (staffIds.length > 0 && staffIds[0]) {
-            const staffId = staffIds[0];
-            let hash = 0;
-            for (let i = 0; i < staffId.length; i++) hash = staffId.charCodeAt(i) + ((hash << 5) - hash);
-            colorId = ((Math.abs(hash) % 11) + 1).toString();
-        }
-
-        const eventTitle = shiftData.status === 'cancelled' ? `【休】${shiftData.title}` : shiftData.title;
-
-        const eventBody: calendar_v3.Schema$Event = {
-            summary: eventTitle,
-            description: shiftData.cancel_reason ? `キャンセル理由: ${shiftData.cancel_reason}` : '',
-            start: {
-                dateTime: new Date(shiftData.start_at).toISOString(),
-                timeZone: 'Asia/Tokyo'
-            },
-            end: {
-                dateTime: new Date(shiftData.end_at).toISOString(),
-                timeZone: 'Asia/Tokyo'
-            },
-            colorId: colorId
-        };
-
-    let newEventId = shiftData.google_event_id;
+    const eventBody = buildGoogleEventBody(organizationId, shiftData as ShiftForGoogle);
+    let newEventId = shiftData.google_event_id || null;
 
     if (shiftData.google_event_id) {
         try {
             await withRetry(() => calendarApi.events.update({ calendarId: orgData.google_calendar_id!, eventId: shiftData.google_event_id!, requestBody: eventBody }));
+            stats.updated++;
+            const linkedEvents = await listGoogleEventsByShiftId(calendarApi, orgData.google_calendar_id, organizationId, shiftId);
+            const deduped = await deleteDuplicateGoogleEvents(calendarApi, orgData.google_calendar_id, linkedEvents, shiftData.google_event_id);
+            stats.deduped += deduped;
         } catch (e: unknown) {
             const se = classifyGoogleError(e);
             if (se.code === 404) {
-                // Googleカレンダー側でイベントが削除済み → 作り直す
-                const res = await withRetry(() => calendarApi.events.insert({ calendarId: orgData.google_calendar_id!, requestBody: eventBody }));
-                if (res.data.id) newEventId = res.data.id;
+                newEventId = null;
             } else throw se;
         }
-    } else {
-        const res = await withRetry(() => calendarApi.events.insert({ calendarId: orgData.google_calendar_id!, requestBody: eventBody }));
-        if (res.data.id) newEventId = res.data.id;
     }
 
-    if (newEventId && newEventId !== shiftData.google_event_id) {
-        await supabaseAdmin.from('shifts').update({ google_event_id: newEventId }).eq('id', shiftId);
+    if (!newEventId) {
+        const linkedEvents = await listGoogleEventsByShiftId(calendarApi, orgData.google_calendar_id, organizationId, shiftId);
+        const primary = choosePrimaryGoogleEvent(linkedEvents, shiftData.google_event_id);
+        if (primary?.id) {
+            await withRetry(() => calendarApi.events.update({ calendarId: orgData.google_calendar_id!, eventId: primary.id!, requestBody: eventBody }));
+            newEventId = primary.id;
+            stats.linked++;
+            stats.updated++;
+            const deduped = await deleteDuplicateGoogleEvents(calendarApi, orgData.google_calendar_id, linkedEvents, primary.id);
+            stats.deduped += deduped;
+        }
     }
+
+    if (!newEventId) {
+        const res = await withRetry(() => calendarApi.events.insert({ calendarId: orgData.google_calendar_id!, requestBody: eventBody }));
+        if (res.data.id) newEventId = res.data.id;
+        stats.created++;
+    }
+
+    await markShiftGoogleSync(shiftId, 'synced', { eventId: newEventId });
+    return stats;
 }
 
 /**
@@ -251,6 +459,7 @@ async function trySyncSilently(organizationId: string, shiftId: string, action: 
     } catch (e) {
         const se = classifyGoogleError(e);
         if (se.kind !== 'skipped') {
+            await markShiftGoogleSync(shiftId, 'failed', { error: se.message }).catch(console.error);
             console.error(`Google Calendar sync (${action}) failed for shift ${shiftId} [${se.kind}]:`, se.message);
         }
     }
@@ -260,6 +469,7 @@ type BatchOutcome = {
     succeeded: number;
     failed: number;
     failedIds: string[];
+    stats: GoogleSyncStats;
     /** 最後に観測したエラー種別（UIで原因別メッセージを出すために使用） */
     errorKind?: SyncErrorKind;
 };
@@ -278,22 +488,25 @@ async function processShiftsSequential(
 ): Promise<BatchOutcome> {
     let succeeded = 0;
     const failedIds: string[] = [];
+    const stats = emptyGoogleSyncStats();
     let errorKind: SyncErrorKind | undefined;
 
     for (const shift of shifts) {
         try {
-            await syncToGoogleCalendarDirect(organizationId, shift.id, action);
+            const result = await syncToGoogleCalendarDirect(organizationId, shift.id, action);
+            mergeGoogleSyncStats(stats, result);
             succeeded++;
         } catch (e) {
             const se = classifyGoogleError(e);
             if (se.kind === 'skipped') { succeeded++; continue; }
+            await markShiftGoogleSync(shift.id, 'failed', { error: se.message }).catch(console.error);
             failedIds.push(shift.id);
             errorKind = se.kind;
             if (se.kind === 'auth') break; // 認証切れは継続不可
         }
         if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
     }
-    return { succeeded, failed: failedIds.length, failedIds, errorKind };
+    return { succeeded, failed: failedIds.length, failedIds, stats, errorKind };
 }
 
 /**
@@ -321,7 +534,7 @@ export async function getSyncStatus(organizationId: string) {
         .select('id', { count: 'exact', head: true })
         .eq('organization_id', organizationId)
         .is('deleted_at', null)
-        .is('google_event_id', null);
+        .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)');
 
     return { connected, total: total || 0, unsynced: unsynced || 0 };
 }
@@ -344,11 +557,12 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
         .from('shifts')
         .select('id')
         .eq('organization_id', organizationId)
-        .is('google_event_id', null)
+        .is('deleted_at', null)
+        .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)')
         .limit(limit);
 
     if (!shifts || shifts.length === 0) {
-        return { processed: 0, succeeded: 0, failed: 0, remaining: 0, connected: true };
+        return { processed: 0, succeeded: 0, failed: 0, remaining: 0, connected: true, ...emptyGoogleSyncStats() };
     }
 
     const outcome = await processShiftsSequential(organizationId, shifts, 'sync');
@@ -358,13 +572,15 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
         .from('shifts')
         .select('id', { count: 'exact', head: true })
         .eq('organization_id', organizationId)
-        .is('google_event_id', null);
+        .is('deleted_at', null)
+        .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)');
 
     return {
         processed: shifts.length,
         succeeded: outcome.succeeded,
         failed: outcome.failed,
         remaining: remaining || 0,
+        ...outcome.stats,
         errorKind: outcome.errorKind,
         connected: true
     };
@@ -388,6 +604,7 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
         .from('shifts')
         .select('id')
         .eq('organization_id', organizationId)
+        .is('deleted_at', null)
         .order('id', { ascending: true })
         .limit(limit);
     if (cursor) query = query.gt('id', cursor);
@@ -395,7 +612,7 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
     const { data: shifts } = await query;
 
     if (!shifts || shifts.length === 0) {
-        return { processed: 0, succeeded: 0, failed: 0, nextCursor: cursor, remaining: 0, connected: true };
+        return { processed: 0, succeeded: 0, failed: 0, nextCursor: cursor, remaining: 0, connected: true, ...emptyGoogleSyncStats() };
     }
 
     const outcome = await processShiftsSequential(organizationId, shifts, 'sync');
@@ -405,6 +622,7 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
         .from('shifts')
         .select('id', { count: 'exact', head: true })
         .eq('organization_id', organizationId)
+        .is('deleted_at', null)
         .gt('id', nextCursor);
 
     return {
@@ -413,8 +631,131 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
         failed: outcome.failed,
         nextCursor,
         remaining: remaining || 0,
+        ...outcome.stats,
         errorKind: outcome.errorKind,
         connected: true
+    };
+}
+
+export type RepairGoogleCalendarSyncOptions = {
+    limit?: number;
+};
+
+export async function repairGoogleCalendarSync(organizationId: string, options: RepairGoogleCalendarSyncOptions = {}) {
+    await assertOrgRole(organizationId, ['owner', 'manager']);
+    const limit = options.limit && Number.isInteger(options.limit) ? Math.min(Math.max(options.limit, 1), 5000) : 5000;
+
+    const { data: orgData } = await supabaseAdmin
+        .from('organizations')
+        .select('google_calendar_id, google_refresh_token')
+        .eq('id', organizationId)
+        .single();
+    if (!orgData?.google_calendar_id || !orgData?.google_refresh_token) {
+        return { processed: 0, succeeded: 0, failed: 0, connected: false, errorKind: 'skipped' as SyncErrorKind, failedIds: [] as string[], ...emptyGoogleSyncStats() };
+    }
+
+    const oauth2Client = getGoogleOAuthClient();
+    oauth2Client.setCredentials({ refresh_token: decryptGoogleToken(orgData.google_refresh_token) });
+    const calendarApi = google.calendar({ version: 'v3', auth: oauth2Client });
+
+    const allEvents = await listAllActiveGoogleEvents(calendarApi, orgData.google_calendar_id);
+    const eventsByShiftId = new Map<string, calendar_v3.Schema$Event[]>();
+    const legacyEventsBySignature = new Map<string, calendar_v3.Schema$Event[]>();
+    for (const event of allEvents) {
+        const eventOrgId = getGoogleEventPrivateProp(event, GOOGLE_PROP_ORG_ID);
+        const eventShiftId = getGoogleEventPrivateProp(event, GOOGLE_PROP_SHIFT_ID);
+        if (eventOrgId === organizationId && eventShiftId) {
+            eventsByShiftId.set(eventShiftId, [...(eventsByShiftId.get(eventShiftId) || []), event]);
+        } else if (!eventShiftId) {
+            const signature = getLegacyEventSignature(event);
+            legacyEventsBySignature.set(signature, [...(legacyEventsBySignature.get(signature) || []), event]);
+        }
+    }
+
+    const { data: shifts } = await supabaseAdmin
+        .from('shifts')
+        .select('id, title, start_at, end_at, status, cancel_reason, google_event_id, deleted_at, google_sync_status, shift_staffs(staff_id)')
+        .eq('organization_id', organizationId)
+        .order('id', { ascending: true })
+        .limit(limit);
+
+    const stats = emptyGoogleSyncStats();
+    let processed = 0;
+    let succeeded = 0;
+    const failedIds: string[] = [];
+    let errorKind: SyncErrorKind | undefined;
+
+    for (const shift of (shifts || []) as ShiftForGoogle[]) {
+        processed++;
+        try {
+            if (shift.deleted_at) {
+                const candidates = [...(eventsByShiftId.get(shift.id) || [])];
+                if (shift.google_event_id) {
+                    const savedEvent = allEvents.find(event => event.id === shift.google_event_id);
+                    if (savedEvent && !candidates.some(event => event.id === savedEvent.id)) candidates.push(savedEvent);
+                }
+                for (const event of candidates) {
+                    if (!event.id) continue;
+                    const deleted = await deleteGoogleEventIfExists(calendarApi, orgData.google_calendar_id, event.id);
+                    if (deleted) stats.deletedRemote++;
+                }
+                await markShiftGoogleSync(shift.id, 'synced', { eventId: null });
+                succeeded++;
+                continue;
+            }
+
+            const eventBody = buildGoogleEventBody(organizationId, shift);
+            const signature = getEventBodySignature(eventBody);
+            const candidates = [...(eventsByShiftId.get(shift.id) || [])];
+
+            if (shift.google_event_id) {
+                const savedEvent = allEvents.find(event => event.id === shift.google_event_id);
+                if (savedEvent && !candidates.some(event => event.id === savedEvent.id)) candidates.push(savedEvent);
+            }
+
+            if (candidates.length === 0) {
+                const legacyCandidates = legacyEventsBySignature.get(signature) || [];
+                candidates.push(...legacyCandidates);
+            }
+
+            const primary = choosePrimaryGoogleEvent(candidates, shift.google_event_id);
+            if (primary?.id) {
+                await withRetry(() => calendarApi.events.update({
+                    calendarId: orgData.google_calendar_id!,
+                    eventId: primary.id!,
+                    requestBody: eventBody,
+                }));
+                stats.updated++;
+                if (primary.id !== shift.google_event_id) stats.linked++;
+                const deduped = await deleteDuplicateGoogleEvents(calendarApi, orgData.google_calendar_id, candidates, primary.id);
+                stats.deduped += deduped;
+                await markShiftGoogleSync(shift.id, 'synced', { eventId: primary.id });
+            } else {
+                const res = await withRetry(() => calendarApi.events.insert({
+                    calendarId: orgData.google_calendar_id!,
+                    requestBody: eventBody,
+                }));
+                if (res.data.id) await markShiftGoogleSync(shift.id, 'synced', { eventId: res.data.id });
+                stats.created++;
+            }
+            succeeded++;
+        } catch (e) {
+            const se = classifyGoogleError(e);
+            await markShiftGoogleSync(shift.id, 'failed', { error: se.message }).catch(console.error);
+            failedIds.push(shift.id);
+            errorKind = se.kind;
+            if (se.kind === 'auth') break;
+        }
+    }
+
+    return {
+        processed,
+        succeeded,
+        failed: failedIds.length,
+        failedIds,
+        connected: true,
+        errorKind,
+        ...stats,
     };
 }
 
@@ -437,7 +778,10 @@ async function createShiftInternal(payload: ShiftPayload, awaitSync: boolean | '
             end_at: payload.endAt,
             status: payload.status || 'published',
             pattern_id: payload.patternId || null,
-            is_modified: payload.isModified ?? false
+            is_modified: payload.isModified ?? false,
+            google_sync_status: 'pending_upsert',
+            google_sync_error: null,
+            google_synced_at: null
         }).select('id').single();
 
         if (shiftError || !shift) throw new Error(shiftError?.message);
@@ -485,6 +829,9 @@ async function updateShiftInternal(shiftId: string, payload: Partial<ShiftPayloa
 
         if (Object.keys(updateData).length > 0) {
             updateData.updated_at = new Date().toISOString();
+            updateData.google_sync_status = 'pending_upsert';
+            updateData.google_sync_error = null;
+            updateData.google_synced_at = null;
             await supabaseAdmin.from('shifts').update(updateData).eq('id', shiftId);
         }
 
@@ -492,6 +839,12 @@ async function updateShiftInternal(shiftId: string, payload: Partial<ShiftPayloa
             await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
             const staffInserts: ShiftStaffInsert[] = payload.staffIds.map(sid => ({ shift_id: shiftId, staff_id: sid }));
             if (staffInserts.length > 0) await supabaseAdmin.from('shift_staffs').insert(staffInserts);
+            await supabaseAdmin.from('shifts').update({
+                google_sync_status: 'pending_upsert',
+                google_sync_error: null,
+                google_synced_at: null,
+                updated_at: new Date().toISOString(),
+            }).eq('id', shiftId);
         }
 
         const targetOrgId = payload.organizationId || (await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single()).data?.organization_id;
@@ -515,7 +868,10 @@ export async function updateShiftTimeOnly(shiftId: string, startAt: string, endA
             start_at: startAt,
             end_at: endAt,
             updated_at: new Date().toISOString(),
-            is_modified: true
+            is_modified: true,
+            google_sync_status: 'pending_upsert',
+            google_sync_error: null,
+            google_synced_at: null
         }).eq('id', shiftId);
 
         const { data } = await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single();
@@ -534,7 +890,10 @@ export async function toggleCancelShift(shiftId: string, isCancel: boolean, reas
             status,
             cancel_reason: cancelReason,
             updated_at: new Date().toISOString(),
-            is_modified: true
+            is_modified: true,
+            google_sync_status: 'pending_upsert',
+            google_sync_error: null,
+            google_synced_at: null
         }).eq('id', shiftId);
 
         const { data } = await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single();
@@ -643,7 +1002,7 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
  * クライアントは件数が多い場合に分割して繰り返し呼ぶ（タイムアウト回避）。
  */
 export async function deleteShiftsBatch(organizationId: string, shiftIds: string[]) {
-    if (!shiftIds || shiftIds.length === 0) return { success: true, deleted: 0, failed: 0 };
+    if (!shiftIds || shiftIds.length === 0) return { success: true, deleted: 0, failed: 0, errorKind: undefined as SyncErrorKind | undefined, ...emptyGoogleSyncStats() };
     await assertOrgRole(organizationId, ['owner', 'manager']);
     await assertShiftsAccessible(shiftIds);
     try {
@@ -653,7 +1012,7 @@ export async function deleteShiftsBatch(organizationId: string, shiftIds: string
             .eq('organization_id', organizationId)
             .in('id', shiftIds);
 
-        if (!shifts || shifts.length === 0) return { success: true, deleted: 0, failed: 0 };
+        if (!shifts || shifts.length === 0) return { success: true, deleted: 0, failed: 0, errorKind: undefined as SyncErrorKind | undefined, ...emptyGoogleSyncStats() };
 
         const outcome = await processShiftsSequential(organizationId, shifts, 'delete');
         const deletableIds = shifts.map(s => s.id).filter(id => !outcome.failedIds.includes(id));
@@ -661,7 +1020,7 @@ export async function deleteShiftsBatch(organizationId: string, shiftIds: string
         if (deletableIds.length > 0) {
             await softDeleteShiftIds(organizationId, deletableIds, 'シフト一括削除');
         }
-        return { success: true, deleted: deletableIds.length, failed: outcome.failed, errorKind: outcome.errorKind };
+        return { success: true, deleted: deletableIds.length, failed: outcome.failed, errorKind: outcome.errorKind, ...outcome.stats };
     } catch (error) {
         console.error('Delete Shifts Batch Error:', error);
         throw error;
@@ -753,6 +1112,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         const { data: existingShifts } = await supabaseAdmin.from('shifts')
             .select('id, pattern_id, start_at, is_modified')
             .eq('organization_id', organizationId)
+            .is('deleted_at', null)
             .not('pattern_id', 'is', null)
             .gte('start_at', startSearchISO)
             .lte('start_at', endSearchISO);
@@ -856,19 +1216,22 @@ export async function deleteShiftCompletely(shiftId: string) {
             .single();
 
         if (shiftData) {
-            await trySyncSilently(shiftData.organization_id, shiftId, 'delete');
+            await syncToGoogleCalendarDirect(shiftData.organization_id, shiftId, 'delete');
         }
 
         const policy = await getRetentionPolicy(actor.organizationId, 'shift');
         const { error } = await supabaseAdmin.from('shifts').update({
             deleted_at: new Date().toISOString(), deleted_by: actor.userId,
             deletion_reason: '管理者による削除', retention_until: retentionDeadline(policy.years),
+            google_sync_status: 'synced', google_sync_error: null, google_synced_at: new Date().toISOString(),
         }).eq('id', shiftId).is('deleted_at', null);
 
         if (error) throw error;
         await recordAuditEvent({ organizationId: actor.organizationId, actorId: actor.userId, action: 'shift.soft_delete', resourceType: 'shift', resourceId: shiftId, reason: '管理者による削除', details: { legalBasis: policy.legalBasis } });
         return { success: true };
     } catch (error) {
+        const se = classifyGoogleError(error);
+        await markShiftGoogleSync(shiftId, 'failed', { error: se.message }).catch(console.error);
         console.error('Delete Shift Completely Error:', error);
         throw error;
     }
@@ -908,6 +1271,7 @@ export async function deleteShiftsDbOnly(shiftIds: string[]) {
             const { error } = await supabaseAdmin.from('shifts').update({
                 deleted_at: new Date().toISOString(), deleted_by: actor.userId,
                 deletion_reason: 'DB一括削除', retention_until: retentionDeadline(policy.years),
+                google_sync_status: 'pending_delete', google_sync_error: null, google_synced_at: null,
             }).in('id', targets).is('deleted_at', null);
             if (error) throw error;
             await recordAuditEvent({ organizationId: orgId, actorId: actor.userId, action: 'shift.bulk_soft_delete', resourceType: 'shift', reason: 'DB一括削除', details: { shiftIds: targets } });

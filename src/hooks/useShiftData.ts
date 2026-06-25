@@ -111,8 +111,8 @@ export const useShiftData = ({
             .from('shifts')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', currentOrg.id)
-            .is('google_event_id', null)
-            .is('deleted_at', null);
+            .is('deleted_at', null)
+            .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)');
         setUnsyncedCount(unsyncedCountResult || 0);
     }, [currentOrg]);
 

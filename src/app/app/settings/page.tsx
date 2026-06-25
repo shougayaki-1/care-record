@@ -23,7 +23,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { deleteOrganization, disconnectGoogleCalendar, getAuditLogs, exportAuditLogsCsv, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName } from '@/app/actions/organization';
-import { getSyncStatus, syncUnsyncedBatch, forceSyncBatch } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
+import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getGoogleAuthUrlAction } from '@/app/actions/google';
@@ -279,6 +279,18 @@ function SettingsContent() {
         }
     };
 
+    const reportRepairResult = (res: Awaited<ReturnType<typeof repairGoogleCalendarSync>>) => {
+        if (!res.connected) {
+            showToast('Googleカレンダーが連携されていません。「連携する」から接続してください。', 'warning');
+        } else if (res.errorKind === 'auth') {
+            showToast('Googleカレンダーの認証が切れています。「連携を解除」後に再接続してください。', 'error');
+        } else if (res.failed > 0) {
+            showToast(`同期修復が一部失敗しました（成功 ${res.succeeded} 件 / 失敗 ${res.failed} 件）。`, 'warning');
+        } else {
+            showToast(`同期修復が完了しました（作成 ${res.created} / 更新 ${res.updated} / 再リンク ${res.linked} / 重複削除 ${res.deduped} / Google削除 ${res.deletedRemote}）。`, 'success');
+        }
+    };
+
     // 未同期シフトのみをチャンク単位で同期する
     const handleRepairCalendar = async () => {
         if (!currentOrg) return;
@@ -311,28 +323,17 @@ function SettingsContent() {
     // 全件強制再同期をチャンク単位でループ実行する
     const handleForceResyncCalendar = async () => {
         if (!currentOrg) return;
-        if (!(await confirm({ message: '全ての予定（既に同期済みの予定も含む）をGoogleカレンダーに強制的に再同期します。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。' }))) return;
+        if (!(await confirm({ message: 'Googleカレンダーの同期状態を修復します。既存予定の再リンク、重複削除、削除済みシフトのGoogle側削除を行います。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。' }))) return;
 
         setResyncingCal(true);
         try {
-            const status = await getSyncStatus(currentOrg.id);
-            const total = status.total;
-            if (total === 0) { showToast('同期対象の予定がありません。', 'info'); return; }
-            setSyncProgress({ total, current: 0 });
-            let cursor: string | null = null;
-            let done = 0, failed = 0;
-            let errorKind: string | undefined;
-            for (;;) {
-                const res = await forceSyncBatch(currentOrg.id, cursor, 20);
-                done += res.processed; failed += res.failed; cursor = res.nextCursor;
-                if (res.errorKind) errorKind = res.errorKind;
-                setSyncProgress({ total, current: Math.min(total, done) });
-                if (errorKind === 'auth' || res.remaining <= 0 || res.processed === 0) break;
-            }
-            reportSyncResult(done, failed, errorKind);
+            setSyncProgress({ total: 1, current: 0 });
+            const res = await repairGoogleCalendarSync(currentOrg.id);
+            setSyncProgress({ total: 1, current: 1 });
+            reportRepairResult(res);
         } catch (e) {
             console.error(e);
-            showToast('全件再同期中にエラーが発生しました。', 'error');
+            showToast('同期修復中にエラーが発生しました。', 'error');
         } finally {
             setResyncingCal(false);
             setSyncProgress(null);
@@ -515,7 +516,7 @@ function SettingsContent() {
                                                         disabled={repairingCal || resyncingCal}
                                                         sx={{ boxShadow: 'none' }}
                                                     >
-                                                        {resyncingCal ? '全件再同期中...' : '全件再同期'}
+                                                        {resyncingCal ? '修復中...' : '同期を修復'}
                                                     </Button>
                                                     <Button 
                                                         variant="outlined"
