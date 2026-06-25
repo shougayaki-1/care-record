@@ -5,7 +5,7 @@ import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Chip, Button, TextField, Stack,
   IconButton, Select, MenuItem, FormControl, InputLabel, Menu, Alert, ListItemIcon,
-  CircularProgress, Checkbox, FormControlLabel, FormGroup
+  CircularProgress, Divider,
 } from '@/components/ui/mui';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -56,6 +56,7 @@ export default function AccountsPage() {
   // ダイアログ用
   const [openRoleDialog, setOpenRoleDialog] = useState(false);
   const [editRole, setEditRole] = useState('staff');
+  const [editOrgRoleIds, setEditOrgRoleIds] = useState<string[]>([]);
   
   // ★追加：削除（取り消し）確認ダイアログ用
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
@@ -133,41 +134,46 @@ export default function AccountsPage() {
   };
 
   const openRoleEditDialog = () => {
-      if (!selectedAccount) return;
-      setEditRole(selectedAccount.role);
-      setOpenRoleDialog(true);
-      handleMenuClose();
+    if (!selectedAccount) return;
+    setEditRole(selectedAccount.role);
+    setEditOrgRoleIds(selectedAccount.roles?.map(r => r.id) ?? []);
+    setOpenRoleDialog(true);
+    handleMenuClose();
   };
 
   const executeRoleChange = async () => {
-      if (!currentOrg || !selectedAccount) return;
-      try {
-          if (selectedAccount.id === currentUserId && selectedAccount.role === 'owner' && editRole !== 'owner') {
-              const ownerCount = accountList.filter(a => a.role === 'owner' && a.status === 'active').length;
-              if (ownerCount <= 1) {
-                  showToast('あなたは最後のオーナーです。他の人にオーナー権限を付与してから変更してください。', 'error');
-                  setOpenRoleDialog(false);
-                  return;
-              }
-          }
-
-          await updateAccountRole(currentOrg.id, {
-              targetId: selectedAccount.id,
-              status: selectedAccount.status === 'active' ? 'active' : 'invited',
-              newRole: editRole,
-          });
-
-          showToast('権限を変更しました');
+    if (!currentOrg || !selectedAccount) return;
+    try {
+      if (selectedAccount.id === currentUserId && selectedAccount.role === 'owner' && editRole !== 'owner') {
+        const ownerCount = accountList.filter(a => a.role === 'owner' && a.status === 'active').length;
+        if (ownerCount <= 1) {
+          showToast('あなたは最後のオーナーです。他の人にオーナー権限を付与してから変更してください。', 'error');
           setOpenRoleDialog(false);
-          fetchData();
-
-          if (selectedAccount.id === currentUserId && editRole !== 'owner') {
-              setTimeout(() => window.location.reload(), 1000);
-          }
-      } catch (error) { 
-          console.error(error); 
-          showToast('変更に失敗しました', 'error'); 
+          return;
+        }
       }
+
+      await updateAccountRole(currentOrg.id, {
+        targetId: selectedAccount.id,
+        status: selectedAccount.status === 'active' ? 'active' : 'invited',
+        newRole: editRole,
+      });
+
+      if (selectedAccount.status === 'active' && editRole !== 'owner') {
+        await updateMemberRoles(currentOrg.id, selectedAccount.id, editOrgRoleIds);
+      }
+
+      showToast('権限を変更しました');
+      setOpenRoleDialog(false);
+      fetchData();
+
+      if (selectedAccount.id === currentUserId && editRole !== 'owner') {
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    } catch (error) {
+      console.error(error);
+      showToast('変更に失敗しました', 'error');
+    }
   };
 
   // ★修正：削除（取り消し）メニューをクリックした際の処理（ダイアログを開くだけ）
@@ -282,7 +288,7 @@ export default function AccountsPage() {
                                         </Box>
                                     ) : (
                                         <Chip
-                                            label="一般(ヘルパー)"
+                                            label="一般"
                                             size="small"
                                             color="default"
                                             variant="outlined"
@@ -345,28 +351,56 @@ export default function AccountsPage() {
               </Typography>
       </AppDialog>
 
-      {/* --- 権限変更ダイアログ --- */}
-      <AppDialog open={openRoleDialog} onClose={() => setOpenRoleDialog(false)} maxWidth="xs" title="権限の変更" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenRoleDialog(false)}>キャンセル</AppButton><AppButton onClick={executeRoleChange}>変更を保存</AppButton></>}>
-              <Box pt={1}>
-                  <Typography variant="body2" mb={2}>
-                      <b>{selectedAccount?.name}</b> さんのシステム権限を変更します。
-                  </Typography>
-                  <FormControl fullWidth size="small">
-                      <InputLabel>システム権限</InputLabel>
-                      <Select value={editRole} onChange={(e) => setEditRole(e.target.value)} label="システム権限">
-                          <MenuItem value="staff">一般(ヘルパー) - 記録の作成のみ</MenuItem>
-                          <MenuItem value="manager">管理者 - シフト管理・利用者管理</MenuItem>
-                          {selectedAccount?.status === 'active' && (
-                            <MenuItem value="owner">オーナー - 全ての権限・事業所設定</MenuItem>
-                          )}
-                      </Select>
-                  </FormControl>
-                  {selectedAccount?.id === currentUserId && editRole !== 'owner' && (
-                      <Alert severity="warning" sx={{ mt: 2 }}>
-                          自分の権限を降格させると、再度オーナーに戻ることはできません。
-                      </Alert>
-                  )}
+      {/* --- 権限・ロール変更ダイアログ --- */}
+      <AppDialog open={openRoleDialog} onClose={() => setOpenRoleDialog(false)} maxWidth="xs" title="権限・ロールの変更" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenRoleDialog(false)}>キャンセル</AppButton><AppButton onClick={executeRoleChange}>変更を保存</AppButton></>}>
+        <Box pt={1}>
+          <Typography variant="body2" mb={2}>
+            <b>{selectedAccount?.name}</b> さんの権限を変更します。
+          </Typography>
+          <FormControl fullWidth size="small">
+            <InputLabel>システム権限</InputLabel>
+            <Select value={editRole} onChange={(e) => setEditRole(e.target.value)} label="システム権限">
+              <MenuItem value="staff">一般 - 記録の作成のみ</MenuItem>
+              <MenuItem value="manager">管理者 - シフト管理・利用者管理</MenuItem>
+              {selectedAccount?.status === 'active' && (
+                <MenuItem value="owner">オーナー - 全ての権限・事業所設定</MenuItem>
+              )}
+            </Select>
+          </FormControl>
+          {selectedAccount?.id === currentUserId && editRole !== 'owner' && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              自分の権限を降格させると、再度オーナーに戻ることはできません。
+            </Alert>
+          )}
+          {availableRoles.length > 0 && editRole !== 'owner' && (
+            <>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle2" mb={1}>割り当てるロール</Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {availableRoles.map((role) => {
+                  const selected = editOrgRoleIds.includes(role.id);
+                  return (
+                    <Chip
+                      key={role.id}
+                      label={role.name}
+                      onClick={() => {
+                        if (selected) setEditOrgRoleIds(prev => prev.filter(id => id !== role.id));
+                        else setEditOrgRoleIds(prev => [...prev, role.id]);
+                      }}
+                      variant={selected ? 'filled' : 'outlined'}
+                      sx={{
+                        cursor: 'pointer',
+                        borderColor: role.color ?? undefined,
+                        color: selected ? '#fff' : (role.color ?? undefined),
+                        bgcolor: selected ? (role.color ?? undefined) : undefined,
+                      }}
+                    />
+                  );
+                })}
               </Box>
+            </>
+          )}
+        </Box>
       </AppDialog>
 
       {/* --- 新規招待ダイアログ --- */}
@@ -377,20 +411,28 @@ export default function AccountsPage() {
                     {availableRoles.length > 0 && (
                         <Box width="100%">
                           <Typography variant="subtitle2" mb={1}>付与するロール</Typography>
-                          {availableRoles.map(role => (
-                            <Box key={role.id} display="flex" alignItems="center">
-                              <Checkbox
-                                size="small"
-                                checked={selectedRoleIds.includes(role.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) setSelectedRoleIds(prev => [...prev, role.id]);
-                                  else setSelectedRoleIds(prev => prev.filter(id => id !== role.id));
-                                }}
-                              />
-                              <Box width={10} height={10} borderRadius="50%" bgcolor={role.color ?? 'grey.400'} mr={0.5} />
-                              <Typography variant="body2">{role.name}</Typography>
-                            </Box>
-                          ))}
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                            {availableRoles.map((role) => {
+                              const selected = selectedRoleIds.includes(role.id);
+                              return (
+                                <Chip
+                                  key={role.id}
+                                  label={role.name}
+                                  onClick={() => {
+                                    if (selected) setSelectedRoleIds(prev => prev.filter(id => id !== role.id));
+                                    else setSelectedRoleIds(prev => [...prev, role.id]);
+                                  }}
+                                  variant={selected ? 'filled' : 'outlined'}
+                                  sx={{
+                                    cursor: 'pointer',
+                                    borderColor: role.color ?? undefined,
+                                    color: selected ? '#fff' : (role.color ?? undefined),
+                                    bgcolor: selected ? (role.color ?? undefined) : undefined,
+                                  }}
+                                />
+                              );
+                            })}
+                          </Box>
                         </Box>
                     )}
                     <TextField label="管理用の名前 (任意)" placeholder="例: 山田 太郎" size="small" fullWidth value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} />
