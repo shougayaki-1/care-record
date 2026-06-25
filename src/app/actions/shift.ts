@@ -165,7 +165,8 @@ function classifyGoogleError(e: unknown): SyncError {
     const err = e as {
         code?: number | string;
         status?: number;
-        response?: { status?: number; data?: { error?: { message?: string }; error_description?: string } };
+        // Google OAuth は error を文字列("invalid_grant")で、Calendar API は {message:string} で返す
+        response?: { status?: number; data?: { error?: string | { message?: string }; error_description?: string } };
         message?: string;
     };
     // Gaxios(googleapis) は HTTP ステータスを response.status に持つ。code は文字列のこともあるため数値のみ採用。
@@ -173,8 +174,16 @@ function classifyGoogleError(e: unknown): SyncError {
         ?? (typeof err?.code === 'number' ? err.code : undefined)
         ?? err?.status;
     const code = typeof raw === 'number' ? raw : undefined;
-    const msg = err?.response?.data?.error?.message || err?.response?.data?.error_description || err?.message;
-    // OAuth のトークン失効は invalid_grant として返ることがある（HTTPコードが付かない場合の保険）
+    const errorField = err?.response?.data?.error;
+    // OAuth エラーは error が文字列("invalid_grant")、Calendar API は error.message にメッセージが入る
+    const oauthErrorCode = typeof errorField === 'string' ? errorField : undefined;
+    const msg = (typeof errorField === 'object' ? errorField?.message : undefined)
+        || err?.response?.data?.error_description
+        || err?.message;
+    // OAuth のトークン失効: invalid_grant(HTTP 400)はコードチェック前に判定が必要
+    if (oauthErrorCode && /invalid_grant|invalid_token/i.test(oauthErrorCode)) {
+        return new SyncError(msg || oauthErrorCode, 'auth', code);
+    }
     if (typeof msg === 'string' && /invalid_grant|invalid_token|unauthorized/i.test(msg)) {
         return new SyncError(msg, 'auth', code);
     }
