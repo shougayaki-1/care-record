@@ -15,6 +15,7 @@ type MemberRow = { user_id: string; role: string };
 export type AccountOverviewItem = {
     id: string;
     name: string;
+    email?: string;
     role: string;  // base org role: 'owner' | 'member'
     roles: { id: string; name: string; color: string | null }[];  // effective roles from organization_roles
     status: 'active' | 'invited';
@@ -51,6 +52,11 @@ export async function getAccountOverview(orgId: string): Promise<{ currentUserId
     if (memberRolesError) throw new Error('ロール情報を取得できませんでした');
 
     const profileNames = new Map((profiles || []).map((profile) => [profile.id, profile.name]));
+    const authEmails = new Map<string, string>();
+    await Promise.all(memberIds.map(async (memberId) => {
+        const { data } = await supabaseAdmin.auth.admin.getUserById(memberId);
+        if (data.user?.email) authEmails.set(memberId, data.user.email);
+    }));
 
     // Build a map of userId -> roles[]
     const rolesMap = new Map<string, { id: string; name: string; color: string | null }[]>();
@@ -64,6 +70,7 @@ export async function getAccountOverview(orgId: string): Promise<{ currentUserId
     const accounts: AccountOverviewItem[] = memberRows.map((member) => ({
         id: member.user_id,
         name: profileNames.get(member.user_id) || '名前未設定',
+        email: authEmails.get(member.user_id),
         role: member.role,
         roles: rolesMap.get(member.user_id) ?? [],
         status: 'active',
