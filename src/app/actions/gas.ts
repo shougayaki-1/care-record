@@ -117,7 +117,7 @@ export async function callGasApi(payload: GasPayload) {
 
   const allowedRoles = payload.action === 'manage_org_folder'
     ? (['owner'] as const)
-    : (['owner', 'manager'] as const);
+    : (['owner', 'member'] as const);
   await assertOrgRole(payload.organizationId, [...allowedRoles]);
   const user = await getAuthedUser();
 

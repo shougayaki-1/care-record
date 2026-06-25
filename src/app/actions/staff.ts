@@ -1,6 +1,6 @@
 'use server';
 
-import { supabaseAdmin, assertOrgRole } from '@/utils/supabase/auth';
+import { supabaseAdmin, assertOrgPermission } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { validatePassword } from '@/utils/passwordPolicy';
 
@@ -14,8 +14,8 @@ export async function createStaffDirectly(params: {
     const passwordResult = validatePassword(password);
     if (!passwordResult.ok) throw new Error(passwordResult.message);
 
-    // 権限チェック: 呼び出し元がこの事業所の owner/manager であることを検証
-    const actor = await assertOrgRole(organizationId, ['owner', 'manager']);
+    // 権限チェック: 呼び出し元がスタッフ管理権限を持つか検証
+    const actor = await assertOrgPermission(organizationId, 'staffs');
 
     if (assignedClientIds.length > 0) {
         const { data: allowedClients } = await supabaseAdmin.from('clients').select('id')
@@ -35,7 +35,7 @@ export async function createStaffDirectly(params: {
         });
         if (profileError) throw profileError;
         const { error: memberError } = await supabaseAdmin.from('organization_members').insert({
-            organization_id: organizationId, user_id: userId, role: 'staff',
+            organization_id: organizationId, user_id: userId, role: 'member',
         });
         if (memberError) throw memberError;
         if (assignedClientIds.length > 0) {

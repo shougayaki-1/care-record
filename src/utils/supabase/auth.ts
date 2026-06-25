@@ -271,6 +271,25 @@ export async function assertOrgPermission(
 }
 
 /**
+ * リソースの organization_id を解決してから assertOrgPermission を呼ぶヘルパ。
+ */
+export async function assertResourceOrgPermission(
+  table: string,
+  resourceId: string,
+  area: ManagementArea
+): Promise<{ organizationId: string; userId: string; isOwner: boolean }> {
+  if (!resourceId) throw new Error('リソースIDが不正です');
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .select('organization_id')
+    .eq('id', resourceId)
+    .single();
+  if (error || !data?.organization_id) throw new Error('リソースが見つかりません');
+  const { userId, isOwner } = await assertOrgPermission(data.organization_id, area);
+  return { organizationId: data.organization_id, userId, isOwner };
+}
+
+/**
  * セッションのユーザーが対象 org のオーナーか検証する。満たさなければ例外。
  */
 export async function assertOwner(organizationId: string): Promise<{ userId: string }> {

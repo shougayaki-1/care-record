@@ -3,7 +3,7 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertOrgRole, createSessionClient, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgRole, assertOrgPermission, assertOwner, createSessionClient, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
 import { randomUUID } from 'crypto';
 import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
@@ -70,7 +70,7 @@ export async function transitionReports(
 ) {
   const ids = Array.from(new Set(reportIds.filter(Boolean)));
   if (ids.length === 0 || ids.length > 100) throw new Error('対象件数が不正です');
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'reports');
 
   const { data: clients, error: clientError } = await supabaseAdmin
     .from('clients').select('id').eq('organization_id', organizationId);
@@ -154,7 +154,7 @@ export async function softDeleteReports(
   if (reports.some((report) => report.status === 'approved')) {
     throw new Error('承認済みの記録は削除できません');
   }
-  if (role === 'staff' && reports.some((report) =>
+  if (role === 'member' && reports.some((report) =>
     report.helper_id !== userId || !['draft', 'remanded'].includes(report.status)
   )) {
     throw new Error('自分の下書きまたは差戻し記録だけ削除できます');
@@ -195,7 +195,7 @@ export async function restoreReports(organizationId: string, reportIds: string[]
   if (uniqueIds.length === 0 || uniqueIds.length > 100) {
     throw new Error('復元対象の件数が不正です');
   }
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'reports');
 
   const { data: clients, error: clientError } = await supabaseAdmin
     .from('clients')
@@ -251,7 +251,7 @@ async function getAccessibleReport(organizationId: string, reportId: string) {
     .maybeSingle();
   if (error || !report) throw new Error('記録にアクセスできません');
 
-  if (role === 'staff' && report.helper_id !== userId) {
+  if (role === 'member' && report.helper_id !== userId) {
     await assertStaffAssignment(userId, report.client_id);
   }
   return { userId, role, report };
@@ -265,7 +265,7 @@ export async function uploadReportImage(formData: FormData) {
 
   const { userId, role, report } = await getAccessibleReport(organizationId, reportId);
   if (report.status === 'approved') throw new Error('承認済み記録へ画像を追加できません');
-  if (role === 'staff' && report.helper_id !== userId) {
+  if (role === 'member' && report.helper_id !== userId) {
     throw new Error('他の職員が作成した記録へ画像を追加できません');
   }
 
@@ -348,7 +348,7 @@ export async function auditReportExport(
 ) {
   const ids = Array.from(new Set(reportIds.filter(Boolean)));
   if (ids.length === 0 || ids.length > 1000) throw new Error('出力対象件数が不正です');
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'reports');
   await recordAuditEvent({
     organizationId,
     actorId: userId,

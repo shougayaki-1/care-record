@@ -2,13 +2,13 @@
 
 import { sanitizeDbError } from '@/utils/errors';
 
-import { supabaseAdmin, getAuthedUser, assertOrgRole } from '@/utils/supabase/auth';
+import { supabaseAdmin, getAuthedUser, assertOrgRole, assertOrgPermission, assertOwner } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 
 export async function updateOrganizationName(orgId: string, name: string) {
-    const { userId } = await assertOrgRole(orgId, ['owner']);
+    const { userId } = await assertOwner(orgId);
     const normalized = name.trim();
     if (normalized.length < 1 || normalized.length > 100) throw new Error('事業所名は1〜100文字で入力してください');
     const { error } = await supabaseAdmin.from('organizations').update({ name: normalized }).eq('id', orgId).is('deleted_at', null);
@@ -18,7 +18,7 @@ export async function updateOrganizationName(orgId: string, name: string) {
 }
 
 export async function updateOrganizationDriveFolder(orgId: string, folderId: string | null) {
-    const { userId } = await assertOrgRole(orgId, ['owner']);
+    const { userId } = await assertOwner(orgId);
     const normalized = folderId?.trim() || null;
     if (normalized && normalized.length > 255) throw new Error('フォルダIDが不正です');
     const { error } = await supabaseAdmin.from('organizations').update({ google_folder_id: normalized }).eq('id', orgId).is('deleted_at', null);
@@ -28,7 +28,7 @@ export async function updateOrganizationDriveFolder(orgId: string, folderId: str
 }
 
 export async function disconnectGoogleCalendar(orgId: string) {
-    const { userId } = await assertOrgRole(orgId, ['owner']);
+    const { userId } = await assertOwner(orgId);
     const { data: org, error: readError } = await supabaseAdmin.from('organizations').select('google_refresh_token').eq('id', orgId).single();
     if (readError) throw new Error(readError.message);
     let revoked = false;
@@ -48,7 +48,7 @@ export async function disconnectGoogleCalendar(orgId: string) {
 
 export async function deleteOrganization(orgId: string) {
     // 権限チェック: 呼び出し元がこの事業所の owner であることをセッションから検証
-    const { userId } = await assertOrgRole(orgId, ['owner']);
+    const { userId } = await assertOwner(orgId);
 
     const { data: organization, error: orgReadError } = await supabaseAdmin
         .from('organizations')
@@ -123,7 +123,7 @@ export async function leaveOrganization(orgId: string) {
 
 export async function transferOwner(orgId: string, newOwnerId: string) {
     // 譲渡できるのは現 owner 本人のみ。現 owner はセッションから取得する
-    const { userId: currentOwnerId } = await assertOrgRole(orgId, ['owner']);
+    const { userId: currentOwnerId } = await assertOwner(orgId);
 
     // 両方の UPDATE を単一トランザクション内で原子的に実行する RPC を使用
     // 分割 UPDATE だと1件目成功・2件目失敗で2オーナー状態になりうるため
@@ -161,7 +161,7 @@ function applyAuditFilters<T extends { gte: (c: string, v: string) => T; lte: (c
 }
 
 export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {}) {
-    await assertOrgRole(orgId, ['owner', 'manager']);
+    await assertOrgPermission(orgId, 'auditLogs');
     const limit = Math.min(Math.max(filters.limit ?? 100, 1), 200);
     const offset = Math.max(filters.offset ?? 0, 0);
     // SQLで profiles への FK を貼ったので結合可能になります
@@ -180,7 +180,7 @@ export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {})
 
 /** 監査ログをCSV化して返す。監査エビデンス出力自体も監査記録する。 */
 export async function exportAuditLogsCsv(orgId: string, filters: AuditLogFilters = {}): Promise<{ filename: string; csv: string }> {
-    const { userId } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const { userId } = await assertOrgPermission(orgId, 'auditLogs');
     const EXPORT_CAP = 10000;
     let query = supabaseAdmin
         .from('audit_events')

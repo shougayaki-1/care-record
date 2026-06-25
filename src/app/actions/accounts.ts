@@ -3,10 +3,10 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { randomUUID } from 'crypto';
-import { supabaseAdmin, getAuthedUser, assertOrgRole, createSessionClient } from '@/utils/supabase/auth';
+import { supabaseAdmin, getAuthedUser, assertOrgRole, assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 
-const VALID_ROLES = ['owner', 'manager', 'staff'] as const;
+const VALID_ROLES = ['owner', 'member'] as const;
 type Role = (typeof VALID_ROLES)[number];
 
 type MemberRow = { user_id: string; role: string };
@@ -14,13 +14,14 @@ type MemberRow = { user_id: string; role: string };
 export type AccountOverviewItem = {
     id: string;
     name: string;
-    role: Role;
+    role: string;  // base org role: 'owner' | 'member'
+    roles: { id: string; name: string; color: string | null }[];  // effective roles from organization_roles
     status: 'active' | 'invited';
     invitation_code?: string;
 };
 
 export async function getAccountOverview(orgId: string): Promise<{ currentUserId: string; accounts: AccountOverviewItem[] }> {
-    const { userId, role: actorRole } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
     const [{ data: members, error: membersError }, { data: invitations, error: invitationsError }] = await Promise.all([
         supabaseAdmin.from('organization_members').select('user_id, role').eq('organization_id', orgId),
         supabaseAdmin.from('invitations')
@@ -33,26 +34,47 @@ export async function getAccountOverview(orgId: string): Promise<{ currentUserId
 
     const memberRows = (members || []) as MemberRow[];
     const memberIds = memberRows.map((member) => member.user_id);
-    const { data: profiles, error: profilesError } = memberIds.length
-        ? await supabaseAdmin.from('profiles').select('id, name').in('id', memberIds)
-        : { data: [], error: null };
+    const [{ data: profiles, error: profilesError }, { data: memberRoles, error: memberRolesError }] = await Promise.all([
+        memberIds.length
+            ? supabaseAdmin.from('profiles').select('id, name').in('id', memberIds)
+            : Promise.resolve({ data: [], error: null }),
+        memberIds.length
+            ? supabaseAdmin
+                .from('organization_member_roles')
+                .select('user_id, organization_roles(id, name, color)')
+                .eq('organization_id', orgId)
+                .in('user_id', memberIds)
+            : Promise.resolve({ data: [], error: null }),
+    ]);
     if (profilesError) throw new Error('プロフィール情報を取得できませんでした');
+    if (memberRolesError) throw new Error('ロール情報を取得できませんでした');
+
     const profileNames = new Map((profiles || []).map((profile) => [profile.id, profile.name]));
+
+    // Build a map of userId -> roles[]
+    const rolesMap = new Map<string, { id: string; name: string; color: string | null }[]>();
+    for (const row of (memberRoles || []) as { user_id: string; organization_roles: { id: string; name: string; color: string | null } | null }[]) {
+        if (!row.organization_roles) continue;
+        const existing = rolesMap.get(row.user_id) ?? [];
+        existing.push(row.organization_roles);
+        rolesMap.set(row.user_id, existing);
+    }
 
     const accounts: AccountOverviewItem[] = memberRows.map((member) => ({
         id: member.user_id,
         name: profileNames.get(member.user_id) || '名前未設定',
-        role: VALID_ROLES.includes(member.role as Role) ? member.role as Role : 'staff',
+        role: member.role,
+        roles: rolesMap.get(member.user_id) ?? [],
         status: 'active',
     }));
     for (const invitation of invitations || []) {
-        const invitationRole = ['manager', 'staff'].includes(invitation.role) ? invitation.role as Role : 'staff';
         accounts.push({
             id: invitation.id,
             name: invitation.target_name || '名前未設定',
-            role: invitationRole,
+            role: invitation.role ?? 'member',
+            roles: [],
             status: 'invited',
-            ...(actorRole === 'owner' ? { invitation_code: invitation.code } : {}),
+            ...(isOwner ? { invitation_code: invitation.code } : {}),
         });
     }
 
@@ -88,13 +110,8 @@ export async function acceptInvitation(code: string) {
  * 招待リンク（invitations）を発行する。owner のみ。
  * code はサーバ側で生成し、actor も改ざんできないようセッションから取得する。
  */
-export async function createInvitation(orgId: string, params: { targetName?: string; role: string }) {
-    const { userId } = await assertOrgRole(orgId, ['owner']);
-
-    // 招待で付与できるのは manager / staff のみ（owner は譲渡フローで扱う）
-    if (!['manager', 'staff'].includes(params.role)) {
-        throw new Error('指定された権限では招待できません');
-    }
+export async function createInvitation(orgId: string, params: { targetName?: string; roleIds?: string[] }) {
+    const { userId } = await assertOrgPermission(orgId, 'accounts');
 
     const code = randomUUID().slice(0, 8);
     const { error } = await supabaseAdmin.from('invitations').insert({
@@ -102,11 +119,11 @@ export async function createInvitation(orgId: string, params: { targetName?: str
         code,
         created_by: userId,
         target_name: params.targetName || null,
-        role: params.role,
+        role_ids: params.roleIds ?? [],
         expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     });
     if (error) throw sanitizeDbError(error, 'action.accounts');
-    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.invitation_create', resourceType: 'invitation', details: { role: params.role } });
+    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.invitation_create', resourceType: 'invitation', details: { roleIds: params.roleIds ?? [] } });
     return { success: true, code };
 }
 
@@ -223,4 +240,36 @@ export async function removeAccount(
     }
     await recordAuditEvent({ organizationId: orgId, actorId: callerId, action: status === 'active' ? 'account.remove' : 'account.invitation_revoke', resourceType: 'account', resourceId: targetId });
     return { success: true };
+}
+
+export async function getOrgRoles(orgId: string): Promise<{ id: string; name: string; color: string | null; is_preset: boolean }[]> {
+    const user = await getAuthedUser();
+    const { data: member, error } = await supabaseAdmin
+        .from('organization_members')
+        .select('role')
+        .eq('organization_id', orgId)
+        .eq('user_id', user.id)
+        .single();
+    if (error || !member) throw new Error('アクセス権がありません');
+    const { data, error: rolesError } = await supabaseAdmin
+        .from('organization_roles')
+        .select('id, name, color, is_preset')
+        .eq('organization_id', orgId)
+        .order('is_preset', { ascending: false });
+    if (rolesError) throw new Error('ロール一覧を取得できませんでした');
+    return data ?? [];
+}
+
+export async function updateMemberRoles(orgId: string, targetUserId: string, roleIds: string[]): Promise<void> {
+    const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
+    void isOwner; // used for audit; permission already checked
+    const { data: targetMember } = await supabaseAdmin.from('organization_members').select('role').eq('organization_id', orgId).eq('user_id', targetUserId).single();
+    if (targetMember?.role === 'owner') throw new Error('オーナーのロールは変更できません');
+    await supabaseAdmin.from('organization_member_roles').delete().eq('organization_id', orgId).eq('user_id', targetUserId);
+    if (roleIds.length > 0) {
+        const rows = roleIds.map(rid => ({ organization_id: orgId, user_id: targetUserId, role_id: rid }));
+        const { error } = await supabaseAdmin.from('organization_member_roles').insert(rows);
+        if (error) throw new Error('ロールの更新に失敗しました');
+    }
+    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.roles_update', resourceType: 'account', resourceId: targetUserId, details: { roleIds } });
 }
