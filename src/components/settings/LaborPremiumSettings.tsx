@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Box, Typography, Stack, Chip, Switch, Button, CircularProgress, Alert,
-  Table, TableBody, TableCell, TableHead, TableRow, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField, Select, MenuItem, FormControl,
+  Box, Stack, Chip, Switch, Button, CircularProgress, Alert,
+  Table, TableBody, TableCell, TableHead, TableRow,
+  TextField, Select, MenuItem, FormControl,
   InputLabel,
 } from '@/components/ui/mui';
+import { AppDialog } from '@/components/ui';
 import { getLaborPremiumTypes, updateLaborPremiumType, createLaborPremiumType, disableLaborPremiumType } from '@/app/actions/laborPremium';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 
@@ -148,53 +149,66 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
     <Box>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
 
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>種別名</TableCell>
-            <TableCell align="right">率</TableCell>
-            <TableCell>計算方法</TableCell>
-            <TableCell>有効</TableCell>
-            <TableCell />
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {rows.length === 0 ? (
-            <TableRow><TableCell colSpan={5} align="center">設定なし</TableCell></TableRow>
-          ) : (
-            rows.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell>{row.name}</TableCell>
-                <TableCell align="right">{Math.round(row.rate * 100)}%</TableCell>
-                <TableCell>
-                  <Chip size="small" label={calcMethodLabel(row.calc_method)} />
-                </TableCell>
-                <TableCell>
-                  <Switch
-                    checked={row.is_enabled}
-                    onChange={() => handleToggleEnabled(row)}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Button size="small" onClick={() => handleEditOpen(row)}>編集</Button>
-                </TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+      <Box sx={{ overflowX: 'auto' }}>
+        <Table size="small" sx={{ minWidth: 520 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>種別名</TableCell>
+              <TableCell align="right">率</TableCell>
+              <TableCell>計算方法</TableCell>
+              <TableCell>有効</TableCell>
+              <TableCell />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableRow><TableCell colSpan={5} align="center">設定なし</TableCell></TableRow>
+            ) : (
+              rows.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell sx={{ minWidth: 140 }}>{row.name}</TableCell>
+                  <TableCell align="right">{Math.round(row.rate * 100)}%</TableCell>
+                  <TableCell>
+                    <Chip size="small" label={calcMethodLabel(row.calc_method)} />
+                  </TableCell>
+                  <TableCell>
+                    <Switch
+                      checked={row.is_enabled}
+                      onChange={() => handleToggleEnabled(row)}
+                      size="small"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Button size="small" onClick={() => handleEditOpen(row)}>編集</Button>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Box>
 
       <Box mt={2}>
-        <Button variant="outlined" size="small" onClick={() => { setAddState(defaultEditState()); setAddOpen(true); }}>
+        <Button variant="outlined" size="small" onClick={() => { setAddState(defaultEditState()); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
           種別を追加
         </Button>
       </Box>
 
       {/* Edit Dialog */}
-      <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>割り増し種別を編集</DialogTitle>
-        <DialogContent>
+      <AppDialog
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        maxWidth="xs"
+        title="割り増し種別を編集"
+        actions={(
+          <>
+            <Button onClick={() => setEditOpen(false)}>キャンセル</Button>
+            <Button variant="contained" onClick={handleEditSave} disabled={saving || !editState.name}>
+              {saving ? '保存中...' : '保存'}
+            </Button>
+          </>
+        )}
+      >
           <Stack spacing={2} mt={1}>
             <TextField
               label="種別名"
@@ -222,7 +236,7 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
               </Select>
             </FormControl>
             {(editTarget?.builtin_type === 'night' || editTarget?.builtin_type === 'custom') && (
-              <Stack direction="row" spacing={1}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                 <TextField
                   label="深夜開始 (時)"
                   type="number"
@@ -242,7 +256,7 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
               </Stack>
             )}
             {editTarget?.builtin_type === 'overtime' && (
-              <Stack direction="row" spacing={1}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                 <TextField
                   label="日次閾値 (h)"
                   type="number"
@@ -262,19 +276,23 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
               </Stack>
             )}
           </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditOpen(false)}>キャンセル</Button>
-          <Button variant="contained" onClick={handleEditSave} disabled={saving || !editState.name}>
-            {saving ? '保存中...' : '保存'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      </AppDialog>
 
       {/* Add Dialog */}
-      <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>割り増し種別を追加</DialogTitle>
-        <DialogContent>
+      <AppDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        maxWidth="xs"
+        title="割り増し種別を追加"
+        actions={(
+          <>
+            <Button onClick={() => setAddOpen(false)}>キャンセル</Button>
+            <Button variant="contained" onClick={handleAddSave} disabled={saving || !addState.name}>
+              {saving ? '追加中...' : '追加'}
+            </Button>
+          </>
+        )}
+      >
           <Stack spacing={2} mt={1}>
             <TextField
               label="種別名"
@@ -301,7 +319,7 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
                 <MenuItem value="multiplicative">乗算 (multiplicative)</MenuItem>
               </Select>
             </FormControl>
-            <Stack direction="row" spacing={1}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
               <TextField
                 label="深夜開始 (時)"
                 type="number"
@@ -320,14 +338,7 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
               />
             </Stack>
           </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAddOpen(false)}>キャンセル</Button>
-          <Button variant="contained" onClick={handleAddSave} disabled={saving || !addState.name}>
-            {saving ? '追加中...' : '追加'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      </AppDialog>
     </Box>
   );
 }

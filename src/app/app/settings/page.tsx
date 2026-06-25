@@ -391,7 +391,7 @@ function SettingsContent() {
                     {tabIndex === 0 && (
                         <Stack spacing={3}>
                             {/* 基本情報 */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+                            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
                                 <Typography variant="h6" fontWeight="bold" gutterBottom>基本情報</Typography>
                                 <Stack spacing={4}>
                                     <Box>
@@ -400,8 +400,8 @@ function SettingsContent() {
                                     </Box>
                                     <Divider />
                                     {isOwner && (
-                                        <Box textAlign="right">
-                                            <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving}>
+                                        <Box sx={{ display: 'flex', justifyContent: { xs: 'stretch', sm: 'flex-end' } }}>
+                                            <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                 {saving ? '保存中...' : '変更を保存'}
                                             </Button>
                                         </Box>
@@ -410,24 +410,27 @@ function SettingsContent() {
                             </Paper>
 
                             {/* Google Drive連携 */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>
-                                <Stack direction="row" alignItems="center" gap={2} mb={2}>
+                            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>
+                                <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={2}>
                                     <CloudQueueIcon color="primary" fontSize="large" />
-                                    <Box>
+                                    <Box sx={{ minWidth: 0 }}>
                                         <Typography variant="h6" fontWeight="bold">Googleドライブ連携</Typography>
                                         <Typography variant="body2" color="text.secondary">帳票の保存先フォルダを管理します（GAS経由）</Typography>
                                     </Box>
-                                    <Chip label={googleFolderId ? "連携済み" : "未連携"} color={googleFolderId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: 'auto' }} />
+                                    <Chip label={googleFolderId ? "連携済み" : "未連携"} color={googleFolderId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: { sm: 'auto' } }} />
                                 </Stack>
                                 
-                                <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                                <Box sx={{ mt: 2, p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider', minWidth: 0 }}>
                                     {isOwner ? (
                                         googleFolderId ? (
                                             <Stack spacing={2}>
                                                 <Typography variant="body2">
-                                                    連携中のフォルダID: <code>{googleFolderId}</code>
+                                                    連携中のフォルダID:{' '}
+                                                    <Box component="code" sx={{ display: 'inline-block', maxWidth: '100%', overflowWrap: 'anywhere', wordBreak: 'break-all', verticalAlign: 'bottom' }}>
+                                                        {googleFolderId}
+                                                    </Box>
                                                 </Typography>
-                                                <Stack direction="row" spacing={2}>
+                                                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" sx={{ '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
                                                     <Button variant="outlined" href={driveUrl} target="_blank" startIcon={<LinkIcon />}>
                                                         フォルダを開く
                                                     </Button>
@@ -444,7 +447,7 @@ function SettingsContent() {
                                                 <Alert severity="info">
                                                     まだ連携フォルダがありません。ボタンを押すと、管理者のGoogleドライブ内にこの事業所用のフォルダが自動作成されます。
                                                 </Alert>
-                                                <Button variant="contained" onClick={handleConnectDrive} disabled={connecting}>
+                                                <Button variant="contained" onClick={handleConnectDrive} disabled={connecting} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                     {connecting ? '作成中...' : '連携フォルダを作成する'}
                                                 </Button>
                                             </Stack>
@@ -458,22 +461,25 @@ function SettingsContent() {
                             </Paper>
 
                             {/* Googleカレンダー連携 (OAuth方式) */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleCalendarId ? 'success.main' : 'divider', bgcolor: googleCalendarId ? 'background.success' : 'background.paper' }}>
-                                <Stack direction="row" alignItems="center" gap={2} mb={2}>
+                            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, borderColor: googleCalendarId ? 'success.main' : 'divider', bgcolor: googleCalendarId ? 'background.success' : 'background.paper' }}>
+                                <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={2}>
                                     <CalendarMonthIcon color="success" fontSize="large" />
-                                    <Box>
+                                    <Box sx={{ minWidth: 0 }}>
                                         <Typography variant="h6" fontWeight="bold">Googleカレンダー連携</Typography>
                                         <Typography variant="body2" color="text.secondary">事業所ごとの専用カレンダーを自動作成し、シフトを同期します（OAuth直接連携）</Typography>
                                     </Box>
-                                    <Chip label={googleCalendarId ? "連携済み" : "未連携"} color={googleCalendarId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: 'auto' }} />
+                                    <Chip label={googleCalendarId ? "連携済み" : "未連携"} color={googleCalendarId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: { sm: 'auto' } }} />
                                 </Stack>
                                 
-                                <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                                <Box sx={{ mt: 2, p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider', minWidth: 0 }}>
                                     {isOwner ? (
                                         googleCalendarId ? (
                                             <Stack spacing={2}>
                                                 <Typography variant="body2">
-                                                    連携中のカレンダーID: <code>{googleCalendarId}</code>
+                                                    連携中のカレンダーID:{' '}
+                                                    <Box component="code" sx={{ display: 'inline-block', maxWidth: '100%', overflowWrap: 'anywhere', wordBreak: 'break-all', verticalAlign: 'bottom' }}>
+                                                        {googleCalendarId}
+                                                    </Box>
                                                 </Typography>
                                                 <Typography variant="caption" color="text.secondary" display="block">
                                                     ※Googleカレンダーアプリから「CareRecord_{orgName}」という名前のカレンダーを確認してください。
@@ -499,7 +505,7 @@ function SettingsContent() {
                                                     </Box>
                                                 )}
 
-                                                <Stack direction="row" spacing={2} sx={{ mt: 1, flexWrap: 'wrap', gap: 1.5 }}>
+                                                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mt: 1, '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
                                                     <Button
                                                         variant="contained"
                                                         color="warning"
@@ -536,7 +542,7 @@ function SettingsContent() {
                                                 <Alert severity="info">
                                                     ボタンを押すとGoogleの認証画面へ移動します。許可すると、あなたのアカウントに事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
                                                 </Alert>
-                                                <Button variant="contained" color="success" onClick={handleConnectCalendar} disabled={connectingCal}>
+                                                <Button variant="contained" color="success" onClick={handleConnectCalendar} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                     {connectingCal ? 'Googleへ移動中...' : 'シフト用カレンダーを作成・連携する'}
                                                 </Button>
                                             </Stack>
@@ -551,7 +557,7 @@ function SettingsContent() {
 
                             {/* 労働時間ルール */}
                             {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'organization')) && (
-                                <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+                                <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
                                     <Typography variant="h6" fontWeight="bold" gutterBottom>労働時間ルール</Typography>
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         深夜割り増し・時間外割り増しなどの種別と計算方法を管理します。
@@ -561,14 +567,14 @@ function SettingsContent() {
                             )}
 
                             {/* 危険な設定 */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.light', bgcolor: 'background.danger' }}>
+                            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, borderColor: 'error.light', bgcolor: 'background.danger' }}>
                                 <Stack direction="row" alignItems="center" gap={1} mb={2}>
                                     <WarningIcon color="error" />
                                     <Typography variant="h6" fontWeight="bold" color="error">危険な設定</Typography>
                                 </Stack>
                                 <Stack spacing={2}>
-                                    <Box display="flex" justifyContent="space-between" alignItems="center">
-                                        <Box>
+                                    <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} flexDirection={{ xs: 'column', sm: 'row' }} gap={1.5}>
+                                        <Box sx={{ minWidth: 0 }}>
                                             <Typography fontWeight="bold">事業所から脱退</Typography>
                                             <Typography variant="caption" color="text.secondary">この事業所のメンバーから外れます</Typography>
                                         </Box>
@@ -579,8 +585,8 @@ function SettingsContent() {
                                     {isOwner && (
                                         <>
                                             <Divider />
-                                            <Box display="flex" justifyContent="space-between" alignItems="center">
-                                                <Box>
+                                            <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} flexDirection={{ xs: 'column', sm: 'row' }} gap={1.5}>
+                                                <Box sx={{ minWidth: 0 }}>
                                                     <Typography fontWeight="bold" color="error">事業所を削除</Typography>
                                                     <Typography variant="caption" color="text.secondary">
                                                         全てのデータ（利用者、記録、スタッフ情報）が永久に削除されます。<br/>
