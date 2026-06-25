@@ -168,8 +168,24 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
         title={isNew ? '新規ロール作成' : 'ロール編集'}
         maxWidth="md"
         fullWidth
+        actions={(
+          <>
+            <Button onClick={() => { setIsNew(false); setEditRole(null); }}>キャンセル</Button>
+            <AppButton loading={saving} variant="contained" onClick={() => void handleSave()}>
+              {isNew ? '作成' : '保存'}
+            </AppButton>
+          </>
+        )}
+        actionsSx={{
+          flexDirection: { xs: 'column-reverse', sm: 'row' },
+          alignItems: { xs: 'stretch', sm: 'center' },
+          '& > :not(style)': {
+            width: { xs: '100%', sm: 'auto' },
+            m: { xs: 0, sm: undefined },
+          },
+        }}
       >
-        <Stack spacing={2} p={1}>
+        <Stack spacing={2} sx={{ p: { xs: 0, sm: 1 }, minWidth: 0 }}>
           <TextField
             label="ロール名"
             value={formName}
@@ -183,12 +199,6 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
             <ColorPresetPicker value={formColor} onChange={setFormColor} />
           </Box>
           <RolePermissionsMatrix value={formPerms} onChange={setFormPerms} />
-          <Stack direction="row" justifyContent="flex-end" spacing={1}>
-            <Button onClick={() => { setIsNew(false); setEditRole(null); }}>キャンセル</Button>
-            <AppButton loading={saving} variant="contained" onClick={() => void handleSave()}>
-              {isNew ? '作成' : '保存'}
-            </AppButton>
-          </Stack>
         </Stack>
       </AppDialog>
 
@@ -196,14 +206,24 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
         open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
         title="ロールを削除"
+        actions={(
+          <>
+            <Button onClick={() => setDeleteTarget(null)}>キャンセル</Button>
+            <Button color="error" variant="contained" onClick={() => void handleDelete()}>削除</Button>
+          </>
+        )}
+        actionsSx={{
+          flexDirection: { xs: 'column-reverse', sm: 'row' },
+          alignItems: { xs: 'stretch', sm: 'center' },
+          '& > :not(style)': {
+            width: { xs: '100%', sm: 'auto' },
+            m: { xs: 0, sm: undefined },
+          },
+        }}
       >
         <Typography>
           「{deleteTarget?.name}」を削除しますか？このロールを付与されているメンバーの権限に影響します。
         </Typography>
-        <Stack direction="row" justifyContent="flex-end" spacing={1} mt={2}>
-          <Button onClick={() => setDeleteTarget(null)}>キャンセル</Button>
-          <Button color="error" variant="contained" onClick={() => void handleDelete()}>削除</Button>
-        </Stack>
       </AppDialog>
     </Box>
   );

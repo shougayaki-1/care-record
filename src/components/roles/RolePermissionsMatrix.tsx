@@ -2,7 +2,7 @@
 
 import React from 'react';
 import {
-  Table, TableBody, TableCell, TableHead, TableRow,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Checkbox, ToggleButton, ToggleButtonGroup, Typography, Box,
 } from '@/components/ui/mui';
 import type { RolePermissions, RecordScope } from '@/utils/permissions';
@@ -33,9 +33,10 @@ function ScopeToggle({
       exclusive
       onChange={(_, v) => v && onChange(v as RecordScope)}
       size="small"
+      sx={{ whiteSpace: 'nowrap' }}
     >
       {options.map(opt => (
-        <ToggleButton key={opt} value={opt} sx={{ px: 1, py: 0.25, fontSize: '0.7rem' }}>
+        <ToggleButton key={opt} value={opt} sx={{ minWidth: 36, px: 1, py: 0.25, fontSize: '0.7rem' }}>
           {SCOPE_LABELS[opt]}
         </ToggleButton>
       ))}
@@ -73,38 +74,40 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
     onChange({ ...value, management: { ...value.management, [area]: checked } });
 
   return (
-    <Box sx={{ opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>リソース</TableCell>
-            {RECORD_ROWS.map(r => <TableCell key={r.action} align="center">{r.label}</TableCell>)}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {(['records', 'shifts'] as const).map(resource => (
-            <TableRow key={resource}>
-              <TableCell>{resource === 'records' ? '記録' : 'シフト'}</TableCell>
-              {RECORD_ROWS.map(r => (
-                <TableCell key={r.action} align="center">
-                  <ScopeToggle
-                    scope={value[resource][r.action] as RecordScope}
-                    onChange={s =>
-                      resource === 'records'
-                        ? setRecords(r.action, s)
-                        : setShifts(r.action as ShiftAction, s)
-                    }
-                    allowAssigned={r.allowAssigned}
-                  />
-                </TableCell>
-              ))}
+    <Box sx={{ minWidth: 0, opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
+      <TableContainer sx={{ overflowX: 'auto' }}>
+        <Table size="small" sx={{ minWidth: 680 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ whiteSpace: 'nowrap' }}>リソース</TableCell>
+              {RECORD_ROWS.map(r => <TableCell key={r.action} align="center" sx={{ whiteSpace: 'nowrap' }}>{r.label}</TableCell>)}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHead>
+          <TableBody>
+            {(['records', 'shifts'] as const).map(resource => (
+              <TableRow key={resource}>
+                <TableCell sx={{ whiteSpace: 'nowrap' }}>{resource === 'records' ? '記録' : 'シフト'}</TableCell>
+                {RECORD_ROWS.map(r => (
+                  <TableCell key={r.action} align="center">
+                    <ScopeToggle
+                      scope={value[resource][r.action] as RecordScope}
+                      onChange={s =>
+                        resource === 'records'
+                          ? setRecords(r.action, s)
+                          : setShifts(r.action as ShiftAction, s)
+                      }
+                      allowAssigned={r.allowAssigned}
+                    />
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
 
       <Typography variant="subtitle2" mt={2} mb={1}>管理機能アクセス</Typography>
-      <Box display="flex" flexWrap="wrap" gap={0.5}>
+      <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))' }} gap={0.5}>
         {MGMT_ITEMS.map(item => (
           <Box key={item.key} display="flex" alignItems="center">
             <Checkbox
