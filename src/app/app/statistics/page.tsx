@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
     Box, Typography, Paper, CircularProgress, Tabs, Tab, Stack, TextField, Button,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip
 } from '@/components/ui/mui';
 import DownloadIcon from '@mui/icons-material/Download';
 import AssessmentIcon from '@mui/icons-material/Assessment';
@@ -27,6 +27,13 @@ type ReportData = {
 
 type AggregatedRow = { name: string; plannedHours: number; actualHours: number; };
 
+type ShiftWithLinks = {
+    id: string; start_at: string; end_at: string; client_id: string;
+    clients: { name: string } | null;
+    shift_staffs: Array<{ staffs: { name: string } | null }>;
+    report_shifts: Array<{ is_primary: boolean; reports: { id: string; start_at: string; end_at: string; status: string } | null }>;
+};
+
 function getOverlappingHours(start: Date, end: Date, monthStart: Date, monthEnd: Date): number {
     const overlapStart = start > monthStart ? start : monthStart;
     const overlapEnd = end < monthEnd ? end : monthEnd;
@@ -47,6 +54,7 @@ export default function StatisticsPage() {
 
     const [rawShifts, setRawShifts] = useState<ShiftData[]>([]);
     const [rawReports, setRawReports] = useState<ReportData[]>([]);
+    const [rawShiftsWithLinks, setRawShiftsWithLinks] = useState<ShiftWithLinks[]>([]);
 
     const fetchStatisticsData = useCallback(async () => {
         if (!currentOrg || !targetMonth) return;
@@ -95,8 +103,24 @@ export default function StatisticsPage() {
 
             if (reportsError) throw reportsError;
 
+            // シフト差異タブ用: シフトと紐付き記録を一緒に取得
+            const { data: shiftsWithLinksData } = await supabase
+                .from('shifts')
+                .select(`
+                    id, start_at, end_at, client_id,
+                    clients (name),
+                    shift_staffs (staffs(name)),
+                    report_shifts (is_primary, reports(id, start_at, end_at, status))
+                `)
+                .eq('organization_id', currentOrg.id)
+                .neq('status', 'cancelled')
+                .is('deleted_at', null)
+                .gte('end_at', shiftStartRange)
+                .lte('start_at', shiftEndRange);
+
             setRawShifts((shiftsData as unknown as ShiftData[]) || []);
             setRawReports((reportsData as unknown as ReportData[]) || []);
+            setRawShiftsWithLinks((shiftsWithLinksData as unknown as ShiftWithLinks[]) || []);
         } catch (error) {
             console.error(error);
             showToast('データの取得に失敗しました', 'error');
@@ -225,17 +249,19 @@ export default function StatisticsPage() {
                 <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
                     <Tab label="スタッフ別" />
                     <Tab label="利用者別" />
+                    <Tab label="シフト差異" />
                 </Tabs>
             </Box>
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={3} spacing={2}>
                     <TextField type="month" label="対象月" size="small" slotProps={{ inputLabel: { shrink: true } }} value={targetMonth} onChange={(e) => setTargetMonth(e.target.value)} sx={{ bgcolor: 'background.paper', minWidth: 200 }} />
-                    <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || aggregatedData.length === 0} sx={{ bgcolor: 'background.paper' }}>CSVダウンロード</Button>
+                    {tabIndex < 2 && <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || aggregatedData.length === 0} sx={{ bgcolor: 'background.paper' }}>CSVダウンロード</Button>}
                 </Stack>
 
                 <Paper sx={{ p: 0, minHeight: 400, borderRadius: 3, overflow: 'hidden', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
                     {loading ? <Box display="flex" justifyContent="center" alignItems="center" height={300}><CircularProgress /></Box> : (
+                        tabIndex < 2 ? (
                         <TableContainer>
                             <Table>
                                 <TableHead sx={{ bgcolor: 'background.tint' }}>
@@ -250,7 +276,7 @@ export default function StatisticsPage() {
                                     {aggregatedData.length === 0 ? <TableRow><TableCell colSpan={4} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow> : (
                                         aggregatedData.map((row, i) => {
                                             const diff = row.actualHours - row.plannedHours;
-                                            const isAlert = diff < -2 || diff > 2; // ±2時間以上で赤字
+                                            const isAlert = diff < -2 || diff > 2;
                                             return (
                                                 <TableRow key={i} hover>
                                                     <TableCell sx={{ fontWeight: 'bold' }}>{row.name}</TableCell>
@@ -264,6 +290,59 @@ export default function StatisticsPage() {
                                 </TableBody>
                             </Table>
                         </TableContainer>
+                        ) : (
+                        <TableContainer>
+                            <Table size="small">
+                                <TableHead sx={{ bgcolor: 'background.tint' }}>
+                                    <TableRow>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>シフト日時</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>利用者名</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>担当職員</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>予定(h)</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>実績(h)</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>差異(h)</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>記録</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {rawShiftsWithLinks.length === 0 ? (
+                                        <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow>
+                                    ) : rawShiftsWithLinks.map(shift => {
+                                        const plannedH = (new Date(shift.end_at).getTime() - new Date(shift.start_at).getTime()) / 3600000;
+                                        const linked = shift.report_shifts ?? [];
+                                        const actualMs = linked.reduce((sum, rs) => {
+                                            const r = rs.reports;
+                                            if (!r || !['pending', 'approved'].includes(r.status)) return sum;
+                                            return sum + new Date(r.end_at).getTime() - new Date(r.start_at).getTime();
+                                        }, 0);
+                                        const actualH = actualMs > 0 ? actualMs / 3600000 : null;
+                                        const diffH = actualH != null ? actualH - plannedH : null;
+                                        const staffNames = (shift.shift_staffs ?? []).map(s => s.staffs?.name).filter(Boolean).join('、');
+                                        const startStr = new Date(shift.start_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                                        const firstReport = linked.find(rs => rs.reports != null);
+                                        return (
+                                            <TableRow key={shift.id} hover>
+                                                <TableCell>{startStr}</TableCell>
+                                                <TableCell>{shift.clients?.name ?? '—'}</TableCell>
+                                                <TableCell>{staffNames || '—'}</TableCell>
+                                                <TableCell align="right">{plannedH.toFixed(1)}</TableCell>
+                                                <TableCell align="right">{actualH != null ? actualH.toFixed(1) : '—'}</TableCell>
+                                                <TableCell align="right" sx={{ color: diffH != null && diffH < -0.1 ? 'error.main' : 'inherit', fontWeight: diffH != null && diffH < -0.1 ? 'bold' : 'normal' }}>
+                                                    {diffH != null ? (diffH >= 0 ? '+' : '') + diffH.toFixed(1) : '—'}
+                                                </TableCell>
+                                                <TableCell>
+                                                    {firstReport?.reports
+                                                        ? <Button size="small" href={`/app/record/${shift.client_id}?reportId=${firstReport.reports.id}`} component="a">記録を開く</Button>
+                                                        : <Chip label="記録なし" size="small" color="warning" variant="outlined" />
+                                                    }
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    })}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                        )
                     )}
                 </Paper>
             </Box>
