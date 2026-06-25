@@ -20,7 +20,7 @@ export const designTokens = {
     dark: '#1557B0',
   },
   surface: {
-    canvas: '#F8F9FA',
+    canvas: '#FFFFFF',
     paper: '#FFFFFF',
     subtle: '#FAFAFA',
     tint: '#E8F0FE',

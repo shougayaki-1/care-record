@@ -124,7 +124,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
   };
 
   return (
-    <Box sx={{ p: embedded ? 0 : { xs: 2, sm: 3 }, maxWidth: 900 }}>
+    <Box sx={{ p: embedded ? 0 : { xs: 2, sm: 3 }, maxWidth: 'none', width: '100%' }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} mb={3} spacing={1.5}>
         <Box>
           <Typography variant={embedded ? 'subtitle1' : 'h5'} fontWeight={embedded ? 'bold' : undefined}>ロール管理</Typography>
@@ -166,8 +166,9 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
         open={isNew || editRole !== null}
         onClose={() => { setIsNew(false); setEditRole(null); }}
         title={isNew ? '新規ロール作成' : 'ロール編集'}
-        maxWidth="md"
+        maxWidth="sm"
         fullWidth
+        contentSx={{ overflowX: 'auto' }}
         actions={(
           <>
             <Button onClick={() => { setIsNew(false); setEditRole(null); }}>キャンセル</Button>

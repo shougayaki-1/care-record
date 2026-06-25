@@ -230,12 +230,12 @@ export default function AccountsPage() {
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
         <Box maxWidth="lg" mx="auto">
           {canManageRoles && (
-            <Paper variant="outlined" sx={{ mb: 2, px: { xs: 1, sm: 2 }, borderRadius: 2 }}>
+            <Box sx={{ mb: 2, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 0, sm: 1 }, pt: 1 }}>
               <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} variant="scrollable" allowScrollButtonsMobile>
                 <Tab label="アカウント" value="accounts" />
                 <Tab label="ロール" value="roles" />
               </Tabs>
-            </Paper>
+            </Box>
           )}
 
           {activeTab === 'accounts' && (
