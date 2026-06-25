@@ -15,6 +15,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { InnerPageHeader } from '@/components/ui';
 
 type Report = {
     id: string; start_at: string; status: 'pending' | 'approved' | 'remanded';
@@ -131,14 +132,16 @@ export default function HistoryPage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-                <HistoryIcon sx={{ color: 'action.active', mr: 2 }} />
-                <Typography variant="h6" fontWeight="bold" color="text.primary" flexGrow={1}>履歴</Typography>
+            <InnerPageHeader
+                icon={<HistoryIcon />}
+                title="履歴"
+                actions={(
                 <Tabs value={viewMode} onChange={(_, v) => setViewMode(v)} sx={{ minHeight: 0 }}>
                     <Tab icon={<ListIcon />} label="リスト" sx={{ py: 1, minHeight: 0 }} />
                     <Tab icon={<CalendarMonthIcon />} label="カレンダー" sx={{ py: 1, minHeight: 0 }} />
                 </Tabs>
-            </Box>
+                )}
+            />
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
                 {viewMode === 0 && (

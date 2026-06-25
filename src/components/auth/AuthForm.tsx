@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import {
-    Box, Button, TextField, Typography, Stack, Alert, CircularProgress, Divider, Tabs, Tab, Fade
+    Box, TextField, Typography, Stack, Alert, Divider, Tabs, Tab, Fade
 } from '@/components/ui/mui';
 import { supabase } from '@/lib/supabase';
 import { useSearchParams } from 'next/navigation';
 import { loginWithPassword, registerWithPassword } from '@/app/actions/auth';
 import { RATE_LIMIT_MESSAGE } from '@/utils/authConstants';
 import { validatePassword, PASSWORD_POLICY_HINT } from '@/utils/passwordPolicy';
+import { AppButton } from '@/components/ui';
 
 // ... (Logoコンポーネントは省略、そのまま使用) ...
 const GoogleLogo = () => (
@@ -166,18 +167,18 @@ export const AuthForm = () => {
                     </Box>
 
                     {message && (
-                        <Alert severity={message.type} sx={{ borderRadius: 2, mb: 3 }}>
+                        <Alert severity={message.type} sx={{ mb: 3 }}>
                             {message.text}
                         </Alert>
                     )}
 
                     <Stack spacing={1.5} mb={3}>
-                        <Button disabled={loading} variant="outlined" startIcon={<GoogleLogo />} onClick={() => handleOAuth('google')} fullWidth sx={{ color: '#3c4043', borderColor: '#dadce0', bgcolor: 'background.paper', textTransform: 'none', py: 1.2 }}>
+                        <AppButton disabled={loading} variant="outlined" intent="secondary" startIcon={<GoogleLogo />} onClick={() => handleOAuth('google')} fullWidth sx={{ color: '#3c4043', borderColor: '#dadce0', bgcolor: 'background.paper', py: 1.2 }}>
                             Google で{isRegisterMode ? '登録' : 'ログイン'}
-                        </Button>
-                        <Button disabled={loading} variant="contained" startIcon={<MicrosoftLogo />} onClick={() => handleOAuth('azure')} fullWidth sx={{ color: '#fff', bgcolor: '#2F2F2F', textTransform: 'none', py: 1.2, '&:hover': { bgcolor: '#1a1a1a' } }}>
+                        </AppButton>
+                        <AppButton disabled={loading} variant="contained" startIcon={<MicrosoftLogo />} onClick={() => handleOAuth('azure')} fullWidth sx={{ color: '#fff', bgcolor: '#2F2F2F', py: 1.2, '&:hover': { bgcolor: '#1a1a1a' } }}>
                             Microsoft で{isRegisterMode ? '登録' : 'ログイン'}
-                        </Button>
+                        </AppButton>
                     </Stack>
 
                     <Divider sx={{ mb: 3, fontSize: 12, color: 'text.secondary' }}>またはメールアドレス</Divider>
@@ -206,22 +207,20 @@ export const AuthForm = () => {
                                 autoComplete={isRegisterMode ? "new-password" : "current-password"}
                             />
 
-                            <Button 
+                            <AppButton 
                                 type="submit" 
-                                variant="contained" 
                                 size="large" 
                                 fullWidth 
-                                disabled={loading} 
+                                loading={loading} 
                                 sx={{ 
                                     py: 1.5, 
                                     fontWeight: 'bold', 
                                     fontSize: '1rem', 
-                                    boxShadow: 'none',
-                                    bgcolor: isRegisterMode ? '#2255CC' : undefined
+                                    bgcolor: isRegisterMode ? 'primary.main' : undefined
                                 }}
                             >
-                                {loading ? <CircularProgress size={24} color="inherit" /> : (isRegisterMode ? 'アカウントを作成' : 'ログイン')}
-                            </Button>
+                                {isRegisterMode ? 'アカウントを作成' : 'ログイン'}
+                            </AppButton>
                         </Stack>
                     </form>
                 </Box>

@@ -32,7 +32,7 @@ import {
 } from '@/app/actions/reports';
 import { getShiftSuggestions, addShiftLink, removeShiftLink, getLinkedShifts } from '@/app/actions/reportShifts';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { AppButton, AppDialog, DateTimeField, DynamicFormField, MultiSelectField } from '@/components/ui';
+import { AppButton, AppDialog, DateTimeField, DynamicFormField, InnerPageHeader, MultiSelectField } from '@/components/ui';
 
 type FormItem = {
   id: string; label: string; type: 'text' | 'number' | 'checkbox' | 'time' | 'select' | 'section' | 'multicheckbox';
@@ -526,12 +526,10 @@ export default function RecordPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-       <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-            <IconButton edge="start" onClick={handleClose} sx={{ mr: 1, color: 'action.active' }}><CloseIcon /></IconButton>
-            <Typography variant="h6" fontWeight="bold" sx={{ color: 'text.primary', flexGrow: 1 }}>
-                {currentReportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済みの記録' : '記録を修正')) : `${clientName} 様`}
-            </Typography>
-            
+       <InnerPageHeader
+            icon={<IconButton edge="start" onClick={handleClose} sx={{ color: 'action.active' }}><CloseIcon /></IconButton>}
+            title={currentReportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済みの記録' : '記録を修正')) : `${clientName} 様`}
+            actions={(
             <Stack direction="row" spacing={1}>
                 {currentReportId && currentStatus !== 'approved' && (
                     <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
@@ -546,7 +544,8 @@ export default function RecordPage() {
                     </>
                 )}
             </Stack>
-       </Box>
+            )}
+       />
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
         <Container maxWidth="md" disableGutters>

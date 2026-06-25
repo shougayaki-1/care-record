@@ -3,11 +3,10 @@
 @tailwind utilities;
 
 :root {
-  --primary-blue: #2255CC;
+  --primary-blue: #1A73E8;
 }
 
 body {
-  background-color: #ffffff;
   color: #1a1a1a;
   -webkit-text-size-adjust: 100%;
   margin: 0;

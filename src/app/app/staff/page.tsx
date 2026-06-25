@@ -20,7 +20,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { AppButton, AppDialog, AppTextField, CreatableMultiSelectField, SelectField } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, CreatableMultiSelectField, InnerPageHeader, SelectField } from '@/components/ui';
 import { reorderStaffs, saveStaff, setStaffArchived, softDeleteStaff } from '@/app/actions/staffs';
 
 // 役職の入力候補（自由入力も可）
@@ -184,10 +184,7 @@ export default function StaffPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-        <BadgeIcon sx={{ color: 'action.active', mr: 2 }} />
-        <Typography variant="h6" fontWeight="bold" color="text.primary">スタッフ(名簿)管理</Typography>
-      </Box>
+      <InnerPageHeader icon={<BadgeIcon />} title="スタッフ(名簿)管理" />
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
         <Box maxWidth="lg" mx="auto">
@@ -209,13 +206,13 @@ export default function StaffPage() {
                             {showArchived ? '退職者を隠す' : `退職者を表示 (${archivedStaff.length})`}
                         </Button>
                     )}
-                    <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd} sx={{ boxShadow: 'none' }}>
+                    <AppButton startIcon={<AddIcon />} onClick={handleOpenAdd}>
                         スタッフを追加
-                    </Button>
+                    </AppButton>
                 </Stack>
             </Paper>
 
-            <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, boxShadow: 'none' }}>
+            <TableContainer component={Paper} variant="outlined">
                 <Table>
                     <TableHead sx={{ bgcolor: 'background.tint' }}>
                         <TableRow>

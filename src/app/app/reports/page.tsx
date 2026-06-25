@@ -28,6 +28,7 @@ import { updateClientGoogleLink } from '@/app/actions/clients';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { InnerPageHeader } from '@/components/ui';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 type ReportValuesData = Record<string, FormValue>;
@@ -488,10 +489,7 @@ export default function ReportsPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-            <TagIcon sx={{ color: 'action.active', mr: 2 }} />
-            <Typography variant="h6" fontWeight="bold" color="text.primary">{headerTitle}</Typography>
-        </Box>
+        <InnerPageHeader icon={<TagIcon />} title={headerTitle} />
 
        <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
            <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.muted', boxShadow: 'none' }}>

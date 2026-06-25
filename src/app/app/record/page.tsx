@@ -13,6 +13,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { InnerPageHeader } from '@/components/ui';
 
 type Client = { id: string; name: string; };
 type DraftReport = { id: string; created_at: string; };
@@ -65,10 +66,7 @@ export default function RecordSelectPage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-                <EditNoteIcon sx={{ color: 'action.active', mr: 2 }} />
-                <Typography variant="h6" fontWeight="bold" color="text.primary">記録を作成</Typography>
-            </Box>
+            <InnerPageHeader icon={<EditNoteIcon />} title="記録を作成" />
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
                 <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ mb: 2 }}>利用者を選択</Typography>

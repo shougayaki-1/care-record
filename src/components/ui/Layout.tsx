@@ -26,8 +26,40 @@ export function PageHeader({ title, description, actions }: { title: ReactNode; 
   );
 }
 
+export function InnerPageHeader({
+  icon,
+  title,
+  actions,
+}: {
+  icon?: ReactNode;
+  title: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <Box
+      sx={{
+        height: 64,
+        flexShrink: 0,
+        borderBottom: 1,
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+        display: 'flex',
+        alignItems: 'center',
+        px: 3,
+        gap: 2,
+      }}
+    >
+      {icon && <Box sx={{ color: 'action.active', display: 'flex' }}>{icon}</Box>}
+      <Typography variant="h6" fontWeight="bold" color="text.primary" sx={{ flexGrow: 1 }}>
+        {title}
+      </Typography>
+      {actions && <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{actions}</Box>}
+    </Box>
+  );
+}
+
 export function SectionCard({ children, sx, ...props }: PaperProps) {
-  return <Paper variant="outlined" {...props} sx={{ p: { xs: 2, md: 3 }, borderRadius: 3, ...sx }}>{children}</Paper>;
+  return <Paper variant="outlined" {...props} sx={{ p: { xs: 2, md: 3 }, ...sx }}>{children}</Paper>;
 }
 
 export function EmptyState({ title = 'データがありません', description, action }: { title?: ReactNode; description?: ReactNode; action?: ReactNode }) {

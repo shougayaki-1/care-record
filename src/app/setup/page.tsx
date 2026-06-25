@@ -13,6 +13,7 @@ import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import PersonIcon from '@mui/icons-material/Person';
 import { useToast } from '@/components/ui/ToastProvider';
 import { createOrganization, updateOwnProfile } from '@/app/actions/user';
+import { AppButton } from '@/components/ui';
 
 type Step = 'profile' | 'choice' | 'create' | 'join';
 
@@ -160,7 +161,7 @@ export default function SetupPage() {
 
     return (
         <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default', p: 2 }}>
-            <Paper elevation={0} sx={{ p: 4, width: '100%', maxWidth: 480, borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+            <Paper variant="outlined" sx={{ p: 4, width: '100%', maxWidth: 480 }}>
                 
                 {step === 'join' && paramInviteCode && (
                     <Alert severity="info" sx={{ mb: 3 }}>
@@ -185,12 +186,12 @@ export default function SetupPage() {
                             value={userName} 
                             onChange={(e) => setUserName(e.target.value)} 
                         />
-                        <Button 
-                            variant="contained" size="large" fullWidth 
-                            onClick={handleSaveProfile} disabled={submitting || !userName.trim()}
+                        <AppButton 
+                            size="large" fullWidth 
+                            onClick={handleSaveProfile} loading={submitting} disabled={!userName.trim()}
                         >
                             次へ進む
-                        </Button>
+                        </AppButton>
                     </Stack>
                 )}
 
@@ -203,7 +204,7 @@ export default function SetupPage() {
                             </Typography>
                         </Box>
                         
-                        <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                        <Card variant="outlined">
                             <CardActionArea onClick={() => setStep('create')} sx={{ p: 2 }}>
                                 <Stack direction="row" alignItems="center" spacing={2}>
                                     <Box sx={{ p: 1, bgcolor: 'background.tint', borderRadius: '50%', color: 'primary.main' }}>
@@ -217,7 +218,7 @@ export default function SetupPage() {
                             </CardActionArea>
                         </Card>
 
-                        <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                        <Card variant="outlined">
                             <CardActionArea onClick={() => setStep('join')} sx={{ p: 2 }}>
                                 <Stack direction="row" alignItems="center" spacing={2}>
                                     <Box sx={{ p: 1, bgcolor: 'background.muted', borderRadius: '50%', color: 'secondary.main' }}>
@@ -256,13 +257,13 @@ export default function SetupPage() {
                             onChange={(e) => setOrgName(e.target.value)} 
                         />
                         <Stack direction="row" spacing={2}>
-                            <Button fullWidth onClick={() => setStep('choice')} disabled={submitting}>戻る</Button>
-                            <Button 
-                                variant="contained" fullWidth size="large" 
-                                onClick={handleCreateOrg} disabled={submitting || !orgName.trim()}
+                            <AppButton variant="text" intent="secondary" fullWidth onClick={() => setStep('choice')} disabled={submitting}>戻る</AppButton>
+                            <AppButton 
+                                fullWidth size="large" 
+                                onClick={handleCreateOrg} loading={submitting} disabled={!orgName.trim()}
                             >
                                 {submitting ? '作成中...' : '作成して開始'}
-                            </Button>
+                            </AppButton>
                         </Stack>
                     </Stack>
                 )}
@@ -284,15 +285,15 @@ export default function SetupPage() {
                             onChange={(e) => setInviteCode(e.target.value)} 
                         />
                         <Stack direction="row" spacing={2}>
-                            <Button fullWidth onClick={() => paramInviteCode ? router.push('/app') : setStep('choice')} disabled={submitting}>
+                            <AppButton variant="text" intent="secondary" fullWidth onClick={() => paramInviteCode ? router.push('/app') : setStep('choice')} disabled={submitting}>
                                 {paramInviteCode ? 'キャンセル' : '戻る'}
-                            </Button>
-                            <Button 
-                                variant="contained" fullWidth size="large" 
-                                onClick={handleJoinOrg} disabled={submitting || !inviteCode.trim()}
+                            </AppButton>
+                            <AppButton 
+                                fullWidth size="large" 
+                                onClick={handleJoinOrg} loading={submitting} disabled={!inviteCode.trim()}
                             >
                                 {submitting ? '参加中...' : '参加する'}
-                            </Button>
+                            </AppButton>
                         </Stack>
                     </Stack>
                 )}
