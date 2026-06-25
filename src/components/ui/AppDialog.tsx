@@ -63,11 +63,17 @@ export function AppDialog({
       onClose={handleClose}
       aria-busy={loading || undefined}
       sx={[
-        {
-          '& .MuiDialog-paper': {
-            maxWidth: { xs: '100%', sm: undefined },
-          },
-        },
+        resolvedFullScreen
+          ? {
+              '& .MuiDialog-paperFullScreen': {
+                borderRadius: 0,
+              },
+            }
+          : {
+              '& .MuiDialog-paper': {
+                borderRadius: { xs: 2, sm: 3 },
+              },
+            },
         ...(Array.isArray(sx) ? sx : [sx]),
       ]}
       {...props}

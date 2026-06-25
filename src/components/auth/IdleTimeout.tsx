@@ -27,6 +27,7 @@ export default function IdleTimeout() {
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const warningRef = useRef(false);
   // ログイン直後はCookie反映と画面遷移が並行するため、マウント直後のheartbeatを避ける。
   const lastHeartbeat = useRef<number | null>(null);
 
@@ -38,6 +39,9 @@ export default function IdleTimeout() {
   }, [router]);
 
   const startWarning = useCallback(() => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    if (graceTimer.current) clearTimeout(graceTimer.current);
+    if (countdownTimer.current) clearInterval(countdownTimer.current);
     setRemaining(Math.ceil(WARNING_GRACE_MS / 1000));
     setWarning(true);
     countdownTimer.current = setInterval(() => {
@@ -70,9 +74,13 @@ export default function IdleTimeout() {
   }, [resetIdle]);
 
   useEffect(() => {
+    warningRef.current = warning;
+  }, [warning]);
+
+  useEffect(() => {
     // 警告表示中はアクティビティで自動延長せず、明示操作のみ受け付ける。
     const onActivity = () => {
-      if (!warning) resetIdle();
+      if (!warningRef.current) resetIdle();
     };
     ACTIVITY_EVENTS.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
     resetIdle();
@@ -82,8 +90,7 @@ export default function IdleTimeout() {
       if (graceTimer.current) clearTimeout(graceTimer.current);
       if (countdownTimer.current) clearInterval(countdownTimer.current);
     };
-    // warning の変化で活動リスナーの挙動を切り替える。
-  }, [warning, resetIdle]);
+  }, [resetIdle]);
 
   return (
     <AppDialog

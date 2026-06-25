@@ -26,6 +26,7 @@ type ReportData = {
     clients: { name: string } | null; 
     helper?: { name: string } | null;
     report_values: { data: { _helpers?: string[]; service_time?: string|number; travel_time?: string|number; } }[] | null; 
+    report_shifts?: { shift_id: string }[] | null;
 };
 
 type AggregatedRow = { name: string; plannedHours: number; actualHours: number; };
@@ -45,6 +46,19 @@ type ShiftWithLinks = {
     clients: { name: string } | null;
     shift_staffs: Array<{ staffs: { name: string } | null }>;
     report_shifts: Array<{ is_primary: boolean; reports: { id: string; start_at: string; end_at: string; status: string } | null }>;
+};
+
+type ShiftVarianceRow = {
+    id: string;
+    clientId: string;
+    clientName: string;
+    staffNames: string;
+    startAt: string;
+    plannedH: number | null;
+    actualH: number | null;
+    diffH: number | null;
+    reportId: string | null;
+    isUnplanned: boolean;
 };
 
 function getOverlappingHours(start: Date, end: Date, monthStart: Date, monthEnd: Date): number {
@@ -126,7 +140,8 @@ export default function StatisticsPage() {
                     id, start_at, end_at, status, client_id,
                     clients (name),
                     helper:profiles!reports_helper_id_fkey (name),
-                    report_values (data)
+                    report_values (data),
+                    report_shifts (shift_id)
                 `)
                 .is('deleted_at', null)
                 .eq('clients.organization_id', currentOrg.id)
@@ -352,6 +367,69 @@ export default function StatisticsPage() {
 
         return { rows, premiumComparisonPerStaff, detailItemsPerStaff };
     }, [rawShifts, rawReports, targetMonth, tabIndex, premiumTypes]);
+
+    const shiftVarianceRows = useMemo<ShiftVarianceRow[]>(() => {
+        const linkedReportIds = new Set<string>();
+        const rows: ShiftVarianceRow[] = rawShiftsWithLinks.map(shift => {
+            const plannedH = (new Date(shift.end_at).getTime() - new Date(shift.start_at).getTime()) / 3600000;
+            const linked = shift.report_shifts ?? [];
+            const actualMs = linked.reduce((sum, rs) => {
+                const r = rs.reports;
+                if (!r || !['pending', 'approved'].includes(r.status)) return sum;
+                linkedReportIds.add(r.id);
+                return sum + new Date(r.end_at).getTime() - new Date(r.start_at).getTime();
+            }, 0);
+            const actualH = actualMs > 0 ? actualMs / 3600000 : null;
+            const diffH = actualH != null ? actualH - plannedH : null;
+            const staffNames = (shift.shift_staffs ?? []).map(s => s.staffs?.name).filter(Boolean).join('、');
+            const firstReport = linked.find(rs => rs.reports != null);
+
+            return {
+                id: `shift-${shift.id}`,
+                clientId: shift.client_id,
+                clientName: shift.clients?.name ?? '—',
+                staffNames: staffNames || '—',
+                startAt: shift.start_at,
+                plannedH,
+                actualH,
+                diffH,
+                reportId: firstReport?.reports?.id ?? null,
+                isUnplanned: false,
+            };
+        });
+
+        rawReports.forEach(report => {
+            const hasLink = (report.report_shifts ?? []).length > 0 || linkedReportIds.has(report.id);
+            if (hasLink) return;
+
+            const dataObj = report.report_values?.[0]?.data;
+            const serviceHours = parseFloat(String(dataObj?.service_time || 0)) || 0;
+            const actualH = serviceHours > 0
+                ? serviceHours
+                : (new Date(report.end_at).getTime() - new Date(report.start_at).getTime()) / 3600000;
+            if (actualH <= 0) return;
+
+            const helpers = Array.isArray(dataObj?._helpers)
+                ? dataObj._helpers.map(String).filter(Boolean)
+                : [];
+            const fallbackHelper = Array.isArray(report.helper) ? report.helper[0]?.name : report.helper?.name;
+
+            rows.push({
+                id: `unplanned-report-${report.id}`,
+                clientId: report.client_id,
+                clientName: report.clients?.name ?? '—',
+                staffNames: helpers.length > 0 ? helpers.join('、') : fallbackHelper || '未設定(担当者不明)',
+                startAt: report.start_at,
+                plannedH: null,
+                actualH,
+                diffH: actualH,
+                reportId: report.id,
+                isUnplanned: true,
+            });
+        });
+
+        return rows.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+    }, [rawShiftsWithLinks, rawReports]);
 
     const handleExportCSV = () => {
         const { rows: aggRows, premiumComparisonPerStaff } = aggregatedData;
@@ -582,34 +660,28 @@ export default function StatisticsPage() {
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                    {rawShiftsWithLinks.length === 0 ? (
+                                    {shiftVarianceRows.length === 0 ? (
                                         <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow>
-                                    ) : rawShiftsWithLinks.map(shift => {
-                                        const plannedH = (new Date(shift.end_at).getTime() - new Date(shift.start_at).getTime()) / 3600000;
-                                        const linked = shift.report_shifts ?? [];
-                                        const actualMs = linked.reduce((sum, rs) => {
-                                            const r = rs.reports;
-                                            if (!r || !['pending', 'approved'].includes(r.status)) return sum;
-                                            return sum + new Date(r.end_at).getTime() - new Date(r.start_at).getTime();
-                                        }, 0);
-                                        const actualH = actualMs > 0 ? actualMs / 3600000 : null;
-                                        const diffH = actualH != null ? actualH - plannedH : null;
-                                        const staffNames = (shift.shift_staffs ?? []).map(s => s.staffs?.name).filter(Boolean).join('、');
-                                        const startStr = new Date(shift.start_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                                        const firstReport = linked.find(rs => rs.reports != null);
+                                    ) : shiftVarianceRows.map(row => {
+                                        const startStr = new Date(row.startAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                                         return (
-                                            <TableRow key={shift.id} hover>
-                                                <TableCell>{startStr}</TableCell>
-                                                <TableCell>{shift.clients?.name ?? '—'}</TableCell>
-                                                <TableCell>{staffNames || '—'}</TableCell>
-                                                <TableCell align="right">{plannedH.toFixed(1)}</TableCell>
-                                                <TableCell align="right">{actualH != null ? actualH.toFixed(1) : '—'}</TableCell>
-                                                <TableCell align="right" sx={{ color: diffH != null && diffH < -0.1 ? 'error.main' : 'inherit', fontWeight: diffH != null && diffH < -0.1 ? 'bold' : 'normal' }}>
-                                                    {diffH != null ? (diffH >= 0 ? '+' : '') + diffH.toFixed(1) : '—'}
+                                            <TableRow key={row.id} hover>
+                                                <TableCell>
+                                                    <Stack direction="row" spacing={1} alignItems="center">
+                                                        <Typography variant="body2">{startStr}</Typography>
+                                                        {row.isUnplanned && <Chip label="予定なし" size="small" color="info" variant="outlined" />}
+                                                    </Stack>
+                                                </TableCell>
+                                                <TableCell>{row.clientName}</TableCell>
+                                                <TableCell>{row.staffNames}</TableCell>
+                                                <TableCell align="right">{row.plannedH != null ? row.plannedH.toFixed(1) : '—'}</TableCell>
+                                                <TableCell align="right">{row.actualH != null ? row.actualH.toFixed(1) : '—'}</TableCell>
+                                                <TableCell align="right" sx={{ color: row.diffH != null && row.diffH < -0.1 ? 'error.main' : 'inherit', fontWeight: row.diffH != null && row.diffH < -0.1 ? 'bold' : 'normal' }}>
+                                                    {row.diffH != null ? (row.diffH >= 0 ? '+' : '') + row.diffH.toFixed(1) : '—'}
                                                 </TableCell>
                                                 <TableCell>
-                                                    {firstReport?.reports
-                                                        ? <Button size="small" href={`/app/record/${shift.client_id}?reportId=${firstReport.reports.id}`} component="a">記録を開く</Button>
+                                                    {row.reportId
+                                                        ? <Button size="small" href={`/app/record/${row.clientId}?reportId=${row.reportId}`} component="a">記録を開く</Button>
                                                         : <Chip label="記録なし" size="small" color="warning" variant="outlined" />
                                                     }
                                                 </TableCell>
@@ -620,47 +692,39 @@ export default function StatisticsPage() {
                             </Table>
                         </TableContainer>
                         <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' }, p: 1.5 }}>
-                            {rawShiftsWithLinks.length === 0 ? (
+                            {shiftVarianceRows.length === 0 ? (
                                 <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>データがありません</Box>
-                            ) : rawShiftsWithLinks.map(shift => {
-                                const plannedH = (new Date(shift.end_at).getTime() - new Date(shift.start_at).getTime()) / 3600000;
-                                const linked = shift.report_shifts ?? [];
-                                const actualMs = linked.reduce((sum, rs) => {
-                                    const r = rs.reports;
-                                    if (!r || !['pending', 'approved'].includes(r.status)) return sum;
-                                    return sum + new Date(r.end_at).getTime() - new Date(r.start_at).getTime();
-                                }, 0);
-                                const actualH = actualMs > 0 ? actualMs / 3600000 : null;
-                                const diffH = actualH != null ? actualH - plannedH : null;
-                                const staffNames = (shift.shift_staffs ?? []).map(s => s.staffs?.name).filter(Boolean).join('、');
-                                const startStr = new Date(shift.start_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                                const firstReport = linked.find(rs => rs.reports != null);
+                            ) : shiftVarianceRows.map(row => {
+                                const startStr = new Date(row.startAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                                 return (
-                                    <Box key={shift.id} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+                                    <Box key={row.id} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
                                         <Stack spacing={1.25}>
                                             <Box>
-                                                <Typography variant="caption" color="text.secondary">{startStr}</Typography>
-                                                <Typography fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{shift.clients?.name ?? '—'}</Typography>
-                                                <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{staffNames || '—'}</Typography>
+                                                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                                                    <Typography variant="caption" color="text.secondary">{startStr}</Typography>
+                                                    {row.isUnplanned && <Chip label="予定なし" size="small" color="info" variant="outlined" />}
+                                                </Stack>
+                                                <Typography fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{row.clientName}</Typography>
+                                                <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{row.staffNames}</Typography>
                                             </Box>
                                             <Box display="grid" gridTemplateColumns="repeat(3, minmax(0, 1fr))" gap={1}>
                                                 <Box>
                                                     <Typography variant="caption" color="text.secondary">予定</Typography>
-                                                    <Typography fontWeight="bold">{plannedH.toFixed(1)}h</Typography>
+                                                    <Typography fontWeight="bold">{row.plannedH != null ? `${row.plannedH.toFixed(1)}h` : '—'}</Typography>
                                                 </Box>
                                                 <Box>
                                                     <Typography variant="caption" color="text.secondary">実績</Typography>
-                                                    <Typography fontWeight="bold">{actualH != null ? `${actualH.toFixed(1)}h` : '—'}</Typography>
+                                                    <Typography fontWeight="bold">{row.actualH != null ? `${row.actualH.toFixed(1)}h` : '—'}</Typography>
                                                 </Box>
                                                 <Box>
                                                     <Typography variant="caption" color="text.secondary">差異</Typography>
-                                                    <Typography color={diffH != null && diffH < -0.1 ? 'error.main' : 'text.primary'} fontWeight={diffH != null && diffH < -0.1 ? 'bold' : 'normal'}>
-                                                        {diffH != null ? `${diffH >= 0 ? '+' : ''}${diffH.toFixed(1)}h` : '—'}
+                                                    <Typography color={row.diffH != null && row.diffH < -0.1 ? 'error.main' : 'text.primary'} fontWeight={row.diffH != null && row.diffH < -0.1 ? 'bold' : 'normal'}>
+                                                        {row.diffH != null ? `${row.diffH >= 0 ? '+' : ''}${row.diffH.toFixed(1)}h` : '—'}
                                                     </Typography>
                                                 </Box>
                                             </Box>
-                                            {firstReport?.reports
-                                                ? <Button size="small" variant="outlined" href={`/app/record/${shift.client_id}?reportId=${firstReport.reports.id}`} component="a">記録を開く</Button>
+                                            {row.reportId
+                                                ? <Button size="small" variant="outlined" href={`/app/record/${row.clientId}?reportId=${row.reportId}`} component="a">記録を開く</Button>
                                                 : <Chip label="記録なし" size="small" color="warning" variant="outlined" sx={{ alignSelf: 'flex-start' }} />
                                             }
                                         </Stack>
