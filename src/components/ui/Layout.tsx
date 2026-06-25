@@ -44,3 +44,46 @@ export type StatusTone = 'default' | 'success' | 'warning' | 'error' | 'info';
 export function StatusChip({ tone = 'default', ...props }: Omit<ChipProps, 'color'> & { tone?: StatusTone }) {
   return <Chip {...props} color={tone} variant={tone === 'default' ? 'outlined' : 'filled'} />;
 }
+
+export function InnerPageHeader({
+  icon,
+  title,
+  actions,
+}: {
+  icon?: ReactNode;
+  title: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <Box
+      sx={{
+        height: 64,
+        flexShrink: 0,
+        borderBottom: 1,
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+        display: 'flex',
+        alignItems: 'center',
+        px: 3,
+        gap: 2,
+      }}
+    >
+      {icon && (
+        <Box sx={{ color: 'action.active', display: 'flex' }}>{icon}</Box>
+      )}
+      <Typography
+        variant="h6"
+        fontWeight="bold"
+        color="text.primary"
+        sx={{ flexGrow: 1 }}
+      >
+        {title}
+      </Typography>
+      {actions && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {actions}
+        </Box>
+      )}
+    </Box>
+  );
+}
