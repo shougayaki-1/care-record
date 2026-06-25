@@ -3,7 +3,7 @@
 import { google, calendar_v3 } from 'googleapis';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 import { rrulestr } from 'rrule';
-import { supabaseAdmin, assertOrgRole, assertOrgPermission, assertResourceOrgPermission } from '@/utils/supabase/auth';
+import { supabaseAdmin, assertOrgRole, assertOrgPermission, assertResourceOrgPermission, getAuthedUser } from '@/utils/supabase/auth';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
@@ -1290,4 +1290,75 @@ export async function deleteShiftsDbOnly(shiftIds: string[]) {
         console.error('Delete Shifts DB Only Error:', error);
         throw error;
     }
+}
+
+export type MyShiftItem = {
+    id: string;
+    organization_id: string;
+    client_id: string;
+    title: string | null;
+    start_at: string;
+    end_at: string;
+    status: string;
+    cancel_reason: string | null;
+    clients: { id: string; name: string } | null;
+    shift_staffs: { staff_id: string; staffs: { name: string } | null }[];
+    report: { id: string; status: string } | null;
+};
+
+export async function getMyShiftsWithStatus(
+    organizationId: string,
+    startDate: string,
+    endDate: string
+): Promise<MyShiftItem[]> {
+    const user = await getAuthedUser();
+
+    const { data: staffRow } = await supabaseAdmin
+        .from('staffs')
+        .select('id')
+        .eq('organization_id', organizationId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+    if (!staffRow) return [];
+
+    const { data: shifts, error } = await supabaseAdmin
+        .from('shifts')
+        .select(`
+            id,
+            organization_id,
+            client_id,
+            title,
+            start_at,
+            end_at,
+            status,
+            cancel_reason,
+            clients (id, name),
+            shift_staffs!inner (staff_id, staffs (name))
+        `)
+        .eq('organization_id', organizationId)
+        .eq('shift_staffs.staff_id', staffRow.id)
+        .is('deleted_at', null)
+        .gte('start_at', startDate)
+        .lte('start_at', endDate)
+        .order('start_at', { ascending: true });
+
+    if (error) throw error;
+    if (!shifts || shifts.length === 0) return [];
+
+    const shiftIds = shifts.map(s => s.id);
+    const { data: reports } = await supabaseAdmin
+        .from('reports')
+        .select('id, shift_id, status')
+        .in('shift_id', shiftIds)
+        .is('deleted_at', null);
+
+    const reportByShiftId = new Map(
+        (reports ?? []).map(r => [r.shift_id, { id: r.id, status: r.status }])
+    );
+
+    return (shifts as unknown as Omit<MyShiftItem, 'report'>[]).map(shift => ({
+        ...shift,
+        report: reportByShiftId.get(shift.id) ?? null,
+    }));
 }
