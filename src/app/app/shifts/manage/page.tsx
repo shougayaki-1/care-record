@@ -2,11 +2,11 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
-    Box, Typography, Paper, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
+    Box, Paper, CircularProgress, Tabs, Tab, Chip, IconButton, Tooltip, Stack, TextField, Typography,
     FormControlLabel, Radio, RadioGroup, LinearProgress,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem, Alert
 } from '@/components/ui/mui';
-import { AppButton, AppDialog } from '@/components/ui';
+import { AppButton, AppDialog, InnerPageHeader } from '@/components/ui';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -373,16 +373,20 @@ export default function ShiftManagePage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, pt: 2, flexShrink: 0 }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                    <Typography variant="h6" fontWeight="bold">全体シフト管理</Typography>
-                    {isAdmin && activeTab === 'fullCalendar' && (
-                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setShiftModalOpen(true); }} sx={{ boxShadow: 'none' }}>単発シフトを追加</Button>
-                    )}
-                    {isAdmin && activeTab === 'patterns' && (
-                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none' }}>ひな形を追加</Button>
-                    )}
-                </Box>
+            <InnerPageHeader
+                title="全体シフト管理"
+                actions={
+                    <>
+                        {isAdmin && activeTab === 'fullCalendar' && (
+                            <AppButton startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setShiftModalOpen(true); }}>単発シフトを追加</AppButton>
+                        )}
+                        {isAdmin && activeTab === 'patterns' && (
+                            <AppButton startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }}>ひな形を追加</AppButton>
+                        )}
+                    </>
+                }
+            />
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, flexShrink: 0 }}>
                 <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as TabId)}>
                     {isAdmin && <Tab label="基本パターン(ひな形)" value="patterns" />}
                     {isAdmin && <Tab label="全体カレンダー" value="fullCalendar" />}
@@ -407,17 +411,17 @@ export default function ShiftManagePage() {
                             <Alert
                                 severity="warning"
                                 action={
-                                    <Button
-                                        color="warning"
+                                    <AppButton
+                                        intent="warning"
                                         size="small"
                                         onClick={handleRepairFromBanner}
                                         disabled={repairingFromBanner}
                                         startIcon={repairingFromBanner ? <CircularProgress size={14} color="inherit" /> : <BuildIcon />}
                                     >
                                         {repairingFromBanner ? '修復中...' : '同期を修復する'}
-                                    </Button>
+                                    </AppButton>
                                 }
-                                sx={{ mb: 2, borderRadius: 3, boxShadow: 'none', border: '1px solid', borderColor: 'warning.light' }}
+                                sx={{ mb: 2, border: '1px solid', borderColor: 'warning.light' }}
                             >
                                 Googleカレンダーと同期されていない予定が <strong>{unsyncedCount} 件</strong> あります。前回の自動展開が途中で中断された場合はこちらから同期を再開できます。
                             </Alert>
@@ -441,46 +445,45 @@ export default function ShiftManagePage() {
                                 </Box>
                                 <Stack direction="row" spacing={1} sx={{ ml: 'auto' }}>
                                     {isAdmin && (
-                                        <Button
+                                        <AppButton
                                             variant="outlined"
-                                            color="primary"
                                             startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
                                             onClick={handleForceResyncCalendar}
                                             disabled={resyncingCal || pdfGenerating}
                                             sx={{ bgcolor: 'background.paper' }}
                                         >
                                             {resyncingCal ? '再同期中...' : 'Googleカレンダー全件再同期'}
-                                        </Button>
+                                        </AppButton>
                                     )}
                                     {activeTab === 'byStaff' && selectedStaffId === 'all' && (
-                                        <Button variant="outlined" color="primary" startIcon={<GridOnIcon />} onClick={handleDownloadMatrixPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'background.paper' }}>
+                                        <AppButton variant="outlined" startIcon={<GridOnIcon />} onClick={handleDownloadMatrixPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'background.paper' }}>
                                             {pdfGenerating ? '作成中...' : '全体マトリックスPDF'}
-                                        </Button>
+                                        </AppButton>
                                     )}
-                                    <Button variant="outlined" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleDownloadPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'background.paper' }}>
+                                    <AppButton variant="outlined" intent="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleDownloadPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'background.paper' }}>
                                         {pdfGenerating ? '作成中...' : '表示中の形式でPDF出力'}
-                                    </Button>
+                                    </AppButton>
                                 </Stack>
                             </Stack>
                         )}
 
                         {isAdmin && (
                             <Box sx={{ display: activeTab === 'patterns' ? 'block' : 'none' }}>
-                                <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: 'background.tint', borderColor: 'divider' }}>
+                                <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: 'background.tint', borderColor: 'divider' }}>
                                     <Typography variant="body2" sx={{ fontWeight: '500' }}>登録したひな形をベースに、指定月のカレンダーへシフトを一括展開・同期します。</Typography>
                                     <Stack direction="row" spacing={1.5} alignItems="center">
                                         <TextField type="month" size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
-                                        <Button variant="contained" color="secondary" startIcon={<PlayArrowIcon />} onClick={handleCalculatePreview} disabled={generating || patterns.length === 0} sx={{ boxShadow: 'none' }}>
+                                        <AppButton intent="secondary" startIcon={<PlayArrowIcon />} onClick={handleCalculatePreview} disabled={generating || patterns.length === 0}>
                                             一括自動展開する
-                                        </Button>
-                                        <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => { setClearMode('unmodified'); setClearDialogOpen(true); }} disabled={generating || patterns.length === 0}>
+                                        </AppButton>
+                                        <AppButton variant="outlined" intent="danger" startIcon={<DeleteIcon />} onClick={() => { setClearMode('unmodified'); setClearDialogOpen(true); }} disabled={generating || patterns.length === 0}>
                                             一括消去する
-                                        </Button>
+                                        </AppButton>
                                     </Stack>
                                 </Paper>
 
                                 <Typography variant="subtitle1" fontWeight="bold" mb={2}>登録済みのひな形パターン一覧</Typography>
-                                <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, mb: 4 }}>
+                                <TableContainer component={Paper} variant="outlined" sx={{ mb: 4 }}>
                                     <Table>
                                         <TableHead sx={{ bgcolor: 'background.subtle' }}>
                                             <TableRow>

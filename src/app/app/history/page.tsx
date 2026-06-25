@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import {
-    Box, Typography, Paper, Stack, Chip, TextField, Tabs, Tab, Card, CardActionArea, Divider,
-    Grid, IconButton, Tooltip
+    Box, Paper, Stack, Chip, TextField, Tabs, Tab, Card, CardActionArea, Divider,
+    Grid, IconButton, Tooltip, Typography
 } from '@/components/ui/mui';
+import { InnerPageHeader } from '@/components/ui';
 import EditIcon from '@mui/icons-material/Edit';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ListIcon from '@mui/icons-material/List';
@@ -131,14 +132,16 @@ export default function HistoryPage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-                <HistoryIcon sx={{ color: 'action.active', mr: 2 }} />
-                <Typography variant="h6" fontWeight="bold" color="text.primary" flexGrow={1}>履歴</Typography>
-                <Tabs value={viewMode} onChange={(_, v) => setViewMode(v)} sx={{ minHeight: 0 }}>
-                    <Tab icon={<ListIcon />} label="リスト" sx={{ py: 1, minHeight: 0 }} />
-                    <Tab icon={<CalendarMonthIcon />} label="カレンダー" sx={{ py: 1, minHeight: 0 }} />
-                </Tabs>
-            </Box>
+            <InnerPageHeader
+                icon={<HistoryIcon />}
+                title="履歴"
+                actions={
+                    <Tabs value={viewMode} onChange={(_, v) => setViewMode(v)} sx={{ minHeight: 0 }}>
+                        <Tab icon={<ListIcon />} label="リスト" sx={{ py: 1, minHeight: 0 }} />
+                        <Tab icon={<CalendarMonthIcon />} label="カレンダー" sx={{ py: 1, minHeight: 0 }} />
+                    </Tabs>
+                }
+            />
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
                 {viewMode === 0 && (
@@ -152,7 +155,7 @@ export default function HistoryPage() {
                         </Paper>
                         <Stack spacing={2}>
                             {reports.map((report) => (
-                                <Card key={report.id} variant="outlined" sx={{ borderRadius: 2 }}>
+                                <Card key={report.id} variant="outlined">
                                     <CardActionArea onClick={() => handleEdit(report)} sx={{ p: 2 }}>
                                         <Stack direction="row" justifyContent="space-between" alignItems="center">
                                             <Box>

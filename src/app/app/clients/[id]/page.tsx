@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-    Box, Button, Typography, Paper, Stack, TextField,
+    Box, Typography, Paper, Stack, TextField,
     MenuItem, IconButton, Card, CardContent, Switch,
     FormControlLabel, Alert, CircularProgress, Divider,
     Tabs, Tab, List, ListItem, ListItemButton, ListItemText, ListItemIcon,
@@ -375,13 +375,13 @@ export default function ClientSettingsPage() {
                 {tabIndex === 0 && (
                     <Box>
                         <Box display="flex" justifyContent="flex-end" gap={1} mb={2}>
-                            <Button 
-                                variant="outlined" 
-                                startIcon={<ContentCopyIcon />} 
+                            <AppButton
+                                variant="outlined"
+                                startIcon={<ContentCopyIcon />}
                                 onClick={() => { setOpenCopyDialog(true); setCopyTab(0); }}
                             >
                                 テンプレート読込 / コピー
-                            </Button>
+                            </AppButton>
                         </Box>
                         <Stack spacing={2} pb={2}>
                             {formItems.map((item, index) => (
@@ -413,7 +413,7 @@ export default function ClientSettingsPage() {
                                     </CardContent>
                                 </Card>
                             ))}
-                            <Button variant="outlined" startIcon={<AddCircleIcon />} onClick={addField} size="large" sx={{ border: '2px dashed', borderColor: 'divider', color: 'text.secondary', py: 2 }}>項目を追加する</Button>
+                            <AppButton variant="outlined" startIcon={<AddCircleIcon />} onClick={addField} size="large" sx={{ border: '2px dashed', borderColor: 'divider', color: 'text.secondary', py: 2 }}>項目を追加する</AppButton>
                         </Stack>
                     </Box>
                 )}
@@ -470,15 +470,14 @@ export default function ClientSettingsPage() {
                                         作成後、下記リストから必要なタグをコピーしてドキュメントに貼り付け、レイアウトを調整してください。
                                     </Typography>
                                     
-                                    <Button 
-                                        variant="contained" 
-                                        color="secondary" 
-                                        onClick={handleCreateTemplate} 
+                                    <AppButton
+                                        intent="secondary"
+                                        onClick={handleCreateTemplate}
                                         disabled={isCreatingTemplate || formItems.length === 0}
                                         startIcon={isCreatingTemplate ? <CircularProgress size={20} color="inherit" /> : <AddCircleIcon />}
                                     >
                                         {isCreatingTemplate ? '作成中...' : 'テンプレートを新規作成する'}
-                                    </Button>
+                                    </AppButton>
                                     
                                     <Box mt={2}>
                                         <Typography variant="caption" color="text.secondary">ID手動設定:</Typography>
@@ -500,14 +499,14 @@ export default function ClientSettingsPage() {
                                         <Typography variant="subtitle2" fontWeight="bold" display="flex" alignItems="center" gap={1}>
                                             <ContentPasteIcon color="primary" fontSize="small" /> 2. 利用可能な差し込みタグ一覧
                                         </Typography>
-                                        <Button 
-                                            variant="outlined" 
-                                            size="small" 
-                                            startIcon={<CopyAllIcon />} 
+                                        <AppButton
+                                            variant="outlined"
+                                            size="small"
+                                            startIcon={<CopyAllIcon />}
                                             onClick={handleCopyAllTags}
                                         >
                                             全てのタグをコピー
-                                        </Button>
+                                        </AppButton>
                                     </Stack>
                                     <Alert severity="info" sx={{ mb: 2 }}>
                                         クリックするとタグをコピーできます。Googleドキュメントの表の中に貼り付けてください。<br/>
@@ -592,9 +591,9 @@ export default function ClientSettingsPage() {
             </Box>
 
             <Paper elevation={3} sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center', bgcolor: 'background.paper', flexShrink: 0, zIndex: 10 }}>
-                <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={() => { if (tabIndex === 0) handleSaveForm(); if (tabIndex === 1) handleSaveAssignments(); if (tabIndex === 2) handleSaveTemplateId(); }} disabled={isSaving} sx={{ minWidth: 300, fontWeight: 'bold', height: 48 }}>
+                <AppButton size="large" startIcon={<SaveIcon />} onClick={() => { if (tabIndex === 0) handleSaveForm(); if (tabIndex === 1) handleSaveAssignments(); if (tabIndex === 2) handleSaveTemplateId(); }} disabled={isSaving} sx={{ minWidth: 300, fontWeight: 'bold', height: 48 }}>
                     {isSaving ? '保存中...' : '設定を保存'}
-                </Button>
+                </AppButton>
             </Paper>
 
             <AppDialog open={openCopyDialog} onClose={() => setOpenCopyDialog(false)} maxWidth="sm" title="記録項目の設定を読み込む" contentSx={{ p: 0 }} actions={<AppButton variant="text" intent="secondary" onClick={() => setOpenCopyDialog(false)}>キャンセル</AppButton>}>

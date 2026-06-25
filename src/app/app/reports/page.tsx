@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Button,
+  Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip,
   CircularProgress, Stack, TextField, MenuItem, Checkbox, TableSortLabel, Switch, FormControlLabel, Divider,
-  LinearProgress, Tooltip
+  LinearProgress, Tooltip, Typography
 } from '@/components/ui/mui';
+import { InnerPageHeader, AppButton } from '@/components/ui';
 import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -488,10 +489,7 @@ export default function ReportsPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-            <TagIcon sx={{ color: 'action.active', mr: 2 }} />
-            <Typography variant="h6" fontWeight="bold" color="text.primary">{headerTitle}</Typography>
-        </Box>
+        <InnerPageHeader icon={<TagIcon />} title={headerTitle} />
 
        <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
            <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.muted', boxShadow: 'none' }}>
@@ -514,7 +512,7 @@ export default function ReportsPage() {
                         <TextField type="date" label="終了日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
                     </Box>
                     <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />
-                    <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none' }}>検索</Button>
+                    <AppButton startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3 }}>検索</AppButton>
                 </Stack>
               </Stack>
            </Paper>
@@ -526,22 +524,22 @@ export default function ReportsPage() {
                    </Typography>
                </Box>
                <Stack direction="row" spacing={1}>
-                 <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing}>CSV</Button>
-                 <Button variant="outlined" size="small" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF}>PDF</Button>
+                 <AppButton variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing}>CSV</AppButton>
+                 <AppButton variant="outlined" size="small" intent="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF}>PDF</AppButton>
                  {selected.length > 0 ? (
                     <>
                         <Divider orientation="vertical" flexItem />
-                        <Button variant="contained" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
+                        <AppButton size="small" intent="secondary" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
                             {gasProgress ? '作成中...' : '帳票作成(GAS)'}
-                        </Button>
-                        <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>
-                        <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</Button>
-                        <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</Button>
+                        </AppButton>
+                        <AppButton size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing}>一括承認</AppButton>
+                        <AppButton size="small" intent="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</AppButton>
+                        <AppButton variant="outlined" size="small" intent="danger" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</AppButton>
                     </>
                  ) : (
-                     <Button variant="outlined" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
+                     <AppButton variant="outlined" size="small" intent="secondary" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
                         {gasProgress ? '作成中...' : '全件帳票作成'}
-                     </Button>
+                     </AppButton>
                  )}
                </Stack>
            </Paper>
@@ -611,9 +609,9 @@ export default function ReportsPage() {
                            <TableCell>{row.clients.name}</TableCell>
                            <TableCell>{getHelperNames(row)}</TableCell>
                            <TableCell>
-                               <Button size="small" variant={isAbnormal ? "contained" : "outlined"} color={isAbnormal ? "error" : "primary"} onClick={() => handleOpenDetail(row)} sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                               <AppButton size="small" variant={isAbnormal ? "contained" : "outlined"} intent={isAbnormal ? "danger" : undefined} onClick={() => handleOpenDetail(row)} sx={{ fontSize: '0.75rem', py: 0.5 }}>
                                    {isAbnormal ? "確認・修正" : "詳細"}
-                               </Button>
+                               </AppButton>
                            </TableCell>
                          </TableRow>
                      );

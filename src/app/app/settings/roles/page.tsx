@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  Box, Typography, Button, Paper, Chip, IconButton,
+  Box, Typography, Paper, Chip, IconButton,
   Stack, CircularProgress, Tooltip, TextField,
 } from '@/components/ui/mui';
 import AddIcon from '@mui/icons-material/Add';
@@ -12,7 +12,7 @@ import RestoreIcon from '@mui/icons-material/Restore';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
-import { AppButton, AppDialog } from '@/components/ui';
+import { AppButton, AppDialog, InnerPageHeader } from '@/components/ui';
 import {
   getOrgRolesFull, createOrgRole, updateOrgRole, deleteOrgRole, resetPresetRole,
 } from '@/app/actions/roles';
@@ -126,13 +126,9 @@ export default function RolesPage() {
   };
 
   return (
-    <Box p={3} maxWidth={900}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h5">ロール管理</Typography>
-        <Button startIcon={<AddIcon />} variant="contained" onClick={openCreate}>
-          ロールを作成
-        </Button>
-      </Stack>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <InnerPageHeader title="ロール管理" actions={<AppButton startIcon={<AddIcon />} onClick={openCreate}>ロールを作成</AppButton>} />
+      <Box p={3} maxWidth={900}>
 
       {loading ? (
         <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box>
@@ -164,6 +160,7 @@ export default function RolesPage() {
           ))}
         </Stack>
       )}
+      </Box>
 
       {/* 作成/編集ダイアログ */}
       <AppDialog
@@ -188,8 +185,8 @@ export default function RolesPage() {
           </Box>
           <RolePermissionsMatrix value={formPerms} onChange={setFormPerms} />
           <Stack direction="row" justifyContent="flex-end" spacing={1}>
-            <Button onClick={() => { setIsNew(false); setEditRole(null); }}>キャンセル</Button>
-            <AppButton loading={saving} variant="contained" onClick={() => void handleSave()}>
+            <AppButton variant="text" intent="secondary" onClick={() => { setIsNew(false); setEditRole(null); }}>キャンセル</AppButton>
+            <AppButton loading={saving} onClick={() => void handleSave()}>
               {isNew ? '作成' : '保存'}
             </AppButton>
           </Stack>
@@ -206,8 +203,8 @@ export default function RolesPage() {
           「{deleteTarget?.name}」を削除しますか？このロールを付与されているメンバーの権限に影響します。
         </Typography>
         <Stack direction="row" justifyContent="flex-end" spacing={1} mt={2}>
-          <Button onClick={() => setDeleteTarget(null)}>キャンセル</Button>
-          <Button color="error" variant="contained" onClick={() => void handleDelete()}>削除</Button>
+          <AppButton variant="text" intent="secondary" onClick={() => setDeleteTarget(null)}>キャンセル</AppButton>
+          <AppButton intent="danger" onClick={() => void handleDelete()}>削除</AppButton>
         </Stack>
       </AppDialog>
     </Box>

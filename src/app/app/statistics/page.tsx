@@ -2,9 +2,10 @@
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
-    Box, Typography, Paper, CircularProgress, Tabs, Tab, Stack, TextField, Button,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip
+    Box, Paper, CircularProgress, Tabs, Tab, Stack, TextField,
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Typography
 } from '@/components/ui/mui';
+import { InnerPageHeader, AppButton } from '@/components/ui';
 import DownloadIcon from '@mui/icons-material/Download';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 
@@ -282,11 +283,8 @@ export default function StatisticsPage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, pt: 2, flexShrink: 0 }}>
-                <Stack direction="row" alignItems="center" spacing={1} mb={1}>
-                    <AssessmentIcon color="action" />
-                    <Typography variant="h6" fontWeight="bold" color="text.primary">統計・予実管理</Typography>
-                </Stack>
+            <InnerPageHeader icon={<AssessmentIcon />} title="統計・予実管理" />
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, flexShrink: 0 }}>
                 <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
                     <Tab label="スタッフ別" />
                     <Tab label="利用者別" />
@@ -297,10 +295,10 @@ export default function StatisticsPage() {
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={3} spacing={2}>
                     <TextField type="month" label="対象月" size="small" slotProps={{ inputLabel: { shrink: true } }} value={targetMonth} onChange={(e) => setTargetMonth(e.target.value)} sx={{ bgcolor: 'background.paper', minWidth: 200 }} />
-                    {tabIndex < 2 && <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || aggregatedData.rows.length === 0} sx={{ bgcolor: 'background.paper' }}>CSVダウンロード</Button>}
+                    {tabIndex < 2 && <AppButton variant="outlined" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || aggregatedData.rows.length === 0} sx={{ bgcolor: 'background.paper' }}>CSVダウンロード</AppButton>}
                 </Stack>
 
-                <Paper sx={{ p: 0, minHeight: 400, borderRadius: 3, overflow: 'hidden', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
+                <Paper sx={{ p: 0, minHeight: 400, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
                     {loading ? <Box display="flex" justifyContent="center" alignItems="center" height={300}><CircularProgress /></Box> : (
                         tabIndex < 2 ? (
                         <TableContainer>
@@ -381,7 +379,7 @@ export default function StatisticsPage() {
                                                 </TableCell>
                                                 <TableCell>
                                                     {firstReport?.reports
-                                                        ? <Button size="small" href={`/app/record/${shift.client_id}?reportId=${firstReport.reports.id}`} component="a">記録を開く</Button>
+                                                        ? <AppButton size="small" variant="outlined" href={`/app/record/${shift.client_id}?reportId=${firstReport.reports.id}`} component="a">記録を開く</AppButton>
                                                         : <Chip label="記録なし" size="small" color="warning" variant="outlined" />
                                                     }
                                                 </TableCell>

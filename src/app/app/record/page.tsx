@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { 
+import {
     Box, Typography, Card, CardActionArea, Stack, Avatar,
     Chip
 } from '@/components/ui/mui';
+import { InnerPageHeader } from '@/components/ui';
 import PersonIcon from '@mui/icons-material/Person';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
@@ -65,10 +66,7 @@ export default function RecordSelectPage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-                <EditNoteIcon sx={{ color: 'action.active', mr: 2 }} />
-                <Typography variant="h6" fontWeight="bold" color="text.primary">記録を作成</Typography>
-            </Box>
+            <InnerPageHeader icon={<EditNoteIcon />} title="記録を作成" />
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
                 <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ mb: 2 }}>利用者を選択</Typography>
@@ -77,7 +75,7 @@ export default function RecordSelectPage() {
                         const drafts = clientDrafts[client.id] || [];
                         return (
                             <Box key={client.id}>
-                                <Card variant="outlined" sx={{ borderRadius: 3 }}>
+                                <Card variant="outlined">
                                     <CardActionArea onClick={() => router.push(`/app/record/${client.id}`)} sx={{ p: 2 }}>
                                         <Box display="flex" alignItems="center" justifyContent="space-between">
                                             <Box display="flex" alignItems="center" gap={2}>

@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { checkManagementPermission } from '@/utils/permissions';
-import { 
-  Box, Typography, Paper, TextField, Button, Alert, CircularProgress, LinearProgress, Stack, Divider,
+import {
+  Box, Paper, TextField, Button, Alert, CircularProgress, LinearProgress, Stack, Divider, Typography,
   Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow
 } from '@/components/ui/mui';
-import { AppButton, AppDialog, AppTextField } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, InnerPageHeader } from '@/components/ui';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
@@ -373,11 +373,8 @@ function SettingsContent() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 3, bgcolor: 'background.paper' }}>
-                <Stack direction="row" alignItems="center" height={64} spacing={2}>
-                    <SettingsIcon sx={{ color: 'action.active' }} />
-                    <Typography variant="h6" fontWeight="bold" color="text.primary">事業所設定</Typography>
-                </Stack>
+            <InnerPageHeader icon={<SettingsIcon />} title="事業所設定" />
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 3, bgcolor: 'background.paper', flexShrink: 0 }}>
                 <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
                     <Tab label="基本設定" />
                     {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs')) && <Tab label="操作ログ" icon={<ListAltIcon fontSize="small" />} iconPosition="start" />}
@@ -391,7 +388,7 @@ function SettingsContent() {
                     {tabIndex === 0 && (
                         <Stack spacing={3}>
                             {/* 基本情報 */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+                            <Paper variant="outlined" sx={{ p: 4 }}>
                                 <Typography variant="h6" fontWeight="bold" gutterBottom>基本情報</Typography>
                                 <Stack spacing={4}>
                                     <Box>
@@ -401,16 +398,16 @@ function SettingsContent() {
                                     <Divider />
                                     {isOwner && (
                                         <Box textAlign="right">
-                                            <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving}>
+                                            <AppButton size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving}>
                                                 {saving ? '保存中...' : '変更を保存'}
-                                            </Button>
+                                            </AppButton>
                                         </Box>
                                     )}
                                 </Stack>
                             </Paper>
 
                             {/* Google Drive連携 */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>
+                            <Paper variant="outlined" sx={{ p: 4, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>
                                 <Stack direction="row" alignItems="center" gap={2} mb={2}>
                                     <CloudQueueIcon color="primary" fontSize="large" />
                                     <Box>
@@ -431,12 +428,12 @@ function SettingsContent() {
                                                     <Button variant="outlined" href={driveUrl} target="_blank" startIcon={<LinkIcon />}>
                                                         フォルダを開く
                                                     </Button>
-                                                    <Button color="error" startIcon={<LinkOffIcon />} onClick={handleDisconnectDrive}>
+                                                    <AppButton variant="text" intent="danger" startIcon={<LinkOffIcon />} onClick={handleDisconnectDrive}>
                                                         連携を解除
-                                                    </Button>
-                                                    <Button color="warning" onClick={handleConnectDrive} disabled={connecting}>
+                                                    </AppButton>
+                                                    <AppButton variant="text" intent="warning" onClick={handleConnectDrive} disabled={connecting}>
                                                         フォルダを再作成/修復
-                                                    </Button>
+                                                    </AppButton>
                                                 </Stack>
                                             </Stack>
                                         ) : (
@@ -444,9 +441,9 @@ function SettingsContent() {
                                                 <Alert severity="info">
                                                     まだ連携フォルダがありません。ボタンを押すと、管理者のGoogleドライブ内にこの事業所用のフォルダが自動作成されます。
                                                 </Alert>
-                                                <Button variant="contained" onClick={handleConnectDrive} disabled={connecting}>
+                                                <AppButton onClick={handleConnectDrive} disabled={connecting}>
                                                     {connecting ? '作成中...' : '連携フォルダを作成する'}
-                                                </Button>
+                                                </AppButton>
                                             </Stack>
                                         )
                                     ) : (
@@ -458,7 +455,7 @@ function SettingsContent() {
                             </Paper>
 
                             {/* Googleカレンダー連携 (OAuth方式) */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: googleCalendarId ? 'success.main' : 'divider', bgcolor: googleCalendarId ? 'background.success' : 'background.paper' }}>
+                            <Paper variant="outlined" sx={{ p: 4, borderColor: googleCalendarId ? 'success.main' : 'divider', bgcolor: googleCalendarId ? 'background.success' : 'background.paper' }}>
                                 <Stack direction="row" alignItems="center" gap={2} mb={2}>
                                     <CalendarMonthIcon color="success" fontSize="large" />
                                     <Box>
@@ -500,35 +497,32 @@ function SettingsContent() {
                                                 )}
 
                                                 <Stack direction="row" spacing={2} sx={{ mt: 1, flexWrap: 'wrap', gap: 1.5 }}>
-                                                    <Button
-                                                        variant="contained"
-                                                        color="warning"
+                                                    <AppButton
+                                                        intent="warning"
                                                         startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />}
                                                         onClick={handleRepairCalendar}
                                                         disabled={repairingCal || resyncingCal || (syncStatus?.unsynced === 0)}
                                                     >
                                                         {repairingCal ? '同期中...' : `未同期を同期${syncStatus && syncStatus.unsynced > 0 ? `（${syncStatus.unsynced}件）` : ''}`}
-                                                    </Button>
+                                                    </AppButton>
                                                     {/* 全件強制再同期（通常は未同期同期で十分。Google側で予定がずれた場合の最終手段） */}
-                                                    <Button
+                                                    <AppButton
                                                         variant="outlined"
-                                                        color="primary"
                                                         startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
                                                         onClick={handleForceResyncCalendar}
                                                         disabled={repairingCal || resyncingCal}
-                                                        sx={{ boxShadow: 'none' }}
                                                     >
                                                         {resyncingCal ? '修復中...' : '同期を修復'}
-                                                    </Button>
-                                                    <Button 
+                                                    </AppButton>
+                                                    <AppButton
                                                         variant="outlined"
-                                                        color="error" 
-                                                        startIcon={<LinkOffIcon />} 
-                                                        onClick={handleDisconnectCalendar} 
+                                                        intent="danger"
+                                                        startIcon={<LinkOffIcon />}
+                                                        onClick={handleDisconnectCalendar}
                                                         disabled={repairingCal || resyncingCal}
                                                     >
                                                         連携を解除
-                                                    </Button>
+                                                    </AppButton>
                                                 </Stack>
                                             </Stack>
                                         ) : (
@@ -536,9 +530,9 @@ function SettingsContent() {
                                                 <Alert severity="info">
                                                     ボタンを押すとGoogleの認証画面へ移動します。許可すると、あなたのアカウントに事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
                                                 </Alert>
-                                                <Button variant="contained" color="success" onClick={handleConnectCalendar} disabled={connectingCal}>
+                                                <AppButton intent="secondary" onClick={handleConnectCalendar} disabled={connectingCal}>
                                                     {connectingCal ? 'Googleへ移動中...' : 'シフト用カレンダーを作成・連携する'}
-                                                </Button>
+                                                </AppButton>
                                             </Stack>
                                         )
                                     ) : (
@@ -551,7 +545,7 @@ function SettingsContent() {
 
                             {/* 労働時間ルール */}
                             {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'organization')) && (
-                                <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+                                <Paper variant="outlined" sx={{ p: 4 }}>
                                     <Typography variant="h6" fontWeight="bold" gutterBottom>労働時間ルール</Typography>
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         深夜割り増し・時間外割り増しなどの種別と計算方法を管理します。
@@ -561,7 +555,7 @@ function SettingsContent() {
                             )}
 
                             {/* 危険な設定 */}
-                            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.light', bgcolor: 'background.danger' }}>
+                            <Paper variant="outlined" sx={{ p: 4, borderColor: 'error.light', bgcolor: 'background.danger' }}>
                                 <Stack direction="row" alignItems="center" gap={1} mb={2}>
                                     <WarningIcon color="error" />
                                     <Typography variant="h6" fontWeight="bold" color="error">危険な設定</Typography>
@@ -572,9 +566,9 @@ function SettingsContent() {
                                             <Typography fontWeight="bold">事業所から脱退</Typography>
                                             <Typography variant="caption" color="text.secondary">この事業所のメンバーから外れます</Typography>
                                         </Box>
-                                        <Button variant="outlined" color="warning" startIcon={<ExitToAppIcon />} onClick={() => setOpenLeaveDialog(true)}>
+                                        <AppButton variant="outlined" intent="warning" startIcon={<ExitToAppIcon />} onClick={() => setOpenLeaveDialog(true)}>
                                             脱退する
-                                        </Button>
+                                        </AppButton>
                                     </Box>
                                     {isOwner && (
                                         <>
@@ -587,9 +581,9 @@ function SettingsContent() {
                                                         この操作は取り消せません。
                                                     </Typography>
                                                 </Box>
-                                                <Button variant="contained" color="error" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
+                                                <AppButton intent="danger" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
                                                     削除する
-                                                </Button>
+                                                </AppButton>
                                             </Box>
                                         </>
                                     )}
@@ -603,9 +597,9 @@ function SettingsContent() {
                             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} sx={{ p: 2 }}>
                                 <TextField label="開始日" type="date" size="small" value={logFrom} onChange={(e) => setLogFrom(e.target.value)} InputLabelProps={{ shrink: true }} />
                                 <TextField label="終了日" type="date" size="small" value={logTo} onChange={(e) => setLogTo(e.target.value)} InputLabelProps={{ shrink: true }} />
-                                <Button variant="outlined" onClick={fetchLogs}>絞り込み</Button>
+                                <AppButton variant="outlined" onClick={fetchLogs}>絞り込み</AppButton>
                                 <Box sx={{ flexGrow: 1 }} />
-                                <Button variant="contained" onClick={handleExportLogs}>CSVエクスポート</Button>
+                                <AppButton onClick={handleExportLogs}>CSVエクスポート</AppButton>
                             </Stack>
                             <Divider />
                             <Table>

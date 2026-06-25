@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, Button, TextField, Stack,
+  Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Chip, TextField, Stack, Typography,
   IconButton, Select, MenuItem, FormControl, InputLabel, Menu, Alert, ListItemIcon,
   CircularProgress, Divider,
 } from '@/components/ui/mui';
@@ -19,7 +19,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { createInvitation, getAccountOverview, getOrgRoles, updateAccountRole, updateMemberRoles, removeAccount } from '@/app/actions/accounts';
-import { AppButton, AppDialog } from '@/components/ui';
+import { AppButton, AppDialog, InnerPageHeader } from '@/components/ui';
 import { checkManagementPermission } from '@/utils/permissions';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
@@ -218,10 +218,7 @@ export default function AccountsPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-        <KeyIcon sx={{ color: 'action.active', mr: 2 }} />
-        <Typography variant="h6" fontWeight="bold" color="text.primary">アカウント(権限)管理</Typography>
-      </Box>
+      <InnerPageHeader icon={<KeyIcon />} title="アカウント(権限)管理" />
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
         <Box maxWidth="lg" mx="auto">
@@ -231,13 +228,13 @@ export default function AccountsPage() {
                     <Typography variant="caption" color="text.secondary">アプリにログインできるユーザーと、その権限を管理します。</Typography>
                 </Box>
                 {canManageAccounts && (
-                  <Button variant="contained" startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); setNewInviteName(''); setSelectedRoleIds([]); }} sx={{ boxShadow: 'none' }}>
+                  <AppButton startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); setNewInviteName(''); setSelectedRoleIds([]); }}>
                       新しい人を招待
-                  </Button>
+                  </AppButton>
                 )}
             </Paper>
 
-            <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, boxShadow: 'none' }}>
+            <TableContainer component={Paper} variant="outlined">
                 <Table>
                     <TableHead sx={{ bgcolor: 'background.tint' }}>
                         <TableRow>
@@ -436,13 +433,13 @@ export default function AccountsPage() {
                         </Box>
                     )}
                     <TextField label="管理用の名前 (任意)" placeholder="例: 山田 太郎" size="small" fullWidth value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} />
-                    <Button variant="contained" onClick={handleGenerateLink} fullWidth sx={{ py: 1, boxShadow: 'none' }}>招待リンクを発行</Button>
+                    <AppButton onClick={handleGenerateLink} fullWidth sx={{ py: 1 }}>招待リンクを発行</AppButton>
                  </>
              ) : (
                  <>
                     <Typography variant="body2" textAlign="center">以下のリンクを相手に共有してください。</Typography>
                     <TextField value={generatedLink} fullWidth size="small" slotProps={{ input: { readOnly: true, endAdornment: (<IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}><ContentCopyIcon /></IconButton>) } }} />
-                    <Button variant="outlined" startIcon={<ShareIcon />} fullWidth onClick={handleShare}>共有メニューを開く</Button>
+                    <AppButton variant="outlined" startIcon={<ShareIcon />} fullWidth onClick={handleShare}>共有メニューを開く</AppButton>
                  </>
              )}
           </Stack>

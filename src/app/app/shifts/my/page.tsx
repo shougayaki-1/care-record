@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import {
-  Box, Typography, CircularProgress, Stack, Chip, Paper,
+  Box, CircularProgress, Stack, Chip, Paper, Typography,
   IconButton, ToggleButton, ToggleButtonGroup, Tooltip
 } from '@/components/ui/mui';
+import { InnerPageHeader } from '@/components/ui';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ListIcon from '@mui/icons-material/List';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
@@ -51,7 +52,6 @@ function ShiftListItem({ shift, onClick }: { shift: MyShiftItem; onClick: () => 
       onClick={onClick}
       sx={{
         p: 2,
-        borderRadius: 2,
         cursor: isCancelled ? 'default' : 'pointer',
         opacity: isCancelled ? 0.5 : 1,
         '&:hover': { bgcolor: isCancelled ? undefined : 'action.hover' },
@@ -154,9 +154,9 @@ export default function MyShiftsPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, py: 2, flexShrink: 0 }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6" fontWeight="bold">自分のシフト</Typography>
+      <InnerPageHeader
+        title="自分のシフト"
+        actions={
           <ToggleButtonGroup
             size="small"
             value={viewMode}
@@ -170,18 +170,20 @@ export default function MyShiftsPage() {
               <Tooltip title="カレンダー表示"><CalendarMonthIcon fontSize="small" /></Tooltip>
             </ToggleButton>
           </ToggleButtonGroup>
-        </Box>
+        }
+      />
 
-        {viewMode === 'list' && (
-          <Stack direction="row" alignItems="center" spacing={1} mt={1}>
+      {viewMode === 'list' && (
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, py: 1, flexShrink: 0 }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
             <IconButton size="small" onClick={handlePrevMonth}><ChevronLeftIcon /></IconButton>
             <Typography variant="subtitle1" fontWeight="bold" sx={{ minWidth: 100, textAlign: 'center' }}>
               {monthLabel}
             </Typography>
             <IconButton size="small" onClick={handleNextMonth}><ChevronRightIcon /></IconButton>
           </Stack>
-        )}
-      </Box>
+        </Box>
+      )}
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
         {loading ? (

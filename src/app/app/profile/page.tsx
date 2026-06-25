@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import {
-    Box, Typography, Paper, TextField, Button, Alert, Stack, Divider,
-    Container, Chip, CircularProgress, Avatar, IconButton
+    Box, Paper, TextField, Alert, Stack, Divider,
+    Container, Chip, CircularProgress, Avatar, IconButton, Typography
 } from '@/components/ui/mui';
+import { InnerPageHeader, AppButton } from '@/components/ui';
 import SaveIcon from '@mui/icons-material/Save';
 import LockIcon from '@mui/icons-material/Lock';
 import PersonIcon from '@mui/icons-material/Person';
@@ -148,17 +149,14 @@ export default function ProfilePage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-                <AccountCircleIcon sx={{ color: 'action.active', mr: 2 }} />
-                <Typography variant="h6" fontWeight="bold" color="text.primary">アカウント設定</Typography>
-            </Box>
+            <InnerPageHeader icon={<AccountCircleIcon />} title="アカウント設定" />
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
                 <Container maxWidth="sm">
                     {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
                     <Stack spacing={3}>
-                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, textAlign: 'center' }}>
+                        <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
                             <Box position="relative" display="inline-block" mb={2}>
                                 <Avatar 
                                     src={avatarUrl || undefined} 
@@ -189,7 +187,7 @@ export default function ProfilePage() {
                             </Box>
                         </Paper>
 
-                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+                        <Paper variant="outlined" sx={{ p: 4 }}>
                             <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
                                 <LockIcon color="primary" /> セキュリティ設定
                             </Typography>
@@ -200,7 +198,7 @@ export default function ProfilePage() {
                                     <Typography variant="body2" mb={1}>現在のメール: {email}</Typography>
                                     <Stack direction="row" spacing={1}>
                                         <TextField label="新しいメールアドレス" fullWidth size="small" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
-                                        <Button variant="outlined" onClick={handleUpdateEmail}>変更確認を送信</Button>
+                                        <AppButton variant="outlined" onClick={handleUpdateEmail}>変更確認を送信</AppButton>
                                     </Stack>
                                 </Box>
 
@@ -216,7 +214,7 @@ export default function ProfilePage() {
                             </Stack>
                         </Paper>
 
-                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+                        <Paper variant="outlined" sx={{ p: 4 }}>
                             <Box>
                                 <Typography variant="subtitle1" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
                                     <LinkIcon color="primary" /> 外部アカウント連携
@@ -229,16 +227,16 @@ export default function ProfilePage() {
                                                 <Typography fontWeight="bold" textTransform="capitalize">{p === 'azure' ? 'Microsoft' : 'Google'}</Typography>
                                             </Box>
                                             {linkedProviders.includes(p) ? <Chip label="連携済" color="success" size="small" icon={<CheckCircleIcon />} /> : 
-                                            <Button variant="outlined" size="small" onClick={() => handleLinkIdentity(p as 'google' | 'azure')}>連携</Button>}
+                                            <AppButton variant="outlined" size="small" onClick={() => handleLinkIdentity(p as 'google' | 'azure')}>連携</AppButton>}
                                         </Box>
                                     ))}
                                 </Stack>
                             </Box>
                         </Paper>
 
-                        <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleUpdateProfile} disabled={saving} sx={{ py: 1.5 }}>
+                        <AppButton size="large" startIcon={<SaveIcon />} onClick={handleUpdateProfile} disabled={saving} sx={{ py: 1.5 }}>
                             {saving ? '保存中...' : '設定を保存'}
-                        </Button>
+                        </AppButton>
 
                         <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.main', bgcolor: 'background.danger' }}>
                             <Typography variant="h6" color="error" gutterBottom fontWeight="bold" display="flex" alignItems="center" gap={1}>
@@ -247,7 +245,7 @@ export default function ProfilePage() {
                             <Typography variant="body2" mb={2}>
                                 アカウントを完全に削除します。参加している事業所の記録データは残りますが、あなたの個人情報は削除され、ログインできなくなります。
                             </Typography>
-                            <Button color="error" variant="contained" onClick={handleDeleteAccount}>退会する</Button>
+                            <AppButton intent="danger" onClick={handleDeleteAccount}>退会する</AppButton>
                         </Paper>
                     </Stack>
                 </Container>
