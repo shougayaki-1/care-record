@@ -154,8 +154,8 @@ export default function MyShiftsPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, py: 2, flexShrink: 0 }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center">
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 2, sm: 3 }, py: 2, flexShrink: 0 }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>
           <Typography variant="h6" fontWeight="bold">自分のシフト</Typography>
           <ToggleButtonGroup
             size="small"
@@ -183,7 +183,7 @@ export default function MyShiftsPage() {
         )}
       </Box>
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
         {loading ? (
           <Box display="flex" justifyContent="center" pt={8}><CircularProgress /></Box>
         ) : viewMode === 'list' ? (

@@ -354,27 +354,27 @@ export default function ClientSettingsPage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', flexShrink: 0 }}>
+            <Box sx={{ p: { xs: 1.5, sm: 2 }, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', flexShrink: 0 }}>
                 <Stack direction="row" alignItems="center" spacing={2} mb={2}>
                     <IconButton onClick={() => router.back()}><ArrowBackIcon /></IconButton>
-                    <Box>
+                    <Box sx={{ minWidth: 0 }}>
                         <Typography variant="caption" color="text.secondary">利用者設定</Typography>
-                        <Typography variant="h5" fontWeight="bold">{clientName} 様</Typography>
+                        <Typography variant="h5" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{clientName} 様</Typography>
                     </Box>
                 </Stack>
-                <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="fullWidth">
+                <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="scrollable" allowScrollButtonsMobile>
                     <Tab icon={<DescriptionIcon />} label="記録フォーム" />
                     <Tab icon={<AssignmentIndIcon />} label="担当スタッフ" />
                     <Tab icon={<FolderIcon />} label="帳票・連携" />
                 </Tabs>
             </Box>
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
                 {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
                 {tabIndex === 0 && (
                     <Box>
-                        <Box display="flex" justifyContent="flex-end" gap={1} mb={2}>
+                        <Box display="flex" justifyContent="flex-end" gap={1} mb={2} sx={{ flexWrap: 'wrap' }}>
                             <Button 
                                 variant="outlined" 
                                 startIcon={<ContentCopyIcon />} 

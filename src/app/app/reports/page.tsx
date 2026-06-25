@@ -16,6 +16,8 @@ import ArticleIcon from '@mui/icons-material/Article';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RestoreIcon from '@mui/icons-material/Restore';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'; // ★追加: 警告アイコン
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { supabase } from '@/lib/supabase';
 import { pdf } from '@react-pdf/renderer';
@@ -49,6 +51,8 @@ export default function ReportsPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const confirm = useConfirm();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
   const [reports, setReports] = useState<Report[]>([]);
   const [clients, setClients] = useState<ClientData[]>([]);
@@ -197,6 +201,21 @@ export default function ReportsPage() {
   };
 
   const getTargetReports = () => selected.length > 0 ? reports.filter(r => selected.includes(r.id)) : reports;
+
+  const formatReportDateTime = (d: Date) => {
+      return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const getReportStatusLabel = (status: ReportStatus) => status === 'approved' ? '承認済' : status === 'remanded' ? '差戻し' : '未承認';
+
+  const getReportStatusColor = (status: ReportStatus) => status === 'approved' ? 'success' : status === 'remanded' ? 'error' : 'warning';
+
+  const isAbnormalReport = (report: Report) => {
+      const start = new Date(report.start_at);
+      const end = new Date(report.end_at);
+      const durationHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+      return durationHours > 24 || durationHours < 0;
+  };
 
   const handleExportCSV = async () => {
       const targetReports = getTargetReports();
@@ -491,39 +510,39 @@ export default function ReportsPage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <InnerPageHeader icon={<TagIcon />} title={headerTitle} />
 
-       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
+       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
            <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.muted', boxShadow: 'none' }}>
               <Stack spacing={2}>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-                    <Box display="flex" alignItems="center" gap={1} color="text.secondary">
+                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} flexWrap="wrap" useFlexGap>
+                    <Box display="flex" alignItems="center" gap={1} color="text.secondary" sx={{ minWidth: 0 }}>
                         <FilterListIcon fontSize="small" />
                         <Typography variant="subtitle2" fontWeight="bold">絞り込み:</Typography>
                     </Box>
-                    <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: 150, bgcolor: 'background.paper' }}>
+                    <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: { xs: 0, md: 150 }, bgcolor: 'background.paper', width: { xs: '100%', md: 'auto' } }}>
                         <MenuItem value="all">全員</MenuItem>
                         {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                     </TextField>
-                    <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 120, bgcolor: 'background.paper' }}>
+                    <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: { xs: 0, md: 120 }, bgcolor: 'background.paper', width: { xs: '100%', md: 'auto' } }}>
                         <MenuItem value="all">全て</MenuItem><MenuItem value="pending">未承認</MenuItem><MenuItem value="approved">承認済</MenuItem>
                     </TextField>
-                    <Box display="flex" alignItems="center" gap={1}>
-                        <TextField type="date" label="開始日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
-                        <Typography>～</Typography>
-                        <TextField type="date" label="終了日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
+                    <Box display="flex" alignItems="center" gap={1} sx={{ flexDirection: { xs: 'column', sm: 'row' }, width: { xs: '100%', md: 'auto' } }}>
+                        <TextField type="date" label="開始日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'background.paper', width: { xs: '100%', sm: 'auto' } }} />
+                        <Typography sx={{ display: { xs: 'none', sm: 'block' } }}>～</Typography>
+                        <TextField type="date" label="終了日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'background.paper', width: { xs: '100%', sm: 'auto' } }} />
                     </Box>
                     <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />
-                    <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none' }}>検索</Button>
+                    <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none', width: { xs: '100%', md: 'auto' } }}>検索</Button>
                 </Stack>
               </Stack>
            </Paper>
            
-           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? 'background.tint' : 'background.paper', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
+           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? 'background.tint' : 'background.paper', display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, border: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
                <Box>
                    <Typography variant="body1" fontWeight="bold">
                        {selected.length > 0 ? `${selected.length} 件選択中` : `検索結果: ${reports.length} 件`}
                    </Typography>
                </Box>
-               <Stack direction="row" spacing={1}>
+               <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}>
                  <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing}>CSV</Button>
                  <Button variant="outlined" size="small" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF}>PDF</Button>
                  {selected.length > 0 ? (
@@ -548,13 +567,58 @@ export default function ReportsPage() {
                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'background.paper', p: 2, borderRadius: 2, boxShadow: 3, zIndex: 9999 }}>
                    <Typography variant="body2" fontWeight="bold">帳票作成中...</Typography>
                    <Typography variant="caption" display="block" sx={{ mb: 1 }}>{gasProgress.currentName}</Typography>
-                   <LinearProgress variant="determinate" value={(gasProgress.current / gasProgress.total) * 100} sx={{ width: 250 }} />
+                   <LinearProgress variant="determinate" value={(gasProgress.current / gasProgress.total) * 100} sx={{ width: { xs: 'calc(100vw - 72px)', sm: 250 } }} />
                    <Typography variant="caption" sx={{ mt: 0.5, display: 'block', textAlign: 'right' }}>{gasProgress.current} / {gasProgress.total}</Typography>
                </Box>
            )}
 
            {loading ? <CircularProgress /> : (
-             <TableContainer component={Paper} sx={{ boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
+             <>
+             {isMobile && (
+               <Stack spacing={1.5}>
+                 {reports.map((row) => {
+                   const start = new Date(row.start_at);
+                   const end = new Date(row.end_at);
+                   const isAbnormal = isAbnormalReport(row);
+                   const checked = selected.includes(row.id);
+
+                   return (
+                     <Paper key={row.id} variant="outlined" sx={{ p: 1.5, bgcolor: isAbnormal ? 'background.danger' : 'background.paper' }}>
+                       <Stack spacing={1.25}>
+                         <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
+                           <Box display="flex" alignItems="center" gap={1} minWidth={0}>
+                             <Checkbox checked={checked} onClick={(e) => handleClick(e, row.id)} sx={{ p: 0.5 }} />
+                             <Box minWidth={0}>
+                               <Typography variant="subtitle2" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{row.clients.name}</Typography>
+                               <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{getHelperNames(row)}</Typography>
+                             </Box>
+                           </Box>
+                           <Chip label={getReportStatusLabel(row.status)} color={getReportStatusColor(row.status)} size="small" variant="outlined" />
+                         </Box>
+                         <Box display="flex" alignItems="flex-start" gap={1}>
+                           <Box flexGrow={1} minWidth={0}>
+                             <Typography variant="body2" color={isAbnormal ? 'error' : 'inherit'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
+                               {formatReportDateTime(start)} 〜
+                             </Typography>
+                             <Typography variant="body2" color={isAbnormal ? 'error' : 'text.secondary'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
+                               {formatReportDateTime(end)}
+                             </Typography>
+                           </Box>
+                           {isAbnormal && <ErrorOutlineIcon color="error" fontSize="small" />}
+                         </Box>
+                         <Box display="flex" justifyContent="flex-end">
+                           <Button size="small" variant={isAbnormal ? "contained" : "outlined"} color={isAbnormal ? "error" : "primary"} onClick={() => handleOpenDetail(row)} sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                             {isAbnormal ? "確認・修正" : "詳細"}
+                           </Button>
+                         </Box>
+                       </Stack>
+                     </Paper>
+                   );
+                 })}
+                 {reports.length === 0 && <Paper variant="outlined" sx={{ py: 5, px: 2, textAlign: 'center', color: 'text.disabled' }}>該当する記録がありません</Paper>}
+               </Stack>
+             )}
+             <TableContainer component={Paper} sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
                <Table>
                  <TableHead sx={{ bgcolor: 'background.muted' }}>
                    <TableRow>
@@ -574,28 +638,22 @@ export default function ReportsPage() {
                    {reports.map((row) => {
                      const start = new Date(row.start_at);
                      const end = new Date(row.end_at);
-                     const durationHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-                     // ★異常検知: 24時間を超える、または終了が開始より前の場合
-                     const isAbnormal = durationHours > 24 || durationHours < 0;
-
-                     const formatDateTime = (d: Date) => {
-                         return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-                     };
+                     const isAbnormal = isAbnormalReport(row);
 
                      return (
                          <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 }, bgcolor: isAbnormal ? 'background.danger' : 'inherit' }}>
                            <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
-                           <TableCell><Chip label={row.status === 'approved' ? '承認済' : row.status === 'remanded' ? '差戻し' : '未承認'} color={row.status === 'approved' ? 'success' : row.status === 'remanded' ? 'error' : 'warning'} size="small" variant="outlined" /></TableCell>
+                           <TableCell><Chip label={getReportStatusLabel(row.status)} color={getReportStatusColor(row.status)} size="small" variant="outlined" /></TableCell>
                            
                            {/* ★修正: 開始から終了までの日時を表示し、異常があればアイコンを出す */}
                            <TableCell>
                                <Box display="flex" alignItems="center" gap={1}>
                                    <Box>
                                        <Typography variant="body2" color={isAbnormal ? 'error' : 'inherit'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
-                                           {formatDateTime(start)} 〜
+                                           {formatReportDateTime(start)} 〜
                                        </Typography>
                                        <Typography variant="body2" color={isAbnormal ? 'error' : 'text.secondary'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
-                                           {formatDateTime(end)}
+                                           {formatReportDateTime(end)}
                                        </Typography>
                                    </Box>
                                    {isAbnormal && (
@@ -620,6 +678,7 @@ export default function ReportsPage() {
                  </TableBody>
                </Table>
              </TableContainer>
+             </>
            )}
        </Box>
     </Box>

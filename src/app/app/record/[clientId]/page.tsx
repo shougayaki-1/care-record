@@ -530,7 +530,7 @@ export default function RecordPage() {
             icon={<IconButton edge="start" onClick={handleClose} sx={{ color: 'action.active' }}><CloseIcon /></IconButton>}
             title={currentReportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済みの記録' : '記録を修正')) : `${clientName} 様`}
             actions={(
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent="flex-end">
                 {currentReportId && currentStatus !== 'approved' && (
                     <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
                 )}
@@ -547,9 +547,9 @@ export default function RecordPage() {
             )}
        />
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
-        <Container maxWidth="md" disableGutters>
-            <Stack spacing={4}>
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
+        <Container maxWidth="md" disableGutters sx={{ width: '100%' }}>
+            <Stack spacing={{ xs: 2.5, sm: 4 }}>
             
             {/* 月末跨ぎの夜勤の場合のみ表示される分割選択タブコントロール */}
             {isSpanningMonth && (
@@ -560,7 +560,8 @@ export default function RecordPage() {
                     <Tabs 
                         value={selectedPart} 
                         onChange={(_, val) => handlePartChange(val)} 
-                        variant="fullWidth"
+                        variant="scrollable"
+                        allowScrollButtonsMobile
                         sx={{ bgcolor: 'background.paper', borderRadius: 2 }}
                     >
                         <Tab value="part1" label={`前半（月末日の24:00まで: ${formatTimeForLabel(originalShiftTimes?.start_at)} 〜 24:00）`} />
@@ -632,7 +633,7 @@ export default function RecordPage() {
               </Box>
             )}
 
-            <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, bgcolor: 'background.paper' }}>
+            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, bgcolor: 'background.paper' }}>
                 <Stack spacing={3}>
 
                 <Box>
@@ -657,7 +658,7 @@ export default function RecordPage() {
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <CalendarTodayIcon fontSize="small" /> サービス日時
                     </Typography>
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
                     <DateTimeField value={startDateTime} onChange={e => handleChange(setStartDateTime, e.target.value)} />
                     <Typography color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>～</Typography>
                     <DateTimeField value={endDateTime} onChange={e => handleChange(setEndDateTime, e.target.value)} />
@@ -678,15 +679,15 @@ export default function RecordPage() {
 
             {groupedSections.map((section, idx) => (
                 <Paper key={idx} variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', bgcolor: 'background.paper' }}>
-                <Box sx={{ bgcolor: 'background.muted', px: 3, py: 2, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
+                <Box sx={{ bgcolor: 'background.muted', px: { xs: 2, sm: 3 }, py: { xs: 1.5, sm: 2 }, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
                     <Box sx={{ width: 6, height: 28, bgcolor: 'primary.main', borderRadius: 1, mr: 2, flexShrink: 0 }} />
-                    <Typography variant="h6" color="text.primary" fontWeight="bold">{section.title}</Typography>
+                    <Typography variant="h6" color="text.primary" fontWeight="bold" sx={{ overflowWrap: 'anywhere', lineHeight: 1.3 }}>{section.title}</Typography>
                 </Box>
                 <Stack divider={<Divider />}>
                     {section.items.map((item) => {
                     const hasError = !!errors[item.id];
                     return (
-                        <Box key={item.id} sx={{ p: 3, bgcolor: hasError ? 'background.danger' : 'transparent' }}>
+                        <Box key={item.id} sx={{ p: { xs: 2, sm: 3 }, bgcolor: hasError ? 'background.danger' : 'transparent' }}>
                           <DynamicFormField
                             item={item}
                             value={answers[item.id]}
@@ -702,7 +703,7 @@ export default function RecordPage() {
                 </Paper>
             ))}
 
-            <Paper variant="outlined" sx={{ p: 3, mt: 3, borderRadius: 3 }}>
+            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, mt: 3, borderRadius: 3 }}>
                 <Typography variant="subtitle2" fontWeight="bold" gutterBottom>画像添付</Typography>
                 <Stack direction="row" gap={2} flexWrap="wrap">
                     {images.map(img => (

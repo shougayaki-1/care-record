@@ -97,7 +97,7 @@ const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | n
       onClose={onClose}
       anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-      slotProps={{ paper: { sx: { width: 320, maxHeight: 400 } } }}
+      slotProps={{ paper: { sx: { width: { xs: 'calc(100vw - 32px)', sm: 320 }, maxWidth: 320, maxHeight: 400 } } }}
     >
       <Box p={2} borderBottom="1px solid" borderColor="divider">
         <Typography fontWeight="bold">通知</Typography>
@@ -183,7 +183,7 @@ const TopAppBar = ({
 
   return (
     <AppBar position="static">
-      <Toolbar sx={{ gap: 1 }}>
+      <Toolbar sx={{ gap: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 } }}>
         {showMenuButton && (
           <IconButton edge="start" onClick={onMenuClick} sx={{ mr: 1 }} aria-label="メニューを開く">
             <MenuIcon />
@@ -207,8 +207,9 @@ const TopAppBar = ({
             color: 'text.primary',
             textTransform: 'none',
             borderRadius: 2,
-            px: 1.5,
-            maxWidth: { xs: 180, sm: 280 },
+            px: { xs: 1, sm: 1.5 },
+            minWidth: 0,
+            maxWidth: { xs: 150, sm: 280 },
             '& .MuiButton-startIcon': { color: 'primary.main' }
           }}
         >

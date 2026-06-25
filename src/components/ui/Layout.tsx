@@ -38,22 +38,45 @@ export function InnerPageHeader({
   return (
     <Box
       sx={{
-        height: 64,
+        minHeight: { xs: 64, sm: 64 },
         flexShrink: 0,
         borderBottom: 1,
         borderColor: 'divider',
         bgcolor: 'background.paper',
         display: 'flex',
+        flexDirection: { xs: actions ? 'column' : 'row', sm: 'row' },
         alignItems: 'center',
-        px: 3,
-        gap: 2,
+        justifyContent: 'space-between',
+        px: { xs: 2, sm: 3 },
+        py: { xs: actions ? 1.25 : 0, sm: 0 },
+        gap: { xs: 1, sm: 2 },
       }}
     >
-      {icon && <Box sx={{ color: 'action.active', display: 'flex' }}>{icon}</Box>}
-      <Typography variant="h6" fontWeight="bold" color="text.primary" sx={{ flexGrow: 1 }}>
-        {title}
-      </Typography>
-      {actions && <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{actions}</Box>}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, width: '100%', minWidth: 0 }}>
+        {icon && <Box sx={{ color: 'action.active', display: 'flex', flexShrink: 0 }}>{icon}</Box>}
+        <Typography
+          variant="h6"
+          fontWeight="bold"
+          color="text.primary"
+          sx={{ flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.25 }}
+        >
+          {title}
+        </Typography>
+      </Box>
+      {actions && (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: { xs: 'flex-end', sm: 'flex-start' },
+            gap: 1,
+            flexWrap: 'wrap',
+            width: { xs: '100%', sm: 'auto' },
+          }}
+        >
+          {actions}
+        </Box>
+      )}
     </Box>
   );
 }

@@ -143,7 +143,7 @@ export default function HistoryPage() {
                 )}
             />
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
                 {viewMode === 0 && (
                     <>
                         <Paper sx={{ p: 2, mb: 2 }}>
@@ -156,12 +156,12 @@ export default function HistoryPage() {
                         <Stack spacing={2}>
                             {reports.map((report) => (
                                 <Card key={report.id} variant="outlined" sx={{ borderRadius: 2 }}>
-                                    <CardActionArea onClick={() => handleEdit(report)} sx={{ p: 2 }}>
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                            <Box>
+                                    <CardActionArea onClick={() => handleEdit(report)} sx={{ p: { xs: 1.5, sm: 2 } }}>
+                                        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
+                                            <Box sx={{ minWidth: 0 }}>
                                                 <Box display="flex" alignItems="center" gap={1} mb={0.5}>
                                                     <AccessTimeIcon fontSize="small" color="action" />
-                                                    <Typography variant="body2" fontWeight="bold">
+                                                    <Typography variant="body2" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>
                                                         {new Date(report.start_at).toLocaleDateString()} {new Date(report.start_at).getHours()}:{String(new Date(report.start_at).getMinutes()).padStart(2,'0')}
                                                     </Typography>
                                                     <Chip 
@@ -170,7 +170,7 @@ export default function HistoryPage() {
                                                         size="small" sx={{ height: 20, fontSize: '0.7rem' }}
                                                     />
                                                 </Box>
-                                                <Typography variant="h6" fontWeight="bold">{report.clients?.name} 様</Typography>
+                                                <Typography variant="h6" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{report.clients?.name} 様</Typography>
                                             </Box>
                                             <EditIcon color="action" />
                                         </Stack>

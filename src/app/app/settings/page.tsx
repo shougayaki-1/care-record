@@ -373,18 +373,18 @@ function SettingsContent() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 3, bgcolor: 'background.paper' }}>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', px: { xs: 2, sm: 3 }, bgcolor: 'background.paper' }}>
                 <Stack direction="row" alignItems="center" height={64} spacing={2}>
                     <SettingsIcon sx={{ color: 'action.active' }} />
                     <Typography variant="h6" fontWeight="bold" color="text.primary">事業所設定</Typography>
                 </Stack>
-                <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
+                <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="scrollable" allowScrollButtonsMobile>
                     <Tab label="基本設定" />
                     {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs')) && <Tab label="操作ログ" icon={<ListAltIcon fontSize="small" />} iconPosition="start" />}
                 </Tabs>
             </Box>
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
                 <Box sx={{ maxWidth: 800, mx: 'auto' }}>
                     {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 

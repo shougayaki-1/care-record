@@ -68,7 +68,7 @@ export default function RecordSelectPage() {
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <InnerPageHeader icon={<EditNoteIcon />} title="記録を作成" />
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
                 <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ mb: 2 }}>利用者を選択</Typography>
                 <Stack spacing={3}>
                     {clients.map((client) => {
@@ -76,14 +76,14 @@ export default function RecordSelectPage() {
                         return (
                             <Box key={client.id}>
                                 <Card variant="outlined" sx={{ borderRadius: 3 }}>
-                                    <CardActionArea onClick={() => router.push(`/app/record/${client.id}`)} sx={{ p: 2 }}>
-                                        <Box display="flex" alignItems="center" justifyContent="space-between">
-                                            <Box display="flex" alignItems="center" gap={2}>
-                                                <Avatar sx={{ bgcolor: 'primary.light' }}><PersonIcon /></Avatar>
-                                                <Typography variant="h6" fontWeight="bold">{client.name} 様</Typography>
+                                    <CardActionArea onClick={() => router.push(`/app/record/${client.id}`)} sx={{ p: { xs: 1.5, sm: 2 } }}>
+                                        <Box display="flex" alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" gap={1.5}>
+                                            <Box display="flex" alignItems="center" gap={1.5} minWidth={0}>
+                                                <Avatar sx={{ bgcolor: 'primary.light', flexShrink: 0 }}><PersonIcon /></Avatar>
+                                                <Typography variant="h6" fontWeight="bold" sx={{ overflowWrap: 'anywhere', lineHeight: 1.3 }}>{client.name} 様</Typography>
                                             </Box>
-                                            <Box display="flex" alignItems="center" gap={1} color="primary.main">
-                                                <Typography variant="body2" fontWeight="bold" sx={{ display: { xs: 'none', sm: 'block' } }}>新規作成</Typography>
+                                            <Box display="flex" alignItems="center" gap={1} color="primary.main" flexShrink={0}>
+                                                <Typography variant="body2" fontWeight="bold" sx={{ display: { xs: 'none', sm: 'block' }, whiteSpace: 'nowrap' }}>新規作成</Typography>
                                                 <AddCircleOutlineIcon />
                                             </Box>
                                         </Box>
@@ -91,9 +91,9 @@ export default function RecordSelectPage() {
                                 </Card>
 
                                 {drafts.length > 0 && (
-                                    <Box sx={{ mt: 1.5, ml: 2, display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1, '&::-webkit-scrollbar': { display: 'none' } }}>
+                                    <Box sx={{ mt: 1.5, ml: { xs: 0, sm: 2 }, display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1, '&::-webkit-scrollbar': { display: 'none' } }}>
                                         {drafts.map((draft) => (
-                                            <Card key={draft.id} variant="outlined" sx={{ minWidth: 200, flexShrink: 0, borderRadius: 2, bgcolor: 'background.warning', borderColor: 'warning.light' }}>
+                                            <Card key={draft.id} variant="outlined" sx={{ minWidth: { xs: 'min(220px, 75vw)', sm: 200 }, flexShrink: 0, borderRadius: 2, bgcolor: 'background.warning', borderColor: 'warning.light' }}>
                                                 <CardActionArea onClick={() => router.push(`/app/record/${client.id}?reportId=${draft.id}`)} sx={{ p: 1.5 }}>
                                                     <Stack spacing={0.5}>
                                                         <Box display="flex" alignItems="center" gap={1}>

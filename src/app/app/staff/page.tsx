@@ -15,6 +15,8 @@ import ArchiveIcon from '@mui/icons-material/Archive';
 import UnarchiveIcon from '@mui/icons-material/Unarchive';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
@@ -47,6 +49,8 @@ export default function StaffPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const confirm = useConfirm();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
   const [isFetching, setIsFetching] = useState(true);
   const [staffList, setStaffList] = useState<StaffData[]>([]);
@@ -186,14 +190,14 @@ export default function StaffPage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <InnerPageHeader icon={<BadgeIcon />} title="スタッフ(名簿)管理" />
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
         <Box maxWidth="lg" mx="auto">
-            <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
-                <Box>
+            <Paper variant="outlined" sx={{ p: { xs: 0, sm: 2 }, mb: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
+                <Box sx={{ minWidth: 0 }}>
                     <Typography variant="subtitle1" fontWeight="bold" color="text.primary">現場スタッフ名簿</Typography>
                     <Typography variant="caption" color="text.secondary">シフトや記録に「担当者」として名前が出るスタッフを登録します。↑↓で並び替えた順序がPDFやシフトの表示順に反映されます。</Typography>
                 </Box>
-                <Stack direction="row" spacing={1} alignItems="center">
+                <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap" justifyContent={{ xs: 'stretch', sm: 'flex-end' }} sx={{ '& > *': { flex: { xs: '1 1 100%', sm: '0 0 auto' } } }}>
                     {archivedStaff.length > 0 && (
                         <Button
                             variant={showArchived ? 'contained' : 'outlined'}
@@ -212,7 +216,65 @@ export default function StaffPage() {
                 </Stack>
             </Paper>
 
-            <TableContainer component={Paper} variant="outlined">
+            {isMobile && (
+                <Stack spacing={1.5}>
+                    {isFetching ? (
+                        <Paper variant="outlined" sx={{ py: 4, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Paper>
+                    ) : visibleStaff.length === 0 ? (
+                        <Paper variant="outlined" sx={{ py: 4, px: 2, textAlign: 'center', color: 'text.secondary' }}>登録がありません</Paper>
+                    ) : visibleStaff.map((staff) => {
+                        const profileName = Array.isArray(staff.profiles) ? staff.profiles[0]?.name : staff.profiles?.name;
+                        const isArchived = !!staff.archived_at;
+                        const activeIndex = isArchived ? -1 : activeStaff.findIndex(s => s.id === staff.id);
+
+                        return (
+                            <Paper key={staff.id} variant="outlined" sx={{ p: 1.5, opacity: isArchived ? 0.65 : 1, bgcolor: isArchived ? 'background.subtle' : 'background.paper' }}>
+                                <Stack spacing={1.25}>
+                                    <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
+                                        <Box minWidth={0}>
+                                            <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+                                                <Typography variant="subtitle2" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{staff.name}</Typography>
+                                                {isArchived && <Chip label="退職" size="small" color="default" sx={{ bgcolor: 'background.muted' }} />}
+                                            </Stack>
+                                            <Typography variant="caption" color="text.secondary" display="block" sx={{ overflowWrap: 'anywhere' }}>
+                                                {staff.user_id ? `紐付き: ${profileName || '不明なアカウント'}` : '紐付きなし (転記・代理入力用)'}
+                                            </Typography>
+                                        </Box>
+                                    </Box>
+                                    <Box display="flex" gap={0.75} flexWrap="wrap">
+                                        {staff.employment_type ? <Chip label={staff.employment_type} size="small" variant="outlined" /> : <Chip label="雇用形態未設定" size="small" variant="outlined" color="default" />}
+                                        {staff.work_style ? <Chip label={staff.work_style} size="small" variant="outlined" /> : <Chip label="専従・兼務未設定" size="small" variant="outlined" color="default" />}
+                                        {staff.positions && staff.positions.length > 0 ? (
+                                            staff.positions.map((p, i) => <Chip key={i} label={p} size="small" variant="outlined" color="primary" />)
+                                        ) : (
+                                            <Chip label="役職未設定" size="small" variant="outlined" color="default" />
+                                        )}
+                                    </Box>
+                                    <Stack direction="row" justifyContent="flex-end" spacing={0.5} useFlexGap flexWrap="wrap">
+                                        {!isArchived && (
+                                            <>
+                                                <Tooltip title="上へ"><span><IconButton size="small" disabled={activeIndex <= 0} onClick={() => handleMove(activeIndex, -1)}><ArrowUpwardIcon fontSize="small" /></IconButton></span></Tooltip>
+                                                <Tooltip title="下へ"><span><IconButton size="small" disabled={activeIndex < 0 || activeIndex >= activeStaff.length - 1} onClick={() => handleMove(activeIndex, 1)}><ArrowDownwardIcon fontSize="small" /></IconButton></span></Tooltip>
+                                            </>
+                                        )}
+                                        {isArchived ? (
+                                            <Tooltip title="復元（在職に戻す）"><IconButton size="small" color="primary" onClick={() => handleRestore(staff.id)}><UnarchiveIcon fontSize="small" /></IconButton></Tooltip>
+                                        ) : (
+                                            <>
+                                                <Tooltip title="編集"><IconButton size="small" onClick={() => handleOpenEdit(staff)}><EditIcon fontSize="small" /></IconButton></Tooltip>
+                                                <Tooltip title="アーカイブ（退職）"><IconButton size="small" color="warning" onClick={() => handleArchive(staff.id, staff.name)}><ArchiveIcon fontSize="small" /></IconButton></Tooltip>
+                                            </>
+                                        )}
+                                        <Tooltip title="削除"><IconButton size="small" color="error" onClick={() => handleDelete(staff.id, staff.name)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
+                                    </Stack>
+                                </Stack>
+                            </Paper>
+                        );
+                    })}
+                </Stack>
+            )}
+
+            <TableContainer component={Paper} variant="outlined" sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
                 <Table>
                     <TableHead sx={{ bgcolor: 'background.tint' }}>
                         <TableRow>

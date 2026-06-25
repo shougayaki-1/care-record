@@ -373,17 +373,17 @@ export default function ShiftManagePage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, pt: 2, flexShrink: 0 }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 2, sm: 3 }, pt: 2, flexShrink: 0 }}>
+                <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} flexDirection={{ xs: 'column', sm: 'row' }} gap={1} mb={1}>
                     <Typography variant="h6" fontWeight="bold">全体シフト管理</Typography>
                     {isAdmin && activeTab === 'fullCalendar' && (
-                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setShiftModalOpen(true); }} sx={{ boxShadow: 'none' }}>単発シフトを追加</Button>
+                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setShiftModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>単発シフトを追加</Button>
                     )}
                     {isAdmin && activeTab === 'patterns' && (
-                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none' }}>ひな形を追加</Button>
+                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>ひな形を追加</Button>
                     )}
                 </Box>
-                <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as TabId)}>
+                <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as TabId)} variant="scrollable" allowScrollButtonsMobile>
                     {isAdmin && <Tab label="基本パターン(ひな形)" value="patterns" />}
                     {isAdmin && <Tab label="全体カレンダー" value="fullCalendar" />}
                     <Tab label="自分のシフト" value="myShift" />
@@ -392,7 +392,7 @@ export default function ShiftManagePage() {
                 </Tabs>
             </Box>
 
-            <Box sx={{ position: 'relative', flexGrow: 1, p: 3, bgcolor: 'background.default', overflowY: 'auto' }}>
+            <Box sx={{ position: 'relative', flexGrow: 1, p: { xs: 2, sm: 3 }, bgcolor: 'background.default', overflowY: 'auto' }}>
                 {isFetching && !initialLoading && (
                     <Box sx={{ position: 'absolute', top: 16, right: 30, zIndex: 10 }}>
                         <CircularProgress size={24} />
@@ -424,22 +424,22 @@ export default function ShiftManagePage() {
                         )}
 
                         {activeTab !== 'patterns' && (
-                            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={2} spacing={2}>
+                            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} mb={2} spacing={2}>
                                 <Box flexGrow={1} width="100%">
                                     {activeTab === 'byStaff' && (
-                                        <TextField select size="small" label="スタッフを選択" value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} sx={{ minWidth: 200, bgcolor: 'background.paper' }}>
+                                        <TextField select size="small" label="スタッフを選択" value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} sx={{ minWidth: { xs: 0, sm: 200 }, width: { xs: '100%', sm: 'auto' }, bgcolor: 'background.paper' }}>
                                             <MenuItem value="all">全員を表示</MenuItem>
                                             {staffs.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
                                         </TextField>
                                     )}
                                     {activeTab === 'byClient' && (
-                                        <TextField select size="small" label="利用者を選択" value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} sx={{ minWidth: 200, bgcolor: 'background.paper' }}>
+                                        <TextField select size="small" label="利用者を選択" value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} sx={{ minWidth: { xs: 0, sm: 200 }, width: { xs: '100%', sm: 'auto' }, bgcolor: 'background.paper' }}>
                                             <MenuItem value="all">全員を表示</MenuItem>
                                             {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                                         </TextField>
                                     )}
                                 </Box>
-                                <Stack direction="row" spacing={1} sx={{ ml: 'auto' }}>
+                                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent={{ xs: 'stretch', sm: 'flex-end' }} sx={{ ml: { sm: 'auto' }, width: { xs: '100%', sm: 'auto' }, '& > *': { flex: { xs: '1 1 100%', sm: '0 0 auto' } } }}>
                                     {isAdmin && (
                                         <Button
                                             variant="outlined"

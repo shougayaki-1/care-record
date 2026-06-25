@@ -15,6 +15,8 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SyncAltIcon from '@mui/icons-material/SyncAlt'; 
 import KeyIcon from '@mui/icons-material/Key';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
@@ -37,6 +39,8 @@ type AccountProfile = {
 export default function AccountsPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
   const [isFetching, setIsFetching] = useState(true);
   const [accountList, setAccountList] = useState<AccountProfile[]>([]);
@@ -220,21 +224,63 @@ export default function AccountsPage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <InnerPageHeader icon={<KeyIcon />} title="アカウント(権限)管理" />
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
         <Box maxWidth="lg" mx="auto">
-            <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
-                <Box>
+            <Paper variant="outlined" sx={{ p: { xs: 0, sm: 2 }, mb: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
+                <Box sx={{ minWidth: 0 }}>
                     <Typography variant="subtitle1" fontWeight="bold" color="text.primary">システムログインアカウント</Typography>
                     <Typography variant="caption" color="text.secondary">アプリにログインできるユーザーと、その権限を管理します。</Typography>
                 </Box>
                 {canManageAccounts && (
-                  <AppButton startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); setNewInviteName(''); setSelectedRoleIds([]); }}>
+                  <AppButton startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); setNewInviteName(''); setSelectedRoleIds([]); }} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>
                       新しい人を招待
                   </AppButton>
                 )}
             </Paper>
 
-            <TableContainer component={Paper} variant="outlined">
+            {isMobile && (
+                <Stack spacing={1.5}>
+                    {isFetching ? (
+                        <Paper variant="outlined" sx={{ py: 4, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Paper>
+                    ) : accountList.length === 0 ? (
+                        <Paper variant="outlined" sx={{ py: 4, px: 2, textAlign: 'center', color: 'text.secondary' }}>アカウントがありません</Paper>
+                    ) : accountList.map((account) => (
+                        <Paper key={account.id} variant="outlined" sx={{ p: 1.5 }}>
+                            <Stack spacing={1.25}>
+                                <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
+                                    <Box minWidth={0}>
+                                        <Typography variant="subtitle2" fontWeight={account.id === currentUserId ? 'bold' : 'normal'} sx={{ color: account.status === 'invited' ? 'text.secondary' : 'text.primary', overflowWrap: 'anywhere' }}>
+                                            {account.name} {account.id === currentUserId && <Typography component="span" variant="caption" color="primary" ml={0.5}>(あなた)</Typography>}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.disabled" display="block" sx={{ overflowWrap: 'anywhere' }}>
+                                            {account.status === 'invited' ? '未登録' : (account.email || 'メールアドレス非公開')}
+                                        </Typography>
+                                    </Box>
+                                    {(canManageAccounts || account.id === currentUserId) && (
+                                        <IconButton size="small" onClick={(e) => handleMenuOpen(e, account)} sx={{ flexShrink: 0 }}>
+                                            <MoreVertIcon fontSize="small" />
+                                        </IconButton>
+                                    )}
+                                </Box>
+                                <Box display="flex" gap={0.75} flexWrap="wrap">
+                                    {account.role === 'owner' ? (
+                                        <Chip label="オーナー" size="small" color="primary" variant="filled" sx={{ fontWeight: 'bold' }} />
+                                    ) : account.roles && account.roles.length > 0 ? (
+                                        account.roles.map((r) => (
+                                            <Chip key={r.id} label={r.name} size="small" variant="outlined" sx={{ borderColor: r.color ?? undefined, color: r.color ?? undefined }} />
+                                        ))
+                                    ) : (
+                                        <Chip label="一般" size="small" color="default" variant="outlined" />
+                                    )}
+                                    <Chip label={account.status === 'active' ? '有効' : '招待中'} color={account.status === 'active' ? 'success' : 'warning'} size="small" variant="filled" />
+                                </Box>
+                            </Stack>
+                        </Paper>
+                    ))}
+                </Stack>
+            )}
+
+            <TableContainer component={Paper} variant="outlined" sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
                 <Table>
                     <TableHead sx={{ bgcolor: 'background.tint' }}>
                         <TableRow>

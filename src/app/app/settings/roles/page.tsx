@@ -59,7 +59,7 @@ export default function RolesPage() {
 
   if (currentOrg?.role !== 'owner') {
     return (
-      <Box p={3}>
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
         <Typography>この機能はオーナーのみ利用できます。</Typography>
       </Box>
     );
@@ -126,8 +126,8 @@ export default function RolesPage() {
   };
 
   return (
-    <Box p={3} maxWidth={900}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
+    <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 900 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} mb={3} spacing={1.5}>
         <Typography variant="h5">ロール管理</Typography>
         <Button startIcon={<AddIcon />} variant="contained" onClick={openCreate}>
           ロールを作成

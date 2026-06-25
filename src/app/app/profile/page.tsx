@@ -151,12 +151,12 @@ export default function ProfilePage() {
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <InnerPageHeader icon={<AccountCircleIcon />} title="アカウント設定" />
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
                 <Container maxWidth="sm">
                     {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
                     <Stack spacing={3}>
-                        <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, textAlign: 'center' }}>
+                        <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, textAlign: 'center' }}>
                             <Box position="relative" display="inline-block" mb={2}>
                                 <Avatar 
                                     src={avatarUrl || undefined} 
