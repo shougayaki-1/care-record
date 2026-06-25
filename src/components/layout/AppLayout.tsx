@@ -437,10 +437,7 @@ const NavDrawer = ({
               {navButton('スタッフ(名簿)管理', <BadgeIcon fontSize="small" />, '/app/staff')}
 
               {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'accounts')) && (
-                navButton('アカウント(権限)管理', <KeyIcon fontSize="small" />, '/app/accounts')
-              )}
-              {currentOrg.role === 'owner' && (
-                navButton('ロール管理', <SettingsIcon fontSize="small" />, '/app/settings/roles')
+                navButton('アカウント・権限管理', <KeyIcon fontSize="small" />, '/app/accounts')
               )}
               {navButton('統計・予実管理', <AssessmentIcon fontSize="small" />, '/app/statistics')}
             </List>

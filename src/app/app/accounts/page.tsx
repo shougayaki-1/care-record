@@ -5,7 +5,7 @@ import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Chip, Button, TextField, Stack,
   IconButton, Select, MenuItem, FormControl, InputLabel, Menu, Alert, ListItemIcon,
-  CircularProgress, Divider,
+  CircularProgress, Divider, Tabs, Tab,
 } from '@/components/ui/mui';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -23,6 +23,7 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { createInvitation, getAccountOverview, getOrgRoles, updateAccountRole, updateMemberRoles, removeAccount } from '@/app/actions/accounts';
 import { AppButton, AppDialog, InnerPageHeader } from '@/components/ui';
 import { checkManagementPermission } from '@/utils/permissions';
+import RoleManagementPanel from '@/components/roles/RoleManagementPanel';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -43,6 +44,7 @@ export default function AccountsPage() {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
   const [isFetching, setIsFetching] = useState(true);
+  const [activeTab, setActiveTab] = useState<'accounts' | 'roles'>('accounts');
   const [accountList, setAccountList] = useState<AccountProfile[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>('');
   
@@ -219,13 +221,25 @@ export default function AccountsPage() {
 
   if (wsLoading || !currentOrg) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
   const canManageAccounts = currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'accounts');
+  const canManageRoles = currentOrg.role === 'owner';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <InnerPageHeader icon={<KeyIcon />} title="アカウント(権限)管理" />
+      <InnerPageHeader icon={<KeyIcon />} title="アカウント・権限管理" />
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
         <Box maxWidth="lg" mx="auto">
+          {canManageRoles && (
+            <Paper variant="outlined" sx={{ mb: 2, px: { xs: 1, sm: 2 }, borderRadius: 2 }}>
+              <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} variant="scrollable" allowScrollButtonsMobile>
+                <Tab label="アカウント" value="accounts" />
+                <Tab label="ロール" value="roles" />
+              </Tabs>
+            </Paper>
+          )}
+
+          {activeTab === 'accounts' && (
+            <>
             <Paper variant="outlined" sx={{ p: { xs: 0, sm: 2 }, mb: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
                 <Box sx={{ minWidth: 0 }}>
                     <Typography variant="subtitle1" fontWeight="bold" color="text.primary">システムログインアカウント</Typography>
@@ -359,6 +373,12 @@ export default function AccountsPage() {
                     </TableBody>
                 </Table>
             </TableContainer>
+            </>
+          )}
+
+          {activeTab === 'roles' && canManageRoles && (
+            <RoleManagementPanel embedded onRolesChanged={fetchData} />
+          )}
         </Box>
       </Box>
 
