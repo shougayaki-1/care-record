@@ -28,6 +28,7 @@ import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/ap
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getGoogleAuthUrlAction } from '@/app/actions/google';
+import LaborPremiumSettings from '@/components/settings/LaborPremiumSettings';
 
 type AuditLog = {
     id: string;
@@ -547,6 +548,17 @@ function SettingsContent() {
                                     )}
                                 </Box>
                             </Paper>
+
+                            {/* 労働時間ルール */}
+                            {(currentOrg.role === 'owner' || currentOrg.role === 'manager') && (
+                                <Paper variant="outlined" sx={{ p: 4, borderRadius: 3 }}>
+                                    <Typography variant="h6" fontWeight="bold" gutterBottom>労働時間ルール</Typography>
+                                    <Typography variant="body2" color="text.secondary" mb={2}>
+                                        深夜割り増し・時間外割り増しなどの種別と計算方法を管理します。
+                                    </Typography>
+                                    <LaborPremiumSettings orgId={currentOrg.id} />
+                                </Paper>
+                            )}
 
                             {/* 危険な設定 */}
                             <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, borderColor: 'error.light', bgcolor: 'background.danger' }}>

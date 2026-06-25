@@ -1,0 +1,333 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import {
+  Box, Typography, Stack, Chip, Switch, Button, CircularProgress, Alert,
+  Table, TableBody, TableCell, TableHead, TableRow, Dialog, DialogTitle,
+  DialogContent, DialogActions, TextField, Select, MenuItem, FormControl,
+  InputLabel,
+} from '@/components/ui/mui';
+import { getLaborPremiumTypes, updateLaborPremiumType, createLaborPremiumType, disableLaborPremiumType } from '@/app/actions/laborPremium';
+import type { LaborPremiumType } from '@/utils/laborPremium';
+
+type PremiumRow = LaborPremiumType & { display_order: number };
+
+interface EditState {
+  name: string;
+  ratePercent: string; // shown as %, stored as decimal on save
+  calc_method: 'additive' | 'multiplicative';
+  night_start_hour: string;
+  night_end_hour: string;
+  overtime_daily_threshold_hours: string;
+  overtime_weekly_threshold_hours: string;
+}
+
+const defaultEditState = (): EditState => ({
+  name: '',
+  ratePercent: '25',
+  calc_method: 'additive',
+  night_start_hour: '22',
+  night_end_hour: '5',
+  overtime_daily_threshold_hours: '8',
+  overtime_weekly_threshold_hours: '40',
+});
+
+function rowToEditState(row: PremiumRow): EditState {
+  return {
+    name: row.name,
+    ratePercent: String(Math.round(row.rate * 100)),
+    calc_method: row.calc_method,
+    night_start_hour: row.night_start_hour != null ? String(row.night_start_hour) : '22',
+    night_end_hour: row.night_end_hour != null ? String(row.night_end_hour) : '5',
+    overtime_daily_threshold_hours: row.overtime_daily_threshold_hours != null ? String(row.overtime_daily_threshold_hours) : '8',
+    overtime_weekly_threshold_hours: row.overtime_weekly_threshold_hours != null ? String(row.overtime_weekly_threshold_hours) : '40',
+  };
+}
+
+export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
+  const [rows, setRows] = useState<PremiumRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Edit dialog
+  const [editTarget, setEditTarget] = useState<PremiumRow | null>(null);
+  const [editState, setEditState] = useState<EditState>(defaultEditState());
+  const [editOpen, setEditOpen] = useState(false);
+
+  // Add dialog
+  const [addOpen, setAddOpen] = useState(false);
+  const [addState, setAddState] = useState<EditState>(defaultEditState());
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getLaborPremiumTypes(orgId);
+      setRows(data as PremiumRow[]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '取得に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleToggleEnabled = async (row: PremiumRow) => {
+    try {
+      if (row.is_enabled) {
+        await disableLaborPremiumType(orgId, row.id);
+      } else {
+        await updateLaborPremiumType(orgId, row.id, { is_enabled: true });
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '更新に失敗しました');
+    }
+  };
+
+  const handleEditOpen = (row: PremiumRow) => {
+    setEditTarget(row);
+    setEditState(rowToEditState(row));
+    setEditOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editTarget) return;
+    setSaving(true);
+    try {
+      const patch: Parameters<typeof updateLaborPremiumType>[2] = {
+        name: editState.name,
+        rate: parseFloat(editState.ratePercent) / 100,
+        calc_method: editState.calc_method,
+      };
+      if (editTarget.builtin_type === 'night' || editTarget.builtin_type === 'custom') {
+        patch.night_start_hour = parseInt(editState.night_start_hour);
+        patch.night_end_hour = parseInt(editState.night_end_hour);
+      }
+      if (editTarget.builtin_type === 'overtime') {
+        patch.overtime_daily_threshold_hours = parseFloat(editState.overtime_daily_threshold_hours);
+        patch.overtime_weekly_threshold_hours = parseFloat(editState.overtime_weekly_threshold_hours);
+      }
+      await updateLaborPremiumType(orgId, editTarget.id, patch);
+      setEditOpen(false);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '更新に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddSave = async () => {
+    setSaving(true);
+    try {
+      await createLaborPremiumType(orgId, {
+        name: addState.name,
+        rate: parseFloat(addState.ratePercent) / 100,
+        calc_method: addState.calc_method,
+        night_start_hour: parseInt(addState.night_start_hour),
+        night_end_hour: parseInt(addState.night_end_hour),
+      });
+      setAddOpen(false);
+      setAddState(defaultEditState());
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '追加に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const calcMethodLabel = (m: string) => m === 'additive' ? '加算' : '乗算';
+
+  if (loading) return <Box py={3} textAlign="center"><CircularProgress size={24} /></Box>;
+
+  return (
+    <Box>
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
+
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>種別名</TableCell>
+            <TableCell align="right">率</TableCell>
+            <TableCell>計算方法</TableCell>
+            <TableCell>有効</TableCell>
+            <TableCell />
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow><TableCell colSpan={5} align="center">設定なし</TableCell></TableRow>
+          ) : (
+            rows.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell>{row.name}</TableCell>
+                <TableCell align="right">{Math.round(row.rate * 100)}%</TableCell>
+                <TableCell>
+                  <Chip size="small" label={calcMethodLabel(row.calc_method)} />
+                </TableCell>
+                <TableCell>
+                  <Switch
+                    checked={row.is_enabled}
+                    onChange={() => handleToggleEnabled(row)}
+                    size="small"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Button size="small" onClick={() => handleEditOpen(row)}>編集</Button>
+                </TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+
+      <Box mt={2}>
+        <Button variant="outlined" size="small" onClick={() => { setAddState(defaultEditState()); setAddOpen(true); }}>
+          種別を追加
+        </Button>
+      </Box>
+
+      {/* Edit Dialog */}
+      <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>割り増し種別を編集</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} mt={1}>
+            <TextField
+              label="種別名"
+              value={editState.name}
+              onChange={(e) => setEditState(s => ({ ...s, name: e.target.value }))}
+              fullWidth size="small"
+            />
+            <TextField
+              label="割り増し率 (%)"
+              type="number"
+              value={editState.ratePercent}
+              onChange={(e) => setEditState(s => ({ ...s, ratePercent: e.target.value }))}
+              fullWidth size="small"
+              inputProps={{ min: 0, step: 1 }}
+            />
+            <FormControl fullWidth size="small">
+              <InputLabel>計算方法</InputLabel>
+              <Select
+                label="計算方法"
+                value={editState.calc_method}
+                onChange={(e) => setEditState(s => ({ ...s, calc_method: e.target.value as 'additive' | 'multiplicative' }))}
+              >
+                <MenuItem value="additive">加算 (additive)</MenuItem>
+                <MenuItem value="multiplicative">乗算 (multiplicative)</MenuItem>
+              </Select>
+            </FormControl>
+            {(editTarget?.builtin_type === 'night' || editTarget?.builtin_type === 'custom') && (
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="深夜開始 (時)"
+                  type="number"
+                  value={editState.night_start_hour}
+                  onChange={(e) => setEditState(s => ({ ...s, night_start_hour: e.target.value }))}
+                  size="small"
+                  inputProps={{ min: 0, max: 23 }}
+                />
+                <TextField
+                  label="深夜終了 (時)"
+                  type="number"
+                  value={editState.night_end_hour}
+                  onChange={(e) => setEditState(s => ({ ...s, night_end_hour: e.target.value }))}
+                  size="small"
+                  inputProps={{ min: 0, max: 23 }}
+                />
+              </Stack>
+            )}
+            {editTarget?.builtin_type === 'overtime' && (
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="日次閾値 (h)"
+                  type="number"
+                  value={editState.overtime_daily_threshold_hours}
+                  onChange={(e) => setEditState(s => ({ ...s, overtime_daily_threshold_hours: e.target.value }))}
+                  size="small"
+                  inputProps={{ min: 0, step: 0.5 }}
+                />
+                <TextField
+                  label="週次閾値 (h)"
+                  type="number"
+                  value={editState.overtime_weekly_threshold_hours}
+                  onChange={(e) => setEditState(s => ({ ...s, overtime_weekly_threshold_hours: e.target.value }))}
+                  size="small"
+                  inputProps={{ min: 0, step: 1 }}
+                />
+              </Stack>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditOpen(false)}>キャンセル</Button>
+          <Button variant="contained" onClick={handleEditSave} disabled={saving || !editState.name}>
+            {saving ? '保存中...' : '保存'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add Dialog */}
+      <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>割り増し種別を追加</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} mt={1}>
+            <TextField
+              label="種別名"
+              value={addState.name}
+              onChange={(e) => setAddState(s => ({ ...s, name: e.target.value }))}
+              fullWidth size="small"
+            />
+            <TextField
+              label="割り増し率 (%)"
+              type="number"
+              value={addState.ratePercent}
+              onChange={(e) => setAddState(s => ({ ...s, ratePercent: e.target.value }))}
+              fullWidth size="small"
+              inputProps={{ min: 0, step: 1 }}
+            />
+            <FormControl fullWidth size="small">
+              <InputLabel>計算方法</InputLabel>
+              <Select
+                label="計算方法"
+                value={addState.calc_method}
+                onChange={(e) => setAddState(s => ({ ...s, calc_method: e.target.value as 'additive' | 'multiplicative' }))}
+              >
+                <MenuItem value="additive">加算 (additive)</MenuItem>
+                <MenuItem value="multiplicative">乗算 (multiplicative)</MenuItem>
+              </Select>
+            </FormControl>
+            <Stack direction="row" spacing={1}>
+              <TextField
+                label="深夜開始 (時)"
+                type="number"
+                value={addState.night_start_hour}
+                onChange={(e) => setAddState(s => ({ ...s, night_start_hour: e.target.value }))}
+                size="small"
+                inputProps={{ min: 0, max: 23 }}
+              />
+              <TextField
+                label="深夜終了 (時)"
+                type="number"
+                value={addState.night_end_hour}
+                onChange={(e) => setAddState(s => ({ ...s, night_end_hour: e.target.value }))}
+                size="small"
+                inputProps={{ min: 0, max: 23 }}
+              />
+            </Stack>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddOpen(false)}>キャンセル</Button>
+          <Button variant="contained" onClick={handleAddSave} disabled={saving || !addState.name}>
+            {saving ? '追加中...' : '追加'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}

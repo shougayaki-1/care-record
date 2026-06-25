@@ -11,6 +11,7 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
+import { aggregatePremiumMinutes, type LaborPremiumType } from '@/utils/laborPremium';
 
 type ShiftStaffData = { staff_id: string; staffs: { name: string } | null; };
 type ShiftData = { 
@@ -47,6 +48,7 @@ export default function StatisticsPage() {
 
     const [rawShifts, setRawShifts] = useState<ShiftData[]>([]);
     const [rawReports, setRawReports] = useState<ReportData[]>([]);
+    const [premiumTypes, setPremiumTypes] = useState<LaborPremiumType[]>([]);
 
     const fetchStatisticsData = useCallback(async () => {
         if (!currentOrg || !targetMonth) return;
@@ -97,6 +99,15 @@ export default function StatisticsPage() {
 
             setRawShifts((shiftsData as unknown as ShiftData[]) || []);
             setRawReports((reportsData as unknown as ReportData[]) || []);
+
+            // 割り増し種別を取得
+            const { data: rawPremiumTypes } = await supabase
+                .from('labor_premium_types')
+                .select('*')
+                .eq('organization_id', currentOrg.id)
+                .eq('is_enabled', true)
+                .order('display_order');
+            setPremiumTypes((rawPremiumTypes ?? []) as LaborPremiumType[]);
         } catch (error) {
             console.error(error);
             showToast('データの取得に失敗しました', 'error');
@@ -110,19 +121,25 @@ export default function StatisticsPage() {
     }, [wsLoading, currentOrg, fetchStatisticsData]);
 
     const aggregatedData = useMemo(() => {
-        if (!targetMonth) return [];
+        if (!targetMonth) return { rows: [], premiumMinsPerStaff: {} };
 
         const [yearStr, monthStr] = targetMonth.split('-');
         const monthStart = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, 1, 0, 0, 0);
         const monthEnd = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10), 0, 23, 59, 59, 999);
 
         const statsMap: Record<string, AggregatedRow> = {};
+        // Per-staff actual report slots for premium calculation (staff tab only)
+        const staffReportsMap: Record<string, Array<{ start_at: string; end_at: string }>> = {};
 
         const addHours = (name: string, type: 'planned' | 'actual', hours: number) => {
             if (!name) return;
             if (!statsMap[name]) statsMap[name] = { name, plannedHours: 0, actualHours: 0 };
             if (type === 'planned') statsMap[name].plannedHours += hours;
             else statsMap[name].actualHours += hours;
+        };
+        const addStaffReport = (name: string, start_at: string, end_at: string) => {
+            if (!name) return;
+            (staffReportsMap[name] ??= []).push({ start_at, end_at });
         };
 
         // ① 単発シフトの集計 (予定時間)
@@ -175,15 +192,21 @@ export default function StatisticsPage() {
                 }
                 if (tabIndex === 0) {
                     const actualHelpers = dataObj?._helpers || [];
-                    
+
                     if (Array.isArray(actualHelpers) && actualHelpers.length > 0) {
                         actualHelpers.forEach(helperName => {
-                            if (helperName) addHours(String(helperName), 'actual', actualHours);
+                            if (helperName) {
+                                addHours(String(helperName), 'actual', actualHours);
+                                addStaffReport(String(helperName), report.start_at, report.end_at);
+                            }
                         });
                     } else if (report.helper?.name) {
                         // 古いデータなどで _helpers がない場合のフォールバック
                         const fallbackName = Array.isArray(report.helper) ? report.helper[0]?.name : report.helper.name;
-                        if (fallbackName) addHours(fallbackName, 'actual', actualHours);
+                        if (fallbackName) {
+                            addHours(fallbackName, 'actual', actualHours);
+                            addStaffReport(fallbackName, report.start_at, report.end_at);
+                        }
                     } else {
                         addHours('未設定(担当者不明)', 'actual', actualHours);
                     }
@@ -191,19 +214,37 @@ export default function StatisticsPage() {
             }
         });
 
-        return Object.values(statsMap).sort((a, b) => a.name.localeCompare(b.name));
-    }, [rawShifts, rawReports, targetMonth, tabIndex]);
+        const rows = Object.values(statsMap).sort((a, b) => a.name.localeCompare(b.name));
+
+        // Compute premium minutes per staff (staff tab only)
+        const premiumMinsPerStaff: Record<string, Record<string, number>> = {};
+        if (tabIndex === 0) {
+            for (const staffName of Object.keys(staffReportsMap)) {
+                premiumMinsPerStaff[staffName] = aggregatePremiumMinutes(premiumTypes, staffReportsMap[staffName]);
+            }
+        }
+
+        return { rows, premiumMinsPerStaff };
+    }, [rawShifts, rawReports, targetMonth, tabIndex, premiumTypes]);
 
     const handleExportCSV = () => {
-        const header = ['氏名', '予定時間(h)', '実績時間(h)', '差異(h)'];
-        const rows = aggregatedData.map(row => [
-            `"${row.name}"`,
-            row.plannedHours.toFixed(2),
-            row.actualHours.toFixed(2),
-            (row.actualHours - row.plannedHours).toFixed(2)
-        ]);
+        const { rows: aggRows, premiumMinsPerStaff } = aggregatedData;
+        const premiumHeaders = tabIndex === 0 ? premiumTypes.map(t => `${t.name}(h)`) : [];
+        const header = ['氏名', '予定時間(h)', '実績時間(h)', '差異(h)', ...premiumHeaders];
+        const csvRows = aggRows.map(row => {
+            const premiumCells = tabIndex === 0
+                ? premiumTypes.map(t => ((premiumMinsPerStaff[row.name]?.[t.id] ?? 0) / 60).toFixed(2))
+                : [];
+            return [
+                `"${row.name}"`,
+                row.plannedHours.toFixed(2),
+                row.actualHours.toFixed(2),
+                (row.actualHours - row.plannedHours).toFixed(2),
+                ...premiumCells,
+            ];
+        });
 
-        const csvContent = '\uFEFF' + [header.join(','), ...rows.map(r => r.join(','))].join('\n');
+        const csvContent = '\uFEFF' + [header.join(','), ...csvRows.map(r => r.join(','))].join('\n');
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
@@ -231,7 +272,7 @@ export default function StatisticsPage() {
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={3} spacing={2}>
                     <TextField type="month" label="対象月" size="small" slotProps={{ inputLabel: { shrink: true } }} value={targetMonth} onChange={(e) => setTargetMonth(e.target.value)} sx={{ bgcolor: 'background.paper', minWidth: 200 }} />
-                    <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || aggregatedData.length === 0} sx={{ bgcolor: 'background.paper' }}>CSVダウンロード</Button>
+                    <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || aggregatedData.rows.length === 0} sx={{ bgcolor: 'background.paper' }}>CSVダウンロード</Button>
                 </Stack>
 
                 <Paper sx={{ p: 0, minHeight: 400, borderRadius: 3, overflow: 'hidden', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
@@ -244,11 +285,14 @@ export default function StatisticsPage() {
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>予定時間 (h)</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>実績時間 (h)</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>差異 (h)</TableCell>
+                                        {tabIndex === 0 && premiumTypes.map(t => (
+                                            <TableCell key={t.id} align="right" sx={{ fontWeight: 'bold' }}>{t.name}(h)</TableCell>
+                                        ))}
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                    {aggregatedData.length === 0 ? <TableRow><TableCell colSpan={4} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow> : (
-                                        aggregatedData.map((row, i) => {
+                                    {aggregatedData.rows.length === 0 ? <TableRow><TableCell colSpan={4 + (tabIndex === 0 ? premiumTypes.length : 0)} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow> : (
+                                        aggregatedData.rows.map((row, i) => {
                                             const diff = row.actualHours - row.plannedHours;
                                             const isAlert = diff < -2 || diff > 2; // ±2時間以上で赤字
                                             return (
@@ -257,6 +301,11 @@ export default function StatisticsPage() {
                                                     <TableCell align="right">{row.plannedHours.toFixed(2)}</TableCell>
                                                     <TableCell align="right" sx={{ fontWeight: 'bold', color: 'primary.main' }}>{row.actualHours.toFixed(2)}</TableCell>
                                                     <TableCell align="right" sx={{ color: isAlert ? 'error.main' : 'inherit', fontWeight: isAlert ? 'bold' : 'normal' }}>{diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}</TableCell>
+                                                    {tabIndex === 0 && premiumTypes.map(t => (
+                                                        <TableCell key={t.id} align="right">
+                                                            {((aggregatedData.premiumMinsPerStaff[row.name]?.[t.id] ?? 0) / 60).toFixed(1)}
+                                                        </TableCell>
+                                                    ))}
                                                 </TableRow>
                                             );
                                         })
