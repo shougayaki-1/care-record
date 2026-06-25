@@ -3,7 +3,7 @@
 import { google, calendar_v3 } from 'googleapis';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 import { rrulestr } from 'rrule';
-import { supabaseAdmin, assertOrgRole, assertResourceOrgRole } from '@/utils/supabase/auth';
+import { supabaseAdmin, assertOrgRole, assertOrgPermission, assertResourceOrgPermission } from '@/utils/supabase/auth';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
@@ -23,13 +23,13 @@ async function assertShiftsAccessible(shiftIds: string[]): Promise<void> {
 
     const orgIds = Array.from(new Set((data || []).map(s => s.organization_id)));
     for (const orgId of orgIds) {
-        await assertOrgRole(orgId, ['owner', 'manager']);
+        await assertOrgPermission(orgId, 'staffs');
     }
 }
 
 async function softDeleteShiftIds(organizationId: string, shiftIds: string[], reason: string) {
     if (shiftIds.length === 0) return;
-    const actor = await assertOrgRole(organizationId, ['owner', 'manager']);
+    const actor = await assertOrgPermission(organizationId, 'staffs');
     const policy = await getRetentionPolicy(organizationId, 'shift');
     const { error } = await supabaseAdmin.from('shifts').update({
         deleted_at: new Date().toISOString(), deleted_by: actor.userId,
@@ -514,7 +514,7 @@ async function processShiftsSequential(
  * UIの「同期ステータス」表示やバッチ同期のループ制御に使用する。
  */
 export async function getSyncStatus(organizationId: string) {
-    await assertOrgRole(organizationId, ['owner', 'manager']);
+    await assertOrgPermission(organizationId, 'staffs');
     const { data: orgData } = await supabaseAdmin
         .from('organizations')
         .select('google_calendar_id, google_refresh_token')
@@ -642,7 +642,7 @@ export type RepairGoogleCalendarSyncOptions = {
 };
 
 export async function repairGoogleCalendarSync(organizationId: string, options: RepairGoogleCalendarSyncOptions = {}) {
-    await assertOrgRole(organizationId, ['owner', 'manager']);
+    await assertOrgPermission(organizationId, 'staffs');
     const limit = options.limit && Number.isInteger(options.limit) ? Math.min(Math.max(options.limit, 1), 5000) : 5000;
 
     const { data: orgData } = await supabaseAdmin
@@ -761,7 +761,7 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
 
 // 認可チェックを伴う公開アクション
 export async function createShift(payload: ShiftPayload, awaitSync: boolean | 'skip' = true) {
-    const actor = await assertOrgRole(payload.organizationId, ['owner', 'manager']);
+    const actor = await assertOrgPermission(payload.organizationId, 'staffs');
     const result = await createShiftInternal(payload, awaitSync);
     await recordAuditEvent({ organizationId: payload.organizationId, actorId: actor.userId, action: 'shift.create', resourceType: 'shift', resourceId: result.shiftId });
     return result;
@@ -805,7 +805,7 @@ async function createShiftInternal(payload: ShiftPayload, awaitSync: boolean | '
 
 // 認可チェックを伴う公開アクション
 export async function updateShift(shiftId: string, payload: Partial<ShiftPayload>, awaitSync: boolean | 'skip' = true) {
-    const actor = await assertResourceOrgRole('shifts', shiftId, ['owner', 'manager']);
+    const actor = await assertResourceOrgPermission('shifts', shiftId, 'staffs');
     const { organizationId } = actor;
     if (payload.organizationId && payload.organizationId !== organizationId) {
         throw new Error('シフトの事業所は変更できません');
@@ -862,7 +862,7 @@ async function updateShiftInternal(shiftId: string, payload: Partial<ShiftPayloa
 }
 
 export async function updateShiftTimeOnly(shiftId: string, startAt: string, endAt: string) {
-    const actor = await assertResourceOrgRole('shifts', shiftId, ['owner', 'manager']);
+    const actor = await assertResourceOrgPermission('shifts', shiftId, 'staffs');
     try {
         await supabaseAdmin.from('shifts').update({
             start_at: startAt,
@@ -882,7 +882,7 @@ export async function updateShiftTimeOnly(shiftId: string, startAt: string, endA
 }
 
 export async function toggleCancelShift(shiftId: string, isCancel: boolean, reason: string = '') {
-    const actor = await assertResourceOrgRole('shifts', shiftId, ['owner', 'manager']);
+    const actor = await assertResourceOrgPermission('shifts', shiftId, 'staffs');
     try {
         const status = isCancel ? 'cancelled' : 'published';
         const cancelReason = isCancel ? reason : null;
@@ -955,7 +955,7 @@ export async function getShiftPatterns(organizationId: string) {
 }
 
 export async function createShiftPattern(payload: ShiftPatternPayload) {
-    const actor = await assertOrgRole(payload.organizationId, ['owner', 'manager']);
+    const actor = await assertOrgPermission(payload.organizationId, 'staffs');
     const { data: pattern, error } = await supabaseAdmin.from('shift_patterns').insert({
         organization_id: payload.organizationId, client_id: payload.clientId, title: payload.title,
         start_time: payload.startTime, end_time: payload.endTime, rrule: payload.rrule
@@ -971,7 +971,7 @@ export async function createShiftPattern(payload: ShiftPatternPayload) {
 }
 
 export async function updateShiftPattern(patternId: string, payload: ShiftPatternPayload) {
-    const actor = await assertResourceOrgRole('shift_patterns', patternId, ['owner', 'manager']);
+    const actor = await assertResourceOrgPermission('shift_patterns', patternId, 'staffs');
     try {
         const { error } = await supabaseAdmin.from('shift_patterns').update({
             client_id: payload.clientId,
@@ -1003,7 +1003,7 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
  */
 export async function deleteShiftsBatch(organizationId: string, shiftIds: string[]) {
     if (!shiftIds || shiftIds.length === 0) return { success: true, deleted: 0, failed: 0, errorKind: undefined as SyncErrorKind | undefined, ...emptyGoogleSyncStats() };
-    await assertOrgRole(organizationId, ['owner', 'manager']);
+    await assertOrgPermission(organizationId, 'staffs');
     await assertShiftsAccessible(shiftIds);
     try {
         const { data: shifts } = await supabaseAdmin
@@ -1028,7 +1028,7 @@ export async function deleteShiftsBatch(organizationId: string, shiftIds: string
 }
 
 export async function deleteShiftPattern(patternId: string) {
-    const actor = await assertResourceOrgRole('shift_patterns', patternId, ['owner', 'manager']);
+    const actor = await assertResourceOrgPermission('shift_patterns', patternId, 'staffs');
     const policy = await getRetentionPolicy(actor.organizationId, 'shift');
     const { error } = await supabaseAdmin.from('shift_patterns').update({ deleted_at: new Date().toISOString(),
         deleted_by: actor.userId, retention_until: retentionDeadline(policy.years) }).eq('id', patternId).is('deleted_at', null);
@@ -1096,7 +1096,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
  * ひな形から対象月のシフトを一括生成する
  */
 export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
-    await assertOrgRole(organizationId, ['owner', 'manager']);
+    await assertOrgPermission(organizationId, 'staffs');
     const [year, month] = yearMonth.split('-').map(Number);
     const lastDayNum = new Date(year, month, 0).getDate();
 
@@ -1207,7 +1207,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
 }
 
 export async function deleteShiftCompletely(shiftId: string) {
-    const actor = await assertResourceOrgRole('shifts', shiftId, ['owner', 'manager']);
+    const actor = await assertResourceOrgPermission('shifts', shiftId, 'staffs');
     try {
         const { data: shiftData } = await supabaseAdmin
             .from('shifts')
@@ -1242,7 +1242,7 @@ export async function deleteShiftCompletely(shiftId: string) {
  * （第3引数 action に 'sync' または 'delete' を指定。デフォルトは 'sync'）
  */
 export async function syncSingleShift(organizationId: string, shiftId: string, action: 'sync' | 'delete' = 'sync') {
-    const resource = await assertResourceOrgRole('shifts', shiftId, ['owner', 'manager']);
+    const resource = await assertResourceOrgPermission('shifts', shiftId, 'staffs');
     if (resource.organizationId !== organizationId) {
         throw new Error('指定された事業所のシフトではありません');
     }
@@ -1265,7 +1265,7 @@ export async function deleteShiftsDbOnly(shiftIds: string[]) {
         const grouped = new Map<string, { id: string }[]>();
         for (const shift of shifts || []) grouped.set(shift.organization_id, [...(grouped.get(shift.organization_id) || []), { id: shift.id }]);
         for (const [orgId, ids] of grouped) {
-            const actor = await assertOrgRole(orgId, ['owner', 'manager']);
+            const actor = await assertOrgPermission(orgId, 'staffs');
             const policy = await getRetentionPolicy(orgId, 'shift');
             const targets = (ids || []).map((shift) => shift.id);
             const { error } = await supabaseAdmin.from('shifts').update({

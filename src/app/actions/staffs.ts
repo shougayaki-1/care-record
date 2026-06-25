@@ -3,7 +3,7 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertOrgRole, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgRole, assertOrgPermission, assertOwner, supabaseAdmin } from '@/utils/supabase/auth';
 
 const EMPLOYMENT_TYPES = ['常勤', '非常勤'] as const;
 const WORK_STYLES = ['兼務', '専従'] as const;
@@ -57,7 +57,7 @@ export async function saveStaff(
     linkedUserId?: string | null;
   },
 ) {
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'staffs');
   const normalized = normalizeStaffInput(values.name, values.positions, values.employmentType, values.workStyle);
   const linkedUserId = values.linkedUserId || null;
   await validateLinkedUser(organizationId, linkedUserId, values.staffId);
@@ -83,7 +83,7 @@ export async function saveStaff(
 }
 
 export async function setStaffArchived(organizationId: string, staffId: string, archived: boolean) {
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'staffs');
   await assertStaffOrg(staffId, organizationId);
   const { error } = await supabaseAdmin.from('staffs').update({ archived_at: archived ? new Date().toISOString() : null }).eq('id', staffId);
   if (error) throw sanitizeDbError(error, 'action.staffs');
@@ -92,7 +92,7 @@ export async function setStaffArchived(organizationId: string, staffId: string, 
 }
 
 export async function softDeleteStaff(organizationId: string, staffId: string, reason: string) {
-  const { userId } = await assertOrgRole(organizationId, ['owner']);
+  const { userId } = await assertOwner(organizationId);
   await assertStaffOrg(staffId, organizationId);
   const normalizedReason = reason.trim();
   if (normalizedReason.length < 2 || normalizedReason.length > 500) throw new Error('削除理由を2〜500文字で入力してください');
@@ -112,7 +112,7 @@ export async function softDeleteStaff(organizationId: string, staffId: string, r
 }
 
 export async function reorderStaffs(organizationId: string, staffIds: string[]) {
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'staffs');
   const ids = Array.from(new Set(staffIds.filter(Boolean)));
   if (ids.length !== staffIds.length || ids.length > 500) throw new Error('並び順が不正です');
   const { data } = await supabaseAdmin.from('staffs').select('id').eq('organization_id', organizationId).in('id', ids).is('deleted_at', null);

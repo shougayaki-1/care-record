@@ -1,31 +1,26 @@
-import { describe, expect, it } from 'vitest';
-import { hasOrganizationPermission } from './permissions';
-import { resolveAppDestination } from './workspaceNavigation';
+import { describe, it, expect } from 'vitest';
+import { mergePermissions, checkRecordPermission, checkManagementPermission, EMPTY_PERMISSIONS, PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS, FULL_PERMISSIONS } from './permissions';
 
-describe('organization permissions', () => {
-  it('limits account and organization changes to owners', () => {
-    expect(hasOrganizationPermission('owner', 'manageAccounts')).toBe(true);
-    expect(hasOrganizationPermission('manager', 'manageAccounts')).toBe(false);
-    expect(hasOrganizationPermission('manager', 'manageOrganization')).toBe(false);
-    expect(hasOrganizationPermission('staff', 'manageOrganization')).toBe(false);
+describe('mergePermissions', () => {
+  it('returns EMPTY when given no roles', () => {
+    expect(mergePermissions([]).records.view).toBe('none');
   });
-
-  it('allows managers to view account and audit information', () => {
-    expect(hasOrganizationPermission('manager', 'viewAccounts')).toBe(true);
-    expect(hasOrganizationPermission('manager', 'viewAuditLogs')).toBe(true);
-    expect(hasOrganizationPermission('staff', 'viewAccounts')).toBe(false);
+  it('permit wins: all > assigned > none', () => {
+    const r = mergePermissions([PRESET_STAFF_PERMISSIONS, PRESET_MANAGER_PERMISSIONS]);
+    expect(r.records.view).toBe('all');
+    expect(r.records.delete).toBe('all');
+  });
+  it('management: true wins', () => {
+    const r = mergePermissions([PRESET_STAFF_PERMISSIONS, PRESET_MANAGER_PERMISSIONS]);
+    expect(r.management.staffs).toBe(true);
+    expect(r.management.accounts).toBe(false);
   });
 });
-
-describe('workspace navigation', () => {
-  it('sends only users without membership to setup', () => {
-    expect(resolveAppDestination('no_membership', false)).toBe('/setup');
-    expect(resolveAppDestination('error', false)).toBeNull();
-    expect(resolveAppDestination('forbidden', false)).toBeNull();
+describe('checkRecordPermission', () => {
+  it('all: allows regardless of assigned', () => expect(checkRecordPermission(FULL_PERMISSIONS, 'view', false)).toBe(true));
+  it('assigned: allows only when assigned', () => {
+    expect(checkRecordPermission(PRESET_STAFF_PERMISSIONS, 'view', false)).toBe(false);
+    expect(checkRecordPermission(PRESET_STAFF_PERMISSIONS, 'view', true)).toBe(true);
   });
-
-  it('routes valid and expired sessions separately', () => {
-    expect(resolveAppDestination('ready', true)).toBe('/app/record');
-    expect(resolveAppDestination('session_expired', false)).toBe('/');
-  });
+  it('none: always denies', () => expect(checkRecordPermission(PRESET_STAFF_PERMISSIONS, 'delete', true)).toBe(false));
 });

@@ -3,7 +3,7 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertOrgRole, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgRole, assertOrgPermission, assertOwner, supabaseAdmin } from '@/utils/supabase/auth';
 
 async function assertClientOrg(clientId: string, organizationId: string) {
   const { data, error } = await supabaseAdmin
@@ -25,7 +25,7 @@ function normalizeName(name: string) {
 }
 
 export async function createClient(organizationId: string, name: string) {
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'clients');
   const { data, error } = await supabaseAdmin
     .from('clients')
     .insert({ organization_id: organizationId, name: normalizeName(name) })
@@ -37,7 +37,7 @@ export async function createClient(organizationId: string, name: string) {
 }
 
 export async function updateClientName(organizationId: string, clientId: string, name: string) {
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'clients');
   await assertClientOrg(clientId, organizationId);
   const normalized = normalizeName(name);
   const { error } = await supabaseAdmin.from('clients').update({ name: normalized }).eq('id', clientId);
@@ -47,7 +47,7 @@ export async function updateClientName(organizationId: string, clientId: string,
 }
 
 export async function setClientArchived(organizationId: string, clientId: string, archived: boolean) {
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'clients');
   await assertClientOrg(clientId, organizationId);
   const { error } = await supabaseAdmin.from('clients').update({ archived_at: archived ? new Date().toISOString() : null }).eq('id', clientId);
   if (error) throw sanitizeDbError(error, 'action.clients');
@@ -62,7 +62,7 @@ export async function setClientArchived(organizationId: string, clientId: string
 }
 
 export async function softDeleteClient(organizationId: string, clientId: string, reason: string) {
-  const { userId } = await assertOrgRole(organizationId, ['owner']);
+  const { userId } = await assertOwner(organizationId);
   const client = await assertClientOrg(clientId, organizationId);
   if (!client.archived_at) throw new Error('完全削除の前に利用者をアーカイブしてください');
   const normalizedReason = reason.trim();
@@ -90,7 +90,7 @@ export async function softDeleteClient(organizationId: string, clientId: string,
 }
 
 export async function saveClientForm(organizationId: string, clientId: string, schema: unknown[]) {
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'clients');
   await assertClientOrg(clientId, organizationId);
   if (!Array.isArray(schema) || schema.length > 200 || JSON.stringify(schema).length > 1_000_000) {
     throw new Error('フォーム設定が不正、または大きすぎます');
@@ -120,7 +120,7 @@ export async function saveClientAssignments(
   clientId: string,
   staffIds: string[],
 ) {
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'clients');
   await assertClientOrg(clientId, organizationId);
   if (staffIds.length > 200) throw new Error('担当者数が多すぎます');
   const uniqueStaffIds = Array.from(new Set(staffIds.filter(Boolean)));
@@ -164,7 +164,7 @@ export async function updateClientGoogleLink(
   clientId: string,
   values: { folderId?: string | null; templateId?: string | null },
 ) {
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'clients');
   await assertClientOrg(clientId, organizationId);
   const update: Record<string, string | null> = {};
   if ('folderId' in values) update.google_folder_id = values.folderId?.trim() || null;

@@ -1,150 +1,124 @@
-import type { OrgRole } from '@/utils/supabase/auth';
+// src/utils/permissions.ts
+// フレキシブルロール権限の型定義とユーティリティ関数
 
-export const ROLE_PERMISSIONS = {
-  viewManagement: ['owner', 'manager'],
-  viewReports: ['owner', 'manager'],
-  manageClients: ['owner', 'manager'],
-  manageStaffs: ['owner', 'manager'],
-  manageShifts: ['owner', 'manager'],
-  viewAccounts: ['owner', 'manager'],
-  manageAccounts: ['owner'],
-  viewAuditLogs: ['owner', 'manager'],
-  manageOrganization: ['owner'],
-  manageIntegrations: ['owner'],
-  approveReports: ['owner', 'manager'],
-} as const satisfies Record<string, readonly OrgRole[]>;
-
-export type OrganizationPermission = keyof typeof ROLE_PERMISSIONS;
-
-export function hasOrganizationPermission(role: OrgRole, permission: OrganizationPermission): boolean {
-  return (ROLE_PERMISSIONS[permission] as readonly OrgRole[]).includes(role);
-}
-
-export type PermissionScope = 'all' | 'assigned' | 'none';
+export type RecordScope = 'all' | 'assigned' | 'none';
+export type RecordAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
+export type ShiftAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
+export type ManagementArea = 'staffs' | 'clients' | 'accounts' | 'organization' | 'integrations' | 'auditLogs' | 'reports';
 
 export type RolePermissions = {
-  records: {
-    view:    PermissionScope;
-    create:  PermissionScope;
-    edit:    PermissionScope;
-    delete:  'all' | 'none';
-    approve: 'all' | 'none';
-  };
-  shifts: {
-    view:    PermissionScope;
-    create:  PermissionScope;
-    edit:    PermissionScope;
-    delete:  'all' | 'none';
-    approve: 'all' | 'none';
-  };
-  management: {
-    staffs:       boolean;
-    clients:      boolean;
-    accounts:     boolean;
-    organization: boolean;
-    integrations: boolean;
-    auditLogs:    boolean;
-    reports:      boolean;
-  };
+  records: Record<RecordAction, RecordScope>;
+  shifts: Record<ShiftAction, RecordScope>;
+  management: Record<ManagementArea, boolean>;
 };
 
-export type ManagementArea = keyof RolePermissions['management'];
-export type RecordAction = keyof RolePermissions['records'];
-export type ShiftAction = keyof RolePermissions['shifts'];
+// ─── 定数 ────────────────────────────────────────────────────────────────────
 
 export const EMPTY_PERMISSIONS: RolePermissions = {
-  records:    { view: 'none', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
-  shifts:     { view: 'none', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
-  management: { staffs: false, clients: false, accounts: false, organization: false, integrations: false, auditLogs: false, reports: false },
-};
-
-export const PRESET_MANAGER_PERMISSIONS: RolePermissions = {
-  records:    { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
-  shifts:     { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
-  management: { staffs: true, clients: true, accounts: false, organization: false, integrations: false, auditLogs: true, reports: true },
-};
-
-export const PRESET_STAFF_PERMISSIONS: RolePermissions = {
-  records:    { view: 'assigned', create: 'assigned', edit: 'assigned', delete: 'none', approve: 'none' },
-  shifts:     { view: 'assigned', create: 'none',     edit: 'none',     delete: 'none', approve: 'none' },
+  records: { view: 'none', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
+  shifts:  { view: 'none', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
   management: { staffs: false, clients: false, accounts: false, organization: false, integrations: false, auditLogs: false, reports: false },
 };
 
 export const FULL_PERMISSIONS: RolePermissions = {
-  records:    { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
-  shifts:     { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
+  records: { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
+  shifts:  { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
   management: { staffs: true, clients: true, accounts: true, organization: true, integrations: true, auditLogs: true, reports: true },
 };
 
-function mergeScope(scopes: PermissionScope[]): PermissionScope {
-  if (scopes.includes('all')) return 'all';
-  if (scopes.includes('assigned')) return 'assigned';
-  return 'none';
+/** 管理者プリセット */
+export const PRESET_MANAGER_PERMISSIONS: RolePermissions = {
+  records: { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
+  shifts:  { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
+  management: { staffs: true, clients: true, accounts: false, organization: false, integrations: false, auditLogs: true, reports: true },
+};
+
+/** 一般スタッフプリセット */
+export const PRESET_STAFF_PERMISSIONS: RolePermissions = {
+  records: { view: 'assigned', create: 'assigned', edit: 'assigned', delete: 'none', approve: 'none' },
+  shifts:  { view: 'assigned', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
+  management: { staffs: false, clients: false, accounts: false, organization: false, integrations: false, auditLogs: false, reports: false },
+};
+
+// ─── スコープ優先順 ───────────────────────────────────────────────────────────
+
+const SCOPE_PRIORITY: Record<RecordScope, number> = { all: 2, assigned: 1, none: 0 };
+
+function mergeScope(a: RecordScope, b: RecordScope): RecordScope {
+  return SCOPE_PRIORITY[a] >= SCOPE_PRIORITY[b] ? a : b;
 }
 
-function mergeBinary(values: ('all' | 'none')[]): 'all' | 'none' {
-  return values.includes('all') ? 'all' : 'none';
-}
+// ─── 関数 ────────────────────────────────────────────────────────────────────
 
+/**
+ * 複数ロールのパーミッションをマージする。
+ * スコープは "all > assigned > none" の優先順位で勝ちが採用される。
+ * management フラグは OR (true が勝つ)。
+ */
 export function mergePermissions(roles: RolePermissions[]): RolePermissions {
   if (roles.length === 0) return { ...EMPTY_PERMISSIONS };
 
-  return {
-    records: {
-      view:    mergeScope(roles.map(r => r.records.view)),
-      create:  mergeScope(roles.map(r => r.records.create)),
-      edit:    mergeScope(roles.map(r => r.records.edit)),
-      delete:  mergeBinary(roles.map(r => r.records.delete)),
-      approve: mergeBinary(roles.map(r => r.records.approve)),
-    },
-    shifts: {
-      view:    mergeScope(roles.map(r => r.shifts.view)),
-      create:  mergeScope(roles.map(r => r.shifts.create)),
-      edit:    mergeScope(roles.map(r => r.shifts.edit)),
-      delete:  mergeBinary(roles.map(r => r.shifts.delete)),
-      approve: mergeBinary(roles.map(r => r.shifts.approve)),
-    },
-    management: {
-      staffs:       roles.some(r => r.management.staffs),
-      clients:      roles.some(r => r.management.clients),
-      accounts:     roles.some(r => r.management.accounts),
-      organization: roles.some(r => r.management.organization),
-      integrations: roles.some(r => r.management.integrations),
-      auditLogs:    roles.some(r => r.management.auditLogs),
-      reports:      roles.some(r => r.management.reports),
-    },
+  const result: RolePermissions = {
+    records: { ...EMPTY_PERMISSIONS.records },
+    shifts: { ...EMPTY_PERMISSIONS.shifts },
+    management: { ...EMPTY_PERMISSIONS.management },
   };
+
+  for (const role of roles) {
+    for (const action of Object.keys(result.records) as RecordAction[]) {
+      result.records[action] = mergeScope(result.records[action], role.records[action]);
+    }
+    for (const action of Object.keys(result.shifts) as ShiftAction[]) {
+      result.shifts[action] = mergeScope(result.shifts[action], role.shifts[action]);
+    }
+    for (const area of Object.keys(result.management) as ManagementArea[]) {
+      result.management[area] = result.management[area] || role.management[area];
+    }
+  }
+
+  return result;
 }
 
-function scopeAllows(scope: PermissionScope, isAssigned: boolean): boolean {
+/**
+ * レコード操作の可否を判定する。
+ * @param permissions 有効権限
+ * @param action 操作種別
+ * @param isAssigned 現在のユーザーが対象クライアントに担当割り当て済みか
+ */
+export function checkRecordPermission(
+  permissions: RolePermissions,
+  action: RecordAction,
+  isAssigned: boolean
+): boolean {
+  const scope = permissions.records[action];
   if (scope === 'all') return true;
   if (scope === 'assigned') return isAssigned;
   return false;
 }
 
-export function checkRecordPermission(
-  eff: RolePermissions,
-  action: RecordAction,
-  isAssigned: boolean
-): boolean {
-  const value = eff.records[action];
-  if (value === 'all' || value === 'none') return value === 'all';
-  return scopeAllows(value, isAssigned);
-}
-
+/**
+ * シフト操作の可否を判定する。
+ * @param permissions 有効権限
+ * @param action 操作種別
+ * @param isAssigned 現在のユーザーが対象シフトに担当割り当て済みか
+ */
 export function checkShiftPermission(
-  eff: RolePermissions,
+  permissions: RolePermissions,
   action: ShiftAction,
   isAssigned: boolean
 ): boolean {
-  const value = eff.shifts[action];
-  if (value === 'all' || value === 'none') return value === 'all';
-  return scopeAllows(value, isAssigned);
+  const scope = permissions.shifts[action];
+  if (scope === 'all') return true;
+  if (scope === 'assigned') return isAssigned;
+  return false;
 }
 
+/**
+ * 管理エリアへのアクセス可否を判定する。
+ */
 export function checkManagementPermission(
-  eff: RolePermissions,
+  permissions: RolePermissions,
   area: ManagementArea
 ): boolean {
-  return eff.management[area];
+  return permissions.management[area];
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
+import { checkManagementPermission } from '@/utils/permissions';
 import { 
   Box, Typography, Paper, TextField, Button, Alert, CircularProgress, LinearProgress, Stack, Divider,
   Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow
@@ -124,7 +125,7 @@ function SettingsContent() {
 
     useEffect(() => {
         if (!wsLoading && currentOrg) {
-            if (currentOrg.role === 'staff') {
+            if (currentOrg.role !== 'owner' && !Object.values(currentOrg.effectivePermissions.management).some(Boolean)) {
                 router.push('/app');
                 return;
             }
@@ -378,7 +379,7 @@ function SettingsContent() {
                 </Stack>
                 <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
                     <Tab label="基本設定" />
-                    {currentOrg.role !== 'staff' && <Tab label="操作ログ" icon={<ListAltIcon fontSize="small" />} iconPosition="start" />}
+                    {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs')) && <Tab label="操作ログ" icon={<ListAltIcon fontSize="small" />} iconPosition="start" />}
                 </Tabs>
             </Box>
 

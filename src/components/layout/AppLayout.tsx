@@ -33,17 +33,18 @@ import { supabase } from '@/lib/supabase';
 import { markNotificationRead } from '@/app/actions/user';
 import { recordLogout } from '@/app/actions/auth';
 import IdleTimeout from '@/components/auth/IdleTimeout';
-import { hasOrganizationPermission, type OrganizationPermission } from '@/utils/permissions';
+import { checkManagementPermission, type ManagementArea } from '@/utils/permissions';
 
 const SIDEBAR_WIDTH = 256;
 
-const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; permission: OrganizationPermission }> = [
-  { prefix: '/app/accounts', permission: 'viewAccounts' },
-  { prefix: '/app/settings', permission: 'viewAuditLogs' },
-  { prefix: '/app/clients', permission: 'manageClients' },
-  { prefix: '/app/staff', permission: 'manageStaffs' },
-  { prefix: '/app/reports', permission: 'viewReports' },
-  { prefix: '/app/statistics', permission: 'viewManagement' },
+const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; area: ManagementArea | 'owner' }> = [
+  { prefix: '/app/accounts', area: 'accounts' },
+  { prefix: '/app/settings/roles', area: 'owner' },
+  { prefix: '/app/settings', area: 'auditLogs' },
+  { prefix: '/app/clients', area: 'clients' },
+  { prefix: '/app/staff', area: 'staffs' },
+  { prefix: '/app/reports', area: 'reports' },
+  { prefix: '/app/statistics', area: 'reports' },
 ];
 
 type Notification = {
@@ -313,7 +314,7 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
     return false;
   };
 
-  const isAdmin = hasOrganizationPermission(currentOrg.role, 'viewManagement');
+  const isAdmin = currentOrg.role === 'owner' || Object.values(currentOrg.effectivePermissions.management).some(Boolean);
 
   const categoryStyle = {
     px: 3, pt: 2.5, pb: 1,
@@ -429,11 +430,19 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
                 </ListItemButton>
               </ListItem>
 
-              {hasOrganizationPermission(currentOrg.role, 'viewAccounts') && (
+              {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'accounts')) && (
                 <ListItem disablePadding>
                   <ListItemButton onClick={() => handleNav('/app/accounts')} sx={itemStyle(isActive('/app/accounts'))}>
                     <ListItemIcon><KeyIcon fontSize="small" /></ListItemIcon>
                     <ListItemText primary="アカウント(権限)管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+                  </ListItemButton>
+                </ListItem>
+              )}
+              {currentOrg.role === 'owner' && (
+                <ListItem disablePadding>
+                  <ListItemButton onClick={() => handleNav('/app/settings/roles')} sx={itemStyle(isActive('/app/settings/roles'))}>
+                    <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
+                    <ListItemText primary="ロール管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
                   </ListItemButton>
                 </ListItem>
               )}
@@ -458,8 +467,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
   const { orgList, currentOrg, switchOrg } = useWorkspace();
-  const requiredPermission = PROTECTED_MANAGEMENT_ROUTES.find(({ prefix }) => pathname.startsWith(prefix))?.permission;
-  const accessDenied = Boolean(currentOrg && requiredPermission && !hasOrganizationPermission(currentOrg.role, requiredPermission));
+  const matchedRoute = PROTECTED_MANAGEMENT_ROUTES.find(({ prefix }) => pathname.startsWith(prefix));
+  const accessDenied = Boolean(
+    currentOrg && matchedRoute && !(
+      matchedRoute.area === 'owner'
+        ? currentOrg.role === 'owner'
+        : currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, matchedRoute.area as ManagementArea)
+    )
+  );
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>

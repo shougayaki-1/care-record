@@ -58,7 +58,7 @@ export async function requestReportDeletion(organizationId: string, reportId: st
 
 /** 承認待ち（およびそれ以外）の削除申請を一覧する（owner/manager）。 */
 export async function listDeletionRequests(organizationId: string, status: 'requested' | 'approved' | 'rejected' | 'completed' | 'all' = 'requested') {
-  await assertOrgRole(organizationId, ['owner', 'manager']);
+  await assertOrgRole(organizationId, ['owner', 'member']);
   let query = supabaseAdmin
     .from('deletion_requests')
     .select('*, requester:requested_by(name)')
