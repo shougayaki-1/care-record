@@ -6,13 +6,15 @@ import { supabase } from '@/lib/supabase';
 // useRouterは使用していなかったので削除
 import { CircularProgress, Box } from '@mui/material';
 import { setLastOrganization } from '@/app/actions/user';
+import { mergePermissions, FULL_PERMISSIONS, type RolePermissions } from '@/utils/permissions';
 
-export type OrganizationRole = 'owner' | 'manager' | 'staff';
+export type OrganizationRole = 'owner' | 'member';
 
 export type Workspace = {
   id: string;
   name: string;
   role: OrganizationRole;
+  effectivePermissions: RolePermissions;
 };
 
 // Supabaseからの返り値の型定義
@@ -108,12 +110,33 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         const organization = Array.isArray(member.organizations)
           ? member.organizations[0]
           : member.organizations;
-        if (!organization || !['owner', 'manager', 'staff'].includes(member.role)) {
+        const role = member.role as string;
+        if (!organization || !['owner', 'member'].includes(role)) {
           setStatus('forbidden');
           setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
           return;
         }
-        list.push({ id: organization.id, name: organization.name, role: member.role as OrganizationRole });
+
+        let effectivePermissions: RolePermissions;
+        if (role === 'owner') {
+          effectivePermissions = FULL_PERMISSIONS;
+        } else {
+          const { data: roleLinks } = await supabase
+            .from('organization_member_roles')
+            .select('organization_roles(permissions)')
+            .eq('organization_id', organization.id)
+            .eq('user_id', session.user.id);
+          const rolePerms: RolePermissions[] = (roleLinks ?? [])
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .map((r: any) => {
+              const org = Array.isArray(r.organization_roles) ? r.organization_roles[0] : r.organization_roles;
+              return org?.permissions as RolePermissions | undefined;
+            })
+            .filter((p): p is RolePermissions => p != null);
+          effectivePermissions = mergePermissions(rolePerms);
+        }
+
+        list.push({ id: organization.id, name: organization.name, role: role as OrganizationRole, effectivePermissions });
       }
 
       if (list.length === 0) {
