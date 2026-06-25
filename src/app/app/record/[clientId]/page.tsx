@@ -5,7 +5,7 @@ import {
   Box, Button, Container, Typography, TextField,
   Paper, Stack, IconButton, CircularProgress,
   Divider,
-  Tabs, Tab
+  Tabs, Tab, Alert, Chip
 } from '@/components/ui/mui';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
@@ -30,6 +30,7 @@ import {
   softDeleteReports,
   uploadReportImage,
 } from '@/app/actions/reports';
+import { getShiftSuggestions, addShiftLink, removeShiftLink, getLinkedShifts } from '@/app/actions/reportShifts';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { AppButton, AppDialog, DateTimeField, DynamicFormField, MultiSelectField } from '@/components/ui';
 
@@ -90,6 +91,9 @@ type ShiftStaffData = {
     staffs: { name: string } | null;
 };
 
+type ShiftSuggestion = { id: string; title: string | null; start_at: string; end_at: string; staffName: string | null };
+type LinkedShift = { shift_id: string; is_primary: boolean; shifts: { id: string; title: string | null; start_at: string; end_at: string; shift_staffs: Array<{ staffs: { name: string } | null }> } | null };
+
 export default function RecordPage() {
   const router = useRouter();
   const { clientId } = useParams();
@@ -124,6 +128,10 @@ export default function RecordPage() {
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+
+  const [shiftSuggestions, setShiftSuggestions] = useState<ShiftSuggestion[]>([]);
+  const [linkedShifts, setLinkedShifts] = useState<LinkedShift[]>([]);
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
 
   // 月末跨ぎ夜勤管理ステート
   const [isSpanningMonth, setIsSpanningMonth] = useState(false);
@@ -370,6 +378,14 @@ export default function RecordPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
+  useEffect(() => {
+    if (!currentReportId || !currentOrg) return;
+    void Promise.all([
+      getLinkedShifts(currentReportId).then(data => setLinkedShifts(data as LinkedShift[])),
+      getShiftSuggestions(currentOrg.id, currentReportId).then(setShiftSuggestions),
+    ]);
+  }, [currentReportId, currentOrg]);
+
   const handleChange = (setter: (val: string) => void, val: string) => { setter(val); setIsDirty(true); };
   const handleAnswerChange = (id: string, value: string | number | boolean | string[]) => {
     setAnswers(prev => ({ ...prev, [id]: value }));
@@ -554,9 +570,72 @@ export default function RecordPage() {
                 </Paper>
             )}
 
+            {shiftSuggestions
+              .filter(s => !dismissedSuggestions.has(s.id))
+              .map(suggestion => {
+                const startStr = new Date(suggestion.start_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                const endStr = new Date(suggestion.end_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                return (
+                  <Alert
+                    key={suggestion.id}
+                    severity="warning"
+                    sx={{ mb: 1 }}
+                    action={
+                      <Box display="flex" gap={1}>
+                        <Button size="small" onClick={async () => {
+                          if (!currentOrg || !currentReportId) return;
+                          try {
+                            await addShiftLink(currentOrg.id, currentReportId, suggestion.id);
+                            const [linked, suggestions] = await Promise.all([
+                              getLinkedShifts(currentReportId),
+                              getShiftSuggestions(currentOrg.id, currentReportId),
+                            ]);
+                            setLinkedShifts(linked as LinkedShift[]);
+                            setShiftSuggestions(suggestions);
+                          } catch (e) { console.error(e); showToast('シフトの紐付けに失敗しました', 'error'); }
+                        }}>紐付ける</Button>
+                        <Button size="small" onClick={() =>
+                          setDismissedSuggestions(prev => new Set([...prev, suggestion.id]))
+                        }>無視する</Button>
+                      </Box>
+                    }
+                  >
+                    {suggestion.staffName ?? 'スタッフ'}（{startStr}〜{endStr}）のシフトを紐付けますか？
+                  </Alert>
+                );
+              })}
+
+            {linkedShifts.length > 0 && (
+              <Box mb={2}>
+                <Typography variant="subtitle2" gutterBottom>担当シフト</Typography>
+                <Box display="flex" flexWrap="wrap" gap={1}>
+                  {linkedShifts.map(link => {
+                    const shift = link.shifts;
+                    if (!shift) return null;
+                    const startStr = new Date(shift.start_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                    const endStr = new Date(shift.end_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                    const staffName = shift.shift_staffs?.[0]?.staffs?.name ?? '';
+                    return (
+                      <Chip
+                        key={link.shift_id}
+                        label={`${staffName} ${startStr}〜${endStr}${link.is_primary ? ' [主]' : ''}`}
+                        onDelete={link.is_primary ? undefined : async () => {
+                          if (!currentOrg || !currentReportId) return;
+                          try {
+                            await removeShiftLink(currentOrg.id, currentReportId, link.shift_id);
+                            setLinkedShifts((await getLinkedShifts(currentReportId)) as LinkedShift[]);
+                          } catch (e) { console.error(e); showToast('シフトの解除に失敗しました', 'error'); }
+                        }}
+                      />
+                    );
+                  })}
+                </Box>
+              </Box>
+            )}
+
             <Paper variant="outlined" sx={{ p: 4, borderRadius: 3, bgcolor: 'background.paper' }}>
                 <Stack spacing={3}>
-                
+
                 <Box>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
