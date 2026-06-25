@@ -368,13 +368,20 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
 
         <Typography sx={categoryStyle}>シフト</Typography>
         <List disablePadding>
-          {/* 旧「シフト一覧(list)」と「全体シフト管理(manage)」への分岐を廃止し、統合された1つのシフトカレンダーに一本化 */}
           <ListItem disablePadding>
-            <ListItemButton onClick={() => handleNav('/app/shifts/manage')} sx={itemStyle(isActive('/app/shifts/manage'))}>
-              <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
-              <ListItemText primary="シフト管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+            <ListItemButton onClick={() => handleNav('/app/shifts/my')} sx={itemStyle(isActive('/app/shifts/my'))}>
+              <ListItemIcon><EditNoteIcon fontSize="small" /></ListItemIcon>
+              <ListItemText primary="自分のシフト" primaryTypographyProps={{ fontSize: '0.95rem' }} />
             </ListItemButton>
           </ListItem>
+          {isAdmin && (
+            <ListItem disablePadding>
+              <ListItemButton onClick={() => handleNav('/app/shifts/manage')} sx={itemStyle(isActive('/app/shifts/manage'))}>
+                <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
+                <ListItemText primary="シフト管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
+              </ListItemButton>
+            </ListItem>
+          )}
         </List>
 
         {isAdmin && (
