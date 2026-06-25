@@ -149,7 +149,7 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
     <Box>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
 
-      <Box sx={{ overflowX: 'auto' }}>
+      <Box sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
         <Table size="small" sx={{ minWidth: 520 }}>
           <TableHead>
             <TableRow>
@@ -187,6 +187,45 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
           </TableBody>
         </Table>
       </Box>
+
+      <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' } }}>
+        {rows.length === 0 ? (
+          <Box sx={{ py: 3, textAlign: 'center', color: 'text.secondary' }}>設定なし</Box>
+        ) : (
+          rows.map((row) => (
+            <Box
+              key={row.id}
+              sx={{
+                p: 1.5,
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 2,
+                bgcolor: 'background.paper',
+              }}
+            >
+              <Stack spacing={1.25}>
+                <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Box sx={{ fontWeight: 'bold', overflowWrap: 'anywhere' }}>{row.name}</Box>
+                    <Stack direction="row" spacing={1} alignItems="center" mt={0.75}>
+                      <Chip size="small" label={`${Math.round(row.rate * 100)}%`} color="primary" variant="outlined" />
+                      <Chip size="small" label={calcMethodLabel(row.calc_method)} />
+                    </Stack>
+                  </Box>
+                  <Switch
+                    checked={row.is_enabled}
+                    onChange={() => handleToggleEnabled(row)}
+                    size="small"
+                  />
+                </Stack>
+                <Button size="small" variant="outlined" onClick={() => handleEditOpen(row)} sx={{ alignSelf: 'stretch' }}>
+                  編集
+                </Button>
+              </Stack>
+            </Box>
+          ))
+        )}
+      </Stack>
 
       <Box mt={2}>
         <Button variant="outlined" size="small" onClick={() => { setAddState(defaultEditState()); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>

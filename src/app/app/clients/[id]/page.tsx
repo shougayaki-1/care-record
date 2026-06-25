@@ -374,7 +374,7 @@ export default function ClientSettingsPage() {
 
                 {tabIndex === 0 && (
                     <Box>
-                        <Box display="flex" justifyContent="flex-end" gap={1} mb={2} sx={{ flexWrap: 'wrap' }}>
+                        <Box display="flex" justifyContent="flex-end" gap={1} mb={2} sx={{ flexWrap: 'wrap', '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
                             <Button 
                                 variant="outlined" 
                                 startIcon={<ContentCopyIcon />} 
@@ -388,22 +388,29 @@ export default function ClientSettingsPage() {
                                 <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid' : 'none', borderLeftColor: 'primary.main', bgcolor: item.type === 'section' ? 'background.tint' : 'background.paper' }}>
                                     <CardContent sx={{ p: '16px !important' }}>
                                         <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2}>
-                                            <Stack direction="column" spacing={0.5}>
+                                            <Stack
+                                                direction={{ xs: 'row', md: 'column' }}
+                                                spacing={0.5}
+                                                sx={{
+                                                    width: { xs: '100%', md: 'auto' },
+                                                    justifyContent: { xs: 'space-between', md: 'flex-start' },
+                                                }}
+                                            >
                                                 <IconButton size="small" onClick={() => moveField(index, 'up')} disabled={index === 0}><ArrowUpwardIcon fontSize="small" /></IconButton>
                                                 <IconButton size="small" onClick={() => moveField(index, 'down')} disabled={index === formItems.length - 1}><ArrowDownwardIcon fontSize="small" /></IconButton>
-                                                <IconButton color="error" size="small" onClick={() => removeField(index)} sx={{ mt: 1 }}><DeleteIcon fontSize="small" /></IconButton>
+                                                <IconButton color="error" size="small" onClick={() => removeField(index)} sx={{ mt: { md: 1 } }}><DeleteIcon fontSize="small" /></IconButton>
                                             </Stack>
                                             <Box sx={{ flexGrow: 1, width: '100%' }}>
                                                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} mb={1}>
-                                                    <TextField select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ minWidth: 160 }} slotProps={{ input: { startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null } }}>
+                                                    <TextField select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ width: { xs: '100%', md: 'auto' }, minWidth: { md: 160 } }} slotProps={{ input: { startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null } }}>
                                                         <MenuItem value="section" sx={{ fontWeight: 'bold', color: 'primary.main' }}>■ セクション見出し</MenuItem>
                                                         <Divider /><MenuItem value="checkbox">チェック (ON/OFF)</MenuItem><MenuItem value="multicheckbox">複数選択</MenuItem><MenuItem value="text">テキスト入力</MenuItem><MenuItem value="number">数値入力</MenuItem><MenuItem value="select">1つ選択 (ラジオ)</MenuItem><MenuItem value="time">時間</MenuItem>
                                                     </TextField>
                                                     <TextField label={item.type === 'section' ? "セクション名" : "質問内容"} size="small" fullWidth value={item.label} onChange={(e) => updateField(index, 'label', e.target.value)} sx={{ '& .MuiInputBase-input': { fontWeight: item.type === 'section' ? 'bold' : 'normal', fontSize: item.type === 'section' ? '1.1rem' : '1rem' } }} />
-                                                    {item.type !== 'section' && <FormControlLabel control={<Switch size="small" checked={item.required} onChange={(e) => updateField(index, 'required', e.target.checked)} />} label="必須" sx={{ minWidth: 80 }} />}
+                                                    {item.type !== 'section' && <FormControlLabel control={<Switch size="small" checked={item.required} onChange={(e) => updateField(index, 'required', e.target.checked)} />} label="必須" sx={{ minWidth: 80, alignSelf: { xs: 'flex-start', md: 'center' } }} />}
                                                 </Stack>
                                                 {(item.type === 'checkbox' || item.type === 'multicheckbox' || item.type === 'select') && (
-                                                    <FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: 1 }} />
+                                                    <FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: { xs: 0, sm: 1 } }} />
                                                 )}
                                                 {(item.type === 'select' || item.type === 'multicheckbox') && (
                                                     <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={item.options || ''} onChange={(e) => updateField(index, 'options', e.target.value)} slotProps={{ input: { startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} /> } }} />
@@ -591,8 +598,8 @@ export default function ClientSettingsPage() {
                 )}
             </Box>
 
-            <Paper elevation={3} sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center', bgcolor: 'background.paper', flexShrink: 0, zIndex: 10 }}>
-                <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={() => { if (tabIndex === 0) handleSaveForm(); if (tabIndex === 1) handleSaveAssignments(); if (tabIndex === 2) handleSaveTemplateId(); }} disabled={isSaving} sx={{ minWidth: 300, fontWeight: 'bold', height: 48 }}>
+            <Paper elevation={3} sx={{ p: { xs: 1.5, sm: 2 }, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center', bgcolor: 'background.paper', flexShrink: 0, zIndex: 10 }}>
+                <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={() => { if (tabIndex === 0) handleSaveForm(); if (tabIndex === 1) handleSaveAssignments(); if (tabIndex === 2) handleSaveTemplateId(); }} disabled={isSaving} sx={{ width: { xs: '100%', sm: 'auto' }, minWidth: { sm: 300 }, fontWeight: 'bold', height: 48 }}>
                     {isSaving ? '保存中...' : '設定を保存'}
                 </Button>
             </Paper>

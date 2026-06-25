@@ -3,7 +3,7 @@
 import React from 'react';
 import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Checkbox, ToggleButton, ToggleButtonGroup, Typography, Box,
+  Checkbox, ToggleButton, ToggleButtonGroup, Typography, Box, Stack,
 } from '@/components/ui/mui';
 import type { RolePermissions, RecordScope } from '@/utils/permissions';
 
@@ -75,7 +75,7 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
 
   return (
     <Box sx={{ minWidth: 0, opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
-      <TableContainer sx={{ overflowX: 'auto' }}>
+      <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
         <Table size="small" sx={{ minWidth: 680 }}>
           <TableHead>
             <TableRow>
@@ -105,6 +105,43 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
           </TableBody>
         </Table>
       </TableContainer>
+
+      <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' } }}>
+        {(['records', 'shifts'] as const).map(resource => (
+          <Box
+            key={resource}
+            sx={{
+              p: 1.5,
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 2,
+              bgcolor: 'background.paper',
+            }}
+          >
+            <Typography variant="subtitle2" fontWeight="bold" mb={1}>
+              {resource === 'records' ? '記録' : 'シフト'}
+            </Typography>
+            <Stack spacing={1}>
+              {RECORD_ROWS.map(r => (
+                <Stack key={r.action} direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                  <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
+                    {r.label}
+                  </Typography>
+                  <ScopeToggle
+                    scope={value[resource][r.action] as RecordScope}
+                    onChange={s =>
+                      resource === 'records'
+                        ? setRecords(r.action, s)
+                        : setShifts(r.action as ShiftAction, s)
+                    }
+                    allowAssigned={r.allowAssigned}
+                  />
+                </Stack>
+              ))}
+            </Stack>
+          </Box>
+        ))}
+      </Stack>
 
       <Typography variant="subtitle2" mt={2} mb={1}>管理機能アクセス</Typography>
       <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))' }} gap={0.5}>

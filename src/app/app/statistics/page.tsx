@@ -303,7 +303,8 @@ export default function StatisticsPage() {
                 <Paper sx={{ p: 0, minHeight: 400, borderRadius: 3, overflow: 'hidden', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
                     {loading ? <Box display="flex" justifyContent="center" alignItems="center" height={300}><CircularProgress /></Box> : (
                         tabIndex < 2 ? (
-                        <TableContainer sx={{ overflowX: 'auto' }}>
+                        <>
+                        <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
                             <Table>
                                 <TableHead sx={{ bgcolor: 'background.tint' }}>
                                     <TableRow>
@@ -339,8 +340,51 @@ export default function StatisticsPage() {
                                 </TableBody>
                             </Table>
                         </TableContainer>
+                        <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' }, p: 1.5 }}>
+                            {aggregatedData.rows.length === 0 ? (
+                                <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>データがありません</Box>
+                            ) : aggregatedData.rows.map((row, i) => {
+                                const diff = row.actualHours - row.plannedHours;
+                                const isAlert = diff < -2 || diff > 2;
+                                return (
+                                    <Box key={i} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+                                        <Typography fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{row.name}</Typography>
+                                        <Box display="grid" gridTemplateColumns="repeat(3, minmax(0, 1fr))" gap={1} mt={1.5}>
+                                            <Box>
+                                                <Typography variant="caption" color="text.secondary">予定</Typography>
+                                                <Typography fontWeight="bold">{row.plannedHours.toFixed(2)}h</Typography>
+                                            </Box>
+                                            <Box>
+                                                <Typography variant="caption" color="text.secondary">実績</Typography>
+                                                <Typography fontWeight="bold" color="primary.main">{row.actualHours.toFixed(2)}h</Typography>
+                                            </Box>
+                                            <Box>
+                                                <Typography variant="caption" color="text.secondary">差異</Typography>
+                                                <Typography fontWeight={isAlert ? 'bold' : 'normal'} color={isAlert ? 'error.main' : 'text.primary'}>
+                                                    {diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}h
+                                                </Typography>
+                                            </Box>
+                                        </Box>
+                                        {tabIndex === 0 && premiumTypes.length > 0 && (
+                                            <Stack direction="row" gap={1} flexWrap="wrap" mt={1.5}>
+                                                {premiumTypes.map(t => (
+                                                    <Chip
+                                                        key={t.id}
+                                                        size="small"
+                                                        variant="outlined"
+                                                        label={`${t.name}: ${((aggregatedData.premiumMinsPerStaff[row.name]?.[t.id] ?? 0) / 60).toFixed(1)}h`}
+                                                    />
+                                                ))}
+                                            </Stack>
+                                        )}
+                                    </Box>
+                                );
+                            })}
+                        </Stack>
+                        </>
                         ) : (
-                        <TableContainer sx={{ overflowX: 'auto' }}>
+                        <>
+                        <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
                             <Table size="small">
                                 <TableHead sx={{ bgcolor: 'background.tint' }}>
                                     <TableRow>
@@ -391,6 +435,56 @@ export default function StatisticsPage() {
                                 </TableBody>
                             </Table>
                         </TableContainer>
+                        <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' }, p: 1.5 }}>
+                            {rawShiftsWithLinks.length === 0 ? (
+                                <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>データがありません</Box>
+                            ) : rawShiftsWithLinks.map(shift => {
+                                const plannedH = (new Date(shift.end_at).getTime() - new Date(shift.start_at).getTime()) / 3600000;
+                                const linked = shift.report_shifts ?? [];
+                                const actualMs = linked.reduce((sum, rs) => {
+                                    const r = rs.reports;
+                                    if (!r || !['pending', 'approved'].includes(r.status)) return sum;
+                                    return sum + new Date(r.end_at).getTime() - new Date(r.start_at).getTime();
+                                }, 0);
+                                const actualH = actualMs > 0 ? actualMs / 3600000 : null;
+                                const diffH = actualH != null ? actualH - plannedH : null;
+                                const staffNames = (shift.shift_staffs ?? []).map(s => s.staffs?.name).filter(Boolean).join('、');
+                                const startStr = new Date(shift.start_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                                const firstReport = linked.find(rs => rs.reports != null);
+                                return (
+                                    <Box key={shift.id} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+                                        <Stack spacing={1.25}>
+                                            <Box>
+                                                <Typography variant="caption" color="text.secondary">{startStr}</Typography>
+                                                <Typography fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{shift.clients?.name ?? '—'}</Typography>
+                                                <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{staffNames || '—'}</Typography>
+                                            </Box>
+                                            <Box display="grid" gridTemplateColumns="repeat(3, minmax(0, 1fr))" gap={1}>
+                                                <Box>
+                                                    <Typography variant="caption" color="text.secondary">予定</Typography>
+                                                    <Typography fontWeight="bold">{plannedH.toFixed(1)}h</Typography>
+                                                </Box>
+                                                <Box>
+                                                    <Typography variant="caption" color="text.secondary">実績</Typography>
+                                                    <Typography fontWeight="bold">{actualH != null ? `${actualH.toFixed(1)}h` : '—'}</Typography>
+                                                </Box>
+                                                <Box>
+                                                    <Typography variant="caption" color="text.secondary">差異</Typography>
+                                                    <Typography color={diffH != null && diffH < -0.1 ? 'error.main' : 'text.primary'} fontWeight={diffH != null && diffH < -0.1 ? 'bold' : 'normal'}>
+                                                        {diffH != null ? `${diffH >= 0 ? '+' : ''}${diffH.toFixed(1)}h` : '—'}
+                                                    </Typography>
+                                                </Box>
+                                            </Box>
+                                            {firstReport?.reports
+                                                ? <Button size="small" variant="outlined" href={`/app/record/${shift.client_id}?reportId=${firstReport.reports.id}`} component="a">記録を開く</Button>
+                                                : <Chip label="記録なし" size="small" color="warning" variant="outlined" sx={{ alignSelf: 'flex-start' }} />
+                                            }
+                                        </Stack>
+                                    </Box>
+                                );
+                            })}
+                        </Stack>
+                        </>
                         )
                     )}
                 </Paper>
