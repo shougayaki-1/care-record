@@ -17,6 +17,7 @@ import {
   getOrgRolesFull, createOrgRole, updateOrgRole, deleteOrgRole, resetPresetRole,
 } from '@/app/actions/roles';
 import RolePermissionsMatrix from '@/components/roles/RolePermissionsMatrix';
+import ColorPresetPicker from '@/components/roles/ColorPresetPicker';
 import type { RolePermissions } from '@/utils/permissions';
 import { EMPTY_PERMISSIONS } from '@/utils/permissions';
 
@@ -139,7 +140,7 @@ export default function RolesPage() {
         <Stack spacing={2}>
           {roles.map(role => (
             <Paper key={role.id} sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Box width={12} height={12} borderRadius="50%" bgcolor={role.color ?? 'grey.400'} flexShrink={0} />
+              <Box width={16} height={16} borderRadius="50%" bgcolor={role.color ?? 'grey.400'} flexShrink={0} />
               <Typography fontWeight="medium" flex={1}>{role.name}</Typography>
               {role.is_preset && <Chip label="プリセット" size="small" variant="outlined" />}
               <Stack direction="row" spacing={0.5}>
@@ -173,25 +174,18 @@ export default function RolesPage() {
         fullWidth
       >
         <Stack spacing={2} p={1}>
-          <Stack direction="row" spacing={2} alignItems="flex-end">
-            <TextField
-              label="ロール名"
-              value={formName}
-              onChange={e => setFormName(e.target.value)}
-              required
-              fullWidth
-              size="small"
-            />
-            <Box>
-              <Typography variant="caption" display="block">カラー</Typography>
-              <input
-                type="color"
-                value={formColor}
-                onChange={e => setFormColor(e.target.value)}
-                style={{ display: 'block', width: 48, height: 36, cursor: 'pointer', border: 'none' }}
-              />
-            </Box>
-          </Stack>
+          <TextField
+            label="ロール名"
+            value={formName}
+            onChange={e => setFormName(e.target.value)}
+            required
+            fullWidth
+            size="small"
+          />
+          <Box>
+            <Typography variant="caption" display="block" mb={0.5}>カラー</Typography>
+            <ColorPresetPicker value={formColor} onChange={setFormColor} />
+          </Box>
           <RolePermissionsMatrix value={formPerms} onChange={setFormPerms} />
           <Stack direction="row" justifyContent="flex-end" spacing={1}>
             <Button onClick={() => { setIsNew(false); setEditRole(null); }}>キャンセル</Button>
