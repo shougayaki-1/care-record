@@ -26,6 +26,8 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import KeyIcon from '@mui/icons-material/Key';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -294,7 +296,12 @@ const TopAppBar = ({
 };
 
 // 左ナビゲーション（Google 風：白基調・丸ピルの選択スタイル）
-const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onClose?: () => void }) => {
+const NavDrawer = ({ currentOrg, onClose, sidebarOpen, toggleSidebar }: {
+  currentOrg: Workspace | null;
+  onClose?: () => void;
+  sidebarOpen: boolean;
+  toggleSidebar: () => void;
+}) => {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -325,9 +332,11 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
 
   // Google（Gmail）風の丸ピル選択スタイル
   const itemStyle = (active: boolean) => ({
-    mx: 1.5,
+    mx: sidebarOpen ? 1.5 : 0.5,
     my: 0.25,
     borderRadius: '24px',
+    justifyContent: sidebarOpen ? 'flex-start' : 'center',
+    minHeight: 48,
     color: active ? 'primary.main' : 'text.primary',
     bgcolor: active ? (t: Theme) => alpha(t.palette.primary.main, 0.12) : 'transparent',
     fontWeight: active ? 600 : 500,
@@ -336,132 +345,167 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
     },
     '& .MuiListItemIcon-root': {
       color: active ? 'primary.main' : 'text.secondary',
-      minWidth: 36
+      minWidth: sidebarOpen ? 36 : 'unset',
+      justifyContent: 'center',
     }
   });
 
   return (
     <Box sx={{
-      width: SIDEBAR_WIDTH,
+      width: '100%',
       bgcolor: 'background.paper',
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      overflowY: 'auto'
+      overflowY: 'auto',
+      overflowX: 'hidden',
     }}>
       <Box sx={{ flexGrow: 1, py: 1 }}>
-        <Typography sx={categoryStyle}>記録</Typography>
+        {sidebarOpen && <Typography sx={categoryStyle}>記録</Typography>}
         <List disablePadding>
           <ListItem disablePadding>
-            <ListItemButton onClick={() => handleNav('/app/record')} sx={itemStyle(isActive('/app/record'))}>
-              <ListItemIcon><EditNoteIcon fontSize="small" /></ListItemIcon>
-              <ListItemText primary="記録を作成" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-            </ListItemButton>
+            <Tooltip title={sidebarOpen ? '' : '記録を作成'} placement="right">
+              <ListItemButton onClick={() => handleNav('/app/record')} sx={itemStyle(isActive('/app/record'))}>
+                <ListItemIcon><EditNoteIcon fontSize="small" /></ListItemIcon>
+                {sidebarOpen && <ListItemText primary="記録を作成" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+              </ListItemButton>
+            </Tooltip>
           </ListItem>
           <ListItem disablePadding>
-            <ListItemButton onClick={() => handleNav('/app/history')} sx={itemStyle(isActive('/app/history'))}>
-              <ListItemIcon><HistoryIcon fontSize="small" /></ListItemIcon>
-              <ListItemText primary="自分の履歴" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-            </ListItemButton>
+            <Tooltip title={sidebarOpen ? '' : '自分の履歴'} placement="right">
+              <ListItemButton onClick={() => handleNav('/app/history')} sx={itemStyle(isActive('/app/history'))}>
+                <ListItemIcon><HistoryIcon fontSize="small" /></ListItemIcon>
+                {sidebarOpen && <ListItemText primary="自分の履歴" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+              </ListItemButton>
+            </Tooltip>
           </ListItem>
         </List>
 
-        <Typography sx={categoryStyle}>シフト</Typography>
+        {sidebarOpen && <Typography sx={categoryStyle}>シフト</Typography>}
         <List disablePadding>
           <ListItem disablePadding>
-            <ListItemButton onClick={() => handleNav('/app/shifts/my')} sx={itemStyle(isActive('/app/shifts/my'))}>
-              <ListItemIcon><EditNoteIcon fontSize="small" /></ListItemIcon>
-              <ListItemText primary="自分のシフト" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-            </ListItemButton>
+            <Tooltip title={sidebarOpen ? '' : '自分のシフト'} placement="right">
+              <ListItemButton onClick={() => handleNav('/app/shifts/my')} sx={itemStyle(isActive('/app/shifts/my'))}>
+                <ListItemIcon><EditNoteIcon fontSize="small" /></ListItemIcon>
+                {sidebarOpen && <ListItemText primary="自分のシフト" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+              </ListItemButton>
+            </Tooltip>
           </ListItem>
           {isAdmin && (
             <ListItem disablePadding>
-              <ListItemButton onClick={() => handleNav('/app/shifts/manage')} sx={itemStyle(isActive('/app/shifts/manage'))}>
-                <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
-                <ListItemText primary="シフト管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-              </ListItemButton>
+              <Tooltip title={sidebarOpen ? '' : 'シフト管理'} placement="right">
+                <ListItemButton onClick={() => handleNav('/app/shifts/manage')} sx={itemStyle(isActive('/app/shifts/manage'))}>
+                  <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
+                  {sidebarOpen && <ListItemText primary="シフト管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+                </ListItemButton>
+              </Tooltip>
             </ListItem>
           )}
         </List>
 
         {isAdmin && (
           <>
-            <Box onClick={() => setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: 'pointer', '&:hover': { color: 'text.primary' } }}>
-              提供記録一覧
-              {openReports ? <ExpandLess fontSize="small" sx={{ ml: 'auto' }} /> : <ExpandMore fontSize="small" sx={{ ml: 'auto' }} />}
-            </Box>
-            <Collapse in={openReports} timeout="auto" unmountOnExit>
+            {sidebarOpen && (
+              <Box onClick={() => setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: 'pointer', '&:hover': { color: 'text.primary' } }}>
+                提供記録一覧
+                {openReports ? <ExpandLess fontSize="small" sx={{ ml: 'auto' }} /> : <ExpandMore fontSize="small" sx={{ ml: 'auto' }} />}
+              </Box>
+            )}
+            <Collapse in={sidebarOpen && openReports} timeout="auto" unmountOnExit>
               <List disablePadding>
                 <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/reports')} sx={itemStyle(isActive('/app/reports'))}>
-                    <ListItemIcon><TagIcon fontSize="small" /></ListItemIcon>
-                    <ListItemText primary="全件表示" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
+                  <Tooltip title={sidebarOpen ? '' : '全件表示'} placement="right">
+                    <ListItemButton onClick={() => handleNav('/app/reports')} sx={itemStyle(isActive('/app/reports'))}>
+                      <ListItemIcon><TagIcon fontSize="small" /></ListItemIcon>
+                      {sidebarOpen && <ListItemText primary="全件表示" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+                    </ListItemButton>
+                  </Tooltip>
                 </ListItem>
                 <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/reports?status=unapproved')} sx={itemStyle(isActive('/app/reports', { key: 'status', val: 'unapproved' }))}>
-                    <ListItemIcon><WarningAmberIcon fontSize="small" color="warning" /></ListItemIcon>
-                    <ListItemText primary="未承認・差戻し" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
+                  <Tooltip title={sidebarOpen ? '' : '未承認・差戻し'} placement="right">
+                    <ListItemButton onClick={() => handleNav('/app/reports?status=unapproved')} sx={itemStyle(isActive('/app/reports', { key: 'status', val: 'unapproved' }))}>
+                      <ListItemIcon><WarningAmberIcon fontSize="small" color="warning" /></ListItemIcon>
+                      {sidebarOpen && <ListItemText primary="未承認・差戻し" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+                    </ListItemButton>
+                  </Tooltip>
                 </ListItem>
                 <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/reports?period=current_month')} sx={itemStyle(isActive('/app/reports', { key: 'period', val: 'current_month' }))}>
-                    <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
-                    <ListItemText primary="今月の記録" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
+                  <Tooltip title={sidebarOpen ? '' : '今月の記録'} placement="right">
+                    <ListItemButton onClick={() => handleNav('/app/reports?period=current_month')} sx={itemStyle(isActive('/app/reports', { key: 'period', val: 'current_month' }))}>
+                      <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
+                      {sidebarOpen && <ListItemText primary="今月の記録" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+                    </ListItemButton>
+                  </Tooltip>
                 </ListItem>
               </List>
             </Collapse>
 
-            <Typography sx={categoryStyle}>管理</Typography>
+            {sidebarOpen && <Typography sx={categoryStyle}>管理</Typography>}
             <List disablePadding>
               {isAdmin && (
                 <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/settings')} sx={itemStyle(isActive('/app/settings'))}>
-                    <ListItemIcon><BusinessIcon fontSize="small" /></ListItemIcon>
-                    <ListItemText primary="事業所設定" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
+                  <Tooltip title={sidebarOpen ? '' : '事業所設定'} placement="right">
+                    <ListItemButton onClick={() => handleNav('/app/settings')} sx={itemStyle(isActive('/app/settings'))}>
+                      <ListItemIcon><BusinessIcon fontSize="small" /></ListItemIcon>
+                      {sidebarOpen && <ListItemText primary="事業所設定" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+                    </ListItemButton>
+                  </Tooltip>
                 </ListItem>
               )}
 
               <ListItem disablePadding>
-                <ListItemButton onClick={() => handleNav('/app/clients')} sx={itemStyle(isActive('/app/clients'))}>
-                  <ListItemIcon><PeopleIcon fontSize="small" /></ListItemIcon>
-                  <ListItemText primary="利用者管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                </ListItemButton>
+                <Tooltip title={sidebarOpen ? '' : '利用者管理'} placement="right">
+                  <ListItemButton onClick={() => handleNav('/app/clients')} sx={itemStyle(isActive('/app/clients'))}>
+                    <ListItemIcon><PeopleIcon fontSize="small" /></ListItemIcon>
+                    {sidebarOpen && <ListItemText primary="利用者管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+                  </ListItemButton>
+                </Tooltip>
               </ListItem>
               <ListItem disablePadding>
-                <ListItemButton onClick={() => handleNav('/app/staff')} sx={itemStyle(isActive('/app/staff'))}>
-                  <ListItemIcon><BadgeIcon fontSize="small" /></ListItemIcon>
-                  <ListItemText primary="スタッフ(名簿)管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                </ListItemButton>
+                <Tooltip title={sidebarOpen ? '' : 'スタッフ(名簿)管理'} placement="right">
+                  <ListItemButton onClick={() => handleNav('/app/staff')} sx={itemStyle(isActive('/app/staff'))}>
+                    <ListItemIcon><BadgeIcon fontSize="small" /></ListItemIcon>
+                    {sidebarOpen && <ListItemText primary="スタッフ(名簿)管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+                  </ListItemButton>
+                </Tooltip>
               </ListItem>
 
               {(currentOrg.role === 'owner' || checkManagementPermission(currentOrg.effectivePermissions, 'accounts')) && (
                 <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/accounts')} sx={itemStyle(isActive('/app/accounts'))}>
-                    <ListItemIcon><KeyIcon fontSize="small" /></ListItemIcon>
-                    <ListItemText primary="アカウント(権限)管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
+                  <Tooltip title={sidebarOpen ? '' : 'アカウント(権限)管理'} placement="right">
+                    <ListItemButton onClick={() => handleNav('/app/accounts')} sx={itemStyle(isActive('/app/accounts'))}>
+                      <ListItemIcon><KeyIcon fontSize="small" /></ListItemIcon>
+                      {sidebarOpen && <ListItemText primary="アカウント(権限)管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+                    </ListItemButton>
+                  </Tooltip>
                 </ListItem>
               )}
               {currentOrg.role === 'owner' && (
                 <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/settings/roles')} sx={itemStyle(isActive('/app/settings/roles'))}>
-                    <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
-                    <ListItemText primary="ロール管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
+                  <Tooltip title={sidebarOpen ? '' : 'ロール管理'} placement="right">
+                    <ListItemButton onClick={() => handleNav('/app/settings/roles')} sx={itemStyle(isActive('/app/settings/roles'))}>
+                      <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
+                      {sidebarOpen && <ListItemText primary="ロール管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+                    </ListItemButton>
+                  </Tooltip>
                 </ListItem>
               )}
               <ListItem disablePadding>
-                <ListItemButton onClick={() => handleNav('/app/statistics')} sx={itemStyle(isActive('/app/statistics'))}>
-                  <ListItemIcon><AssessmentIcon fontSize="small" /></ListItemIcon>
-                  <ListItemText primary="統計・予実管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                </ListItemButton>
+                <Tooltip title={sidebarOpen ? '' : '統計・予実管理'} placement="right">
+                  <ListItemButton onClick={() => handleNav('/app/statistics')} sx={itemStyle(isActive('/app/statistics'))}>
+                    <ListItemIcon><AssessmentIcon fontSize="small" /></ListItemIcon>
+                    {sidebarOpen && <ListItemText primary="統計・予実管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />}
+                  </ListItemButton>
+                </Tooltip>
               </ListItem>
             </List>
           </>
         )}
+      </Box>
+      <Box sx={{ p: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+        <IconButton onClick={toggleSidebar} sx={{ width: '100%', borderRadius: '24px' }}>
+          {sidebarOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
+        </IconButton>
       </Box>
     </Box>
   );
@@ -473,7 +517,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const { orgList, currentOrg, switchOrg } = useWorkspace();
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setSidebarOpen(localStorage.getItem('sidebarOpen') !== 'false');
+    }
+  }, []);
+
+  const toggleSidebar = () => {
+    setSidebarOpen(prev => {
+      const next = !prev;
+      localStorage.setItem('sidebarOpen', String(next));
+      return next;
+    });
+  };
   const matchedRoute = PROTECTED_MANAGEMENT_ROUTES.find(({ prefix }) => pathname.startsWith(prefix));
   const accessDenied = Boolean(
     currentOrg && matchedRoute && !(
@@ -497,14 +556,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
         {/* デスクトップ：常時表示のナビ */}
         <Box sx={{
-          width: SIDEBAR_WIDTH,
+          width: sidebarOpen ? 256 : 72,
           flexShrink: 0,
           display: { xs: 'none', md: 'block' },
           borderRight: '1px solid',
           borderColor: 'divider',
-          height: '100%'
+          height: '100%',
+          transition: 'width 0.2s ease',
+          overflow: 'hidden',
         }}>
-          <NavDrawer currentOrg={currentOrg} />
+          <NavDrawer currentOrg={currentOrg} sidebarOpen={sidebarOpen} toggleSidebar={toggleSidebar} />
         </Box>
 
         {/* モバイル：一時的なドロワー */}
@@ -513,9 +574,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           open={mobileOpen}
           onClose={() => setMobileOpen(false)}
           ModalProps={{ keepMounted: true }}
-          sx={{ display: { xs: 'block', md: 'none' }, '& .MuiDrawer-paper': { width: SIDEBAR_WIDTH } }}
+          sx={{ display: { xs: 'block', md: 'none' }, '& .MuiDrawer-paper': { width: 256 } }}
         >
-          <NavDrawer currentOrg={currentOrg} onClose={() => setMobileOpen(false)} />
+          <NavDrawer currentOrg={currentOrg} onClose={() => setMobileOpen(false)} sidebarOpen={true} toggleSidebar={() => {}} />
         </Drawer>
 
         <Box
