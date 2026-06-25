@@ -7,8 +7,12 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
 import { decodeJwtSessionId } from '@/utils/jwt';
+import {
+  mergePermissions, FULL_PERMISSIONS,
+  type RolePermissions, type ManagementArea,
+} from '@/utils/permissions';
 
-export type OrgRole = 'owner' | 'manager' | 'staff';
+export type OrgRole = 'owner' | 'member';
 export const SESSION_IDLE_MINUTES = 16;
 export const SESSION_ABSOLUTE_HOURS = 12;
 
@@ -164,7 +168,7 @@ export async function getAuthedUserFromAccessToken(
  */
 export async function assertOrgRole(
     organizationId: string,
-    allowedRoles: OrgRole[] = ['owner', 'manager', 'staff']
+    allowedRoles: OrgRole[] = ['owner', 'member']
 ): Promise<{ userId: string; role: OrgRole }> {
     if (!organizationId) throw new Error('organizationId が不正です');
     const user = await getAuthedUser();
@@ -190,7 +194,7 @@ export async function assertOrgRole(
 export async function assertResourceOrgRole(
     table: string,
     resourceId: string,
-    allowedRoles: OrgRole[] = ['owner', 'manager', 'staff']
+    allowedRoles: OrgRole[] = ['owner', 'member']
 ): Promise<{ organizationId: string; userId: string; role: OrgRole }> {
     if (!resourceId) throw new Error('リソースIDが不正です');
     const { data, error } = await supabaseAdmin
@@ -218,4 +222,66 @@ export async function assertSuperAdmin(): Promise<{ userId: string }> {
         throw new Error('管理者権限が必要です');
     }
     return { userId: user.id };
+}
+
+/**
+ * 組織メンバーの有効な権限を返す。
+ * オーナーは FULL_PERMISSIONS。メンバーは割り当てられたロールをマージして返す。
+ */
+export async function getEffectivePermissions(
+  organizationId: string,
+  userId: string
+): Promise<{ isOwner: boolean; permissions: RolePermissions }> {
+  const { data: member, error } = await supabaseAdmin
+    .from('organization_members')
+    .select('role')
+    .eq('organization_id', organizationId)
+    .eq('user_id', userId)
+    .single();
+  if (error || !member) throw new Error('この事業所へのアクセス権がありません');
+  if (member.role === 'owner') return { isOwner: true, permissions: FULL_PERMISSIONS };
+
+  const { data: roleLinks } = await supabaseAdmin
+    .from('organization_member_roles')
+    .select('organization_roles(permissions)')
+    .eq('organization_id', organizationId)
+    .eq('user_id', userId);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rolePerms: RolePermissions[] = (roleLinks ?? [])
+    .map((r: any) => (Array.isArray(r.organization_roles) ? r.organization_roles[0]?.permissions : r.organization_roles?.permissions) as RolePermissions | undefined)
+    .filter((p): p is RolePermissions => p != null);
+
+  return { isOwner: false, permissions: mergePermissions(rolePerms) };
+}
+
+/**
+ * セッションのユーザーが対象 org の指定管理エリアへの権限を持つか検証する。
+ * 満たさなければ例外。
+ */
+export async function assertOrgPermission(
+  organizationId: string,
+  area: ManagementArea
+): Promise<{ userId: string; isOwner: boolean }> {
+  if (!organizationId) throw new Error('organizationId が不正です');
+  const user = await getAuthedUser();
+  const { isOwner, permissions } = await getEffectivePermissions(organizationId, user.id);
+  if (!isOwner && !permissions.management[area]) throw new Error('この操作を行う権限がありません');
+  return { userId: user.id, isOwner };
+}
+
+/**
+ * セッションのユーザーが対象 org のオーナーか検証する。満たさなければ例外。
+ */
+export async function assertOwner(organizationId: string): Promise<{ userId: string }> {
+  if (!organizationId) throw new Error('organizationId が不正です');
+  const user = await getAuthedUser();
+  const { data: member, error } = await supabaseAdmin
+    .from('organization_members')
+    .select('role')
+    .eq('organization_id', organizationId)
+    .eq('user_id', user.id)
+    .single();
+  if (error || !member || member.role !== 'owner') throw new Error('オーナー権限が必要です');
+  return { userId: user.id };
 }
