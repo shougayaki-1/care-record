@@ -584,13 +584,15 @@ export default function RecordPage() {
                       <Box display="flex" gap={1}>
                         <Button size="small" onClick={async () => {
                           if (!currentOrg || !currentReportId) return;
-                          await addShiftLink(currentOrg.id, currentReportId, suggestion.id);
-                          const [linked, suggestions] = await Promise.all([
-                            getLinkedShifts(currentReportId),
-                            getShiftSuggestions(currentOrg.id, currentReportId),
-                          ]);
-                          setLinkedShifts(linked as LinkedShift[]);
-                          setShiftSuggestions(suggestions);
+                          try {
+                            await addShiftLink(currentOrg.id, currentReportId, suggestion.id);
+                            const [linked, suggestions] = await Promise.all([
+                              getLinkedShifts(currentReportId),
+                              getShiftSuggestions(currentOrg.id, currentReportId),
+                            ]);
+                            setLinkedShifts(linked as LinkedShift[]);
+                            setShiftSuggestions(suggestions);
+                          } catch (e) { console.error(e); showToast('シフトの紐付けに失敗しました', 'error'); }
                         }}>紐付ける</Button>
                         <Button size="small" onClick={() =>
                           setDismissedSuggestions(prev => new Set([...prev, suggestion.id]))
@@ -619,8 +621,10 @@ export default function RecordPage() {
                         label={`${staffName} ${startStr}〜${endStr}${link.is_primary ? ' [主]' : ''}`}
                         onDelete={link.is_primary ? undefined : async () => {
                           if (!currentOrg || !currentReportId) return;
-                          await removeShiftLink(currentOrg.id, currentReportId, link.shift_id);
-                          setLinkedShifts((await getLinkedShifts(currentReportId)) as LinkedShift[]);
+                          try {
+                            await removeShiftLink(currentOrg.id, currentReportId, link.shift_id);
+                            setLinkedShifts((await getLinkedShifts(currentReportId)) as LinkedShift[]);
+                          } catch (e) { console.error(e); showToast('シフトの解除に失敗しました', 'error'); }
                         }}
                       />
                     );
