@@ -13,7 +13,7 @@ import CloudOffIcon from '@mui/icons-material/CloudOff';
 import { listDailyBackups, getBackupRecords, triggerDailyBackup } from '@/app/actions/backup';
 import type { BackupFileEntry, BackupRecord, ListDailyBackupsResult } from '@/app/actions/backup';
 import { useToast } from '@/components/ui/ToastProvider';
-import { AppButton, DataTable, InnerPageHeader, PageContainer, StatusChip } from '@/components/ui';
+import { AppButton, AppDialog, DataTable, InnerPageHeader, PageContainer, StatusChip } from '@/components/ui';
 
 const STATUS_LABELS: Record<string, string> = {
   draft: '下書き',
@@ -47,6 +47,7 @@ function matchesBackupRecord(record: BackupRecord, rawQuery: string): boolean {
     STATUS_LABELS[record.status] ?? record.status,
     formatDateTime(record.startAt),
     formatDateTime(record.endAt),
+    ...detailEntries(record.values).map((entry) => `${entry.label}${entry.value}`),
   ].map(normalizeSearchText);
   const combinedSearchable = searchable.join('');
   const queryTerms = rawQuery
@@ -62,6 +63,28 @@ function matchesBackupRecord(record: BackupRecord, rawQuery: string): boolean {
   );
 }
 
+function uniqueOptions(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ja'));
+}
+
+function detailEntries(values: Record<string, unknown> | null): { label: string; value: string }[] {
+  if (!values) return [];
+  return Object.entries(values).flatMap(([key, value]) => {
+    if (key.startsWith('_')) return [];
+    const formatted = formatDetailValue(value);
+    if (!formatted) return [];
+    return [{ label: key, value: formatted }];
+  });
+}
+
+function formatDetailValue(value: unknown): string {
+  if (value == null || value === '') return '';
+  if (Array.isArray(value)) return value.map(formatDetailValue).filter(Boolean).join('、');
+  if (typeof value === 'object') return JSON.stringify(value);
+  if (typeof value === 'boolean') return value ? 'はい' : 'いいえ';
+  return String(value);
+}
+
 export default function BackupPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const router = useRouter();
@@ -71,12 +94,16 @@ export default function BackupPage() {
   const [triggering, setTriggering] = useState(false);
   const [gcsNotConfigured, setGcsNotConfigured] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>('');
+  const [selectedBackupPath, setSelectedBackupPath] = useState<string>('');
   const [records, setRecords] = useState<BackupRecord[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [clientFilter, setClientFilter] = useState('');
+  const [helperFilter, setHelperFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [selectedRecord, setSelectedRecord] = useState<BackupRecord | null>(null);
 
   useEffect(() => {
     if (!wsLoading && currentOrg) {
@@ -86,7 +113,7 @@ export default function BackupPage() {
     }
   }, [wsLoading, currentOrg, router]);
 
-  const refreshFiles = useCallback(async (orgId: string, keepDate?: string) => {
+  const refreshFiles = useCallback(async (orgId: string, preferredPath?: string) => {
     setLoadingFiles(true);
     setError(null);
     setGcsNotConfigured(false);
@@ -97,7 +124,11 @@ export default function BackupPage() {
         return;
       }
       setFiles(result.files);
-      if (!keepDate && result.files.length > 0) setSelectedDate(result.files[0].date);
+      const selected = result.files.find((file) => file.path === preferredPath) ?? result.files[0];
+      if (selected) {
+        setSelectedDate(selected.date);
+        setSelectedBackupPath(selected.path);
+      }
     } catch {
       setError('バックアップファイルの取得に失敗しました');
     } finally {
@@ -114,10 +145,11 @@ export default function BackupPage() {
     if (!currentOrg) return;
     setTriggering(true);
     try {
-      const { date, records } = await triggerDailyBackup(currentOrg.id);
+      const { date, path, records } = await triggerDailyBackup(currentOrg.id);
       showToast(`バックアップ完了（${date}：${records} 件）`, 'success');
-      await refreshFiles(currentOrg.id, date);
+      await refreshFiles(currentOrg.id, path);
       setSelectedDate(date);
+      setSelectedBackupPath(path);
     } catch {
       showToast('バックアップに失敗しました', 'error');
     } finally {
@@ -125,12 +157,13 @@ export default function BackupPage() {
     }
   };
 
-  const loadRecords = useCallback(async (orgId: string, date: string) => {
+  const loadRecords = useCallback(async (orgId: string, backupPath: string) => {
     setLoadingRecords(true);
     setError(null);
     setRecords([]);
+    setSelectedRecord(null);
     try {
-      const data = await getBackupRecords(orgId, date);
+      const data = await getBackupRecords(orgId, backupPath);
       setRecords(data);
     } catch {
       setError('記録の取得に失敗しました');
@@ -140,12 +173,30 @@ export default function BackupPage() {
   }, []);
 
   useEffect(() => {
-    if (currentOrg && selectedDate) {
-      loadRecords(currentOrg.id, selectedDate);
+    if (currentOrg && selectedBackupPath) {
+      loadRecords(currentOrg.id, selectedBackupPath);
+    } else {
+      setRecords([]);
+      setSelectedRecord(null);
     }
-  }, [currentOrg, selectedDate, loadRecords]);
+  }, [currentOrg, selectedBackupPath, loadRecords]);
+
+  const dateFiles = files.filter((file) => file.date === selectedDate);
+  const availableDates = uniqueOptions(files.map((file) => file.date)).sort((a, b) => b.localeCompare(a));
+  const clientOptions = uniqueOptions(records.map((record) => record.clientName));
+  const helperOptions = uniqueOptions(records.map((record) => record.helperName));
+
+  useEffect(() => {
+    if (!selectedDate) return;
+    const nextPath = dateFiles.some((file) => file.path === selectedBackupPath)
+      ? selectedBackupPath
+      : dateFiles[0]?.path ?? '';
+    if (nextPath !== selectedBackupPath) setSelectedBackupPath(nextPath);
+  }, [dateFiles, selectedBackupPath, selectedDate]);
 
   const filtered = records.filter((r) => {
+    if (clientFilter && r.clientName !== clientFilter) return false;
+    if (helperFilter && r.helperName !== helperFilter) return false;
     if (statusFilter && r.status !== statusFilter) return false;
     return matchesBackupRecord(r, query);
   });
@@ -202,7 +253,7 @@ export default function BackupPage() {
               }}
             >
               <Typography variant="subtitle2" fontWeight="bold" sx={{ px: 2, pt: 2, pb: 1, color: 'text.secondary' }}>
-                バックアップ日
+                バックアップ選択
               </Typography>
               {loadingFiles ? (
                 <Box p={3} textAlign="center"><CircularProgress size={20} /></Box>
@@ -211,44 +262,94 @@ export default function BackupPage() {
                   バックアップがありません
                 </Typography>
               ) : (
-                <Box sx={{ maxHeight: { xs: 160, md: 480 }, overflowY: 'auto' }}>
-                  {files.map((f) => (
-                    <Box
-                      key={f.date}
-                      onClick={() => setSelectedDate(f.date)}
-                      sx={{
-                        px: 2, py: 1.2, cursor: 'pointer', fontSize: 13,
-                        fontWeight: selectedDate === f.date ? 700 : 400,
-                        color: selectedDate === f.date ? 'primary.main' : 'text.primary',
-                        bgcolor: selectedDate === f.date ? 'primary.50' : 'transparent',
-                        '&:hover': { bgcolor: 'action.hover' },
-                        borderLeft: selectedDate === f.date ? '3px solid' : '3px solid transparent',
-                        borderColor: selectedDate === f.date ? 'primary.main' : 'transparent',
-                      }}
-                    >
-                      {f.date}
-                    </Box>
-                  ))}
-                </Box>
+                <Stack spacing={1.5} sx={{ p: 2, pt: 1 }}>
+                  <TextField
+                    label="日付"
+                    type="date"
+                    value={selectedDate}
+                    onChange={(event) => {
+                      setSelectedDate(event.target.value);
+                      setQuery('');
+                      setClientFilter('');
+                      setHelperFilter('');
+                      setStatusFilter('');
+                    }}
+                    inputProps={{
+                      min: availableDates.at(-1),
+                      max: availableDates[0],
+                    }}
+                    InputLabelProps={{ shrink: true }}
+                    fullWidth
+                  />
+                  <TextField
+                    label="バックアップ"
+                    select
+                    value={selectedBackupPath}
+                    onChange={(event) => setSelectedBackupPath(event.target.value)}
+                    fullWidth
+                    disabled={dateFiles.length === 0}
+                  >
+                    {dateFiles.length === 0 ? (
+                      <MenuItem value="">この日のバックアップはありません</MenuItem>
+                    ) : (
+                      dateFiles.map((file) => (
+                        <MenuItem key={file.path} value={file.path}>
+                          {file.label}
+                        </MenuItem>
+                      ))
+                    )}
+                  </TextField>
+                  <Typography variant="caption" color="text.secondary">
+                    {dateFiles.length > 0 ? `${dateFiles.length} 件のバックアップ` : '別の日付を選択してください'}
+                  </Typography>
+                </Stack>
               )}
             </Paper>
 
             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} mb={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', sm: 'minmax(220px, 1.4fr) repeat(2, minmax(150px, 1fr))', lg: 'minmax(240px, 1.4fr) repeat(3, minmax(150px, 1fr)) auto' },
+                  gap: 1.5,
+                  alignItems: 'center',
+                  mb: 2,
+                }}
+              >
                 <TextField
                   size="small"
-                  placeholder="利用者名・担当者で検索"
+                  placeholder="キーワード検索"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
-                  sx={{ width: { xs: '100%', sm: 280 } }}
+                  fullWidth
                 />
+                <TextField
+                  select
+                  label="利用者"
+                  value={clientFilter}
+                  onChange={(event) => setClientFilter(event.target.value)}
+                  fullWidth
+                >
+                  <MenuItem value="">すべて</MenuItem>
+                  {clientOptions.map((clientName) => <MenuItem key={clientName} value={clientName}>{clientName}</MenuItem>)}
+                </TextField>
+                <TextField
+                  select
+                  label="ヘルパー"
+                  value={helperFilter}
+                  onChange={(event) => setHelperFilter(event.target.value)}
+                  fullWidth
+                >
+                  <MenuItem value="">すべて</MenuItem>
+                  {helperOptions.map((helperName) => <MenuItem key={helperName} value={helperName}>{helperName}</MenuItem>)}
+                </TextField>
                 <Select
                   size="small"
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
                   displayEmpty
-                  sx={{ width: { xs: '100%', sm: 150 } }}
+                  sx={{ width: '100%' }}
                 >
                   <MenuItem value="">すべて</MenuItem>
                   <MenuItem value="approved">承認済み</MenuItem>
@@ -256,10 +357,10 @@ export default function BackupPage() {
                   <MenuItem value="draft">下書き</MenuItem>
                   <MenuItem value="remanded">差し戻し</MenuItem>
                 </Select>
-                <Typography variant="body2" color="text.secondary" sx={{ ml: { sm: 'auto' }, textAlign: { xs: 'right', sm: 'left' } }}>
+                <Typography variant="body2" color="text.secondary" sx={{ textAlign: { xs: 'right', lg: 'left' }, whiteSpace: 'nowrap' }}>
                   {loadingRecords ? '読み込み中...' : `${filtered.length} 件 / 全 ${records.length} 件`}
                 </Typography>
-              </Stack>
+              </Box>
 
               <DataTable
                 component={Paper}
@@ -267,8 +368,9 @@ export default function BackupPage() {
                 rows={filtered}
                 loading={loadingRecords}
                 getRowKey={(record) => record.id}
+                onRowClick={(record) => setSelectedRecord(record)}
                 emptyTitle={records.length === 0 ? 'この日のバックアップに記録がありません' : '条件に一致する記録がありません'}
-                minWidth={720}
+                minWidth={820}
                 mobileCardRender={(record) => (
                   <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1, bgcolor: 'background.paper' }}>
                     <Stack spacing={1.25}>
@@ -306,12 +408,96 @@ export default function BackupPage() {
                       />
                     ),
                   },
+                  {
+                    key: 'detail',
+                    header: '詳細',
+                    align: 'right',
+                    render: (record) => (
+                      <AppButton
+                        size="small"
+                        variant="text"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedRecord(record);
+                        }}
+                      >
+                        表示
+                      </AppButton>
+                    ),
+                  },
                 ]}
               />
             </Box>
           </Stack>
         </Box>
       </PageContainer>
+
+      <AppDialog
+        open={!!selectedRecord}
+        onClose={() => setSelectedRecord(null)}
+        title="提供記録の詳細"
+        maxWidth="md"
+        actions={<AppButton variant="text" intent="secondary" onClick={() => setSelectedRecord(null)}>閉じる</AppButton>}
+      >
+        {selectedRecord && (
+          <Stack spacing={2}>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 1, bgcolor: 'background.subtle' }}>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', sm: '8em minmax(0, 1fr)' },
+                  gap: 1,
+                  fontSize: 14,
+                }}
+              >
+                <Typography color="text.secondary">利用者</Typography>
+                <Typography fontWeight={700} sx={{ overflowWrap: 'anywhere' }}>{selectedRecord.clientName || '-'}</Typography>
+                <Typography color="text.secondary">担当者</Typography>
+                <Typography sx={{ overflowWrap: 'anywhere' }}>{selectedRecord.helperName || '-'}</Typography>
+                <Typography color="text.secondary">開始</Typography>
+                <Typography>{formatDateTime(selectedRecord.startAt)}</Typography>
+                <Typography color="text.secondary">終了</Typography>
+                <Typography>{formatDateTime(selectedRecord.endAt)}</Typography>
+                <Typography color="text.secondary">ステータス</Typography>
+                <Box>
+                  <StatusChip
+                    label={STATUS_LABELS[selectedRecord.status] ?? selectedRecord.status}
+                    tone={STATUS_COLORS[selectedRecord.status] ?? 'default'}
+                  />
+                </Box>
+              </Box>
+            </Paper>
+
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+                記録内容
+              </Typography>
+              {detailEntries(selectedRecord.values).length === 0 ? (
+                <Typography variant="body2" color="text.secondary">詳細内容は保存されていません</Typography>
+              ) : (
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'minmax(9em, 14em) minmax(0, 1fr)' }, borderTop: 1, borderColor: 'divider' }}>
+                  {detailEntries(selectedRecord.values).map((entry) => (
+                    <Box
+                      key={`${entry.label}:${entry.value}`}
+                      sx={{
+                        display: 'contents',
+                        '& > *': { borderBottom: 1, borderColor: 'divider', py: 1, minWidth: 0 },
+                      }}
+                    >
+                      <Typography variant="body2" color="text.secondary" sx={{ pr: { sm: 2 }, overflowWrap: 'anywhere' }}>
+                        {entry.label}
+                      </Typography>
+                      <Typography variant="body2" sx={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+                        {entry.value}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+            </Box>
+          </Stack>
+        )}
+      </AppDialog>
     </Box>
   );
 }

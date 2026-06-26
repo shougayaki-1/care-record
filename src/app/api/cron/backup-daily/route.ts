@@ -17,7 +17,9 @@ export async function GET(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const bucket = 'care-record-search-daily';
-  const today = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const today = formatTokyoDate(now);
+  const version = formatTokyoTime(now).replace(/:/g, '-');
 
   try {
     const orgIds = await getActiveOrganizationIds();
@@ -31,8 +33,8 @@ export async function GET(request: NextRequest) {
       const html = generateBackupHtml(today, rows);
 
       await Promise.all([
-        uploadToGCS(bucket, `daily/${orgId}/${today}.csv`, csv),
-        uploadToGCS(bucket, `daily/${orgId}/${today}.html`, html),
+        uploadToGCS(bucket, `daily/${orgId}/${today}/${version}.csv`, csv),
+        uploadToGCS(bucket, `daily/${orgId}/${today}/${version}.html`, html),
       ]);
       succeeded++;
     }
@@ -75,4 +77,23 @@ function parseCsvLine(line: string): string[] {
 
 export async function POST(request: NextRequest) {
   return GET(request);
+}
+
+function formatTokyoDate(date: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function formatTokyoTime(date: Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Tokyo',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
 }
