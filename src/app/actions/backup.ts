@@ -23,28 +23,42 @@ export type BackupRecord = {
   status: string;
 };
 
-export async function listDailyBackups(orgId: string): Promise<BackupFileEntry[]> {
+function isGcsConfigured(): boolean {
+  return !!(process.env.GCP_PROJECT_ID && process.env.GCP_SERVICE_ACCOUNT_KEY_JSON);
+}
+
+export type ListDailyBackupsResult =
+  | { configured: false }
+  | { configured: true; files: BackupFileEntry[] };
+
+export async function listDailyBackups(orgId: string): Promise<ListDailyBackupsResult> {
   await assertOrgPermission(orgId, 'auditLogs');
+
+  if (!isGcsConfigured()) return { configured: false };
 
   const prefix = `daily/${orgId}/`;
   const files = await listGCSFiles(DAILY_BUCKET, prefix);
 
-  return files
-    .filter((f) => f.name.endsWith('.csv'))
-    .map((f) => {
-      const dateMatch = f.name.match(/(\d{4}-\d{2}-\d{2})\.csv$/);
-      return {
-        date: dateMatch?.[1] ?? f.name,
-        path: f.name,
-        updated: f.updated,
-        size: f.size,
-      };
-    })
-    .sort((a, b) => b.date.localeCompare(a.date));
+  return {
+    configured: true,
+    files: files
+      .filter((f) => f.name.endsWith('.csv'))
+      .map((f) => {
+        const dateMatch = f.name.match(/(\d{4}-\d{2}-\d{2})\.csv$/);
+        return {
+          date: dateMatch?.[1] ?? f.name,
+          path: f.name,
+          updated: f.updated,
+          size: f.size,
+        };
+      })
+      .sort((a, b) => b.date.localeCompare(a.date)),
+  };
 }
 
 export async function getBackupRecords(orgId: string, date: string): Promise<BackupRecord[]> {
   await assertOrgPermission(orgId, 'auditLogs');
+  if (!isGcsConfigured()) throw new Error('GCS_NOT_CONFIGURED');
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日付形式が不正です');
 
@@ -70,6 +84,7 @@ export async function getBackupRecords(orgId: string, date: string): Promise<Bac
 
 export async function triggerDailyBackup(orgId: string): Promise<{ date: string; records: number }> {
   await assertOrgPermission(orgId, 'auditLogs');
+  if (!isGcsConfigured()) throw new Error('GCS_NOT_CONFIGURED');
 
   const date = new Date().toISOString().split('T')[0];
   const csv = await exportReportsAsCsv(orgId);

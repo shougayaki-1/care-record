@@ -10,8 +10,9 @@ import SearchIcon from '@mui/icons-material/Search';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter } from 'next/navigation';
 import { checkManagementPermission } from '@/utils/permissions';
+import CloudOffIcon from '@mui/icons-material/CloudOff';
 import { listDailyBackups, getBackupRecords, triggerDailyBackup } from '@/app/actions/backup';
-import type { BackupFileEntry, BackupRecord } from '@/app/actions/backup';
+import type { BackupFileEntry, BackupRecord, ListDailyBackupsResult } from '@/app/actions/backup';
 import { useToast } from '@/components/ui/ToastProvider';
 import { AppButton } from '@/components/ui';
 
@@ -36,6 +37,7 @@ export default function BackupPage() {
 
   const [files, setFiles] = useState<BackupFileEntry[]>([]);
   const [triggering, setTriggering] = useState(false);
+  const [gcsNotConfigured, setGcsNotConfigured] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [records, setRecords] = useState<BackupRecord[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -55,10 +57,15 @@ export default function BackupPage() {
   const refreshFiles = useCallback(async (orgId: string, keepDate?: string) => {
     setLoadingFiles(true);
     setError(null);
+    setGcsNotConfigured(false);
     try {
-      const data = await listDailyBackups(orgId);
-      setFiles(data);
-      if (!keepDate && data.length > 0) setSelectedDate(data[0].date);
+      const result: ListDailyBackupsResult = await listDailyBackups(orgId);
+      if (!result.configured) {
+        setGcsNotConfigured(true);
+        return;
+      }
+      setFiles(result.files);
+      if (!keepDate && result.files.length > 0) setSelectedDate(result.files[0].date);
     } catch {
       setError('バックアップファイルの取得に失敗しました');
     } finally {
@@ -140,6 +147,18 @@ export default function BackupPage() {
 
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
         <Box sx={{ maxWidth: 1000, mx: 'auto' }}>
+          {gcsNotConfigured && (
+            <Paper variant="outlined" sx={{ p: 4, borderColor: 'warning.main', borderRadius: 3 }}>
+              <Stack spacing={1.5} alignItems="center" textAlign="center">
+                <CloudOffIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
+                <Typography variant="h6" fontWeight="bold">GCS が設定されていません</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Vercel の環境変数に <code>GCP_PROJECT_ID</code> と <code>GCP_SERVICE_ACCOUNT_KEY_JSON</code> を設定してください。
+                </Typography>
+              </Stack>
+            </Paper>
+          )}
+
           {error && (
             <Paper variant="outlined" sx={{ p: 2, mb: 2, borderColor: 'error.main', bgcolor: 'background.danger' }}>
               <Typography color="error">{error}</Typography>
