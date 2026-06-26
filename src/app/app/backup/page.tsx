@@ -2,8 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Box, Typography, Paper, CircularProgress, Stack, Table, TableBody,
-  TableCell, TableHead, TableRow, TextField, MenuItem, Select, InputAdornment, Chip,
+  Box, Typography, Paper, CircularProgress, Stack, TextField, MenuItem, Select, InputAdornment,
 } from '@/components/ui/mui';
 import BackupIcon from '@mui/icons-material/Backup';
 import SearchIcon from '@mui/icons-material/Search';
@@ -14,7 +13,7 @@ import CloudOffIcon from '@mui/icons-material/CloudOff';
 import { listDailyBackups, getBackupRecords, triggerDailyBackup } from '@/app/actions/backup';
 import type { BackupFileEntry, BackupRecord, ListDailyBackupsResult } from '@/app/actions/backup';
 import { useToast } from '@/components/ui/ToastProvider';
-import { AppButton } from '@/components/ui';
+import { AppButton, DataTable, InnerPageHeader, PageContainer, StatusChip } from '@/components/ui';
 
 const STATUS_LABELS: Record<string, string> = {
   draft: '下書き',
@@ -29,6 +28,39 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'error'>
   approved: 'success',
   remanded: 'error',
 };
+
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFKC')
+    .replace(/[\s\u3000]+/g, '')
+    .replace(/[ぁ-ん]/g, (char) => String.fromCharCode(char.charCodeAt(0) + 0x60))
+    .toLowerCase();
+}
+
+function matchesBackupRecord(record: BackupRecord, rawQuery: string): boolean {
+  const query = normalizeSearchText(rawQuery);
+  if (!query) return true;
+
+  const searchable = [
+    record.clientName,
+    record.helperName,
+    STATUS_LABELS[record.status] ?? record.status,
+    formatDateTime(record.startAt),
+    formatDateTime(record.endAt),
+  ].map(normalizeSearchText);
+  const combinedSearchable = searchable.join('');
+  const queryTerms = rawQuery
+    .trim()
+    .split(/[\s\u3000]+/)
+    .map(normalizeSearchText)
+    .filter(Boolean);
+
+  return (
+    searchable.some((value) => value.includes(query))
+    || combinedSearchable.includes(query)
+    || (queryTerms.length > 1 && queryTerms.every((term) => combinedSearchable.includes(term)))
+  );
+}
 
 export default function BackupPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
@@ -115,11 +147,7 @@ export default function BackupPage() {
 
   const filtered = records.filter((r) => {
     if (statusFilter && r.status !== statusFilter) return false;
-    if (query) {
-      const q = query.toLowerCase();
-      if (!r.clientName.toLowerCase().includes(q) && !r.helperName.toLowerCase().includes(q)) return false;
-    }
-    return true;
+    return matchesBackupRecord(r, query);
   });
 
   if (wsLoading || !currentOrg) {
@@ -128,12 +156,10 @@ export default function BackupPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', px: { xs: 2, sm: 3 }, bgcolor: 'background.paper' }}>
-        <Stack direction="row" alignItems="center" height={64} spacing={2}>
-          <BackupIcon sx={{ color: 'action.active' }} />
-          <Typography variant="h6" fontWeight="bold">バックアップ閲覧</Typography>
-          <Box sx={{ flexGrow: 1 }} />
+      <InnerPageHeader
+        icon={<BackupIcon />}
+        title="バックアップ閲覧"
+        actions={
           <AppButton
             size="small"
             onClick={handleTriggerBackup}
@@ -142,13 +168,13 @@ export default function BackupPage() {
           >
             {triggering ? 'バックアップ中...' : '今すぐバックアップ'}
           </AppButton>
-        </Stack>
-      </Box>
+        }
+      />
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
-        <Box sx={{ maxWidth: 1000, mx: 'auto' }}>
+      <PageContainer>
+        <Box sx={{ maxWidth: 1120, mx: 'auto' }}>
           {gcsNotConfigured && (
-            <Paper variant="outlined" sx={{ p: 4, borderColor: 'warning.main', borderRadius: 3 }}>
+            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, mb: 2, borderColor: 'warning.main', borderRadius: 1 }}>
               <Stack spacing={1.5} alignItems="center" textAlign="center">
                 <CloudOffIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
                 <Typography variant="h6" fontWeight="bold">GCS が設定されていません</Typography>
@@ -160,14 +186,21 @@ export default function BackupPage() {
           )}
 
           {error && (
-            <Paper variant="outlined" sx={{ p: 2, mb: 2, borderColor: 'error.main', bgcolor: 'background.danger' }}>
+            <Paper variant="outlined" sx={{ p: 2, mb: 2, borderColor: 'error.main', bgcolor: 'background.danger', borderRadius: 1 }}>
               <Typography color="error">{error}</Typography>
             </Paper>
           )}
 
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={3} alignItems={{ sm: 'flex-start' }}>
-            {/* ファイル一覧 */}
-            <Paper variant="outlined" sx={{ borderRadius: 3, minWidth: 180, flexShrink: 0 }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2.5} alignItems={{ md: 'flex-start' }}>
+            <Paper
+              variant="outlined"
+              sx={{
+                borderRadius: 1,
+                width: { xs: '100%', md: 200 },
+                flexShrink: 0,
+                overflow: 'hidden',
+              }}
+            >
               <Typography variant="subtitle2" fontWeight="bold" sx={{ px: 2, pt: 2, pb: 1, color: 'text.secondary' }}>
                 バックアップ日
               </Typography>
@@ -178,7 +211,7 @@ export default function BackupPage() {
                   バックアップがありません
                 </Typography>
               ) : (
-                <Box sx={{ maxHeight: 480, overflowY: 'auto' }}>
+                <Box sx={{ maxHeight: { xs: 160, md: 480 }, overflowY: 'auto' }}>
                   {files.map((f) => (
                     <Box
                       key={f.date}
@@ -200,23 +233,22 @@ export default function BackupPage() {
               )}
             </Paper>
 
-            {/* 記録テーブル */}
             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} mb={2} alignItems={{ sm: 'center' }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} mb={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
                 <TextField
                   size="small"
-                  placeholder="利用者名・担当者で絞り込み"
+                  placeholder="利用者名・担当者で検索"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
-                  sx={{ minWidth: 220 }}
+                  sx={{ width: { xs: '100%', sm: 280 } }}
                 />
                 <Select
                   size="small"
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
                   displayEmpty
-                  sx={{ minWidth: 140 }}
+                  sx={{ width: { xs: '100%', sm: 150 } }}
                 >
                   <MenuItem value="">すべて</MenuItem>
                   <MenuItem value="approved">承認済み</MenuItem>
@@ -224,57 +256,62 @@ export default function BackupPage() {
                   <MenuItem value="draft">下書き</MenuItem>
                   <MenuItem value="remanded">差し戻し</MenuItem>
                 </Select>
-                <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
+                <Typography variant="body2" color="text.secondary" sx={{ ml: { sm: 'auto' }, textAlign: { xs: 'right', sm: 'left' } }}>
                   {loadingRecords ? '読み込み中...' : `${filtered.length} 件 / 全 ${records.length} 件`}
                 </Typography>
               </Stack>
 
-              <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden' }}>
-                {loadingRecords ? (
-                  <Box p={5} textAlign="center"><CircularProgress /></Box>
-                ) : (
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 600 }}>利用者名</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>開始日時</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>終了日時</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>担当者</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>ステータス</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {filtered.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={5} align="center" sx={{ py: 5, color: 'text.secondary' }}>
-                            {records.length === 0 ? 'この日のバックアップに記録がありません' : '条件に一致する記録がありません'}
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        filtered.map((r) => (
-                          <TableRow key={r.id} hover>
-                            <TableCell>{r.clientName}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(r.startAt)}</TableCell>
-                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(r.endAt)}</TableCell>
-                            <TableCell>{r.helperName}</TableCell>
-                            <TableCell>
-                              <Chip
-                                label={STATUS_LABELS[r.status] ?? r.status}
-                                color={STATUS_COLORS[r.status] ?? 'default'}
-                                size="small"
-                              />
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
+              <DataTable
+                component={Paper}
+                sx={{ border: 1, borderRadius: 1, borderColor: 'divider' }}
+                rows={filtered}
+                loading={loadingRecords}
+                getRowKey={(record) => record.id}
+                emptyTitle={records.length === 0 ? 'この日のバックアップに記録がありません' : '条件に一致する記録がありません'}
+                minWidth={720}
+                mobileCardRender={(record) => (
+                  <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1, bgcolor: 'background.paper' }}>
+                    <Stack spacing={1.25}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography fontWeight={700} sx={{ overflowWrap: 'anywhere' }}>{record.clientName}</Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{record.helperName}</Typography>
+                        </Box>
+                        <StatusChip
+                          label={STATUS_LABELS[record.status] ?? record.status}
+                          tone={STATUS_COLORS[record.status] ?? 'default'}
+                        />
+                      </Stack>
+                      <Box sx={{ display: 'grid', gridTemplateColumns: '4em minmax(0, 1fr)', gap: 0.75, color: 'text.secondary', fontSize: 13 }}>
+                        <Box>開始</Box>
+                        <Box>{formatDateTime(record.startAt)}</Box>
+                        <Box>終了</Box>
+                        <Box>{formatDateTime(record.endAt)}</Box>
+                      </Box>
+                    </Stack>
+                  </Paper>
                 )}
-              </Paper>
+                columns={[
+                  { key: 'clientName', header: '利用者名', render: (record) => record.clientName },
+                  { key: 'startAt', header: '開始日時', render: (record) => <Box sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(record.startAt)}</Box> },
+                  { key: 'endAt', header: '終了日時', render: (record) => <Box sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(record.endAt)}</Box> },
+                  { key: 'helperName', header: '担当者', render: (record) => record.helperName },
+                  {
+                    key: 'status',
+                    header: 'ステータス',
+                    render: (record) => (
+                      <StatusChip
+                        label={STATUS_LABELS[record.status] ?? record.status}
+                        tone={STATUS_COLORS[record.status] ?? 'default'}
+                      />
+                    ),
+                  },
+                ]}
+              />
             </Box>
           </Stack>
         </Box>
-      </Box>
+      </PageContainer>
     </Box>
   );
 }
