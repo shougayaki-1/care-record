@@ -8,8 +8,8 @@ type ReportRow = {
   values: Record<string, unknown> | null;
   created_at: string | null;
   updated_at: string | null;
-  helper: { name: string }[] | null;
-  client: { name: string }[] | null;
+  helper: { name: string } | { name: string }[] | null;
+  clients: { name: string } | { name: string }[] | null;
 };
 
 function escapeCsvCell(value: unknown): string {
@@ -18,6 +18,13 @@ function escapeCsvCell(value: unknown): string {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
+}
+
+function relationName(
+  relation: { name: string } | { name: string }[] | null | undefined,
+): string {
+  if (!relation) return '';
+  return Array.isArray(relation) ? (relation[0]?.name ?? '') : (relation.name ?? '');
 }
 
 export async function getActiveOrganizationIds(): Promise<string[]> {
@@ -49,8 +56,8 @@ export async function exportReportsAsCsv(orgId: string): Promise<string> {
       values,
       created_at,
       updated_at,
-      helper:helper_id(name),
-      client:client_id(name)
+      helper:profiles!reports_helper_id_fkey(name),
+      clients(name)
     `)
     .in('client_id', clientIds)
     .is('deleted_at', null)
@@ -64,10 +71,10 @@ export async function exportReportsAsCsv(orgId: string): Promise<string> {
     ...rows.map((r) =>
       [
         r.id,
-        r.client?.[0]?.name ?? '',
+        relationName(r.clients),
         r.start_at ?? '',
         r.end_at ?? '',
-        r.helper?.[0]?.name ?? '',
+        relationName(r.helper),
         r.status,
         r.values != null ? JSON.stringify(r.values) : '',
         r.created_at ?? '',
@@ -117,8 +124,8 @@ export async function exportReportsAsJson(
       values,
       created_at,
       updated_at,
-      helper:helper_id(name),
-      client:client_id(name)
+      helper:profiles!reports_helper_id_fkey(name),
+      clients(name)
     `)
     .in('client_id', clientIds)
     .is('deleted_at', null)

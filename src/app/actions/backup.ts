@@ -1,7 +1,7 @@
 'use server';
 
 import { assertOrgPermission } from '@/utils/supabase/auth';
-import { listGCSFiles, readGCSFile, uploadToGCS } from '@/utils/gcs/upload';
+import { isGcsBackupConfigured, listGCSFiles, readGCSFile, uploadToGCS } from '@/utils/gcs/upload';
 import { exportReportsAsCsv } from '@/utils/gcs/export';
 import { generateBackupHtml } from '@/utils/gcs/html';
 
@@ -23,10 +23,6 @@ export type BackupRecord = {
   status: string;
 };
 
-function isGcsConfigured(): boolean {
-  return !!(process.env.GCP_PROJECT_ID && process.env.GCP_SERVICE_ACCOUNT_KEY_JSON);
-}
-
 export type ListDailyBackupsResult =
   | { configured: false }
   | { configured: true; files: BackupFileEntry[] };
@@ -34,7 +30,7 @@ export type ListDailyBackupsResult =
 export async function listDailyBackups(orgId: string): Promise<ListDailyBackupsResult> {
   await assertOrgPermission(orgId, 'auditLogs');
 
-  if (!isGcsConfigured()) return { configured: false };
+  if (!isGcsBackupConfigured()) return { configured: false };
 
   const prefix = `daily/${orgId}/`;
   const files = await listGCSFiles(DAILY_BUCKET, prefix);
@@ -58,7 +54,7 @@ export async function listDailyBackups(orgId: string): Promise<ListDailyBackupsR
 
 export async function getBackupRecords(orgId: string, date: string): Promise<BackupRecord[]> {
   await assertOrgPermission(orgId, 'auditLogs');
-  if (!isGcsConfigured()) throw new Error('GCS_NOT_CONFIGURED');
+  if (!isGcsBackupConfigured()) throw new Error('GCS_NOT_CONFIGURED');
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日付形式が不正です');
 
@@ -84,7 +80,7 @@ export async function getBackupRecords(orgId: string, date: string): Promise<Bac
 
 export async function triggerDailyBackup(orgId: string): Promise<{ date: string; records: number }> {
   await assertOrgPermission(orgId, 'auditLogs');
-  if (!isGcsConfigured()) throw new Error('GCS_NOT_CONFIGURED');
+  if (!isGcsBackupConfigured()) throw new Error('GCS_NOT_CONFIGURED');
 
   const date = new Date().toISOString().split('T')[0];
   const csv = await exportReportsAsCsv(orgId);

@@ -1,9 +1,57 @@
 import { Storage } from '@google-cloud/storage';
 
+type ServiceAccountCredentials = {
+  client_email?: string;
+  private_key?: string;
+  [key: string]: unknown;
+};
+
+function parseServiceAccountCredentials(): ServiceAccountCredentials | undefined {
+  const raw = process.env.GCP_SERVICE_ACCOUNT_KEY_JSON?.trim();
+  if (!raw) return undefined;
+
+  const jsonText = raw.startsWith('{')
+    ? raw
+    : Buffer.from(raw, 'base64').toString('utf-8');
+
+  try {
+    const credentials = JSON.parse(jsonText) as ServiceAccountCredentials;
+    if (typeof credentials.private_key === 'string') {
+      credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
+    }
+    return credentials;
+  } catch {
+    throw new Error('GCP_SERVICE_ACCOUNT_KEY_JSON の形式が不正です。サービスアカウントJSONまたはBase64化したJSONを設定してください。');
+  }
+}
+
+export function isGcsBackupConfigured(): boolean {
+  return !!(
+    process.env.GCP_PROJECT_ID
+    && (
+      process.env.GCP_SERVICE_ACCOUNT_KEY_JSON
+      || process.env.GCP_SERVICE_ACCOUNT_KEY_PATH
+      || process.env.GOOGLE_APPLICATION_CREDENTIALS
+    )
+  );
+}
+
 function getStorage(): Storage {
+  const projectId = process.env.GCP_PROJECT_ID;
+  const credentials = parseServiceAccountCredentials();
+  if (credentials) {
+    return new Storage({ projectId, credentials });
+  }
+
+  if (process.env.GCP_SERVICE_ACCOUNT_KEY_PATH) {
+    return new Storage({
+      projectId,
+      keyFilename: process.env.GCP_SERVICE_ACCOUNT_KEY_PATH,
+    });
+  }
+
   return new Storage({
-    projectId: process.env.GCP_PROJECT_ID,
-    credentials: JSON.parse(process.env.GCP_SERVICE_ACCOUNT_KEY_JSON ?? '{}'),
+    projectId,
   });
 }
 
