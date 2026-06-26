@@ -5,11 +5,11 @@ type ReportRow = {
   start_at: string | null;
   end_at: string | null;
   status: string;
-  values: Record<string, unknown> | null;
   created_at: string | null;
   updated_at: string | null;
   helper: { name: string } | { name: string }[] | null;
   clients: { name: string } | { name: string }[] | null;
+  report_values: { data: Record<string, unknown> | null } | { data: Record<string, unknown> | null }[] | null;
 };
 
 function escapeCsvCell(value: unknown): string {
@@ -25,6 +25,15 @@ function relationName(
 ): string {
   if (!relation) return '';
   return Array.isArray(relation) ? (relation[0]?.name ?? '') : (relation.name ?? '');
+}
+
+function reportValuesData(
+  reportValues: ReportRow['report_values'],
+): Record<string, unknown> | null {
+  if (!reportValues) return null;
+  return Array.isArray(reportValues)
+    ? (reportValues[0]?.data ?? null)
+    : (reportValues.data ?? null);
 }
 
 export async function getActiveOrganizationIds(): Promise<string[]> {
@@ -53,11 +62,11 @@ export async function exportReportsAsCsv(orgId: string): Promise<string> {
       start_at,
       end_at,
       status,
-      values,
       created_at,
       updated_at,
       helper:profiles!reports_helper_id_fkey(name),
-      clients(name)
+      clients(name),
+      report_values(data)
     `)
     .in('client_id', clientIds)
     .is('deleted_at', null)
@@ -68,21 +77,22 @@ export async function exportReportsAsCsv(orgId: string): Promise<string> {
   const header = ['id', '利用者名', '開始日時', '終了日時', '担当者', 'ステータス', '記録内容(JSON)', '作成日時', '更新日時'];
   const lines = [
     header.join(','),
-    ...rows.map((r) =>
-      [
+    ...rows.map((r) => {
+      const values = reportValuesData(r.report_values);
+      return [
         r.id,
         relationName(r.clients),
         r.start_at ?? '',
         r.end_at ?? '',
         relationName(r.helper),
         r.status,
-        r.values != null ? JSON.stringify(r.values) : '',
+        values != null ? JSON.stringify(values) : '',
         r.created_at ?? '',
         r.updated_at ?? '',
       ]
         .map(escapeCsvCell)
-        .join(','),
-    ),
+        .join(',');
+    }),
   ];
   return lines.join('\n');
 }
@@ -121,11 +131,11 @@ export async function exportReportsAsJson(
       start_at,
       end_at,
       status,
-      values,
       created_at,
       updated_at,
       helper:profiles!reports_helper_id_fkey(name),
-      clients(name)
+      clients(name),
+      report_values(data)
     `)
     .in('client_id', clientIds)
     .is('deleted_at', null)
