@@ -19,7 +19,7 @@
 | CRY-02 | アプリ秘密情報 | versioned AES-256-GCM keyring | implemented | ローテーション演習と旧鍵失効記録 |
 | FILE-01 | 画像安全化 | malware scan、画像再エンコード | implemented | 本番scanサービスとEICAR・偽装試験 |
 | WEB-01 | ブラウザ防御 | nonce CSP、HSTS等 | implemented | 本番CSP違反ゼロ、ヘッダー試験 |
-| BAK-01 | バックアップ/PITR | `backup-restore-bcp.md` | pending | RPO/RTOを満たす四半期復旧試験 |
+| BAK-01 | バックアップ/PITR | `backup-restore-bcp.md` | pending | 退避データ検索と四半期復旧試験を実施し、提示までの時間を測定 |
 | BCM-01 | インシデント・BCP | 手順・記録テーブル | implemented | 年2回訓練と是正記録 |
 | SUP-01 | 委託・再委託管理 | `vendor_registry` | pending | Supabase/Vercel/Googleの契約・国・exit plan承認 |
 | RET-01 | 記録別保持 | `retention_policies`、legal hold | pending | 専門家確認済み根拠で暫定値を置換 |

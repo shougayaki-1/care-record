@@ -8,6 +8,14 @@
     {
       "path": "/api/cron/archive-audit",
       "schedule": "15 0 * * *"
+    },
+    {
+      "path": "/api/cron/backup-daily",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/backup-monthly",
+      "schedule": "0 2 1 * *"
     }
   ]
 }

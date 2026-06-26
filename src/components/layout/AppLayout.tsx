@@ -28,6 +28,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import KeyIcon from '@mui/icons-material/Key';
+import BackupIcon from '@mui/icons-material/Backup';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -48,6 +49,7 @@ const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; area: ManagementArea 
   { prefix: '/app/staff', area: 'staffs' },
   { prefix: '/app/reports', area: 'reports' },
   { prefix: '/app/statistics', area: 'reports' },
+  { prefix: '/app/backup', area: 'auditLogs' },
 ];
 
 type Notification = {
@@ -440,6 +442,8 @@ const NavDrawer = ({
                 navButton('アカウント・権限管理', <KeyIcon fontSize="small" />, '/app/accounts')
               )}
               {navButton('統計・予実管理', <AssessmentIcon fontSize="small" />, '/app/statistics')}
+              {checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs') &&
+                navButton('バックアップ閲覧', <BackupIcon fontSize="small" />, '/app/backup')}
             </List>
           </>
         )}
