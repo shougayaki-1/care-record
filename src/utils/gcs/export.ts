@@ -1,7 +1,9 @@
 import { supabaseAdmin } from '@/utils/supabase/auth';
+import { convertDataToReadable, type FormItem, type FormValue } from '@/utils/templateHelper';
 
 type ReportRow = {
   id: string;
+  client_id: string;
   start_at: string | null;
   end_at: string | null;
   status: string;
@@ -36,6 +38,15 @@ function reportValuesData(
     : (reportValues.data ?? null);
 }
 
+function toReadableValues(
+  values: Record<string, unknown> | null,
+  schema: FormItem[] | undefined,
+): Record<string, unknown> | null {
+  if (!values) return null;
+  if (!schema) return values;
+  return convertDataToReadable(values as Record<string, FormValue>, schema) as Record<string, unknown>;
+}
+
 export async function getActiveOrganizationIds(): Promise<string[]> {
   const { data, error } = await supabaseAdmin
     .from('organizations')
@@ -55,10 +66,24 @@ export async function exportReportsAsCsv(orgId: string): Promise<string> {
   const clientIds = (clients ?? []).map((c: { id: string }) => c.id);
   if (clientIds.length === 0) return '';
 
+  const { data: templates, error: templateError } = await supabaseAdmin
+    .from('form_templates')
+    .select('client_id, schema')
+    .in('client_id', clientIds);
+  if (templateError) throw new Error(`フォーム設定の取得に失敗しました: ${templateError.message}`);
+
+  const schemaByClientId = new Map<string, FormItem[]>();
+  (templates ?? []).forEach((template: { client_id: string; schema: unknown }) => {
+    if (Array.isArray(template.schema)) {
+      schemaByClientId.set(template.client_id, template.schema as FormItem[]);
+    }
+  });
+
   const { data, error } = await supabaseAdmin
     .from('reports')
     .select(`
       id,
+      client_id,
       start_at,
       end_at,
       status,
@@ -78,7 +103,7 @@ export async function exportReportsAsCsv(orgId: string): Promise<string> {
   const lines = [
     header.join(','),
     ...rows.map((r) => {
-      const values = reportValuesData(r.report_values);
+      const values = toReadableValues(reportValuesData(r.report_values), schemaByClientId.get(r.client_id));
       return [
         r.id,
         relationName(r.clients),
@@ -128,6 +153,7 @@ export async function exportReportsAsJson(
     .from('reports')
     .select(`
       id,
+      client_id,
       start_at,
       end_at,
       status,

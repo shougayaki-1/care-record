@@ -1,9 +1,10 @@
 'use server';
 
-import { assertOrgPermission } from '@/utils/supabase/auth';
+import { assertOrgPermission, supabaseAdmin } from '@/utils/supabase/auth';
 import { isGcsBackupConfigured, listGCSFiles, readGCSFile, uploadToGCS } from '@/utils/gcs/upload';
 import { exportReportsAsCsv } from '@/utils/gcs/export';
 import { generateBackupHtml } from '@/utils/gcs/html';
+import { convertDataToReadable, type FormItem, type FormValue } from '@/utils/templateHelper';
 
 const DAILY_BUCKET = 'care-record-search-daily';
 
@@ -66,6 +67,7 @@ export async function getBackupRecords(orgId: string, filePath: string): Promise
 
   const path = resolveBackupFilePath(orgId, filePath);
   const csv = await readGCSFile(DAILY_BUCKET, path);
+  const schemaByClientName = await getSchemaByUniqueClientName(orgId);
 
   const lines = csv.split('\n');
   if (lines.length < 2) return [];
@@ -73,14 +75,16 @@ export async function getBackupRecords(orgId: string, filePath: string): Promise
   return lines.slice(1).flatMap((line) => {
     if (!line.trim()) return [];
     const cols = parseCsvLine(line);
+    const clientName = cols[1] ?? '';
+    const values = parseJsonCell(cols[6]);
     return [{
       id: cols[0] ?? '',
-      clientName: cols[1] ?? '',
+      clientName,
       startAt: cols[2] ?? '',
       endAt: cols[3] ?? '',
       helperName: cols[4] ?? '',
       status: cols[5] ?? '',
-      values: parseJsonCell(cols[6]),
+      values: toReadableValues(values, schemaByClientName.get(clientName)),
       createdAt: cols[7] ?? '',
       updatedAt: cols[8] ?? '',
     }];
@@ -138,6 +142,46 @@ function parseJsonCell(value: string | undefined): Record<string, unknown> | nul
   } catch {
     return null;
   }
+}
+
+async function getSchemaByUniqueClientName(orgId: string): Promise<Map<string, FormItem[]>> {
+  const { data: clients, error: clientError } = await supabaseAdmin
+    .from('clients')
+    .select('id, name')
+    .eq('organization_id', orgId)
+    .is('deleted_at', null);
+  if (clientError) throw new Error(`利用者一覧の取得に失敗しました: ${clientError.message}`);
+
+  const clientRows = (clients ?? []) as { id: string; name: string }[];
+  const clientIds = clientRows.map((client) => client.id);
+  if (clientIds.length === 0) return new Map();
+
+  const { data: templates, error: templateError } = await supabaseAdmin
+    .from('form_templates')
+    .select('client_id, schema')
+    .in('client_id', clientIds);
+  if (templateError) throw new Error(`フォーム設定の取得に失敗しました: ${templateError.message}`);
+
+  const nameCounts = new Map<string, number>();
+  clientRows.forEach((client) => nameCounts.set(client.name, (nameCounts.get(client.name) ?? 0) + 1));
+
+  const clientNameById = new Map(clientRows.map((client) => [client.id, client.name]));
+  const schemaByClientName = new Map<string, FormItem[]>();
+  (templates ?? []).forEach((template: { client_id: string; schema: unknown }) => {
+    const clientName = clientNameById.get(template.client_id);
+    if (!clientName || nameCounts.get(clientName) !== 1 || !Array.isArray(template.schema)) return;
+    schemaByClientName.set(clientName, template.schema as FormItem[]);
+  });
+  return schemaByClientName;
+}
+
+function toReadableValues(
+  values: Record<string, unknown> | null,
+  schema: FormItem[] | undefined,
+): Record<string, unknown> | null {
+  if (!values) return null;
+  if (!schema) return values;
+  return convertDataToReadable(values as Record<string, FormValue>, schema) as Record<string, unknown>;
 }
 
 function formatBackupFileLabel(filePath: string, updated: string): string {
