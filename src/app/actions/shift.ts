@@ -17,6 +17,10 @@ import {
     getLegacyEventSignature, getEventBodySignature,
     isActiveGoogleEvent, choosePrimaryGoogleEvent,
 } from '@/utils/googleSync';
+import {
+    buildPatternRuleString, isOvernightShift, computeOccurrenceDateTimes,
+    patternDateKey, jstDateStrFromStartAt, jstDateStrFromOccurrence,
+} from '@/utils/shiftRecurrence';
 
 /**
  * 複数 shiftId が呼び出し元のアクセス可能な事業所に属することを検証する。
@@ -909,14 +913,11 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
         const details: { title: string; count: number; isOvernight: boolean }[] = [];
 
         for (const p of patterns) {
-            const [sHour, sMin] = p.start_time.split(':').map(Number);
-            const dtStartStr = buildFloatingDate(year, month, 1, sHour, sMin).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-            const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
+            const ruleStr = buildPatternRuleString(year, month, p.start_time, p.rrule);
             const rule = rrulestr(ruleStr);
             const occurrences = rule.between(startDateJST, endDateJST, true);
 
-            const [eHour, eMin] = p.end_time.split(':').map(Number);
-            const isOvernight = eHour * 60 + eMin <= sHour * 60 + sMin;
+            const isOvernight = isOvernightShift(p.start_time, p.end_time);
 
             let patternCount = 0;
             occurrences.forEach(() => {
@@ -968,8 +969,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
 
         const existingMap = new Map<string, { id: string, is_modified: boolean }>();
         existingShifts?.forEach(s => {
-            const jstDateStr = new Date(new Date(s.start_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-            const key = `${s.pattern_id}::${jstDateStr}`;
+            const key = patternDateKey(s.pattern_id, jstDateStrFromStartAt(s.start_at));
             existingMap.set(key, { id: s.id, is_modified: s.is_modified || false });
         });
 
@@ -985,9 +985,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         const promises: Promise<unknown>[] = [];
 
         for (const p of patterns) {
-            const [sHour, sMin] = p.start_time.split(':').map(Number);
-            const dtStartStr = buildFloatingDate(year, month, 1, sHour, sMin).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-            const ruleStr = `DTSTART:${dtStartStr}\nRRULE:${p.rrule}`;
+            const ruleStr = buildPatternRuleString(year, month, p.start_time, p.rrule);
             const rule = rrulestr(ruleStr);
             const occurrences = rule.between(startDateJST, endDateJST, true);
 
@@ -996,30 +994,18 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 const mm = dateJST.getUTCMonth() + 1;
                 const dd = dateJST.getUTCDate();
 
-                const [eHour, eMin] = p.end_time.split(':').map(Number);
-                const pad = (n: number) => String(n).padStart(2, '0');
-                const isOvernight = eHour * 60 + eMin <= sHour * 60 + sMin;
                 const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
-                const baseJstDateStr = `${yy}-${pad(mm)}-${pad(dd)}`;
+                const baseJstDateStr = jstDateStrFromOccurrence(dateJST);
 
-                const startAtStr = buildJstIsoString(yy, mm, dd, `${pad(sHour)}:${pad(sMin)}`);
-                let endAtStr: string;
+                const { startAt, endAt } = computeOccurrenceDateTimes(yy, mm, dd, p.start_time, p.end_time);
 
-                if (isOvernight) {
-                    const nextDay = new Date(Date.UTC(yy, mm - 1, dd));
-                    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-                    endAtStr = buildJstIsoString(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), `${pad(eHour)}:${pad(eMin)}`);
-                } else {
-                    endAtStr = buildJstIsoString(yy, mm, dd, `${pad(eHour)}:${pad(eMin)}`);
-                }
-
-                const keyNormal = `${p.id}::${baseJstDateStr}`;
+                const keyNormal = patternDateKey(p.id, baseJstDateStr);
                 const payload = {
                     organizationId,
                     clientId: p.client_id,
                     title: p.title,
-                    startAt: new Date(startAtStr).toISOString(),
-                    endAt: new Date(endAtStr).toISOString(),
+                    startAt,
+                    endAt,
                     staffIds: staffIds,
                     status: 'published' as const,
                     isModified: false
