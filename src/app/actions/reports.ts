@@ -3,7 +3,7 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertOrgRole, assertOrgPermission, createSessionClient, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgPermission, assertRecordPermission, createSessionClient, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
 import { randomUUID } from 'crypto';
 import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
@@ -20,16 +20,6 @@ export type SaveReportInput = {
   status: ReportStatus;
   values: Record<string, unknown>;
 };
-
-async function assertStaffAssignment(userId: string, clientId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('assignments')
-    .select('client_id')
-    .eq('helper_id', userId)
-    .eq('client_id', clientId)
-    .maybeSingle();
-  if (error || !data) throw new Error('この利用者の記録を作成する権限がありません');
-}
 
 export async function saveReport(input: SaveReportInput) {
   const startAt = new Date(input.startAt);
@@ -70,7 +60,8 @@ export async function transitionReports(
 ) {
   const ids = Array.from(new Set(reportIds.filter(Boolean)));
   if (ids.length === 0 || ids.length > 100) throw new Error('対象件数が不正です');
-  const { userId } = await assertOrgPermission(organizationId, 'reports');
+  await assertOrgPermission(organizationId, 'reports');
+  const { userId } = await assertRecordPermission(organizationId, 'approve', { reportIds: ids });
 
   const { data: clients, error: clientError } = await supabaseAdmin
     .from('clients').select('id').eq('organization_id', organizationId);
@@ -129,7 +120,7 @@ export async function softDeleteReports(
     throw new Error('削除理由を2〜500文字で入力してください');
   }
 
-  const { userId, role } = await assertOrgRole(organizationId);
+  const { userId } = await assertRecordPermission(organizationId, 'delete', { reportIds: uniqueIds, includeDeleted: true });
   const { data: clients, error: clientError } = await supabaseAdmin
     .from('clients')
     .select('id')
@@ -154,12 +145,6 @@ export async function softDeleteReports(
   if (reports.some((report) => report.status === 'approved')) {
     throw new Error('承認済みの記録は削除できません');
   }
-  if (role === 'member' && reports.some((report) =>
-    report.helper_id !== userId || !['draft', 'remanded'].includes(report.status)
-  )) {
-    throw new Error('自分の下書きまたは差戻し記録だけ削除できます');
-  }
-
   const deletedAt = new Date();
   const policy = await getRetentionPolicy(organizationId, 'report');
   const retentionUntil = retentionDeadline(policy.years, deletedAt);
@@ -195,7 +180,8 @@ export async function restoreReports(organizationId: string, reportIds: string[]
   if (uniqueIds.length === 0 || uniqueIds.length > 100) {
     throw new Error('復元対象の件数が不正です');
   }
-  const { userId } = await assertOrgPermission(organizationId, 'reports');
+  await assertOrgPermission(organizationId, 'reports');
+  const { userId } = await assertRecordPermission(organizationId, 'delete', { reportIds: uniqueIds, includeDeleted: true });
 
   const { data: clients, error: clientError } = await supabaseAdmin
     .from('clients')
@@ -237,8 +223,8 @@ export async function restoreReports(organizationId: string, reportIds: string[]
   return { success: true, restored: uniqueIds.length };
 }
 
-async function getAccessibleReport(organizationId: string, reportId: string) {
-  const { userId, role } = await assertOrgRole(organizationId);
+async function getAccessibleReport(organizationId: string, reportId: string, action: 'view' | 'edit' = 'view') {
+  const { userId } = await assertRecordPermission(organizationId, action, { reportId });
   const { data: clients, error: clientError } = await supabaseAdmin
     .from('clients').select('id').eq('organization_id', organizationId);
   if (clientError) throw new Error(clientError.message);
@@ -251,10 +237,7 @@ async function getAccessibleReport(organizationId: string, reportId: string) {
     .maybeSingle();
   if (error || !report) throw new Error('記録にアクセスできません');
 
-  if (role === 'member' && report.helper_id !== userId) {
-    await assertStaffAssignment(userId, report.client_id);
-  }
-  return { userId, role, report };
+  return { userId, report };
 }
 
 export async function uploadReportImage(formData: FormData) {
@@ -263,11 +246,8 @@ export async function uploadReportImage(formData: FormData) {
   const file = formData.get('file');
   if (!(file instanceof File)) throw new Error('画像ファイルがありません');
 
-  const { userId, role, report } = await getAccessibleReport(organizationId, reportId);
+  const { userId, report } = await getAccessibleReport(organizationId, reportId, 'edit');
   if (report.status === 'approved') throw new Error('承認済み記録へ画像を追加できません');
-  if (role === 'member' && report.helper_id !== userId) {
-    throw new Error('他の職員が作成した記録へ画像を追加できません');
-  }
 
   const sanitized = await sanitizeUploadedImage(file);
 
@@ -304,7 +284,7 @@ export async function uploadReportImage(formData: FormData) {
 }
 
 export async function getReportImages(organizationId: string, reportId: string) {
-  const { userId } = await getAccessibleReport(organizationId, reportId);
+  const { userId } = await getAccessibleReport(organizationId, reportId, 'view');
   const { data: images, error } = await supabaseAdmin
     .from('report_images')
     .select('id, storage_path')
@@ -331,7 +311,7 @@ export async function getReportImages(organizationId: string, reportId: string) 
 }
 
 export async function auditReportView(organizationId: string, reportId: string) {
-  const { userId } = await getAccessibleReport(organizationId, reportId);
+  const { userId } = await getAccessibleReport(organizationId, reportId, 'view');
   await recordAuditEvent({
     organizationId,
     actorId: userId,

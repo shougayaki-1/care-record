@@ -38,7 +38,7 @@ import { supabase } from '@/lib/supabase';
 import { markNotificationRead } from '@/app/actions/user';
 import { recordLogout } from '@/app/actions/auth';
 import IdleTimeout from '@/components/auth/IdleTimeout';
-import { checkManagementPermission, type ManagementArea } from '@/utils/permissions';
+import { checkManagementPermission, checkShiftPermission, type ManagementArea } from '@/utils/permissions';
 
 const SIDEBAR_WIDTH = 256;
 const SIDEBAR_COLLAPSED_WIDTH = 72;
@@ -333,6 +333,7 @@ const NavDrawer = ({
   };
 
   const isAdmin = Object.values(currentOrg.effectivePermissions.management).some(Boolean);
+  const canViewShiftManagement = checkShiftPermission(currentOrg.effectivePermissions, 'view', true);
 
   const categoryStyle = {
     px: 3,
@@ -413,7 +414,7 @@ const NavDrawer = ({
         <Typography sx={categoryStyle}>シフト</Typography>
         <List disablePadding>
           {navButton('自分のシフト', <EditNoteIcon fontSize="small" />, '/app/shifts/my')}
-          {isAdmin && (
+          {canViewShiftManagement && (
             navButton('シフト管理', <CalendarMonthIcon fontSize="small" />, '/app/shifts/manage')
           )}
         </List>
@@ -484,10 +485,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     window.localStorage.setItem('care-record-sidebar-open', String(sidebarOpen));
   }, [sidebarOpen]);
   const matchedRoute = PROTECTED_MANAGEMENT_ROUTES.find(({ prefix }) => pathname.startsWith(prefix));
+  const shiftAccessDenied = Boolean(
+    currentOrg && pathname.startsWith('/app/shifts/manage') && !checkShiftPermission(currentOrg.effectivePermissions, 'view', true)
+  );
   const accessDenied = Boolean(
-    currentOrg && matchedRoute && !(
+    shiftAccessDenied || (currentOrg && matchedRoute && !(
       checkManagementPermission(currentOrg.effectivePermissions, matchedRoute.area)
-    )
+    ))
   );
 
   return (

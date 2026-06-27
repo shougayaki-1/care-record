@@ -10,7 +10,7 @@ import { decodeJwtSessionId } from '@/utils/jwt';
 import {
   mergePermissions,
   FULL_PERMISSIONS,
-  type RolePermissions, type ManagementArea,
+  type RolePermissions, type ManagementArea, type RecordAction, type ShiftAction,
 } from '@/utils/permissions';
 
 export type OrgRole = 'owner' | 'member';
@@ -273,6 +273,209 @@ export async function assertOrgPermission(
   const { isOwner, permissions } = await getEffectivePermissions(organizationId, user.id);
   if (!isOwner && !permissions.management[area]) throw new Error('この操作を行う権限がありません');
   return { userId: user.id, isOwner };
+}
+
+type ReportPermissionTarget = {
+  clientId?: string | null;
+  reportId?: string | null;
+  reportIds?: string[];
+  includeDeleted?: boolean;
+};
+
+type ShiftPermissionTarget = {
+  clientId?: string | null;
+  clientIds?: string[];
+  shiftId?: string | null;
+  shiftIds?: string[];
+  patternId?: string | null;
+  patternIds?: string[];
+  includeDeleted?: boolean;
+  requireAllScope?: boolean;
+};
+
+type ReportPermissionActor = { userId: string; isOwner: boolean; clientIds: string[] };
+type ShiftPermissionActor = { organizationId: string; userId: string; isOwner: boolean; clientIds: string[]; staffId: string | null };
+
+async function getActorStaffId(organizationId: string, userId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('staffs')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('user_id', userId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (error) throw new Error('スタッフ情報を確認できませんでした');
+  return data?.id ?? null;
+}
+
+async function getAssignedClientIds(organizationId: string, userId: string): Promise<Set<string>> {
+  const staffId = await getActorStaffId(organizationId, userId);
+  let query = supabaseAdmin
+    .from('assignments')
+    .select('client_id, helper_id, staff_id, clients!inner(organization_id, deleted_at)')
+    .eq('clients.organization_id', organizationId)
+    .is('clients.deleted_at', null);
+  if (staffId) {
+    query = query.or(`helper_id.eq.${userId},staff_id.eq.${staffId}`);
+  } else {
+    query = query.eq('helper_id', userId);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error('担当利用者を確認できませんでした');
+  return new Set((data ?? []).map((row) => row.client_id as string));
+}
+
+async function resolveReportClientIds(
+  organizationId: string,
+  target: ReportPermissionTarget,
+): Promise<string[]> {
+  const clientIds = new Set<string>();
+  if (target.clientId) clientIds.add(target.clientId);
+
+  const reportIds = Array.from(new Set([...(target.reportId ? [target.reportId] : []), ...(target.reportIds ?? [])].filter(Boolean)));
+  if (reportIds.length > 0) {
+    let query = supabaseAdmin
+      .from('reports')
+      .select('id, client_id, clients!inner(organization_id)')
+      .in('id', reportIds)
+      .eq('clients.organization_id', organizationId);
+    if (!target.includeDeleted) query = query.is('deleted_at', null);
+    const { data, error } = await query;
+    if (error) throw new Error('記録の所属を確認できませんでした');
+    if ((data ?? []).length !== reportIds.length) throw new Error('記録にアクセスできません');
+    for (const row of data ?? []) clientIds.add(row.client_id as string);
+  }
+
+  if (clientIds.size === 0) throw new Error('権限確認対象が不正です');
+  return [...clientIds];
+}
+
+async function resolveShiftTargets(
+  organizationId: string,
+  target: ShiftPermissionTarget,
+): Promise<{ clientIds: string[]; shiftIds: string[]; clientIdByShiftId: Map<string, string> }> {
+  const clientIds = new Set<string>();
+  const shiftIds = new Set<string>();
+  const clientIdByShiftId = new Map<string, string>();
+  if (target.clientId) clientIds.add(target.clientId);
+  for (const id of target.clientIds ?? []) if (id) clientIds.add(id);
+
+  const directShiftIds = Array.from(new Set([...(target.shiftId ? [target.shiftId] : []), ...(target.shiftIds ?? [])].filter(Boolean)));
+  if (directShiftIds.length > 0) {
+    let query = supabaseAdmin
+      .from('shifts')
+      .select('id, client_id, organization_id')
+      .in('id', directShiftIds)
+      .eq('organization_id', organizationId);
+    if (!target.includeDeleted) query = query.is('deleted_at', null);
+    const { data, error } = await query;
+    if (error) throw new Error('シフトの所属を確認できませんでした');
+    if ((data ?? []).length !== directShiftIds.length) throw new Error('シフトにアクセスできません');
+    for (const row of data ?? []) {
+      shiftIds.add(row.id as string);
+      const clientId = row.client_id as string;
+      clientIds.add(clientId);
+      clientIdByShiftId.set(row.id as string, clientId);
+    }
+  }
+
+  const patternIds = Array.from(new Set([...(target.patternId ? [target.patternId] : []), ...(target.patternIds ?? [])].filter(Boolean)));
+  if (patternIds.length > 0) {
+    let query = supabaseAdmin
+      .from('shift_patterns')
+      .select('id, client_id, organization_id')
+      .in('id', patternIds)
+      .eq('organization_id', organizationId);
+    if (!target.includeDeleted) query = query.is('deleted_at', null);
+    const { data, error } = await query;
+    if (error) throw new Error('シフトひな形の所属を確認できませんでした');
+    if ((data ?? []).length !== patternIds.length) throw new Error('シフトひな形にアクセスできません');
+    for (const row of data ?? []) clientIds.add(row.client_id as string);
+  }
+
+  if (clientIds.size === 0 && shiftIds.size === 0 && target.requireAllScope == null) {
+    throw new Error('権限確認対象が不正です');
+  }
+  return { clientIds: [...clientIds], shiftIds: [...shiftIds], clientIdByShiftId };
+}
+
+async function assertAssignedClients(organizationId: string, userId: string, clientIds: string[]): Promise<void> {
+  const assignedClientIds = await getAssignedClientIds(organizationId, userId);
+  if (clientIds.some((id) => !assignedClientIds.has(id))) {
+    throw new Error('この操作を行う権限がありません');
+  }
+}
+
+async function assertAssignedShifts(
+  organizationId: string,
+  userId: string,
+  staffId: string | null,
+  clientIds: string[],
+  shiftIds: string[],
+  clientIdByShiftId: Map<string, string>,
+): Promise<void> {
+  const assignedClientIds = await getAssignedClientIds(organizationId, userId);
+  const ownShiftIds = new Set<string>();
+  if (shiftIds.length > 0 && staffId) {
+    const { data, error } = await supabaseAdmin
+      .from('shift_staffs')
+      .select('shift_id')
+      .in('shift_id', shiftIds)
+      .eq('staff_id', staffId);
+    if (error) throw new Error('シフト担当を確認できませんでした');
+    for (const row of data ?? []) ownShiftIds.add(row.shift_id as string);
+  }
+
+  for (const shiftId of shiftIds) {
+    const clientId = clientIdByShiftId.get(shiftId);
+    if (!ownShiftIds.has(shiftId) && (!clientId || !assignedClientIds.has(clientId))) {
+      throw new Error('この操作を行う権限がありません');
+    }
+  }
+
+  const standaloneClientIds = clientIds.filter((clientId) => ![...clientIdByShiftId.values()].includes(clientId));
+  if (standaloneClientIds.some((id) => !assignedClientIds.has(id))) {
+    throw new Error('この操作を行う権限がありません');
+  }
+}
+
+export async function assertRecordPermission(
+  organizationId: string,
+  action: RecordAction,
+  target: ReportPermissionTarget,
+): Promise<ReportPermissionActor> {
+  if (!organizationId) throw new Error('organizationId が不正です');
+  const user = await getAuthedUser();
+  const { isOwner, permissions } = await getEffectivePermissions(organizationId, user.id);
+  const clientIds = await resolveReportClientIds(organizationId, target);
+  if (isOwner || permissions.records[action] === 'all') return { userId: user.id, isOwner, clientIds };
+  if (permissions.records[action] === 'assigned') {
+    await assertAssignedClients(organizationId, user.id, clientIds);
+    return { userId: user.id, isOwner, clientIds };
+  }
+  throw new Error('この操作を行う権限がありません');
+}
+
+export async function assertShiftPermission(
+  organizationId: string,
+  action: ShiftAction,
+  target: ShiftPermissionTarget,
+): Promise<ShiftPermissionActor> {
+  if (!organizationId) throw new Error('organizationId が不正です');
+  const user = await getAuthedUser();
+  const { isOwner, permissions } = await getEffectivePermissions(organizationId, user.id);
+  const { clientIds, shiftIds, clientIdByShiftId } = await resolveShiftTargets(organizationId, target);
+  const staffId = await getActorStaffId(organizationId, user.id);
+  if (isOwner || permissions.shifts[action] === 'all') return { organizationId, userId: user.id, isOwner, clientIds, staffId };
+  if (target.requireAllScope || permissions.shifts[action] !== 'assigned') {
+    throw new Error('この操作を行う権限がありません');
+  }
+  if (clientIds.length === 0 && shiftIds.length === 0) {
+    const assignedClientIds = await getAssignedClientIds(organizationId, user.id);
+    return { organizationId, userId: user.id, isOwner, clientIds: [...assignedClientIds], staffId };
+  }
+  await assertAssignedShifts(organizationId, user.id, staffId, clientIds, shiftIds, clientIdByShiftId);
+  return { organizationId, userId: user.id, isOwner, clientIds, staffId };
 }
 
 /**

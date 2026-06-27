@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
                 return role?.permissions as RolePermissions | undefined;
             })
             .filter((value): value is RolePermissions => value != null));
-        if (!member || !permissions.management.integrations) {
+        if (!member || (member.role !== 'owner' && !permissions.management.integrations)) {
             console.error('User cannot manage integrations for target organization');
             return failResponse;
         }

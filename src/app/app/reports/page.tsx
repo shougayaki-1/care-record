@@ -31,6 +31,7 @@ import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/t
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { InnerPageHeader } from '@/components/ui';
+import { checkRecordPermission } from '@/utils/permissions';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 type ReportValuesData = Record<string, FormValue>;
@@ -506,6 +507,8 @@ export default function ReportsPage() {
   if (searchParams.get('period') === 'current_month') headerTitle = "今月の記録";
 
   if (wsLoading || !currentOrg) return null;
+  const canApproveRecords = checkRecordPermission(currentOrg.effectivePermissions, 'approve', true);
+  const canDeleteRecords = checkRecordPermission(currentOrg.effectivePermissions, 'delete', true);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -552,9 +555,9 @@ export default function ReportsPage() {
                         <Button variant="contained" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
                             {gasProgress ? '作成中...' : '帳票作成(GAS)'}
                         </Button>
-                        <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>
-                        <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</Button>
-                        <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</Button>
+                        {canApproveRecords && <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>}
+                        {canApproveRecords && <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</Button>}
+                        {canDeleteRecords && <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</Button>}
                     </>
                  ) : (
                      <Button variant="outlined" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>

@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { getShifts, getShiftPatterns, type ShiftQueryFilter } from '@/app/actions/shift';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ClientData, StaffData } from '@/components/shifts/ShiftFormModal';
+import { checkShiftPermission, type RolePermissions } from '@/utils/permissions';
 
 export type FetchedPatternData = {
     id: string;
@@ -27,7 +28,7 @@ export type ShiftDateRange = {
 };
 
 type UseShiftDataParams = {
-    currentOrg: { id: string; role: string } | null;
+    currentOrg: { id: string; role: string; effectivePermissions: RolePermissions } | null;
     showToast: (msg: string, severity?: 'success' | 'info' | 'warning' | 'error') => void;
     calendarRef: RefObject<FullCalendar | null>;
     activeTab: TabId;
@@ -176,7 +177,7 @@ export const useShiftData = ({
             const typedShifts = (fetchedShifts as unknown as FetchedShiftData[]) || [];
 
             setRawShifts(typedShifts);
-            const isEditable = activeTab === 'fullCalendar' && ['owner', 'manager'].includes(currentOrg.role);
+            const isEditable = activeTab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true);
             setEvents(convertToCalendarEvents(typedShifts, !isEditable));
             void fetchUnsyncedCount().catch(console.error);
         } catch (error) {
@@ -217,7 +218,7 @@ export const useShiftData = ({
             return true;
         });
 
-        const isEditable = activeTab === 'fullCalendar' && ['owner', 'manager'].includes(currentOrg?.role || '');
+        const isEditable = Boolean(currentOrg && activeTab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true));
         setEvents(convertToCalendarEvents(filtered, !isEditable));
     }, [rawShifts, activeTab, selectedStaffId, selectedClientId, currentStaffId, currentOrg]);
 

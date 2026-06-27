@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
-import { checkManagementPermission } from '@/utils/permissions';
+import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
 import { 
   Box, Typography, Paper, TextField, Button, Alert, CircularProgress, LinearProgress, Stack, Divider,
   Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow
@@ -79,6 +79,11 @@ function SettingsContent() {
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
     const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
     const [confirmInput, setConfirmInput] = useState('');
+    const canRepairCalendarSync = Boolean(
+        currentOrg &&
+        checkShiftPermission(currentOrg.effectivePermissions, 'edit', true) &&
+        currentOrg.effectivePermissions.shifts.edit === 'all'
+    );
 
     const fetchOrgDetails = useCallback(async () => {
         if (!currentOrg) return;
@@ -272,19 +277,19 @@ function SettingsContent() {
 
     // 同期ステータス（未同期件数）を取得して表示を更新
     const refreshSyncStatus = useCallback(async () => {
-        if (!currentOrg) return;
+        if (!currentOrg || !canRepairCalendarSync) return;
         try {
             const s = await getSyncStatus(currentOrg.id);
             setSyncStatus({ total: s.total, unsynced: s.unsynced });
         } catch (e) {
             console.error('getSyncStatus error', e);
         }
-    }, [currentOrg]);
+    }, [currentOrg, canRepairCalendarSync]);
 
     useEffect(() => {
-        if (googleCalendarId) refreshSyncStatus();
+        if (googleCalendarId && canRepairCalendarSync) refreshSyncStatus();
         else setSyncStatus(null);
-    }, [googleCalendarId, refreshSyncStatus]);
+    }, [googleCalendarId, canRepairCalendarSync, refreshSyncStatus]);
 
     // 同期結果のメッセージ
     const reportSyncResult = (done: number, failed: number, errorKind?: string) => {
@@ -527,7 +532,7 @@ function SettingsContent() {
                                                 </Typography>
 
                                                 {/* 同期ステータス */}
-                                                {syncStatus && (
+                                                {canRepairCalendarSync && syncStatus && (
                                                     syncStatus.unsynced > 0 ? (
                                                         <Alert severity="warning" sx={{ mt: 1 }}>
                                                             未同期の予定が <strong>{syncStatus.unsynced} 件</strong> あります（全 {syncStatus.total} 件中）。「未同期を同期」で解消できます。
@@ -539,7 +544,7 @@ function SettingsContent() {
                                                     )
                                                 )}
 
-                                                {syncProgress && (
+                                                {canRepairCalendarSync && syncProgress && (
                                                     <Box sx={{ mt: 1 }}>
                                                         <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 3 }} />
                                                         <Typography variant="caption" color="text.secondary">{syncProgress.current} / {syncProgress.total} 件 処理中...</Typography>
@@ -547,7 +552,7 @@ function SettingsContent() {
                                                 )}
 
                                                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mt: 1, '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
-                                                    <Button
+                                                    {canRepairCalendarSync && <Button
                                                         variant="contained"
                                                         color="warning"
                                                         startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />}
@@ -555,9 +560,9 @@ function SettingsContent() {
                                                         disabled={repairingCal || resyncingCal || (syncStatus?.unsynced === 0)}
                                                     >
                                                         {repairingCal ? '同期中...' : `未同期を同期${syncStatus && syncStatus.unsynced > 0 ? `（${syncStatus.unsynced}件）` : ''}`}
-                                                    </Button>
+                                                    </Button>}
                                                     {/* 全件強制再同期（通常は未同期同期で十分。Google側で予定がずれた場合の最終手段） */}
-                                                    <Button
+                                                    {canRepairCalendarSync && <Button
                                                         variant="outlined"
                                                         color="primary"
                                                         startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
@@ -566,7 +571,7 @@ function SettingsContent() {
                                                         sx={{ boxShadow: 'none' }}
                                                     >
                                                         {resyncingCal ? '修復中...' : '同期を修復'}
-                                                    </Button>
+                                                    </Button>}
                                                     <Button 
                                                         variant="outlined"
                                                         color="error" 

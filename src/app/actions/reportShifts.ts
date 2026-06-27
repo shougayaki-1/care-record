@@ -1,12 +1,12 @@
 'use server';
-import { supabaseAdmin, getAuthedUser } from '@/utils/supabase/auth';
+import { supabaseAdmin, assertRecordPermission, assertShiftPermission } from '@/utils/supabase/auth';
 
 /** Returns candidate shifts to suggest linking: same client, overlapping time, not already linked. */
 export async function getShiftSuggestions(
   orgId: string,
   reportId: string
 ): Promise<Array<{ id: string; title: string | null; start_at: string; end_at: string; staffName: string | null }>> {
-  await getAuthedUser();
+  await assertRecordPermission(orgId, 'view', { reportId });
 
   // Get primary shift of the report
   const { data: primaryLink } = await supabaseAdmin
@@ -19,6 +19,7 @@ export async function getShiftSuggestions(
   if (!primaryLink?.shift_id) return [];
   const primary = primaryLink.shifts as unknown as { start_at: string; end_at: string; client_id: string } | null;
   if (!primary) return [];
+  await assertShiftPermission(orgId, 'view', { clientId: primary.client_id });
 
   // Get already-linked shift IDs
   const { data: existing } = await supabaseAdmin.from('report_shifts').select('shift_id').eq('report_id', reportId);
@@ -48,7 +49,8 @@ export async function getShiftSuggestions(
 
 /** Links a secondary shift to a report (draft/remanded only). */
 export async function addShiftLink(orgId: string, reportId: string, shiftId: string): Promise<void> {
-  await getAuthedUser();
+  await assertRecordPermission(orgId, 'edit', { reportId });
+  await assertShiftPermission(orgId, 'view', { shiftId });
 
   const { data: report } = await supabaseAdmin.from('reports').select('status').eq('id', reportId).single();
   if (!report) throw new Error('記録が見つかりません');
@@ -60,7 +62,8 @@ export async function addShiftLink(orgId: string, reportId: string, shiftId: str
 
 /** Removes a non-primary shift link. */
 export async function removeShiftLink(orgId: string, reportId: string, shiftId: string): Promise<void> {
-  await getAuthedUser();
+  await assertRecordPermission(orgId, 'edit', { reportId });
+  await assertShiftPermission(orgId, 'view', { shiftId });
 
   const { data: link } = await supabaseAdmin.from('report_shifts').select('is_primary').eq('report_id', reportId).eq('shift_id', shiftId).maybeSingle();
   if (link?.is_primary) throw new Error('主シフトは解除できません');
@@ -71,6 +74,15 @@ export async function removeShiftLink(orgId: string, reportId: string, shiftId: 
 
 /** Returns all shifts linked to a report. */
 export async function getLinkedShifts(reportId: string): Promise<unknown[]> {
+  const { data: report } = await supabaseAdmin
+    .from('reports')
+    .select('id, clients!inner(organization_id)')
+    .eq('id', reportId)
+    .maybeSingle();
+  const orgId = (report as { clients?: { organization_id?: string } | Array<{ organization_id?: string }> } | null)?.clients;
+  const organizationId = Array.isArray(orgId) ? orgId[0]?.organization_id : orgId?.organization_id;
+  if (!organizationId) throw new Error('記録にアクセスできません');
+  await assertRecordPermission(organizationId, 'view', { reportId });
   const { data, error } = await supabaseAdmin
     .from('report_shifts')
     .select('shift_id, is_primary, shifts(id, title, start_at, end_at, shift_staffs(staffs(name)))')

@@ -4,7 +4,7 @@
 // 直接削除（softDeleteReports）に加え、申請→owner承認→論理削除の経路を提供する。
 // deletion_requests は service_role のみアクセス可（RLSで REVOKE 済み）。
 
-import { assertOrgPermission, assertOrgRole, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgPermission, assertOrgRole, assertRecordPermission, supabaseAdmin } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { sanitizeDbError } from '@/utils/errors';
 
@@ -84,6 +84,7 @@ export async function approveDeletionRequest(organizationId: string, requestId: 
   if (req.resource_type !== 'report') throw new Error('未対応の対象種別です');
 
   await assertReportInOrg(req.resource_id, organizationId);
+  await assertRecordPermission(organizationId, 'delete', { reportId: req.resource_id });
 
   // 保持期間を解決して論理削除する。
   const { data: org, error: orgError } = await supabaseAdmin

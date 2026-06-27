@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergePermissions, checkRecordPermission, checkManagementPermission, PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS, FULL_PERMISSIONS, type RolePermissions } from './permissions';
+import { mergePermissions, checkRecordPermission, checkShiftPermission, checkManagementPermission, PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS, FULL_PERMISSIONS, type RolePermissions } from './permissions';
 
 describe('mergePermissions', () => {
   it('returns EMPTY when given no roles', () => {
@@ -50,4 +50,20 @@ describe('checkRecordPermission', () => {
     expect(checkRecordPermission(PRESET_STAFF_PERMISSIONS, 'view', true)).toBe(true);
   });
   it('none: always denies', () => expect(checkRecordPermission(PRESET_STAFF_PERMISSIONS, 'delete', true)).toBe(false));
+});
+
+describe('checkShiftPermission', () => {
+  it('all: allows regardless of assigned', () => {
+    expect(checkShiftPermission(FULL_PERMISSIONS, 'edit', false)).toBe(true);
+  });
+
+  it('assigned: allows only assigned shifts or assigned-client shifts', () => {
+    expect(checkShiftPermission(PRESET_STAFF_PERMISSIONS, 'view', true)).toBe(true);
+    expect(checkShiftPermission(PRESET_STAFF_PERMISSIONS, 'view', false)).toBe(false);
+  });
+
+  it('none: denies shift mutations', () => {
+    expect(checkShiftPermission(PRESET_STAFF_PERMISSIONS, 'create', true)).toBe(false);
+    expect(checkShiftPermission(PRESET_STAFF_PERMISSIONS, 'delete', true)).toBe(false);
+  });
 });

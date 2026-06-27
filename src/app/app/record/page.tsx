@@ -16,7 +16,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { InnerPageHeader } from '@/components/ui';
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
-import { checkRecordPermission } from '@/utils/permissions';
+import { checkRecordPermission, checkShiftPermission } from '@/utils/permissions';
 
 type Client = { id: string; name: string; };
 type DraftReport = { id: string; created_at: string; };
@@ -49,7 +49,7 @@ export default function RecordSelectPage() {
             }
             setClients(targetClients);
 
-            if (user) {
+            if (user && checkShiftPermission(currentOrg.effectivePermissions, 'view', true)) {
                 const start = new Date();
                 start.setHours(0, 0, 0, 0);
                 const end = new Date(start);

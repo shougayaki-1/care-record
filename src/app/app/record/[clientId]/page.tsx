@@ -548,6 +548,7 @@ export default function RecordPage() {
   }, [template]);
 
   const isAdmin = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'approve', true));
+  const canDeleteRecord = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'delete', true));
   const travelCostYen = Math.round((parseFloat(roundTripDistanceKm || '0') || 0) * travelCostRateYenPerKm);
 
   const handleStaffChange = (value: string[]) => {
@@ -573,7 +574,7 @@ export default function RecordPage() {
             title={currentReportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済みの記録' : '記録を修正')) : `${clientName} 様`}
             actions={(
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent="flex-end">
-                {currentReportId && currentStatus !== 'approved' && (
+                {currentReportId && currentStatus !== 'approved' && canDeleteRecord && (
                     <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
                 )}
                 
