@@ -3,7 +3,7 @@
 
 export type RecordScope = 'all' | 'assigned' | 'none';
 export type RecordAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
-export type ShiftAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
+export type ShiftAction = 'view' | 'create' | 'edit' | 'delete';
 export type ManagementArea =
   | 'staffs'
   | 'clients'
@@ -26,7 +26,7 @@ export type RolePermissions = {
 
 export const EMPTY_PERMISSIONS: RolePermissions = {
   records: { view: 'none', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
-  shifts:  { view: 'none', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
+  shifts:  { view: 'none', create: 'none', edit: 'none', delete: 'none' },
   management: {
     staffs: false,
     clients: false,
@@ -43,7 +43,7 @@ export const EMPTY_PERMISSIONS: RolePermissions = {
 
 export const FULL_PERMISSIONS: RolePermissions = {
   records: { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
-  shifts:  { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
+  shifts:  { view: 'all', create: 'all', edit: 'all', delete: 'all' },
   management: {
     staffs: true,
     clients: true,
@@ -61,7 +61,7 @@ export const FULL_PERMISSIONS: RolePermissions = {
 /** 管理者プリセット */
 export const PRESET_MANAGER_PERMISSIONS: RolePermissions = {
   records: { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
-  shifts:  { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
+  shifts:  { view: 'all', create: 'all', edit: 'all', delete: 'all' },
   management: {
     staffs: true,
     clients: true,
@@ -79,7 +79,7 @@ export const PRESET_MANAGER_PERMISSIONS: RolePermissions = {
 /** 一般スタッフプリセット */
 export const PRESET_STAFF_PERMISSIONS: RolePermissions = {
   records: { view: 'assigned', create: 'assigned', edit: 'assigned', delete: 'none', approve: 'none' },
-  shifts:  { view: 'assigned', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
+  shifts:  { view: 'assigned', create: 'none', edit: 'none', delete: 'none' },
   management: {
     staffs: false,
     clients: false,

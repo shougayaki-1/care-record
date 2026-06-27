@@ -56,6 +56,13 @@ const RECORD_ROWS: Array<{ label: string; action: RecordAction; allowAssigned: b
   { label: '承認', action: 'approve', allowAssigned: false },
 ];
 
+const SHIFT_ROWS: Array<{ label: string; action: ShiftAction; allowAssigned: boolean }> = [
+  { label: '閲覧', action: 'view',   allowAssigned: true },
+  { label: '作成', action: 'create', allowAssigned: true },
+  { label: '編集', action: 'edit',   allowAssigned: true },
+  { label: '削除', action: 'delete', allowAssigned: false },
+];
+
 const MGMT_ITEMS: Array<{ label: string; key: keyof RolePermissions['management']; description: string }> = [
   { label: 'スタッフ管理', key: 'staffs', description: 'スタッフ名簿、役職、アカウント紐付けを編集できます。' },
   { label: '利用者管理', key: 'clients', description: '利用者の追加、フォーム設定、担当スタッフ設定を編集できます。' },
@@ -94,63 +101,71 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
             </TableRow>
           </TableHead>
           <TableBody>
-            {(['records', 'shifts'] as const).map(resource => (
-              <TableRow key={resource}>
-                <TableCell sx={{ whiteSpace: 'nowrap' }}>{resource === 'records' ? '記録' : 'シフト'}</TableCell>
-                {RECORD_ROWS.map(r => (
-                  <TableCell key={r.action} align="center">
-                    <ScopeToggle
-                      scope={value[resource][r.action] as RecordScope}
-                      onChange={s =>
-                        resource === 'records'
-                          ? setRecords(r.action, s)
-                          : setShifts(r.action as ShiftAction, s)
-                      }
-                      allowAssigned={r.allowAssigned}
-                    />
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
+            <TableRow>
+              <TableCell sx={{ whiteSpace: 'nowrap' }}>記録</TableCell>
+              {RECORD_ROWS.map(r => (
+                <TableCell key={r.action} align="center">
+                  <ScopeToggle
+                    scope={value.records[r.action]}
+                    onChange={s => setRecords(r.action, s)}
+                    allowAssigned={r.allowAssigned}
+                  />
+                </TableCell>
+              ))}
+            </TableRow>
+            <TableRow>
+              <TableCell sx={{ whiteSpace: 'nowrap' }}>シフト</TableCell>
+              {SHIFT_ROWS.map(r => (
+                <TableCell key={r.action} align="center">
+                  <ScopeToggle
+                    scope={value.shifts[r.action]}
+                    onChange={s => setShifts(r.action, s)}
+                    allowAssigned={r.allowAssigned}
+                  />
+                </TableCell>
+              ))}
+              {/* 承認列はシフトに存在しないため空セル */}
+              <TableCell />
+            </TableRow>
           </TableBody>
         </Table>
       </TableContainer>
 
       <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' } }}>
-        {(['records', 'shifts'] as const).map(resource => (
-          <Box
-            key={resource}
-            sx={{
-              p: 1.5,
-              border: '1px solid',
-              borderColor: 'divider',
-              borderRadius: 2,
-              bgcolor: 'background.paper',
-            }}
-          >
-            <Typography variant="subtitle2" fontWeight="bold" mb={1}>
-              {resource === 'records' ? '記録' : 'シフト'}
-            </Typography>
-            <Stack spacing={1}>
-              {RECORD_ROWS.map(r => (
-                <Stack key={r.action} direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                  <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
-                    {r.label}
-                  </Typography>
-                  <ScopeToggle
-                    scope={value[resource][r.action] as RecordScope}
-                    onChange={s =>
-                      resource === 'records'
-                        ? setRecords(r.action, s)
-                        : setShifts(r.action as ShiftAction, s)
-                    }
-                    allowAssigned={r.allowAssigned}
-                  />
-                </Stack>
-              ))}
-            </Stack>
-          </Box>
-        ))}
+        <Box sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+          <Typography variant="subtitle2" fontWeight="bold" mb={1}>記録</Typography>
+          <Stack spacing={1}>
+            {RECORD_ROWS.map(r => (
+              <Stack key={r.action} direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
+                  {r.label}
+                </Typography>
+                <ScopeToggle
+                  scope={value.records[r.action]}
+                  onChange={s => setRecords(r.action, s)}
+                  allowAssigned={r.allowAssigned}
+                />
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
+        <Box sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+          <Typography variant="subtitle2" fontWeight="bold" mb={1}>シフト</Typography>
+          <Stack spacing={1}>
+            {SHIFT_ROWS.map(r => (
+              <Stack key={r.action} direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
+                  {r.label}
+                </Typography>
+                <ScopeToggle
+                  scope={value.shifts[r.action]}
+                  onChange={s => setShifts(r.action, s)}
+                  allowAssigned={r.allowAssigned}
+                />
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
       </Stack>
 
       <Typography variant="subtitle2" mt={2} mb={1}>管理機能アクセス</Typography>
