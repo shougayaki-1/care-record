@@ -19,11 +19,12 @@ async function assertDangerousRoleOwnerCheck(
   isOwner: boolean,
 ): Promise<void> {
   if (roleIds.length === 0) return;
-  const { data: orgRoles } = await supabaseAdmin
+  const { data: orgRoles, error } = await supabaseAdmin
     .from('organization_roles')
     .select('id, permissions')
     .eq('organization_id', orgId)
     .in('id', roleIds);
+  if (error) throw new Error('ロール情報の取得に失敗しました');
   const hasDangerous = (orgRoles ?? []).some(r => isDangerousPermissions(r.permissions as RolePermissions));
   if (hasDangerous && !isOwner) {
     throw new Error('危険な権限を含むロールの付与はオーナーのみ実行できます');
