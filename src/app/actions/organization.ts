@@ -72,8 +72,9 @@ export async function disconnectGoogleCalendar(orgId: string) {
 }
 
 export async function deleteOrganization(orgId: string) {
-    // 権限チェック: 呼び出し元がこの事業所の owner であることをセッションから検証
-    const { userId } = await assertOrgPermission(orgId, 'organizationDelete');
+    // 権限チェック: owner かつ organizationDelete 権限が必要
+    const { userId, isOwner } = await assertOrgPermission(orgId, 'organizationDelete');
+    if (!isOwner) throw new Error('事業所の削除はオーナーのみ実行できます');
 
     const { data: organization, error: orgReadError } = await supabaseAdmin
         .from('organizations')

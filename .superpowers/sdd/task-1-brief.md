@@ -1,62 +1,56 @@
-# Task 1 Brief: Roboto font + theme.ts全面更新
+# Task 1: shifts.approveを型・プリセット・UIから削除する
 
-## 作業ディレクトリ
-/Users/shoug/Documents/GitHub/care-record/.claude/worktrees/ui-unification-m3
+## Context
+care-record は Next.js + Supabase のヘルスケア記録アプリ（branch: permission-design-cleanup）。
+権限設計整理の一環として、シフトに「承認」アクションは不要なため型・プリセット・UIから削除する。
+DB内の既存JSON（`shifts.approve`キー）はmigrationで削除しない（アプリ側で無視するだけでOK）。
 
-## 目的
-Google風M3 UIへのフル刷新の基盤。フォントをRobotoに変え、MUIテーマのカラー・角丸・コンポーネントデフォルトをM3/Googleブルーに更新する。
+## Target Files
+- `/Users/shoug/Documents/GitHub/care-record/src/utils/permissions.ts`
+- `/Users/shoug/Documents/GitHub/care-record/src/components/roles/RolePermissionsMatrix.tsx`
+- `/Users/shoug/Documents/GitHub/care-record/src/utils/permissions.test.ts`
 
-## 変更ファイル
+## Required Changes
 
-### 1. src/app/layout.tsx
-- `next/font/google` から `Roboto` をインポート
-- `subsets: ['latin']`、`weight: ['300','400','500','700']`
-- `<body>` タグに `className={roboto.className}` を追加
+### 1. src/utils/permissions.ts
+- `ShiftAction` 型を `'view' | 'create' | 'edit' | 'delete'` に変更（`'approve'` を削除）
+- `EMPTY_PERMISSIONS.shifts` から `approve: 'none'` を削除
+- `FULL_PERMISSIONS.shifts` から `approve: 'all'` を削除
+- `PRESET_MANAGER_PERMISSIONS.shifts` から `approve: 'all'` を削除
+- `PRESET_STAFF_PERMISSIONS.shifts` から `approve: 'none'` を削除
 
-### 2. src/theme.ts
-以下の変更を適用：
+### 2. src/components/roles/RolePermissionsMatrix.tsx
+現在 `RECORD_ROWS`（5行: view/create/edit/delete/approve）を records と shifts の両方に流用している。
+シフトには「承認」列が不要なので分離する。
 
-#### designTokens変更点（exact values）
-```ts
-brand: {
-  main:  '#1A73E8',   // #2255CC → #1A73E8
-  light: '#4285F4',   // #6699FF → #4285F4
-  dark:  '#1557B0',   // #003399 → #1557B0
-},
-surface: {
-  canvas: '#F8F9FA',  // #F6F7F9 → #F8F9FA
-  tint:   '#E8F0FE',  // #F0F5FF → #E8F0FE
-  // paper / subtle / muted は変更なし
-},
-radius: {
-  control: 8,   // 10 → 8
-  card:    12,  // 変更なし
-  dialog:  28,  // 16 → 28
-  chip:    8,   // 新規追加
-},
+推奨実装方針:
+- `RECORD_ROWS` はそのまま records 用（5行）として使う
+- `SHIFT_ROWS` を新たに定義し、承認なし4行にする
+- テーブルヘッダーは RECORD_ROWS の5列のまま維持し、shifts行の承認セルは空セル（`<TableCell />`）にする
+- モバイル Stack 表示でも同様に shifts は SHIFT_ROWS を使う
+- `type ShiftAction = keyof RolePermissions['shifts']` は型が自動的に更新されるのでそのままでOK
+
+### 3. src/utils/permissions.test.ts
+現在のテスト内容:
+- `checkShiftPermission(FULL_PERMISSIONS, 'edit', false)` → そのまま維持
+- `checkShiftPermission(PRESET_STAFF_PERMISSIONS, 'view', ...)` → そのまま維持
+- `checkShiftPermission(PRESET_STAFF_PERMISSIONS, 'create', ...)` → そのまま維持
+- `checkShiftPermission(PRESET_STAFF_PERMISSIONS, 'delete', ...)` → そのまま維持
+- shifts に 'approve' を使っているテストがあれば削除
+- FULL_PERMISSIONS で shifts.approve を直接参照するテストがあれば修正
+
+## Verification Commands
+```bash
+cd /Users/shoug/Documents/GitHub/care-record
+npx tsc --noEmit 2>&1 | head -60
+npx vitest run src/utils/permissions.test.ts 2>&1
 ```
 
-#### typography
-```ts
-fontFamily: 'Roboto, "Helvetica Neue", Arial, sans-serif',
-// 現在: 'Inter, "Helvetica Neue", Arial, sans-serif'
-```
+## Report File
+`/Users/shoug/Documents/GitHub/care-record/.superpowers/sdd/task-1-report.md` に書いてください。
 
-#### MUI コンポーネントオーバーライド
-- `MuiDialog.paper`: `borderRadius: designTokens.radius.dialog`（28に自動反映）
-- `MuiChip.root`: `borderRadius: designTokens.radius.chip`（= 8）に更新
-- `MuiPaper.root`: `styleOverrides` に `boxShadow: 'none'` を追加（全ページでの手動指定を不要にする）
-- `MuiCard.root`: `styleOverrides` に `boxShadow: 'none'` を追加
-- `MuiTableContainer`（新規追加）: `defaultProps: {}`, `styleOverrides: { root: { boxShadow: 'none' } }`
-
-## 制約
-- PDFコンポーネント（src/components/pdf/）は変更しない
-- `designTokens` の型定義は既存のまま維持（ただし `radius.chip` を追加する場合はas constで問題なし）
-- `npm run build` が通ること
-
-## 完了の定義
-- `npm run build` がエラーなく完了
-- コミット済み
-
-## レポートファイル
-完了後、作業内容を /Users/shoug/Documents/GitHub/care-record/.superpowers/sdd/task-1-report.md に書くこと
+## Report Format
+1行目: STATUS: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
+2行目: COMMITS: <hash>
+3行目: TESTS: <テスト結果サマリー>
+4行目以降: CONCERNS: （あれば）

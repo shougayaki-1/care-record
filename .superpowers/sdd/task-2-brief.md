@@ -1,86 +1,167 @@
-# Task 2 Brief: InnerPageHeaderコンポーネント追加
+# Task 2: 危険ロールのowner限定バリデーション追加
 
-## 作業ディレクトリ
-/Users/shoug/Documents/GitHub/care-record/.claude/worktrees/ui-unification-m3
+## Context
+care-record は Next.js + Supabase のヘルスケア記録アプリ（branch: permission-design-cleanup）。
+業務ロール付与において、強力な管理権限を含む「危険ロール」の付与は owner のみが行えるようにする。
 
-## 目的
-全アプリページで重複している「64pxヘッダーボックス + アイコン + タイトル」パターンを共通コンポーネントに集約する。
+## 危険ロールの定義
+以下のいずれかを `management` で持つ `RolePermissions` が設定されたロールを「危険ロール」と呼ぶ:
+- `management.accounts`
+- `management.roles`
+- `management.organizationDelete`
+- `management.ownerTransfer`
 
-## 変更ファイル
+## Target Files
+- `/Users/shoug/Documents/GitHub/care-record/src/app/actions/accounts.ts`
+- `/Users/shoug/Documents/GitHub/care-record/src/app/app/accounts/page.tsx`
 
-### 1. src/components/ui/Layout.tsx
-既存の `PageContainer`、`PageHeader`、`SectionCard`、`EmptyState`、`StatusChip` に加えて、新しく `InnerPageHeader` コンポーネントを追加する。
+## Required Changes
 
-```tsx
-export function InnerPageHeader({
-  icon,
-  title,
-  actions,
-}: {
-  icon?: ReactNode;
-  title: ReactNode;
-  actions?: ReactNode;
-}) {
-  return (
-    <Box
-      sx={{
-        height: 64,
-        flexShrink: 0,
-        borderBottom: 1,
-        borderColor: 'divider',
-        bgcolor: 'background.paper',
-        display: 'flex',
-        alignItems: 'center',
-        px: 3,
-        gap: 2,
-      }}
-    >
-      {icon && (
-        <Box sx={{ color: 'action.active', display: 'flex' }}>{icon}</Box>
-      )}
-      <Typography
-        variant="h6"
-        fontWeight="bold"
-        color="text.primary"
-        sx={{ flexGrow: 1 }}
-      >
-        {title}
-      </Typography>
-      {actions && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {actions}
-        </Box>
-      )}
-    </Box>
-  );
+### 1. src/app/actions/accounts.ts
+
+#### ヘルパー関数を追加
+ファイルの先頭付近（インポートの後）に以下を追加する:
+```typescript
+import type { RolePermissions } from '@/utils/permissions';
+
+function isDangerousPermissions(permissions: RolePermissions): boolean {
+  const { accounts, roles, organizationDelete, ownerTransfer } = permissions.management;
+  return accounts || roles || organizationDelete || ownerTransfer;
+}
+```
+（RolePermissions は既にインポートされていないかもしれないので確認すること）
+
+#### assertDangerousRoleOwnerCheck ヘルパー（任意）
+roleIds から DB で permissions を引き、危険ロールがあれば isOwner を検証する共通処理:
+```typescript
+async function assertDangerousRoleOwnerCheck(
+  orgId: string,
+  roleIds: string[],
+  isOwner: boolean,
+): Promise<void> {
+  if (roleIds.length === 0) return;
+  const { data: roles } = await supabaseAdmin
+    .from('organization_roles')
+    .select('id, permissions')
+    .eq('organization_id', orgId)
+    .in('id', roleIds);
+  const hasDangerous = (roles ?? []).some(r => isDangerousPermissions(r.permissions as RolePermissions));
+  if (hasDangerous && !isOwner) {
+    throw new Error('危険な権限を含むロールの付与はオーナーのみ実行できます');
+  }
 }
 ```
 
-### 2. src/components/ui/index.ts
-`InnerPageHeader` を既存のexportに追加する。
-現在の内容:
-```ts
-export * from './AppButton';
-export * from './AppDialog';
-export * from './DataTable';
-export * from './DynamicFormField';
-export * from './Fields';
-export * from './Layout';
-export * from './SelectionFields';
+#### createInvitation の変更
+現在のコード:
+```typescript
+export async function createInvitation(orgId: string, params: { targetName: string; roleIds?: string[]; staffId?: string | null }) {
+    const { userId } = await assertOrgPermission(orgId, 'accounts');
 ```
-`Layout` は既に `export * from './Layout'` でre-exportされているため、`InnerPageHeader` を `Layout.tsx` に追加するだけで自動的にexportされる。追加作業不要。
+変更後:
+```typescript
+export async function createInvitation(orgId: string, params: { targetName: string; roleIds?: string[]; staffId?: string | null }) {
+    const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
+    await assertDangerousRoleOwnerCheck(orgId, params.roleIds ?? [], isOwner);
+```
 
-## 制約
-- このタスクではページファイルは変更しない（ページへの適用は後のTaskで行う）
-- `Layout.tsx` の既存コンポーネントは変更しない
-- TypeScriptコンパイルが通ること
-- `npm run build` が通ること
+#### updateMemberRoles の変更
+現在のコード:
+```typescript
+export async function updateMemberRoles(orgId: string, targetUserId: string, roleIds: string[]): Promise<void> {
+    const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
+    void isOwner; // used for audit; permission already checked
+```
+変更後:
+```typescript
+export async function updateMemberRoles(orgId: string, targetUserId: string, roleIds: string[]): Promise<void> {
+    const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
+    await assertDangerousRoleOwnerCheck(orgId, roleIds, isOwner);
+```
+（`void isOwner;` の行は削除する）
 
-## 完了の定義
-- `InnerPageHeader` が `src/components/ui/Layout.tsx` に追加されている
-- `src/components/ui/index.ts` から `InnerPageHeader` がexportされている（Layout経由で自動）
-- `npm run build` がエラーなく完了
-- コミット済み
+### 2. src/app/actions/accounts.ts の getOrgRoles に is_dangerous を追加
+現在:
+```typescript
+export async function getOrgRoles(orgId: string): Promise<{ id: string; name: string; color: string | null; is_preset: boolean }[]>
+```
+変更後: permissions も取得し、is_dangerous を計算して返す:
+```typescript
+export async function getOrgRoles(orgId: string): Promise<{ id: string; name: string; color: string | null; is_preset: boolean; is_dangerous: boolean }[]>
+```
+実装:
+```typescript
+const { data, error: rolesError } = await supabaseAdmin
+    .from('organization_roles')
+    .select('id, name, color, is_preset, permissions')
+    .eq('organization_id', orgId)
+    .order('is_preset', { ascending: false });
+if (rolesError) throw new Error('ロール一覧を取得できませんでした');
+return (data ?? []).map(r => ({
+    id: r.id,
+    name: r.name,
+    color: r.color,
+    is_preset: r.is_preset,
+    is_dangerous: isDangerousPermissions(r.permissions as RolePermissions),
+}));
+```
 
-## レポートファイル
-完了後、作業内容を /Users/shoug/Documents/GitHub/care-record/.superpowers/sdd/task-2-report.md に書くこと
+### 3. src/app/app/accounts/page.tsx の UI変更
+
+#### availableRoles の型を更新
+```typescript
+const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string; color: string | null; is_preset: boolean; is_dangerous: boolean }[]>([]);
+```
+
+#### isOwner の取得
+```typescript
+const isOwner = currentOrg?.role === 'owner';
+```
+
+#### 招待ダイアログのロール選択 (付与するロール)
+is_dangerous かつ非owner の場合は disabled にする:
+```tsx
+{availableRoles.map((role) => {
+  const selected = selectedRoleIds.includes(role.id);
+  const locked = role.is_dangerous && !isOwner;
+  return (
+    <Chip
+      key={role.id}
+      label={role.name}
+      onClick={() => {
+        if (locked) return;
+        if (selected) setSelectedRoleIds(prev => prev.filter(id => id !== role.id));
+        else setSelectedRoleIds(prev => [...prev, role.id]);
+      }}
+      variant={selected ? 'filled' : 'outlined'}
+      sx={{
+        cursor: locked ? 'not-allowed' : 'pointer',
+        opacity: locked ? 0.4 : 1,
+        borderColor: role.color ?? undefined,
+        color: selected ? '#fff' : (role.color ?? undefined),
+        bgcolor: selected ? (role.color ?? undefined) : undefined,
+      }}
+    />
+  );
+})}
+```
+
+#### 権限変更ダイアログのロール選択 (割り当てるロール)
+同様に locked 判定を追加する（同じパターン）。
+
+## Verification Commands
+```bash
+cd /Users/shoug/Documents/GitHub/care-record
+npx tsc --noEmit 2>&1 | head -60
+```
+
+## Report File
+`/Users/shoug/Documents/GitHub/care-record/.superpowers/sdd/task-2-report.md` に書いてください。
+
+## Report Format
+```
+STATUS: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
+COMMITS: <hash>
+TESTS: <TypeScriptチェック結果>
+CONCERNS: （あれば）
+```

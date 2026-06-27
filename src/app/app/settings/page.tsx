@@ -392,7 +392,7 @@ function SettingsContent() {
     if (wsLoading || !currentOrg) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
     const canEditOrganization = checkManagementPermission(currentOrg.effectivePermissions, 'organization');
     const canManageIntegrations = checkManagementPermission(currentOrg.effectivePermissions, 'integrations');
-    const canDeleteOrganization = checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete');
+    const canDeleteOrganization = currentOrg.role === 'owner' && checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete');
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
