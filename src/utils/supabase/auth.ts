@@ -90,7 +90,11 @@ export async function registerSessionActivity(session: Session): Promise<string>
         absolute_expires_at: absoluteExpiresAt,
         revoked_at: null,
     }, { onConflict: 'session_hash' });
-    if (error) throw new Error(`セッションを登録できませんでした: ${error.message}`);
+    if (error) {
+        console.error('[auth] registerSessionActivity failed:', error.message, 'authSessionId:', authSessionId, 'userId:', session.user.id);
+        throw new Error(`セッションを登録できませんでした: ${error.message}`);
+    }
+    console.log('[auth] Session activity registered. authSessionId:', authSessionId, 'userId:', session.user.id);
     return authSessionId;
 }
 
