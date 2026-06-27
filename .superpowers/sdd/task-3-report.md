@@ -1,49 +1,39 @@
-# Task 3 実装レポート: AppLayout折りたたみサイドバー
+# Task 3 実装レポート: 組織削除にowner必須チェックを追加
 
 ## 実装概要
 
-`src/components/layout/AppLayout.tsx` に折りたたみサイドバー機能を追加した。
+組織削除に `organizationDelete` 権限に加えて、owner ロール要件を追加した。
 
 ## 実施した変更
 
-### 1. import追加
-`ChevronLeftIcon` / `ChevronRightIcon` を MUI Icons からインポート。
+### 1. src/app/actions/organization.ts
+deleteOrganization 関数：
+- `assertOrgPermission` の返り値から `isOwner` を取得
+- `isOwner` が false の場合にエラーを throw
+- コメントを更新：「owner かつ organizationDelete 権限が必要」
 
-### 2. AppLayoutコンポーネント
-- `sidebarOpen` state を追加（初期値 `true`、`useEffect` で localStorage を読み込み）
-- `toggleSidebar` 関数を追加（state更新 + localStorage書き込み）
-- デスクトップサイドバー Box の `width` を `sidebarOpen ? 256 : 72` に変更
-- `transition: 'width 0.2s ease'` と `overflow: 'hidden'` を追加
-- `NavDrawer` へ `sidebarOpen` / `toggleSidebar` を渡すよう変更
-- モバイル Drawer の `NavDrawer` は `sidebarOpen={true}` / `toggleSidebar={() => {}}` 固定
-- モバイル Drawer の width 参照を `SIDEBAR_WIDTH` 定数から直接 `256` に変更
+変更行数：3行（コメント更新 + 変数追加 + 条件判定追加）
 
-### 3. NavDrawerコンポーネント
-- Props に `sidebarOpen: boolean` / `toggleSidebar: () => void` を追加
-- `itemStyle` 関数: `mx`・`justifyContent`・`minHeight`・`MuiListItemIcon-root.minWidth` を sidebarOpen に応じて切替
-- カテゴリラベル (`Typography`): `{sidebarOpen && ...}` で折りたたみ時に非表示
-- `ListItemText`: `{sidebarOpen && ...}` で折りたたみ時に非表示
-- 各 `ListItemButton` を `<Tooltip title={sidebarOpen ? '' : 'ラベル'} placement="right">` でラップ
-- 「提供記録一覧」Collapse: `in={sidebarOpen && openReports}` に変更（折りたたみ時は常時閉じる）
-- 「提供記録一覧」ヘッダー Box: `{sidebarOpen && ...}` で折りたたみ時に非表示
-- NavDrawer 下部にトグルボタン追加 (`ChevronLeft` / `ChevronRight`)
-- NavDrawer 内の Box の `width` を `SIDEBAR_WIDTH` 定数から `'100%'` に変更（外側 Box がサイズを制御）
+### 2. src/app/app/settings/page.tsx
+canDeleteOrganization の判定ロジック：
+- 既存：`checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete')`
+- 変更後：`currentOrg.role === 'owner' && checkManagementPermission(...)`
 
-## ビルド結果
+変更行数：1行
 
-```
-✓ Compiled successfully in 4.1s
-Finished TypeScript in 6.8s ...
-✓ Generating static pages (23/23)
+## 検証
+
+```bash
+npx tsc --noEmit
 ```
 
-TypeScriptエラーなし、ビルド成功。
+TypeScript 型チェック：パス ✓
 
 ## コミット
 
-`608c55b` feat: add collapsible sidebar to AppLayout (256px ↔ 72px)
+`6035afe` feat: require owner for organization deletion
 
 ## 備考
 
-- `SIDEBAR_WIDTH` 定数はモバイル Drawer の `sx` 内参照が残っていたため、直接 `256` に置き換えて削除せず（定数自体は `38` 行目に残存するが未使用のため次フェーズで整理可）
-- SSR対策として useState 初期値は `true` にして `useEffect` で localStorage を読む方式を採用（Hydration mismatch を回避）
+- 2重DB アクセスを避けるため、既存の assertOrgPermission の戻り値を活用
+- currentOrg.role は WorkspaceContext の Workspace 型に存在する OrganizationRole フィールド
