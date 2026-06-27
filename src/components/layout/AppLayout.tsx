@@ -30,6 +30,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import KeyIcon from '@mui/icons-material/Key';
 import BackupIcon from '@mui/icons-material/Backup';
+import ListAltIcon from '@mui/icons-material/ListAlt';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -45,11 +46,11 @@ const SIDEBAR_COLLAPSED_WIDTH = 72;
 const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; area: ManagementArea }> = [
   { prefix: '/app/accounts', area: 'accounts' },
   { prefix: '/app/settings/roles', area: 'roles' },
-  { prefix: '/app/settings', area: 'auditLogs' },
   { prefix: '/app/clients', area: 'clients' },
   { prefix: '/app/staff', area: 'staffs' },
   { prefix: '/app/reports', area: 'reports' },
   { prefix: '/app/statistics', area: 'reports' },
+  { prefix: '/app/logs', area: 'auditLogs' },
   { prefix: '/app/backup', area: 'auditLogs' },
 ];
 
@@ -444,6 +445,8 @@ const NavDrawer = ({
                 navButton('アカウント・権限管理', <KeyIcon fontSize="small" />, '/app/accounts')
               )}
               {navButton('統計・予実管理', <AssessmentIcon fontSize="small" />, '/app/statistics')}
+              {checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs') &&
+                navButton('ログ', <ListAltIcon fontSize="small" />, '/app/logs')}
               {checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs') &&
                 navButton('バックアップ閲覧', <BackupIcon fontSize="small" />, '/app/backup')}
             </List>

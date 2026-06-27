@@ -79,7 +79,7 @@ export default function ClientsPage() {
       setOpenAdd(false);
       setNewName('');
       showToast('登録しました');
-      fetchClients(); // リフレッシュ
+      router.push(`/app/clients/${data.id}?setup=1`);
     } catch (error) { 
         console.error(error); 
         showToast('登録に失敗しました', 'error'); 

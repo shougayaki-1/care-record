@@ -9,6 +9,7 @@ import { createHash } from 'crypto';
 import { decodeJwtSessionId } from '@/utils/jwt';
 import {
   mergePermissions,
+  FULL_PERMISSIONS,
   type RolePermissions, type ManagementArea,
 } from '@/utils/permissions';
 
@@ -250,12 +251,13 @@ export async function getEffectivePermissions(
     .eq('organization_id', organizationId)
     .eq('user_id', userId);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type RoleLinkRow = { organization_roles: { permissions?: RolePermissions } | Array<{ permissions?: RolePermissions }> | null };
   const rolePerms: RolePermissions[] = (roleLinks ?? [])
-    .map((r: any) => (Array.isArray(r.organization_roles) ? r.organization_roles[0]?.permissions : r.organization_roles?.permissions) as RolePermissions | undefined)
+    .map((r: RoleLinkRow) => (Array.isArray(r.organization_roles) ? r.organization_roles[0]?.permissions : r.organization_roles?.permissions))
     .filter((p): p is RolePermissions => p != null);
 
-  return { isOwner: member.role === 'owner', permissions: mergePermissions(rolePerms) };
+  const isOwner = member.role === 'owner';
+  return { isOwner, permissions: isOwner ? FULL_PERMISSIONS : mergePermissions(rolePerms) };
 }
 
 /**
@@ -269,7 +271,7 @@ export async function assertOrgPermission(
   if (!organizationId) throw new Error('organizationId が不正です');
   const user = await getAuthedUser();
   const { isOwner, permissions } = await getEffectivePermissions(organizationId, user.id);
-  if (!permissions.management[area]) throw new Error('この操作を行う権限がありません');
+  if (!isOwner && !permissions.management[area]) throw new Error('この操作を行う権限がありません');
   return { userId: user.id, isOwner };
 }
 

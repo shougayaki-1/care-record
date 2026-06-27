@@ -12,6 +12,7 @@ import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import LoginIcon from '@mui/icons-material/Login';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import PersonIcon from '@mui/icons-material/Person';
 import { AppButton } from '@/components/ui';
 
 type State = 'loading' | 'preview' | 'invalid' | 'redirecting';
@@ -26,7 +27,7 @@ export default function JoinPage() {
 
     useEffect(() => {
         if (!code) {
-            setState('invalid');
+            queueMicrotask(() => setState('invalid'));
             return;
         }
 
@@ -143,6 +144,18 @@ export default function JoinPage() {
                                             ))}
                                         </Box>
                                     </Box>
+                                )}
+
+                                {preview?.targetName && (
+                                    <Stack direction="row" spacing={1} alignItems="center">
+                                        <PersonIcon color="primary" fontSize="small" />
+                                        <Box>
+                                            <Typography variant="caption" color="text.secondary">招待された名前</Typography>
+                                            <Typography variant="subtitle2" fontWeight="bold">
+                                                {preview.targetName}
+                                            </Typography>
+                                        </Box>
+                                    </Stack>
                                 )}
 
                                 {preview?.expiresAt && (

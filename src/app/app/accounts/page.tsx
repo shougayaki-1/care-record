@@ -20,7 +20,7 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
-import { createInvitation, getAccountOverview, getOrgRoles, updateAccountRole, updateMemberRoles, removeAccount } from '@/app/actions/accounts';
+import { createInvitation, getAccountOverview, getInviteStaffCandidates, getOrgRoles, updateAccountRole, updateMemberRoles, removeAccount, type InviteStaffCandidate } from '@/app/actions/accounts';
 import { AppButton, AppDialog, InnerPageHeader } from '@/components/ui';
 import { checkManagementPermission } from '@/utils/permissions';
 import RoleManagementPanel from '@/components/roles/RoleManagementPanel';
@@ -35,6 +35,8 @@ type AccountProfile = {
     roles: { id: string; name: string; color: string | null }[];
     status: 'active' | 'invited';
     invitation_code?: string;
+    staffId?: string | null;
+    staffName?: string | null;
 };
 
 export default function AccountsPage() {
@@ -52,8 +54,10 @@ export default function AccountsPage() {
   const [openInvite, setOpenInvite] = useState(false);
   const [generatedLink, setGeneratedLink] = useState('');
   const [newInviteName, setNewInviteName] = useState('');
+  const [selectedInviteStaffId, setSelectedInviteStaffId] = useState('none');
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
   const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string; color: string | null; is_preset: boolean }[]>([]);
+  const [inviteStaffCandidates, setInviteStaffCandidates] = useState<InviteStaffCandidate[]>([]);
 
   // 操作メニュー用
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
@@ -71,11 +75,13 @@ export default function AccountsPage() {
     if (!currentOrg) return;
     setIsFetching(true);
     try {
-      const [overview, orgRoles] = await Promise.all([
+      const [overview, orgRoles, staffCandidates] = await Promise.all([
         getAccountOverview(currentOrg.id),
         getOrgRoles(currentOrg.id).catch(() => []),
+        getInviteStaffCandidates(currentOrg.id).catch(() => []),
       ]);
       setAvailableRoles(orgRoles);
+      setInviteStaffCandidates(staffCandidates);
       // fetchedUserId をローカル変数で保持し sort に使うことで
       // currentUserId state への依存を断ち、二重フェッチループを防ぐ
       const fetchedUserId = overview.currentUserId;
@@ -106,7 +112,11 @@ export default function AccountsPage() {
   const handleGenerateLink = async () => {
     if (!currentOrg) return;
     try {
-        const { code } = await createInvitation(currentOrg.id, { targetName: newInviteName, roleIds: selectedRoleIds });
+        const { code } = await createInvitation(currentOrg.id, {
+          targetName: newInviteName,
+          roleIds: selectedRoleIds,
+          staffId: selectedInviteStaffId === 'none' ? null : selectedInviteStaffId,
+        });
         setGeneratedLink(`${BASE_URL}/join?code=${code}`);
         fetchData();
     } catch (e) {
@@ -246,7 +256,7 @@ export default function AccountsPage() {
                     <Typography variant="caption" color="text.secondary">アプリにログインできるユーザーと、その権限を管理します。</Typography>
                 </Box>
                 {canManageAccounts && (
-                  <AppButton startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); setNewInviteName(''); setSelectedRoleIds([]); }} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>
+                  <AppButton startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); setNewInviteName(''); setSelectedInviteStaffId('none'); setSelectedRoleIds([]); }} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>
                       新しい人を招待
                   </AppButton>
                 )}
@@ -269,6 +279,11 @@ export default function AccountsPage() {
                                         <Typography variant="caption" color="text.disabled" display="block" sx={{ overflowWrap: 'anywhere' }}>
                                             {account.status === 'invited' ? '未登録' : (account.email || 'メールアドレス非公開')}
                                         </Typography>
+                                        {account.status === 'invited' && account.staffName && (
+                                            <Typography variant="caption" color="text.secondary" display="block" sx={{ overflowWrap: 'anywhere' }}>
+                                                名簿: {account.staffName}
+                                            </Typography>
+                                        )}
                                     </Box>
                                     {(canManageAccounts || account.id === currentUserId) && (
                                         <IconButton size="small" onClick={(e) => handleMenuOpen(e, account)} sx={{ flexShrink: 0 }}>
@@ -320,6 +335,11 @@ export default function AccountsPage() {
                                         <Typography variant="caption" color="text.disabled" display="block">
                                             {account.status === 'invited' ? '未登録' : (account.email || 'メールアドレス非公開')}
                                         </Typography>
+                                        {account.status === 'invited' && account.staffName && (
+                                            <Typography variant="caption" color="text.secondary" display="block">
+                                                名簿: {account.staffName}
+                                            </Typography>
+                                        )}
                                     </Box>
                                 </TableCell>
                                 <TableCell>
@@ -497,8 +517,19 @@ export default function AccountsPage() {
                           </Box>
                         </Box>
                     )}
-                    <TextField label="管理用の名前 (任意)" placeholder="例: 山田 太郎" size="small" fullWidth value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} />
-                    <Button variant="contained" onClick={handleGenerateLink} fullWidth sx={{ py: 1, boxShadow: 'none' }}>招待リンクを発行</Button>
+                    <TextField label="招待する人の名前" placeholder="例: 山田 太郎" size="small" fullWidth required value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} helperText="招待された人の表示名として使われます" />
+                    <FormControl fullWidth size="small">
+                      <InputLabel>スタッフ名簿との紐付け</InputLabel>
+                      <Select value={selectedInviteStaffId} onChange={(e) => setSelectedInviteStaffId(e.target.value)} label="スタッフ名簿との紐付け">
+                        <MenuItem value="none">紐付けない</MenuItem>
+                        {inviteStaffCandidates.map((staff) => (
+                          <MenuItem key={staff.id} value={staff.id}>
+                            {staff.name}{staff.positions && staff.positions.length > 0 ? `（${staff.positions.join('・')}）` : ''}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <Button variant="contained" onClick={handleGenerateLink} disabled={!newInviteName.trim()} fullWidth sx={{ py: 1, boxShadow: 'none' }}>招待リンクを発行</Button>
                  </>
              ) : (
                  <>

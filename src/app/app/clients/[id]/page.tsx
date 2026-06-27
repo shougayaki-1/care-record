@@ -28,7 +28,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CopyAllIcon from '@mui/icons-material/CopyAll';
 
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { callGasApi } from '@/app/actions/gas';
@@ -38,15 +38,18 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, CheckboxGroupField } from '@/components/ui';
 import {
+    getClientAssignmentPermissionHints,
     saveClientAssignments,
     saveClientForm,
     updateClientGoogleLink,
+    type AssignmentPermissionHint,
 } from '@/app/actions/clients';
 
 type Staff = { id: string; name: string; userId: string | null };
 
 export default function ClientSettingsPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const params = useParams();
     const clientId = params.id as string;
     const { currentOrg, loading: wsLoading } = useWorkspace();
@@ -62,6 +65,7 @@ export default function ClientSettingsPage() {
     const [allStaffs, setAllStaffs] = useState<Staff[]>([]);
     const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([]);
     const [roundTripDistances, setRoundTripDistances] = useState<Record<string, string>>({});
+    const [permissionHints, setPermissionHints] = useState<AssignmentPermissionHint[]>([]);
     
     const [templateId, setTemplateId] = useState('');
 
@@ -72,6 +76,7 @@ export default function ClientSettingsPage() {
     const [openCopyDialog, setOpenCopyDialog] = useState(false);
     const [copyTab, setCopyTab] = useState(0); 
     const [otherClients, setOtherClients] = useState<{id: string, name: string}[]>([]);
+    const showSetupWizard = searchParams.get('setup') === '1';
 
     const fetchClientData = useCallback(async () => {
         try {
@@ -119,6 +124,7 @@ export default function ClientSettingsPage() {
                     });
                     setRoundTripDistances(distances);
                 }
+                setPermissionHints(await getClientAssignmentPermissionHints(currentOrg.id, clientId));
             }
 
         } catch (error) {
@@ -381,6 +387,15 @@ export default function ClientSettingsPage() {
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
                 {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
+                {showSetupWizard && (
+                    <Alert
+                        severity="info"
+                        sx={{ mb: 3 }}
+                        action={<Button color="inherit" size="small" onClick={() => router.replace(`/app/clients/${clientId}`)}>完了</Button>}
+                    >
+                        利用者を追加しました。記録フォーム、担当スタッフ、帳票・連携の順に設定してください。
+                    </Alert>
+                )}
 
                 {tabIndex === 0 && (
                     <Box>
@@ -440,6 +455,11 @@ export default function ClientSettingsPage() {
                         <CardContent>
                             <Typography variant="subtitle1" fontWeight="bold" gutterBottom>この利用者を担当するスタッフを選択してください</Typography>
                             <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。往復距離は記録作成時の初期値になります。</Typography>
+                            {permissionHints.some((hint) => hint.canCreateAllRecords) && (
+                                <Alert severity="info" sx={{ mb: 2 }}>
+                                    全体の記録作成権限を持つスタッフは、ここで担当に入っていなくても記録を作成できます。
+                                </Alert>
+                            )}
                             <Stack spacing={3}>
                                 <CheckboxGroupField
                                     label="メンバー（ログインユーザー）"
@@ -463,7 +483,18 @@ export default function ClientSettingsPage() {
                                         <Stack spacing={1.5}>
                                             {allStaffs.filter((staff) => assignedStaffIds.includes(staff.id)).map((staff) => (
                                                 <Stack key={staff.id} direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                                                    <Typography sx={{ minWidth: { sm: 180 }, fontWeight: 'bold', overflowWrap: 'anywhere' }}>{staff.name}</Typography>
+                                                    <Box sx={{ minWidth: { sm: 180 } }}>
+                                                        <Typography sx={{ fontWeight: 'bold', overflowWrap: 'anywhere' }}>{staff.name}</Typography>
+                                                        {permissionHints.find((hint) => hint.staffId === staff.id)?.canCreateAllRecords && (
+                                                            <Chip
+                                                                label="全体権限で記録作成可"
+                                                                size="small"
+                                                                color="success"
+                                                                variant="outlined"
+                                                                sx={{ mt: 0.5 }}
+                                                            />
+                                                        )}
+                                                    </Box>
                                                     <TextField
                                                         label="往復距離"
                                                         type="number"

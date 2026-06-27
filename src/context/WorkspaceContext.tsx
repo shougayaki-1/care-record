@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 // useRouterは使用していなかったので削除
 import { CircularProgress, Box } from '@mui/material';
 import { setLastOrganization } from '@/app/actions/user';
-import { mergePermissions, type RolePermissions } from '@/utils/permissions';
+import { FULL_PERMISSIONS, mergePermissions, type RolePermissions } from '@/utils/permissions';
 
 export type OrganizationRole = 'owner' | 'member';
 
@@ -129,7 +129,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
             return org?.permissions as RolePermissions | undefined;
           })
           .filter((p): p is RolePermissions => p != null);
-        const effectivePermissions = mergePermissions(rolePerms);
+        const effectivePermissions = role === 'owner' ? FULL_PERMISSIONS : mergePermissions(rolePerms);
 
         list.push({ id: organization.id, name: organization.name, role: role as OrganizationRole, effectivePermissions });
       }

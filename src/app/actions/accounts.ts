@@ -20,6 +20,8 @@ export type AccountOverviewItem = {
     roles: { id: string; name: string; color: string | null }[];  // effective roles from organization_roles
     status: 'active' | 'invited';
     invitation_code?: string;
+    staffId?: string | null;
+    staffName?: string | null;
 };
 
 export async function getAccountOverview(orgId: string): Promise<{ currentUserId: string; accounts: AccountOverviewItem[] }> {
@@ -27,7 +29,7 @@ export async function getAccountOverview(orgId: string): Promise<{ currentUserId
     const [{ data: members, error: membersError }, { data: invitations, error: invitationsError }] = await Promise.all([
         supabaseAdmin.from('organization_members').select('user_id, role').eq('organization_id', orgId),
         supabaseAdmin.from('invitations')
-            .select('id, target_name, role, code')
+            .select('id, target_name, role, role_ids, code, staff_id, staffs(name)')
             .eq('organization_id', orgId)
             .eq('is_used', false)
             .gt('expires_at', new Date().toISOString()),
@@ -75,13 +77,37 @@ export async function getAccountOverview(orgId: string): Promise<{ currentUserId
         roles: rolesMap.get(member.user_id) ?? [],
         status: 'active',
     }));
-    for (const invitation of invitations || []) {
+    const inviteRows = (invitations || []) as Array<{
+        id: string;
+        target_name: string | null;
+        role: string | null;
+        role_ids: string[] | null;
+        code: string;
+        staff_id: string | null;
+        staffs: { name: string } | { name: string }[] | null;
+    }>;
+    const inviteRoleIds = Array.from(new Set(inviteRows.flatMap((invitation) => invitation.role_ids ?? [])));
+    const inviteRoleMap = new Map<string, { id: string; name: string; color: string | null }>();
+    if (inviteRoleIds.length > 0) {
+        const { data: inviteRoles, error: inviteRolesError } = await supabaseAdmin
+            .from('organization_roles')
+            .select('id, name, color')
+            .eq('organization_id', orgId)
+            .in('id', inviteRoleIds);
+        if (inviteRolesError) throw new Error('招待ロール情報を取得できませんでした');
+        (inviteRoles || []).forEach((role) => inviteRoleMap.set(role.id, role));
+    }
+
+    for (const invitation of inviteRows) {
+        const staff = Array.isArray(invitation.staffs) ? invitation.staffs[0] : invitation.staffs;
         accounts.push({
             id: invitation.id,
             name: invitation.target_name || '名前未設定',
             role: invitation.role ?? 'member',
-            roles: [],
+            roles: (invitation.role_ids ?? []).map((roleId) => inviteRoleMap.get(roleId)).filter((role): role is { id: string; name: string; color: string | null } => Boolean(role)),
             status: 'invited',
+            staffId: invitation.staff_id,
+            staffName: staff?.name ?? null,
             ...(isOwner ? { invitation_code: invitation.code } : {}),
         });
     }
@@ -118,20 +144,35 @@ export async function acceptInvitation(code: string) {
  * 招待リンク（invitations）を発行する。owner のみ。
  * code はサーバ側で生成し、actor も改ざんできないようセッションから取得する。
  */
-export async function createInvitation(orgId: string, params: { targetName?: string; roleIds?: string[] }) {
+export async function createInvitation(orgId: string, params: { targetName: string; roleIds?: string[]; staffId?: string | null }) {
     const { userId } = await assertOrgPermission(orgId, 'accounts');
+    const targetName = params.targetName.trim();
+    if (targetName.length < 1 || targetName.length > 100) throw new Error('招待する人の名前を1〜100文字で入力してください');
+
+    if (params.staffId) {
+        const { data: staff, error: staffError } = await supabaseAdmin
+            .from('staffs')
+            .select('id, user_id')
+            .eq('id', params.staffId)
+            .eq('organization_id', orgId)
+            .is('deleted_at', null)
+            .maybeSingle();
+        if (staffError || !staff) throw new Error('紐付けるスタッフが見つかりません');
+        if (staff.user_id) throw new Error('このスタッフはすでにアカウントに紐付いています');
+    }
 
     const code = randomUUID().slice(0, 8);
     const { error } = await supabaseAdmin.from('invitations').insert({
         organization_id: orgId,
         code,
         created_by: userId,
-        target_name: params.targetName || null,
+        target_name: targetName,
+        staff_id: params.staffId || null,
         role_ids: params.roleIds ?? [],
         expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     });
     if (error) throw sanitizeDbError(error, 'action.accounts');
-    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.invitation_create', resourceType: 'invitation', details: { roleIds: params.roleIds ?? [] } });
+    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.invitation_create', resourceType: 'invitation', details: { roleIds: params.roleIds ?? [], staffId: params.staffId || null, targetName } });
     return { success: true, code };
 }
 
@@ -254,6 +295,7 @@ export async function removeAccount(
 export type InvitationPreview = {
     valid: boolean;
     orgName?: string;
+    targetName?: string;
     roleNames?: string[];
     expiresAt?: string;
 };
@@ -267,7 +309,7 @@ export async function getInvitationPreview(code: string): Promise<InvitationPrev
 
     const { data: inv } = await supabaseAdmin
         .from('invitations')
-        .select('organization_id, role_ids, expires_at, organizations!inner(name)')
+        .select('organization_id, target_name, role_ids, expires_at, organizations!inner(name)')
         .eq('code', code.trim())
         .eq('is_used', false)
         .gt('expires_at', new Date().toISOString())
@@ -290,9 +332,31 @@ export async function getInvitationPreview(code: string): Promise<InvitationPrev
     return {
         valid: true,
         orgName: org?.name ?? '事業所',
+        targetName: inv.target_name ?? undefined,
         roleNames,
         expiresAt: inv.expires_at,
     };
+}
+
+export type InviteStaffCandidate = {
+    id: string;
+    name: string;
+    positions: string[] | null;
+};
+
+export async function getInviteStaffCandidates(orgId: string): Promise<InviteStaffCandidate[]> {
+    await assertOrgPermission(orgId, 'accounts');
+    const { data, error } = await supabaseAdmin
+        .from('staffs')
+        .select('id, name, positions')
+        .eq('organization_id', orgId)
+        .is('user_id', null)
+        .is('deleted_at', null)
+        .is('archived_at', null)
+        .order('sort_order', { ascending: true, nullsFirst: false })
+        .order('name', { ascending: true });
+    if (error) throw sanitizeDbError(error, 'action.accounts');
+    return (data ?? []) as InviteStaffCandidate[];
 }
 
 export async function getOrgRoles(orgId: string): Promise<{ id: string; name: string; color: string | null; is_preset: boolean }[]> {

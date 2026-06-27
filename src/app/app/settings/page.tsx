@@ -11,7 +11,6 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
 import LinkIcon from '@mui/icons-material/Link';
-import ListAltIcon from '@mui/icons-material/ListAlt';
 import WarningIcon from '@mui/icons-material/Warning';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
@@ -133,7 +132,6 @@ function SettingsContent() {
                 return;
             }
             fetchOrgDetails();
-            fetchLogs();
         }
     }, [wsLoading, currentOrg, router, fetchOrgDetails, fetchLogs]);
 
@@ -389,7 +387,6 @@ function SettingsContent() {
     if (wsLoading || !currentOrg) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
     const canEditOrganization = checkManagementPermission(currentOrg.effectivePermissions, 'organization');
     const canManageIntegrations = checkManagementPermission(currentOrg.effectivePermissions, 'integrations');
-    const canViewAuditLogs = checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs');
     const canDeleteOrganization = checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete');
 
     return (
@@ -401,7 +398,6 @@ function SettingsContent() {
                 </Stack>
                 <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="scrollable" allowScrollButtonsMobile>
                     <Tab label="基本設定" />
-                    {canViewAuditLogs && <Tab label="操作ログ" icon={<ListAltIcon fontSize="small" />} iconPosition="start" />}
                 </Tabs>
             </Box>
 

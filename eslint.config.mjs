@@ -27,12 +27,14 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    ".claude/**",
     "next-env.d.ts",
     "public/sw.js",
     "public/workbox-*.js",
     "ai_context_output/**",
     "collect_code.js",
     "storybook-static/**",
+    "playwright-report/**",
   ]),
 ]);
 

@@ -61,9 +61,21 @@ export default function SetupPage() {
                 const isMember = members && members.length > 0;
                 setHasMembership(isMember || false);
 
+                let inviteName: string | undefined;
+                if (paramInviteCode) {
+                    const preview = await getInvitationPreview(paramInviteCode).catch(() => null);
+                    if (preview?.valid) {
+                        setInvitePreview(preview);
+                        inviteName = preview.targetName;
+                    }
+                }
+
                 if (profile?.name) {
                     setUserName(profile.name);
                     setStep(paramInviteCode ? 'join' : 'choice');
+                } else if (paramInviteCode && inviteName) {
+                    setUserName(inviteName);
+                    setStep('join');
                 } else {
                     setStep('profile');
                 }
@@ -274,6 +286,17 @@ export default function SetupPage() {
                                             </Typography>
                                         </Box>
                                     </Stack>
+                                    {invitePreview.targetName && (
+                                        <Stack direction="row" spacing={1} alignItems="center">
+                                            <PersonIcon color="primary" fontSize="small" />
+                                            <Box>
+                                                <Typography variant="caption" color="text.secondary">招待された名前</Typography>
+                                                <Typography variant="subtitle2" fontWeight="bold">
+                                                    {invitePreview.targetName}
+                                                </Typography>
+                                            </Box>
+                                        </Stack>
+                                    )}
                                     {invitePreview.roleNames && invitePreview.roleNames.length > 0 && (
                                         <Box>
                                             <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>

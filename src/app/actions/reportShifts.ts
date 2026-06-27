@@ -9,7 +9,7 @@ export async function getShiftSuggestions(
   await getAuthedUser();
 
   // Get primary shift of the report
-  const { data: primaryLink } = await (supabaseAdmin as any)
+  const { data: primaryLink } = await supabaseAdmin
     .from('report_shifts')
     .select('shift_id, shifts(start_at, end_at, client_id)')
     .eq('report_id', reportId)
@@ -17,11 +17,11 @@ export async function getShiftSuggestions(
     .maybeSingle();
 
   if (!primaryLink?.shift_id) return [];
-  const primary = primaryLink.shifts as { start_at: string; end_at: string; client_id: string } | null;
+  const primary = primaryLink.shifts as unknown as { start_at: string; end_at: string; client_id: string } | null;
   if (!primary) return [];
 
   // Get already-linked shift IDs
-  const { data: existing } = await (supabaseAdmin as any).from('report_shifts').select('shift_id').eq('report_id', reportId);
+  const { data: existing } = await supabaseAdmin.from('report_shifts').select('shift_id').eq('report_id', reportId);
   const linkedIds = new Set((existing ?? []).map((r: { shift_id: string }) => r.shift_id));
 
   // Find overlapping candidate shifts
@@ -54,7 +54,7 @@ export async function addShiftLink(orgId: string, reportId: string, shiftId: str
   if (!report) throw new Error('記録が見つかりません');
   if (!['draft', 'remanded'].includes(report.status)) throw new Error('承認済みの記録にはシフトを追加できません');
 
-  const { error } = await (supabaseAdmin as any).from('report_shifts').insert({ report_id: reportId, shift_id: shiftId, is_primary: false });
+  const { error } = await supabaseAdmin.from('report_shifts').insert({ report_id: reportId, shift_id: shiftId, is_primary: false });
   if (error) throw new Error('シフトの紐付けに失敗しました');
 }
 
@@ -62,19 +62,19 @@ export async function addShiftLink(orgId: string, reportId: string, shiftId: str
 export async function removeShiftLink(orgId: string, reportId: string, shiftId: string): Promise<void> {
   await getAuthedUser();
 
-  const { data: link } = await (supabaseAdmin as any).from('report_shifts').select('is_primary').eq('report_id', reportId).eq('shift_id', shiftId).maybeSingle();
+  const { data: link } = await supabaseAdmin.from('report_shifts').select('is_primary').eq('report_id', reportId).eq('shift_id', shiftId).maybeSingle();
   if (link?.is_primary) throw new Error('主シフトは解除できません');
 
-  const { error } = await (supabaseAdmin as any).from('report_shifts').delete().eq('report_id', reportId).eq('shift_id', shiftId);
+  const { error } = await supabaseAdmin.from('report_shifts').delete().eq('report_id', reportId).eq('shift_id', shiftId);
   if (error) throw new Error('シフトの解除に失敗しました');
 }
 
 /** Returns all shifts linked to a report. */
-export async function getLinkedShifts(reportId: string) {
-  const { data, error } = await (supabaseAdmin as any)
+export async function getLinkedShifts(reportId: string): Promise<unknown[]> {
+  const { data, error } = await supabaseAdmin
     .from('report_shifts')
     .select('shift_id, is_primary, shifts(id, title, start_at, end_at, shift_staffs(staffs(name)))')
     .eq('report_id', reportId);
   if (error) throw new Error('シフト情報を取得できませんでした');
-  return data ?? [];
+  return (data ?? []) as unknown[];
 }

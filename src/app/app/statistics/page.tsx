@@ -11,10 +11,10 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
 import { aggregatePremiumMinutes, type LaborPremiumType } from '@/utils/laborPremium';
-import { listInternalWorkRecordsForStatistics, type InternalWorkRecord } from '@/app/actions/internalWork';
+import { type InternalWorkRecord } from '@/app/actions/internalWork';
+import { getStatisticsData } from '@/app/actions/statistics';
 
 type ShiftStaffData = { staff_id: string; staffs: { name: string } | null; };
 type ShiftData = { 
@@ -135,70 +135,15 @@ export default function StatisticsPage() {
             const shiftStartRange = new Date(monthStart.getTime() - (24 * 60 * 60 * 1000)).toISOString();
             const shiftEndRange = new Date(monthEnd.getTime() + (24 * 60 * 60 * 1000)).toISOString();
 
-            // 予定（シフト）の取得
-            const { data: shiftsData, error: shiftsError } = await supabase
-                .from('shifts')
-                .select(`
-                    id, start_at, end_at, status, client_id,
-                    clients (name),
-                    shift_staffs (staff_id, staffs(name))
-                `)
-                .eq('organization_id', currentOrg.id)
-                .neq('status', 'cancelled')
-                .gte('end_at', shiftStartRange)
-                .lte('start_at', shiftEndRange);
-
-            if (shiftsError) throw shiftsError;
-
-            // 実績（記録）の取得
-            const { data: reportsData, error: reportsError } = await supabase
-                .from('reports')
-                .select(`
-                    id, start_at, end_at, status, client_id,
-                    clients (name),
-                    helper:profiles!reports_helper_id_fkey (name),
-                    report_values (data),
-                    report_shifts (shift_id)
-                `)
-                .is('deleted_at', null)
-                .eq('clients.organization_id', currentOrg.id)
-                .in('status', ['pending', 'approved', 'remanded']) 
-                .gte('end_at', shiftStartRange)
-                .lte('start_at', shiftEndRange);
-
-            if (reportsError) throw reportsError;
-
-            // シフト差異タブ用: シフトと紐付き記録を一緒に取得
-            const { data: shiftsWithLinksData } = await supabase
-                .from('shifts')
-                .select(`
-                    id, start_at, end_at, client_id,
-                    clients (name),
-                    shift_staffs (staffs(name)),
-                    report_shifts (is_primary, reports(id, start_at, end_at, status, report_values(data)))
-                `)
-                .eq('organization_id', currentOrg.id)
-                .neq('status', 'cancelled')
-                .is('deleted_at', null)
-                .gte('end_at', shiftStartRange)
-                .lte('start_at', shiftEndRange);
-
-            setRawShifts((shiftsData as unknown as ShiftData[]) || []);
-            setRawReports((reportsData as unknown as ReportData[]) || []);
-            setInternalWorkRecords(await listInternalWorkRecordsForStatistics(currentOrg.id, shiftStartRange, shiftEndRange));
-
-            // 割り増し種別を取得
-            const { data: rawPremiumTypes } = await supabase
-                .from('labor_premium_types')
-                .select('*')
-                .eq('organization_id', currentOrg.id)
-                .eq('is_enabled', true)
-                .order('display_order');
-            setPremiumTypes((rawPremiumTypes ?? []) as LaborPremiumType[]);
-            setRawShiftsWithLinks((shiftsWithLinksData as unknown as ShiftWithLinks[]) || []);
+            const data = await getStatisticsData(currentOrg.id, shiftStartRange, shiftEndRange);
+            setRawShifts(data.shifts as ShiftData[]);
+            setRawReports(data.reports as ReportData[]);
+            setInternalWorkRecords(data.internalWorkRecords as InternalWorkRecord[]);
+            setPremiumTypes(data.premiumTypes as LaborPremiumType[]);
+            setRawShiftsWithLinks(data.shiftsWithLinks as ShiftWithLinks[]);
         } catch (error) {
-            console.error(error);
-            showToast('データの取得に失敗しました', 'error');
+            console.error('Statistics fetch failed', error);
+            showToast(error instanceof Error ? `データの取得に失敗しました: ${error.message}` : 'データの取得に失敗しました', 'error');
         } finally {
             setLoading(false);
         }
@@ -548,7 +493,7 @@ export default function StatisticsPage() {
                                 </TableHead>
                                 <TableBody>
                                     {aggregatedData.rows.length === 0 ? <TableRow><TableCell colSpan={6 + (tabIndex === 0 ? premiumTypes.length : 0)} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow> : (
-                                        aggregatedData.rows.map((row, i) => {
+                                        aggregatedData.rows.map((row) => {
                                             const diff = row.actualHours - row.plannedHours;
                                             const premiumDiff = premiumTypes.some(t => Math.abs(aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id]?.diff ?? 0) >= 1);
                                             const hasDiff = Math.abs(diff) >= 0.01 || premiumDiff;

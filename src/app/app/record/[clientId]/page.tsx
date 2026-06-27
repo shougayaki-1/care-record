@@ -33,6 +33,7 @@ import {
 import { getShiftSuggestions, addShiftLink, removeShiftLink, getLinkedShifts } from '@/app/actions/reportShifts';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { AppButton, AppDialog, DateTimeField, DynamicFormField, InnerPageHeader, MultiSelectField } from '@/components/ui';
+import { checkRecordPermission } from '@/utils/permissions';
 
 type FormItem = {
   id: string; label: string; type: 'text' | 'number' | 'checkbox' | 'time' | 'select' | 'section' | 'multicheckbox';
@@ -546,7 +547,7 @@ export default function RecordPage() {
     return sections;
   }, [template]);
 
-  const isAdmin = currentOrg && ['owner', 'manager'].includes(currentOrg.role);
+  const isAdmin = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'approve', true));
   const travelCostYen = Math.round((parseFloat(roundTripDistanceKm || '0') || 0) * travelCostRateYenPerKm);
 
   const handleStaffChange = (value: string[]) => {

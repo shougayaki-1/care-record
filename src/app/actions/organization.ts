@@ -7,6 +7,7 @@ import { recordAuditEvent } from '@/utils/supabase/audit';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 import { assertRoleManagerRemains } from '@/utils/supabase/roleSafety';
+import { google } from 'googleapis';
 
 export async function updateOrganizationName(orgId: string, name: string) {
     const { userId } = await assertOrgPermission(orgId, 'organization');
@@ -250,5 +251,51 @@ export async function addAuditLog(params: { orgId: string, action: string, targe
         resourceType: 'legacy',
         resourceId: params.target,
         details: params.details,
+    });
+}
+
+export type CloudLogFilters = {
+    from?: string | null;
+    to?: string | null;
+    severity?: string | null;
+    text?: string | null;
+    limit?: number;
+};
+
+export type CloudLogEntry = {
+    timestamp: string;
+    severity: string;
+    logName: string;
+    text: string;
+};
+
+export async function listCloudLogEntries(orgId: string, filters: CloudLogFilters = {}): Promise<CloudLogEntry[]> {
+    await assertOrgPermission(orgId, 'auditLogs');
+    const projectId = process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+    if (!projectId) throw new Error('GCP_PROJECT_ID が設定されていません');
+
+    const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/cloud-platform.read-only'] });
+    const logging = google.logging({ version: 'v2', auth });
+    const filterParts: string[] = [];
+    if (filters.from) filterParts.push(`timestamp >= "${filters.from}"`);
+    if (filters.to) filterParts.push(`timestamp <= "${filters.to}"`);
+    if (filters.severity) filterParts.push(`severity >= ${filters.severity}`);
+    if (filters.text?.trim()) filterParts.push(`textPayload:"${filters.text.trim().replace(/"/g, '\\"')}"`);
+    const res = await logging.entries.list({
+        requestBody: {
+            resourceNames: [`projects/${projectId}`],
+            filter: filterParts.join(' AND ') || undefined,
+            orderBy: 'timestamp desc',
+            pageSize: Math.min(Math.max(filters.limit ?? 100, 1), 200),
+        },
+    });
+    return (res.data.entries ?? []).map((entry) => {
+        const payload = entry.textPayload ?? (entry.jsonPayload ? JSON.stringify(entry.jsonPayload) : entry.protoPayload ? JSON.stringify(entry.protoPayload) : '');
+        return {
+            timestamp: entry.timestamp ?? '',
+            severity: entry.severity ?? 'DEFAULT',
+            logName: entry.logName ?? '',
+            text: payload,
+        };
     });
 }

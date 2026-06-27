@@ -3,7 +3,7 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertOrgRole, assertOrgPermission, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgPermission, getEffectivePermissions, supabaseAdmin } from '@/utils/supabase/auth';
 
 async function assertClientOrg(clientId: string, organizationId: string) {
   const { data, error } = await supabaseAdmin
@@ -176,4 +176,52 @@ export async function updateClientGoogleLink(
   if (error) throw sanitizeDbError(error, 'action.clients');
   await recordAuditEvent({ organizationId, actorId: userId, action: 'client.google_link_update', resourceType: 'client', resourceId: clientId });
   return { success: true };
+}
+
+export type AssignmentPermissionHint = {
+  staffId: string;
+  userId: string | null;
+  canCreateAllRecords: boolean;
+  roleNames: string[];
+};
+
+export async function getClientAssignmentPermissionHints(
+  organizationId: string,
+  clientId: string,
+): Promise<AssignmentPermissionHint[]> {
+  await assertOrgPermission(organizationId, 'clients');
+  await assertClientOrg(clientId, organizationId);
+  const { data: staffRows, error } = await supabaseAdmin
+    .from('staffs')
+    .select('id, user_id')
+    .eq('organization_id', organizationId)
+    .not('user_id', 'is', null)
+    .is('deleted_at', null);
+  if (error) throw sanitizeDbError(error, 'action.clients');
+  const userIds = Array.from(new Set((staffRows || []).map((staff) => staff.user_id).filter(Boolean))) as string[];
+  const { data: roleLinks } = userIds.length > 0
+    ? await supabaseAdmin
+      .from('organization_member_roles')
+      .select('user_id, organization_roles(name)')
+      .eq('organization_id', organizationId)
+      .in('user_id', userIds)
+    : { data: [] };
+  const roleNamesByUser = new Map<string, string[]>();
+  for (const link of (roleLinks || []) as Array<{ user_id: string; organization_roles: { name: string } | { name: string }[] | null }>) {
+    const role = Array.isArray(link.organization_roles) ? link.organization_roles[0] : link.organization_roles;
+    if (!role?.name) continue;
+    roleNamesByUser.set(link.user_id, [...(roleNamesByUser.get(link.user_id) ?? []), role.name]);
+  }
+
+  return Promise.all((staffRows || []).map(async (staff) => {
+    const userId = staff.user_id as string | null;
+    if (!userId) return { staffId: staff.id, userId: null, canCreateAllRecords: false, roleNames: [] };
+    const { isOwner, permissions } = await getEffectivePermissions(organizationId, userId);
+    return {
+      staffId: staff.id,
+      userId,
+      canCreateAllRecords: isOwner || permissions.records.create === 'all',
+      roleNames: roleNamesByUser.get(userId) ?? [],
+    };
+  }));
 }

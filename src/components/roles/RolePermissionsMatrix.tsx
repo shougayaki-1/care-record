@@ -3,8 +3,9 @@
 import React from 'react';
 import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Checkbox, ToggleButton, ToggleButtonGroup, Typography, Box, Stack,
+  Checkbox, ToggleButton, ToggleButtonGroup, Typography, Box, Stack, Tooltip,
 } from '@/components/ui/mui';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import type { RolePermissions, RecordScope } from '@/utils/permissions';
 
 type Props = {
@@ -55,17 +56,17 @@ const RECORD_ROWS: Array<{ label: string; action: RecordAction; allowAssigned: b
   { label: '承認', action: 'approve', allowAssigned: false },
 ];
 
-const MGMT_ITEMS: Array<{ label: string; key: keyof RolePermissions['management'] }> = [
-  { label: 'スタッフ管理', key: 'staffs' },
-  { label: 'クライアント管理', key: 'clients' },
-  { label: 'アカウント管理', key: 'accounts' },
-  { label: '組織設定', key: 'organization' },
-  { label: '連携設定', key: 'integrations' },
-  { label: '監査ログ', key: 'auditLogs' },
-  { label: 'レポート閲覧', key: 'reports' },
-  { label: 'ロール管理', key: 'roles' },
-  { label: '事業所削除', key: 'organizationDelete' },
-  { label: 'オーナー移譲', key: 'ownerTransfer' },
+const MGMT_ITEMS: Array<{ label: string; key: keyof RolePermissions['management']; description: string }> = [
+  { label: 'スタッフ管理', key: 'staffs', description: 'スタッフ名簿、役職、アカウント紐付けを編集できます。' },
+  { label: '利用者管理', key: 'clients', description: '利用者の追加、フォーム設定、担当スタッフ設定を編集できます。' },
+  { label: 'アカウント管理', key: 'accounts', description: '招待、除名、メンバーの業務ロール割当を変更できます。' },
+  { label: '事業所設定', key: 'organization', description: '事業所名、交通費、労働時間ルールなどを変更できます。' },
+  { label: '連携設定', key: 'integrations', description: 'Googleドライブ、Googleカレンダーなどの外部連携を変更できます。' },
+  { label: '操作ログ', key: 'auditLogs', description: '監査ログと過去ログを閲覧・エクスポートできます。' },
+  { label: '予実・記録一覧', key: 'reports', description: '記録一覧、承認、予実管理、集計画面にアクセスできます。' },
+  { label: 'ロール管理', key: 'roles', description: '業務ロールの作成、編集、削除ができます。' },
+  { label: '事業所削除', key: 'organizationDelete', description: '事業所を削除状態にできます。通常は付与しないでください。' },
+  { label: 'オーナー移譲', key: 'ownerTransfer', description: '事業所オーナーを別メンバーへ移譲できます。' },
 ];
 
 export default function RolePermissionsMatrix({ value, onChange, disabled }: Props) {
@@ -78,6 +79,12 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
 
   return (
     <Box sx={{ minWidth: 0, opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
+      <Box sx={{ mb: 1.5, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.subtle' }}>
+        <Typography variant="caption" color="text.secondary" display="block">
+          「全体」は担当に関係なく操作できます。「担当」はその利用者またはシフトの担当者に紐付いている場合だけ操作できます。「×」は許可しません。
+        </Typography>
+      </Box>
+
       <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
         <Table size="small" sx={{ minWidth: 680 }}>
           <TableHead>
@@ -149,13 +156,16 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
       <Typography variant="subtitle2" mt={2} mb={1}>管理機能アクセス</Typography>
       <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))' }} gap={0.5}>
         {MGMT_ITEMS.map(item => (
-          <Box key={item.key} display="flex" alignItems="center">
+          <Box key={item.key} display="flex" alignItems="center" minWidth={0}>
             <Checkbox
               size="small"
               checked={value.management[item.key]}
               onChange={e => setMgmt(item.key, e.target.checked)}
             />
             <Typography variant="body2">{item.label}</Typography>
+            <Tooltip title={item.description}>
+              <HelpOutlineIcon sx={{ ml: 0.5, fontSize: 16, color: 'text.disabled' }} />
+            </Tooltip>
           </Box>
         ))}
       </Box>

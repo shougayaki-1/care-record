@@ -124,3 +124,51 @@ export async function reorderStaffs(organizationId: string, staffIds: string[]) 
   await recordAuditEvent({ organizationId, actorId: userId, action: 'staff.reorder', resourceType: 'staff', details: { count: ids.length } });
   return { success: true };
 }
+
+export type StaffPositionPreset = {
+  id: string;
+  name: string;
+  sort_order: number | null;
+};
+
+export async function getStaffPositionPresets(organizationId: string): Promise<StaffPositionPreset[]> {
+  await assertOrgRole(organizationId);
+  const { data, error } = await supabaseAdmin
+    .from('staff_position_presets')
+    .select('id, name, sort_order')
+    .eq('organization_id', organizationId)
+    .order('sort_order', { ascending: true, nullsFirst: false })
+    .order('name', { ascending: true });
+  if (error) throw sanitizeDbError(error, 'action.staffs');
+  return (data ?? []) as StaffPositionPreset[];
+}
+
+export async function saveStaffPositionPreset(organizationId: string, name: string) {
+  const { userId } = await assertOrgPermission(organizationId, 'staffs');
+  const normalized = name.trim();
+  if (normalized.length < 1 || normalized.length > 50) throw new Error('役職名は1〜50文字で入力してください');
+  const { count } = await supabaseAdmin
+    .from('staff_position_presets')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', organizationId);
+  const { data, error } = await supabaseAdmin
+    .from('staff_position_presets')
+    .insert({ organization_id: organizationId, name: normalized, sort_order: count ?? 0 })
+    .select('id')
+    .single();
+  if (error || !data) throw sanitizeDbError(error || new Error('役職プリセットを保存できませんでした'), 'action.staffs');
+  await recordAuditEvent({ organizationId, actorId: userId, action: 'staff_position_preset.create', resourceType: 'staff_position_preset', resourceId: data.id, details: { name: normalized } });
+  return { success: true, id: data.id as string };
+}
+
+export async function deleteStaffPositionPreset(organizationId: string, presetId: string) {
+  const { userId } = await assertOrgPermission(organizationId, 'staffs');
+  const { error } = await supabaseAdmin
+    .from('staff_position_presets')
+    .delete()
+    .eq('id', presetId)
+    .eq('organization_id', organizationId);
+  if (error) throw sanitizeDbError(error, 'action.staffs');
+  await recordAuditEvent({ organizationId, actorId: userId, action: 'staff_position_preset.delete', resourceType: 'staff_position_preset', resourceId: presetId });
+  return { success: true };
+}

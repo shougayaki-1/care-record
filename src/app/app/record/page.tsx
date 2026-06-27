@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { InnerPageHeader } from '@/components/ui';
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
+import { checkRecordPermission } from '@/utils/permissions';
 
 type Client = { id: string; name: string; };
 type DraftReport = { id: string; created_at: string; };
@@ -34,10 +35,12 @@ export default function RecordSelectPage() {
             const { data: { user } } = await supabase.auth.getUser();
             let targetClients: Client[] = [];
 
-            if (['owner', 'manager'].includes(currentOrg.role)) {
+            const canCreateAll = currentOrg.effectivePermissions.records.create === 'all';
+            const canCreateAssigned = currentOrg.effectivePermissions.records.create === 'assigned';
+            if (canCreateAll) {
                 const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
                 if (data) targetClients = data as Client[];
-            } else {
+            } else if (canCreateAssigned) {
                 const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', user?.id);
                 if (data) {
                     const assignments = data as unknown as { clients: Client | null }[];
@@ -82,6 +85,7 @@ export default function RecordSelectPage() {
     };
 
     if (loading || wsLoading) return null;
+    const canCreateAnyRecord = currentOrg ? checkRecordPermission(currentOrg.effectivePermissions, 'create', true) : false;
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -170,7 +174,11 @@ export default function RecordSelectPage() {
                             </Box>
                         );
                     })}
-                    {clients.length === 0 && <Typography color="text.secondary" textAlign="center" mt={4}>表示できる利用者がいません</Typography>}
+                    {clients.length === 0 && (
+                        <Typography color="text.secondary" textAlign="center" mt={4}>
+                            {canCreateAnyRecord ? '表示できる利用者がいません' : '記録を作成する権限がありません'}
+                        </Typography>
+                    )}
                 </Stack>
             </Box>
         </Box>

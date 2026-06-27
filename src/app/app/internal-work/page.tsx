@@ -2,31 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert, Box, Button, Chip, Divider, MenuItem, Paper, Stack, TextField, Typography,
+  Alert, Box, Button, Chip, Divider, Paper, Stack, TextField, Typography,
 } from '@/components/ui/mui';
 import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
-import SaveIcon from '@mui/icons-material/Save';
-import { DateTimeField, InnerPageHeader } from '@/components/ui';
+import AddIcon from '@mui/icons-material/Add';
+import { InnerPageHeader } from '@/components/ui';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import {
   listMyInternalWorkRecords,
-  saveInternalWork,
   type InternalWorkRecord,
 } from '@/app/actions/internalWork';
-
-const WORK_TYPES = [
-  { value: 'meeting', label: '会議' },
-  { value: 'training', label: '研修' },
-  { value: 'office', label: '事務作業' },
-  { value: 'recording', label: '記録作成' },
-  { value: 'other', label: 'その他' },
-];
-
-function formatDatetimeLocal(date: Date) {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
+import InternalWorkDialog from '@/components/internal-work/InternalWorkDialog';
 
 function monthRange(month: string) {
   const [year, mon] = month.split('-').map(Number);
@@ -45,16 +32,10 @@ export default function InternalWorkPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const now = useMemo(() => new Date(), []);
-  const [title, setTitle] = useState('会議');
-  const [workType, setWorkType] = useState('meeting');
-  const [startAt, setStartAt] = useState(() => formatDatetimeLocal(now));
-  const [endAt, setEndAt] = useState(() => formatDatetimeLocal(new Date(now.getTime() + 60 * 60 * 1000)));
-  const [workHours, setWorkHours] = useState('1');
-  const [note, setNote] = useState('');
   const [targetMonth, setTargetMonth] = useState(() => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
   const [records, setRecords] = useState<InternalWorkRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [openDialog, setOpenDialog] = useState(false);
 
   const loadRecords = useCallback(async () => {
     if (!currentOrg) return;
@@ -74,39 +55,6 @@ export default function InternalWorkPage() {
     if (!wsLoading && currentOrg) void loadRecords();
   }, [wsLoading, currentOrg, loadRecords]);
 
-  useEffect(() => {
-    const start = new Date(startAt);
-    const end = new Date(endAt);
-    if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && end > start) {
-      const hours = (end.getTime() - start.getTime()) / 3600000;
-      setWorkHours(String(Math.round(hours * 100) / 100));
-    }
-  }, [startAt, endAt]);
-
-  const handleSave = async () => {
-    if (!currentOrg) return;
-    setSaving(true);
-    try {
-      await saveInternalWork({
-        organizationId: currentOrg.id,
-        title,
-        workType,
-        startAt: new Date(startAt).toISOString(),
-        endAt: new Date(endAt).toISOString(),
-        workHours: Number(workHours),
-        note,
-      });
-      showToast('内勤実績を保存しました', 'success');
-      setNote('');
-      await loadRecords();
-    } catch (e) {
-      console.error(e);
-      showToast(e instanceof Error ? e.message : '保存に失敗しました', 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   if (wsLoading || !currentOrg) return null;
 
   return (
@@ -116,33 +64,11 @@ export default function InternalWorkPage() {
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
         <Stack spacing={3} maxWidth={760} mx="auto">
           <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, borderRadius: 3 }}>
-            <Stack spacing={2}>
-              <Alert severity="info">会議・研修・事務作業など、利用者に紐づかない勤務実績を登録します。</Alert>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField label="件名" value={title} onChange={(e) => setTitle(e.target.value)} fullWidth />
-                <TextField select label="種別" value={workType} onChange={(e) => setWorkType(e.target.value)} sx={{ minWidth: { sm: 180 } }}>
-                  {WORK_TYPES.map((type) => <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>)}
-                </TextField>
-              </Stack>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                <DateTimeField value={startAt} onChange={(e) => setStartAt(e.target.value)} />
-                <Typography color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>〜</Typography>
-                <DateTimeField value={endAt} onChange={(e) => setEndAt(e.target.value)} />
-                <TextField
-                  label="内勤時間"
-                  type="number"
-                  value={workHours}
-                  onChange={(e) => setWorkHours(e.target.value)}
-                  sx={{ minWidth: { sm: 140 } }}
-                  slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.25' } }}
-                />
-              </Stack>
-              <TextField label="メモ" value={note} onChange={(e) => setNote(e.target.value)} fullWidth multiline minRows={2} />
-              <Box display="flex" justifyContent="flex-end">
-                <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving}>
-                  保存
-                </Button>
-              </Box>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
+              <Alert severity="info" sx={{ flex: 1 }}>会議・研修・事務作業など、利用者に紐づかない勤務実績を登録します。</Alert>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpenDialog(true)}>
+                内勤を記録
+              </Button>
             </Stack>
           </Paper>
 
@@ -178,6 +104,7 @@ export default function InternalWorkPage() {
           </Paper>
         </Stack>
       </Box>
+      <InternalWorkDialog open={openDialog} organizationId={currentOrg.id} onClose={() => setOpenDialog(false)} onSaved={loadRecords} />
     </Box>
   );
 }

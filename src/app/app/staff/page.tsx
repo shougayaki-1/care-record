@@ -22,11 +22,18 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { AppButton, AppDialog, AppTextField, CreatableMultiSelectField, InnerPageHeader, SelectField } from '@/components/ui';
-import { reorderStaffs, saveStaff, setStaffArchived, softDeleteStaff } from '@/app/actions/staffs';
+import { AppButton, AppDialog, AppTextField, InnerPageHeader, MultiSelectField, SelectField } from '@/components/ui';
+import {
+  deleteStaffPositionPreset,
+  getStaffPositionPresets,
+  reorderStaffs,
+  saveStaff,
+  saveStaffPositionPreset,
+  setStaffArchived,
+  softDeleteStaff,
+  type StaffPositionPreset,
+} from '@/app/actions/staffs';
 
-// 役職の入力候補（自由入力も可）
-const POSITION_OPTIONS = ['サービス提供責任者', 'ヘルパー', '管理者'];
 const EMPLOYMENT_TYPE_OPTIONS = ['常勤', '非常勤'] as const;
 const WORK_STYLE_OPTIONS = ['兼務', '専従'] as const;
 type EmploymentType = (typeof EMPLOYMENT_TYPE_OPTIONS)[number];
@@ -55,6 +62,7 @@ export default function StaffPage() {
   const [isFetching, setIsFetching] = useState(true);
   const [staffList, setStaffList] = useState<StaffData[]>([]);
   const [accountList, setAccountList] = useState<AccountData[]>([]);
+  const [positionPresets, setPositionPresets] = useState<StaffPositionPreset[]>([]);
   
   const [openModal, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -64,6 +72,8 @@ export default function StaffPage() {
   const [workStyle, setWorkStyle] = useState<WorkStyle>('兼務');
   const [linkedUserId, setLinkedUserId] = useState<string>('none');
   const [showArchived, setShowArchived] = useState(false);
+  const [openPositionDialog, setOpenPositionDialog] = useState(false);
+  const [newPositionName, setNewPositionName] = useState('');
 
   const fetchData = useCallback(async () => {
     if (!currentOrg) return;
@@ -101,6 +111,7 @@ export default function StaffPage() {
           }
       }
       setAccountList(accounts);
+      setPositionPresets(await getStaffPositionPresets(currentOrg.id));
     } catch (e) {
         const message = e && typeof e === 'object' && 'message' in e ? String(e.message) : '不明なエラー';
         const code = e && typeof e === 'object' && 'code' in e ? String(e.code) : undefined;
@@ -159,6 +170,31 @@ export default function StaffPage() {
       try { await setStaffArchived(currentOrg!.id, id, false); showToast('復元しました'); fetchData(); } catch (e) { console.error(e); showToast('復元に失敗しました', 'error'); }
   };
 
+  const handleAddPositionPreset = async () => {
+      if (!currentOrg || !newPositionName.trim()) return;
+      try {
+          await saveStaffPositionPreset(currentOrg.id, newPositionName);
+          setNewPositionName('');
+          setPositionPresets(await getStaffPositionPresets(currentOrg.id));
+          showToast('役職プリセットを追加しました');
+      } catch (e) {
+          console.error(e);
+          showToast(e instanceof Error ? e.message : '役職プリセットの追加に失敗しました', 'error');
+      }
+  };
+
+  const handleDeletePositionPreset = async (presetId: string) => {
+      if (!currentOrg) return;
+      try {
+          await deleteStaffPositionPreset(currentOrg.id, presetId);
+          setPositionPresets(await getStaffPositionPresets(currentOrg.id));
+          showToast('役職プリセットを削除しました');
+      } catch (e) {
+          console.error(e);
+          showToast('役職プリセットの削除に失敗しました', 'error');
+      }
+  };
+
   const activeStaff = staffList.filter(s => !s.archived_at);
   const archivedStaff = staffList.filter(s => s.archived_at);
   const visibleStaff = showArchived ? staffList : activeStaff;
@@ -213,6 +249,9 @@ export default function StaffPage() {
                     <AppButton startIcon={<AddIcon />} onClick={handleOpenAdd}>
                         スタッフを追加
                     </AppButton>
+                    <Button variant="outlined" size="small" onClick={() => setOpenPositionDialog(true)}>
+                        役職プリセット
+                    </Button>
                 </Stack>
             </Paper>
 
@@ -366,12 +405,39 @@ export default function StaffPage() {
                 <AppTextField autoFocus label="スタッフ名 (表示用)" value={staffName} onChange={e => setStaffName(e.target.value)} required />
                 <SelectField value={employmentType} onChange={(value) => setEmploymentType(value as EmploymentType)} label="雇用形態" options={EMPLOYMENT_TYPE_OPTIONS.map((value) => ({ value, label: value }))} />
                 <SelectField value={workStyle} onChange={(value) => setWorkStyle(value as WorkStyle)} label="専従・兼務" options={WORK_STYLE_OPTIONS.map((value) => ({ value, label: value }))} />
-                <CreatableMultiSelectField options={POSITION_OPTIONS} value={staffPositions} onChange={setStaffPositions} label="役職 (複数可)" placeholder="入力してEnter / 候補から選択" helperText="候補にない役職も入力して追加できます" />
+                <MultiSelectField
+                    options={positionPresets.map((preset) => preset.name)}
+                    value={staffPositions}
+                    onChange={setStaffPositions}
+                    label="役職 (複数可)"
+                    placeholder="役職プリセットから選択"
+                    helperText="候補は「役職プリセット」から追加できます"
+                    getOptionLabel={(name) => name}
+                    getOptionValue={(name) => name}
+                />
                 <SelectField value={linkedUserId} onChange={setLinkedUserId} label="紐付けるアカウント (任意)" options={[{ value: 'none', label: '紐付けない (転記・代理入力用)' }, ...accountList.map((account) => ({ value: account.id, label: account.name }))]} />
                 <Typography variant="caption" color="text.secondary">
                     ※システムにログインして自分で記録をつけるヘルパーの場合は、その人の「アカウント」を紐付けてください。事務員が代わりに記録を打ち込むだけのスタッフの場合は「紐付けない」を選択してください。
                 </Typography>
               </Stack>
+      </AppDialog>
+
+      <AppDialog open={openPositionDialog} onClose={() => setOpenPositionDialog(false)} maxWidth="xs" title="役職プリセット" actions={<AppButton variant="text" intent="secondary" onClick={() => setOpenPositionDialog(false)}>閉じる</AppButton>}>
+          <Stack spacing={2} pt={1}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                  <AppTextField label="新しい役職" value={newPositionName} onChange={(e) => setNewPositionName(e.target.value)} />
+                  <AppButton onClick={handleAddPositionPreset} disabled={!newPositionName.trim()}>追加</AppButton>
+              </Stack>
+              <Stack spacing={1}>
+                  {positionPresets.map((preset) => (
+                      <Paper key={preset.id} variant="outlined" sx={{ p: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                          <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{preset.name}</Typography>
+                          <IconButton size="small" color="error" onClick={() => handleDeletePositionPreset(preset.id)}><DeleteIcon fontSize="small" /></IconButton>
+                      </Paper>
+                  ))}
+                  {positionPresets.length === 0 && <Typography variant="body2" color="text.secondary" textAlign="center">役職プリセットがありません</Typography>}
+              </Stack>
+          </Stack>
       </AppDialog>
     </Box>
   );
