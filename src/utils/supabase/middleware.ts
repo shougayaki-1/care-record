@@ -96,19 +96,29 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
         const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
             auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
         });
-        const { data: activity, error: activityError } = sessionId
-            ? await supabaseAdmin.from('user_session_activity').select('session_hash')
-                .eq('auth_session_id', sessionId).eq('user_id', user.id).is('revoked_at', null)
-                .gte('last_activity', idleCutoff).gt('absolute_expires_at', now).maybeSingle()
-            : { data: null, error: null };
+        if (!sessionId) {
+            // JWT に session_id フィールドがない（古いトークン形式 or JWT テンプレートの設定問題）。
+            // idle_timeout にリダイレクトすると page.tsx が signOut() を呼び出し新規セッションを
+            // 破棄してしまうため、別のエラーコードを使う。
+            console.error('[middleware] JWT has no session_id. userId:', user.id, 'path:', path);
+            const url = request.nextUrl.clone();
+            url.pathname = '/';
+            url.search = 'error=session_init_failed';
+            return redirectWithSession(url);
+        }
+        const { data: activity, error: activityError } = await supabaseAdmin
+            .from('user_session_activity').select('session_hash')
+            .eq('auth_session_id', sessionId).eq('user_id', user.id).is('revoked_at', null)
+            .gte('last_activity', idleCutoff).gt('absolute_expires_at', now).maybeSingle();
         if (activityError) {
-            console.error('[proxy] session activity lookup failed', activityError.message);
+            console.error('[middleware] session activity lookup failed', activityError.message, 'sessionId:', sessionId);
             const url = request.nextUrl.clone();
             url.pathname = '/';
             url.search = 'error=session_validation_unavailable';
             return redirectWithSession(url);
         }
         if (!activity) {
+            console.error('[middleware] session activity not found. sessionId:', sessionId, 'userId:', user.id, 'idleCutoff:', idleCutoff);
             const url = request.nextUrl.clone();
             url.pathname = '/';
             url.search = 'reason=idle_timeout';
