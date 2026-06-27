@@ -21,20 +21,31 @@ const MicrosoftLogo = () => (
 
 export const AuthForm = () => {
     const searchParams = useSearchParams();
-    
+
+    const nextUrl = searchParams.get('next') || '/app';
+    const registerParam = searchParams.get('register');
+    const errorParam = searchParams.get('error');
+
+    // next URL に inviteCode が含まれている場合は招待コンテキストを表示する
+    const inviteCodeFromNext = (() => {
+        try {
+            return new URL(nextUrl, 'http://localhost').searchParams.get('inviteCode') ?? null;
+        } catch {
+            return null;
+        }
+    })();
+
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    
-    // 0: ログイン, 1: 新規登録
-    const [tabIndex, setTabIndex] = useState(0);
+
+    // 0: ログイン, 1: 新規登録。register=1 パラメータがあれば登録タブを初期選択
+    const [tabIndex, setTabIndex] = useState(registerParam === '1' ? 1 : 0);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info', text: string } | null>(null);
     const [origin, setOrigin] = useState('');
     const oauthInFlight = useRef(false);
 
     const isRegisterMode = tabIndex === 1;
-    const nextUrl = searchParams.get('next') || '/app';
-    const errorParam = searchParams.get('error'); // エラーパラメータの取得
 
     useEffect(() => {
         setOrigin(window.location.origin);
@@ -132,7 +143,6 @@ export const AuthForm = () => {
 
     return (
         <Stack spacing={3}>
-            {/* ... (表示部分は変更なし) ... */}
             <Box textAlign="center" mb={1}>
                 <Typography
                     variant="h4"
@@ -145,6 +155,17 @@ export const AuthForm = () => {
                     訪問介護記録プラットフォーム
                 </Typography>
             </Box>
+
+            {inviteCodeFromNext && (
+                <Alert severity="info" icon={false} sx={{ borderRadius: 2 }}>
+                    <Typography variant="body2" fontWeight="bold">
+                        📋 招待リンクから参加します
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                        ログインまたは新規登録してください
+                    </Typography>
+                </Alert>
+            )}
 
             <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
                 <Tabs value={tabIndex} onChange={handleTabChange} variant="fullWidth">

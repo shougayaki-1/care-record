@@ -251,6 +251,50 @@ export async function removeAccount(
     return { success: true };
 }
 
+export type InvitationPreview = {
+    valid: boolean;
+    orgName?: string;
+    roleNames?: string[];
+    expiresAt?: string;
+};
+
+/**
+ * 招待コードから事業所名・ロール名を取得する（認証不要）。
+ * 招待コードを持つ人に事業所名・ロール名を公開することは意図的。
+ */
+export async function getInvitationPreview(code: string): Promise<InvitationPreview> {
+    if (!code?.trim()) return { valid: false };
+
+    const { data: inv } = await supabaseAdmin
+        .from('invitations')
+        .select('organization_id, role_ids, expires_at, organizations!inner(name)')
+        .eq('code', code.trim())
+        .eq('is_used', false)
+        .gt('expires_at', new Date().toISOString())
+        .maybeSingle();
+
+    if (!inv) return { valid: false };
+
+    const roleNames: string[] = [];
+    const roleIds = inv.role_ids as string[] | null;
+    if (roleIds && roleIds.length > 0) {
+        const { data: roles } = await supabaseAdmin
+            .from('organization_roles')
+            .select('name')
+            .in('id', roleIds)
+            .eq('organization_id', inv.organization_id);
+        if (roles) roleNames.push(...roles.map((r) => r.name));
+    }
+
+    const org = inv.organizations as unknown as { name: string } | null;
+    return {
+        valid: true,
+        orgName: org?.name ?? '事業所',
+        roleNames,
+        expiresAt: inv.expires_at,
+    };
+}
+
 export async function getOrgRoles(orgId: string): Promise<{ id: string; name: string; color: string | null; is_preset: boolean }[]> {
     const user = await getAuthedUser();
     const { data: member, error } = await supabaseAdmin

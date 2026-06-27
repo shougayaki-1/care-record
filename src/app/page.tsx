@@ -35,8 +35,11 @@ export default function LoginPage() {
       }
 
       if (session) {
-        console.log('[LoginPage] Session found. Redirecting to /app', session.user.id);
-        router.replace('/app');
+        // next パラメータがあればそちらへ、なければ /app へ
+        const nextParam = searchParams.get('next');
+        const dest = nextParam?.startsWith('/') && !nextParam.startsWith('//') ? nextParam : '/app';
+        console.log('[LoginPage] Session found. Redirecting to', dest, session.user.id);
+        router.replace(dest);
       } else {
         console.log('[LoginPage] No session found.');
         setChecking(false);
