@@ -119,6 +119,7 @@ export async function saveClientAssignments(
   organizationId: string,
   clientId: string,
   staffIds: string[],
+  distancesByStaffId: Record<string, number> = {},
 ) {
   const { userId } = await assertOrgPermission(organizationId, 'clients');
   await assertClientOrg(clientId, organizationId);
@@ -145,6 +146,7 @@ export async function saveClientAssignments(
       // ログインユーザーの利用者アクセス制御は従来どおり helper_id でも維持する。
       helper_id: staff.user_id,
       ghost_staff_id: null,
+      round_trip_distance_km: Math.min(Math.max(Number(distancesByStaffId[staff.id] || 0), 0), 1000),
     })));
     if (error) throw sanitizeDbError(error, 'action.clients');
   }

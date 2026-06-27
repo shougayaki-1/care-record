@@ -83,7 +83,7 @@ const DEFAULT_TEMPLATE: FormItem[] = [
 ];
 
 type FormAnswers = Record<string, string | number | boolean | string[]>;
-type HelperProfile = { id: string; name: string };
+type HelperProfile = { id: string; name: string; defaultRoundTripDistanceKm?: number };
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 
 type ShiftStaffData = {
@@ -118,6 +118,9 @@ export default function RecordPage() {
   const [endDateTime, setEndDateTime] = useState('');
   const [serviceTime, setServiceTime] = useState('');
   const [travelTime, setTravelTime] = useState('0');
+  const [roundTripDistanceKm, setRoundTripDistanceKm] = useState('0');
+  const [travelCostRateYenPerKm, setTravelCostRateYenPerKm] = useState(20);
+  const [distanceTouched, setDistanceTouched] = useState(false);
   
   const [currentStatus, setCurrentStatus] = useState<ReportStatus | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -218,7 +221,7 @@ export default function RecordPage() {
         setClientName(client.name);
         const { data: tmpl } = await supabase.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle();
         const schema = (tmpl?.schema as FormItem[]) || DEFAULT_TEMPLATE;
-        setTemplate(schema.filter(i => i.id !== 'service_time' && i.id !== 'travel_time'));
+        setTemplate(schema.filter(i => !['service_time', 'travel_time', 'round_trip_distance_km', 'travel_cost_yen'].includes(i.id)));
       }
 
       const { data: staffsData } = await supabase
@@ -229,13 +232,28 @@ export default function RecordPage() {
         .order('sort_order', { ascending: true, nullsFirst: false })
         .order('name', { ascending: true });
 
-      const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id }));
+      const { data: assignmentRows } = await supabase
+        .from('assignments')
+        .select('staff_id, round_trip_distance_km')
+        .eq('client_id', clientId);
+      const distanceByStaffId = new Map((assignmentRows || []).map((assignment) => [assignment.staff_id, Number(assignment.round_trip_distance_km || 0)]));
+      const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id, defaultRoundTripDistanceKm: distanceByStaffId.get(s.id) || 0 }));
       setSelectableStaffs(allStaffs);
+
+      if (currentOrg) {
+        const { data: orgData } = await supabase
+          .from('organizations')
+          .select('travel_cost_rate_yen_per_km')
+          .eq('id', currentOrg.id)
+          .maybeSingle();
+        setTravelCostRateYenPerKm(Number(orgData?.travel_cost_rate_yen_per_km ?? 20));
+      }
 
       if (!currentReportId && !shiftId && user) {
         const myStaffRecord = allStaffs.find(s => s.user_id === user.id);
         if (myStaffRecord) {
             setSelectedHelpers([myStaffRecord.name]);
+            setRoundTripDistanceKm(String(myStaffRecord.defaultRoundTripDistanceKm || 0));
         }
       }
     } catch (error) { console.error('Error fetching base data:', error); }
@@ -274,9 +292,12 @@ export default function RecordPage() {
       // ★修正: .single() だと行欠落/複数行でエラーになり全項目が空になるため maybeSingle に変更
       const { data: v, error: vError } = await supabase.from('report_values').select('data').eq('report_id', targetId).maybeSingle();
       if (vError) console.error('report_values load error:', vError);
-      const data = (v?.data || {}) as FormAnswers & { service_time?: string; travel_time?: string; _helpers?: string[] };
+      const data = (v?.data || {}) as FormAnswers & { service_time?: string; travel_time?: string; round_trip_distance_km?: string; _helpers?: string[] };
       setServiceTime(data.service_time || '');
       setTravelTime(data.travel_time || '0');
+      setRoundTripDistanceKm(data.round_trip_distance_km || '0');
+      setTravelCostRateYenPerKm(Number(data.travel_cost_rate_yen_per_km || travelCostRateYenPerKm || 20));
+      setDistanceTouched(false);
       setSelectedHelpers(data._helpers || []);
       setAnswers(data);
 
@@ -285,7 +306,13 @@ export default function RecordPage() {
         setImages(await getReportImages(currentOrg.id, targetId));
       }
     } catch (e) { console.error(e); showToast('記録の読み込みに失敗しました', 'error'); }
-  }, [showToast, formatDatetimeLocal, currentOrg]);
+  }, [showToast, formatDatetimeLocal, currentOrg, travelCostRateYenPerKm]);
+
+  useEffect(() => {
+    if (currentReportId || distanceTouched || selectableStaffs.length === 0 || selectedHelpers.length === 0) return;
+    const staff = selectableStaffs.find((helper) => helper.name === selectedHelpers[0]);
+    if (staff) setRoundTripDistanceKm(String(staff.defaultRoundTripDistanceKm || 0));
+  }, [currentReportId, distanceTouched, selectableStaffs, selectedHelpers]);
 
   useEffect(() => {
     const init = async () => {
@@ -443,7 +470,16 @@ export default function RecordPage() {
     if (!skipValidation && !validate()) { showToast('入力不備があります', 'error'); window.scrollTo({ top: 0, behavior: 'smooth' }); return false; }
     setSubmitting(true);
     try {
-      const finalData = { ...answers, _helpers: selectedHelpers, service_time: serviceTime, travel_time: travelTime };
+      const distanceKm = parseFloat(roundTripDistanceKm || '0') || 0;
+      const finalData = {
+        ...answers,
+        _helpers: selectedHelpers,
+        service_time: serviceTime,
+        travel_time: travelTime,
+        round_trip_distance_km: roundTripDistanceKm,
+        travel_cost_rate_yen_per_km: travelCostRateYenPerKm,
+        travel_cost_yen: Math.round(distanceKm * travelCostRateYenPerKm),
+      };
       if (!currentOrg) throw new Error('事業所が選択されていません');
       const result = await saveReportAction({
         organizationId: currentOrg.id,
@@ -511,9 +547,14 @@ export default function RecordPage() {
   }, [template]);
 
   const isAdmin = currentOrg && ['owner', 'manager'].includes(currentOrg.role);
+  const travelCostYen = Math.round((parseFloat(roundTripDistanceKm || '0') || 0) * travelCostRateYenPerKm);
 
   const handleStaffChange = (value: string[]) => {
       setSelectedHelpers(value);
+      if (!currentReportId && !distanceTouched) {
+          const staff = selectableStaffs.find((helper) => helper.name === value[0]);
+          if (staff) setRoundTripDistanceKm(String(staff.defaultRoundTripDistanceKm || 0));
+      }
       setIsDirty(true);
       if (errors.helpers) {
           const newErrors = { ...errors };
@@ -672,6 +713,23 @@ export default function RecordPage() {
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                         <TextField label="サービス提供" type="number" fullWidth value={serviceTime} onChange={e => handleChange(setServiceTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} error={!!errors.serviceTime} slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
                         <TextField label="移動" type="number" fullWidth value={travelTime} onChange={e => handleChange(setTravelTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} slotProps={{ input: { startAdornment: <DirectionsCarIcon color="action" fontSize="small" sx={{ mr: 1 }} />, endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
+                    </Stack>
+                </Box>
+                <Box>
+                    <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
+                        <DirectionsCarIcon fontSize="small" /> 移動距離・交通費
+                    </Typography>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                        <TextField
+                            label="往復距離"
+                            type="number"
+                            fullWidth
+                            value={roundTripDistanceKm}
+                            onChange={e => { setDistanceTouched(true); handleChange(setRoundTripDistanceKm, e.target.value); }}
+                            onWheel={e => (e.target as HTMLElement).blur()}
+                            slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">km</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.1' } }}
+                        />
+                        <Chip label={`交通費 ${travelCostYen.toLocaleString()}円（${travelCostRateYenPerKm.toLocaleString()}円/km）`} color="primary" variant="outlined" sx={{ alignSelf: { xs: 'flex-start', sm: 'center' }, fontWeight: 'bold' }} />
                     </Stack>
                 </Box>
                 </Stack>

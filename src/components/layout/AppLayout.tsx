@@ -13,6 +13,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import TagIcon from '@mui/icons-material/Tag';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import HistoryIcon from '@mui/icons-material/History';
+import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import PeopleIcon from '@mui/icons-material/People';
 import BadgeIcon from '@mui/icons-material/Badge';
 import ExpandLess from '@mui/icons-material/ExpandLess';
@@ -404,6 +405,7 @@ const NavDrawer = ({
         <Typography sx={categoryStyle}>記録</Typography>
         <List disablePadding>
           {navButton('記録を作成', <EditNoteIcon fontSize="small" />, '/app/record')}
+          {navButton('内勤を記録', <WorkHistoryIcon fontSize="small" />, '/app/internal-work')}
           {navButton('自分の履歴', <HistoryIcon fontSize="small" />, '/app/history')}
         </List>
 

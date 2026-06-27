@@ -61,6 +61,7 @@ export default function ClientSettingsPage() {
     
     const [allStaffs, setAllStaffs] = useState<Staff[]>([]);
     const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([]);
+    const [roundTripDistances, setRoundTripDistances] = useState<Record<string, string>>({});
     
     const [templateId, setTemplateId] = useState('');
 
@@ -104,13 +105,19 @@ export default function ClientSettingsPage() {
                 }));
                 setAllStaffs(staffs);
 
-                const { data: assigns } = await supabase.from('assignments').select('staff_id, helper_id').eq('client_id', clientId);
+                const { data: assigns } = await supabase.from('assignments').select('staff_id, helper_id, round_trip_distance_km').eq('client_id', clientId);
                 if (assigns) {
                     const staffIdByUserId = new Map(staffs.filter((staff) => staff.userId).map((staff) => [staff.userId, staff.id]));
                     const ids = assigns
                         .map((assignment) => assignment.staff_id || staffIdByUserId.get(assignment.helper_id))
                         .filter((id): id is string => Boolean(id));
                     setAssignedStaffIds(ids);
+                    const distances: Record<string, string> = {};
+                    assigns.forEach((assignment) => {
+                        const staffId = assignment.staff_id || staffIdByUserId.get(assignment.helper_id);
+                        if (staffId) distances[staffId] = String(assignment.round_trip_distance_km ?? 0);
+                    });
+                    setRoundTripDistances(distances);
                 }
             }
 
@@ -179,7 +186,10 @@ export default function ClientSettingsPage() {
         setMessage(null);
         try {
             if (!currentOrg) throw new Error('事業所が選択されていません');
-            await saveClientAssignments(currentOrg.id, clientId, assignedStaffIds);
+            const distancePayload = Object.fromEntries(
+                assignedStaffIds.map((staffId) => [staffId, Number(roundTripDistances[staffId] || 0)])
+            );
+            await saveClientAssignments(currentOrg.id, clientId, assignedStaffIds, distancePayload);
 
             setMessage({ type: 'success', text: '担当スタッフを更新しました！' });
             setTimeout(() => setMessage(null), 3000);
@@ -429,7 +439,7 @@ export default function ClientSettingsPage() {
                     <Card variant="outlined">
                         <CardContent>
                             <Typography variant="subtitle1" fontWeight="bold" gutterBottom>この利用者を担当するスタッフを選択してください</Typography>
-                            <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。</Typography>
+                            <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。往復距離は記録作成時の初期値になります。</Typography>
                             <Stack spacing={3}>
                                 <CheckboxGroupField
                                     label="メンバー（ログインユーザー）"
@@ -447,6 +457,28 @@ export default function ClientSettingsPage() {
                                     getOptionLabel={(staff) => staff.name}
                                     getOptionValue={(staff) => staff.id}
                                 />
+                                {assignedStaffIds.length > 0 && (
+                                    <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.muted' }}>
+                                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>スタッフ別 往復移動距離</Typography>
+                                        <Stack spacing={1.5}>
+                                            {allStaffs.filter((staff) => assignedStaffIds.includes(staff.id)).map((staff) => (
+                                                <Stack key={staff.id} direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                                                    <Typography sx={{ minWidth: { sm: 180 }, fontWeight: 'bold', overflowWrap: 'anywhere' }}>{staff.name}</Typography>
+                                                    <TextField
+                                                        label="往復距離"
+                                                        type="number"
+                                                        size="small"
+                                                        value={roundTripDistances[staff.id] ?? '0'}
+                                                        onChange={(e) => setRoundTripDistances(prev => ({ ...prev, [staff.id]: e.target.value }))}
+                                                        onWheel={e => (e.target as HTMLElement).blur()}
+                                                        sx={{ maxWidth: { sm: 220 } }}
+                                                        slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">km</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.1', min: 0 } }}
+                                                    />
+                                                </Stack>
+                                            ))}
+                                        </Stack>
+                                    </Paper>
+                                )}
                             </Stack>
                         </CardContent>
                     </Card>

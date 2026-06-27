@@ -14,6 +14,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
 import { aggregatePremiumMinutes, type LaborPremiumType } from '@/utils/laborPremium';
+import { listInternalWorkRecordsForStatistics, type InternalWorkRecord } from '@/app/actions/internalWork';
 
 type ShiftStaffData = { staff_id: string; staffs: { name: string } | null; };
 type ShiftData = { 
@@ -25,15 +26,17 @@ type ReportData = {
     id: string; start_at: string; end_at: string; status: string; client_id: string; 
     clients: { name: string } | null; 
     helper?: { name: string } | null;
-    report_values: { data: { _helpers?: string[]; service_time?: string|number; travel_time?: string|number; } }[] | null; 
+    report_values: { data: ReportValuesData }[] | null; 
     report_shifts?: { shift_id: string }[] | null;
 };
 
-type AggregatedRow = { name: string; plannedHours: number; actualHours: number; };
+type ReportValuesData = { _helpers?: string[]; service_time?: string|number; travel_time?: string|number; };
+type StatusCounts = { pending: number; remanded: number };
+type AggregatedRow = { name: string; plannedHours: number; actualHours: number; serviceHours: number; travelHours: number; internalHours: number; statusCounts: StatusCounts; };
 type PremiumComparison = Record<string, { planned: number; actual: number; diff: number }>;
 type StaffDetailItem = {
     id: string;
-    kind: 'planned' | 'actual';
+    kind: 'planned' | 'actual' | 'internal';
     clientName: string;
     startAt: string;
     endAt: string;
@@ -45,7 +48,7 @@ type ShiftWithLinks = {
     id: string; start_at: string; end_at: string; client_id: string;
     clients: { name: string } | null;
     shift_staffs: Array<{ staffs: { name: string } | null }>;
-    report_shifts: Array<{ is_primary: boolean; reports: { id: string; start_at: string; end_at: string; status: string } | null }>;
+    report_shifts: Array<{ is_primary: boolean; reports: { id: string; start_at: string; end_at: string; status: string; report_values?: { data: ReportValuesData }[] | null } | null }>;
 };
 
 type ShiftVarianceRow = {
@@ -86,6 +89,19 @@ function formatDetailDateTime(value: string): string {
     });
 }
 
+function getReportHours(dataObj: ReportValuesData | null, startAt: string, endAt: string, monthStart?: Date, monthEnd?: Date) {
+    const serviceHours = parseFloat(String(dataObj?.service_time || 0)) || 0;
+    const travelHours = parseFloat(String(dataObj?.travel_time || 0)) || 0;
+    const explicitTotal = serviceHours + travelHours;
+    if (explicitTotal > 0) return { serviceHours, travelHours, totalHours: explicitTotal };
+    const start = new Date(startAt);
+    const end = new Date(endAt);
+    const fallback = monthStart && monthEnd
+        ? getOverlappingHours(start, end, monthStart, monthEnd)
+        : (end.getTime() - start.getTime()) / 3600000;
+    return { serviceHours: fallback, travelHours: 0, totalHours: fallback };
+}
+
 export default function StatisticsPage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
@@ -101,6 +117,7 @@ export default function StatisticsPage() {
     const [rawReports, setRawReports] = useState<ReportData[]>([]);
     const [premiumTypes, setPremiumTypes] = useState<LaborPremiumType[]>([]);
     const [rawShiftsWithLinks, setRawShiftsWithLinks] = useState<ShiftWithLinks[]>([]);
+    const [internalWorkRecords, setInternalWorkRecords] = useState<InternalWorkRecord[]>([]);
     const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
     const fetchStatisticsData = useCallback(async () => {
@@ -145,7 +162,7 @@ export default function StatisticsPage() {
                 `)
                 .is('deleted_at', null)
                 .eq('clients.organization_id', currentOrg.id)
-                .in('status', ['pending', 'approved']) 
+                .in('status', ['pending', 'approved', 'remanded']) 
                 .gte('end_at', shiftStartRange)
                 .lte('start_at', shiftEndRange);
 
@@ -158,7 +175,7 @@ export default function StatisticsPage() {
                     id, start_at, end_at, client_id,
                     clients (name),
                     shift_staffs (staffs(name)),
-                    report_shifts (is_primary, reports(id, start_at, end_at, status))
+                    report_shifts (is_primary, reports(id, start_at, end_at, status, report_values(data)))
                 `)
                 .eq('organization_id', currentOrg.id)
                 .neq('status', 'cancelled')
@@ -168,6 +185,7 @@ export default function StatisticsPage() {
 
             setRawShifts((shiftsData as unknown as ShiftData[]) || []);
             setRawReports((reportsData as unknown as ReportData[]) || []);
+            setInternalWorkRecords(await listInternalWorkRecordsForStatistics(currentOrg.id, shiftStartRange, shiftEndRange));
 
             // 割り増し種別を取得
             const { data: rawPremiumTypes } = await supabase
@@ -208,11 +226,21 @@ export default function StatisticsPage() {
         const staffReportsMap: Record<string, Array<{ start_at: string; end_at: string }>> = {};
         const detailItemsPerStaff: Record<string, StaffDetailItem[]> = {};
 
-        const addHours = (name: string, type: 'planned' | 'actual', hours: number) => {
+        const addHours = (name: string, type: 'planned' | 'actual', hours: number, breakdown?: Partial<Pick<AggregatedRow, 'serviceHours' | 'travelHours' | 'internalHours'>>) => {
             if (!name) return;
-            if (!statsMap[name]) statsMap[name] = { name, plannedHours: 0, actualHours: 0 };
+            if (!statsMap[name]) statsMap[name] = { name, plannedHours: 0, actualHours: 0, serviceHours: 0, travelHours: 0, internalHours: 0, statusCounts: { pending: 0, remanded: 0 } };
             if (type === 'planned') statsMap[name].plannedHours += hours;
-            else statsMap[name].actualHours += hours;
+            else {
+                statsMap[name].actualHours += hours;
+                statsMap[name].serviceHours += breakdown?.serviceHours ?? 0;
+                statsMap[name].travelHours += breakdown?.travelHours ?? 0;
+                statsMap[name].internalHours += breakdown?.internalHours ?? 0;
+            }
+        };
+        const addStatusCount = (name: string, status?: string) => {
+            if (!name || !statsMap[name]) return;
+            if (status === 'pending') statsMap[name].statusCounts.pending += 1;
+            if (status === 'remanded') statsMap[name].statusCounts.remanded += 1;
         };
         const addStaffSlot = (
             map: Record<string, Array<{ start_at: string; end_at: string }>>,
@@ -277,33 +305,22 @@ export default function StatisticsPage() {
 
         // ② 実績（記録）の集計 (実績時間)
         rawReports.forEach(report => {
-            let actualHours = 0;
             const dataObj = (report.report_values && report.report_values.length > 0) ? report.report_values[0].data : null;
-            
-            // サービス時間に移動時間も含まれている前提のため、service_timeのみを実績時間とする
-            if (dataObj) {
-                const sTime = parseFloat(String(dataObj.service_time || 0)) || 0;
-                actualHours = sTime;
-            }
-
-            // もし入力されていなければ start_at と end_at から計算 (フォールバック)
-            if (actualHours <= 0) {
-                const rStart = new Date(report.start_at);
-                const rEnd = new Date(report.end_at);
-                actualHours = getOverlappingHours(rStart, rEnd, monthStart, monthEnd);
-            }
+            const { serviceHours, travelHours, totalHours: actualHours } = getReportHours(dataObj, report.start_at, report.end_at, monthStart, monthEnd);
 
             if (actualHours > 0) {
                 if (tabIndex === 1 && report.clients?.name) {
                     const clientName = Array.isArray(report.clients) ? report.clients[0]?.name : report.clients.name;
-                    addHours(clientName, 'actual', actualHours);
+                    addHours(clientName, 'actual', actualHours, { serviceHours, travelHours });
+                    addStatusCount(clientName, report.status);
                 }
                 if (tabIndex === 0) {
                     const actualHelpers = dataObj?._helpers || [];
                     const clipped = clipSlotToMonth(report.start_at, report.end_at, monthStart, monthEnd);
                     const clientName = Array.isArray(report.clients) ? report.clients[0]?.name : report.clients?.name;
                     const addActualForStaff = (helperName: string) => {
-                        addHours(helperName, 'actual', actualHours);
+                        addHours(helperName, 'actual', actualHours, { serviceHours, travelHours });
+                        addStatusCount(helperName, report.status);
                         if (clipped) addStaffSlot(staffReportsMap, helperName, clipped.start_at, clipped.end_at);
                         addDetailItem(helperName, {
                             id: `actual-${report.id}-${helperName}`,
@@ -330,6 +347,7 @@ export default function StatisticsPage() {
                         }
                     } else {
                         addHours('未設定(担当者不明)', 'actual', actualHours);
+                        addStatusCount('未設定(担当者不明)', report.status);
                         if (clipped) addStaffSlot(staffReportsMap, '未設定(担当者不明)', clipped.start_at, clipped.end_at);
                         addDetailItem('未設定(担当者不明)', {
                             id: `actual-${report.id}-unknown`,
@@ -344,6 +362,25 @@ export default function StatisticsPage() {
                 }
             }
         });
+
+        if (tabIndex === 0) {
+            internalWorkRecords.forEach((record) => {
+                const staffName = record.staffs?.name || '未設定(スタッフ名なし)';
+                const hours = Number(record.work_hours) || 0;
+                if (hours <= 0) return;
+                addHours(staffName, 'actual', hours, { internalHours: hours });
+                addStatusCount(staffName, record.status);
+                addDetailItem(staffName, {
+                    id: `internal-${record.id}`,
+                    kind: 'internal',
+                    clientName: record.title,
+                    startAt: record.start_at,
+                    endAt: record.end_at,
+                    hours,
+                    status: record.status,
+                });
+            });
+        }
 
         const rows = Object.values(statsMap).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -366,7 +403,7 @@ export default function StatisticsPage() {
         }
 
         return { rows, premiumComparisonPerStaff, detailItemsPerStaff };
-    }, [rawShifts, rawReports, targetMonth, tabIndex, premiumTypes]);
+    }, [rawShifts, rawReports, internalWorkRecords, targetMonth, tabIndex, premiumTypes]);
 
     const shiftVarianceRows = useMemo<ShiftVarianceRow[]>(() => {
         const linkedReportIds = new Set<string>();
@@ -375,9 +412,10 @@ export default function StatisticsPage() {
             const linked = shift.report_shifts ?? [];
             const actualMs = linked.reduce((sum, rs) => {
                 const r = rs.reports;
-                if (!r || !['pending', 'approved'].includes(r.status)) return sum;
+                if (!r || !['pending', 'approved', 'remanded'].includes(r.status)) return sum;
                 linkedReportIds.add(r.id);
-                return sum + new Date(r.end_at).getTime() - new Date(r.start_at).getTime();
+                const dataObj = r.report_values?.[0]?.data ?? null;
+                return sum + getReportHours(dataObj, r.start_at, r.end_at).totalHours * 3600000;
             }, 0);
             const actualH = actualMs > 0 ? actualMs / 3600000 : null;
             const diffH = actualH != null ? actualH - plannedH : null;
@@ -403,10 +441,7 @@ export default function StatisticsPage() {
             if (hasLink) return;
 
             const dataObj = report.report_values?.[0]?.data;
-            const serviceHours = parseFloat(String(dataObj?.service_time || 0)) || 0;
-            const actualH = serviceHours > 0
-                ? serviceHours
-                : (new Date(report.end_at).getTime() - new Date(report.start_at).getTime()) / 3600000;
+            const actualH = getReportHours(dataObj ?? null, report.start_at, report.end_at).totalHours;
             if (actualH <= 0) return;
 
             const helpers = Array.isArray(dataObj?._helpers)
@@ -434,7 +469,7 @@ export default function StatisticsPage() {
     const handleExportCSV = () => {
         const { rows: aggRows, premiumComparisonPerStaff } = aggregatedData;
         const premiumHeaders = tabIndex === 0 ? premiumTypes.flatMap(t => [`${t.name}予定(h)`, `${t.name}実績(h)`, `${t.name}差異(h)`]) : [];
-        const header = ['氏名', '予定時間(h)', '実績時間(h)', '差異(h)', ...premiumHeaders];
+        const header = ['氏名', '予定時間(h)', '実績時間(h)', 'サービス(h)', '移動(h)', '内勤(h)', '差異(h)', '未承認件数', '差戻し件数', ...premiumHeaders];
         const csvRows = aggRows.map(row => {
             const premiumCells = tabIndex === 0
                 ? premiumTypes.flatMap(t => {
@@ -450,7 +485,12 @@ export default function StatisticsPage() {
                 `"${row.name}"`,
                 row.plannedHours.toFixed(2),
                 row.actualHours.toFixed(2),
+                row.serviceHours.toFixed(2),
+                row.travelHours.toFixed(2),
+                row.internalHours.toFixed(2),
                 (row.actualHours - row.plannedHours).toFixed(2),
+                row.statusCounts.pending,
+                row.statusCounts.remanded,
                 ...premiumCells,
             ];
         });
@@ -498,14 +538,16 @@ export default function StatisticsPage() {
                                         <TableCell sx={{ fontWeight: 'bold' }}>{tabIndex === 0 ? 'スタッフ名' : '利用者名'}</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>予定時間 (h)</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>実績時間 (h)</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>実績内訳</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>差異 (h)</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>状態</TableCell>
                                         {tabIndex === 0 && premiumTypes.map(t => (
                                             <TableCell key={t.id} align="right" sx={{ fontWeight: 'bold' }}>{t.name}<br />予定/実績/差異(h)</TableCell>
                                         ))}
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                    {aggregatedData.rows.length === 0 ? <TableRow><TableCell colSpan={4 + (tabIndex === 0 ? premiumTypes.length : 0)} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow> : (
+                                    {aggregatedData.rows.length === 0 ? <TableRow><TableCell colSpan={6 + (tabIndex === 0 ? premiumTypes.length : 0)} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow> : (
                                         aggregatedData.rows.map((row, i) => {
                                             const diff = row.actualHours - row.plannedHours;
                                             const premiumDiff = premiumTypes.some(t => Math.abs(aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id]?.diff ?? 0) >= 1);
@@ -530,7 +572,21 @@ export default function StatisticsPage() {
                                                         </TableCell>
                                                         <TableCell align="right">{row.plannedHours.toFixed(2)}</TableCell>
                                                         <TableCell align="right" sx={{ fontWeight: 'bold', color: 'primary.main' }}>{row.actualHours.toFixed(2)}</TableCell>
+                                                        <TableCell>
+                                                            <Stack direction="row" spacing={0.5} flexWrap="wrap" justifyContent="flex-start">
+                                                                <Chip size="small" variant="outlined" label={`サービス ${row.serviceHours.toFixed(1)}h`} />
+                                                                <Chip size="small" variant="outlined" label={`移動 ${row.travelHours.toFixed(1)}h`} />
+                                                                {tabIndex === 0 && row.internalHours > 0 && <Chip size="small" variant="outlined" label={`内勤 ${row.internalHours.toFixed(1)}h`} />}
+                                                            </Stack>
+                                                        </TableCell>
                                                         <TableCell align="right" sx={{ color: isAlert ? 'error.main' : 'inherit', fontWeight: isAlert ? 'bold' : 'normal' }}>{diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}</TableCell>
+                                                        <TableCell>
+                                                            <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                                                                {row.statusCounts.pending > 0 && <Chip size="small" color="warning" label={`未承認あり ${row.statusCounts.pending}`} />}
+                                                                {row.statusCounts.remanded > 0 && <Chip size="small" color="error" label={`差戻しあり ${row.statusCounts.remanded}`} />}
+                                                                {row.statusCounts.pending === 0 && row.statusCounts.remanded === 0 && <Typography variant="caption" color="text.secondary">—</Typography>}
+                                                            </Stack>
+                                                        </TableCell>
                                                         {tabIndex === 0 && premiumTypes.map(t => {
                                                             const premium = aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id] ?? { planned: 0, actual: 0, diff: 0 };
                                                             const diffHours = premium.diff / 60;
@@ -542,14 +598,14 @@ export default function StatisticsPage() {
                                                         })}
                                                     </TableRow>
                                                     <TableRow>
-                                                        <TableCell colSpan={4 + (tabIndex === 0 ? premiumTypes.length : 0)} sx={{ p: 0, borderBottom: isExpanded ? undefined : 0 }}>
+                                                        <TableCell colSpan={6 + (tabIndex === 0 ? premiumTypes.length : 0)} sx={{ p: 0, borderBottom: isExpanded ? undefined : 0 }}>
                                                             <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                                                                 <Box sx={{ px: 3, py: 2, bgcolor: 'background.tint' }}>
                                                                     <Typography variant="subtitle2" fontWeight="bold" mb={1}>差異対象シフト・実績</Typography>
                                                                     <Stack spacing={1}>
                                                                         {(aggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => (
                                                                             <Box key={item.id} sx={{ display: 'grid', gridTemplateColumns: '90px 1fr 110px', gap: 1, alignItems: 'center' }}>
-                                                                                <Chip size="small" label={item.kind === 'planned' ? '予定' : '実績'} color={item.kind === 'planned' ? 'default' : 'primary'} variant={item.kind === 'planned' ? 'outlined' : 'filled'} />
+                                                                                <Chip size="small" label={item.kind === 'planned' ? '予定' : item.kind === 'internal' ? '内勤' : '実績'} color={item.kind === 'planned' ? 'default' : item.kind === 'internal' ? 'secondary' : 'primary'} variant={item.kind === 'planned' ? 'outlined' : 'filled'} />
                                                                                 <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
                                                                                     {item.clientName} {formatDetailDateTime(item.startAt)} - {formatDetailDateTime(item.endAt)}
                                                                                 </Typography>
@@ -606,6 +662,13 @@ export default function StatisticsPage() {
                                                 </Typography>
                                             </Box>
                                         </Box>
+                                        <Stack direction="row" gap={1} flexWrap="wrap" mt={1.5}>
+                                            <Chip size="small" variant="outlined" label={`サービス ${row.serviceHours.toFixed(1)}h`} />
+                                            <Chip size="small" variant="outlined" label={`移動 ${row.travelHours.toFixed(1)}h`} />
+                                            {tabIndex === 0 && row.internalHours > 0 && <Chip size="small" variant="outlined" label={`内勤 ${row.internalHours.toFixed(1)}h`} />}
+                                            {row.statusCounts.pending > 0 && <Chip size="small" color="warning" label={`未承認あり ${row.statusCounts.pending}`} />}
+                                            {row.statusCounts.remanded > 0 && <Chip size="small" color="error" label={`差戻しあり ${row.statusCounts.remanded}`} />}
+                                        </Stack>
                                         {tabIndex === 0 && premiumTypes.length > 0 && (
                                             <Stack direction="row" gap={1} flexWrap="wrap" mt={1.5}>
                                                 {premiumTypes.map(t => {
@@ -629,7 +692,7 @@ export default function StatisticsPage() {
                                                 {(aggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => (
                                                     <Box key={item.id}>
                                                         <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                                                            <Chip size="small" label={item.kind === 'planned' ? '予定' : '実績'} color={item.kind === 'planned' ? 'default' : 'primary'} variant={item.kind === 'planned' ? 'outlined' : 'filled'} />
+                                                            <Chip size="small" label={item.kind === 'planned' ? '予定' : item.kind === 'internal' ? '内勤' : '実績'} color={item.kind === 'planned' ? 'default' : item.kind === 'internal' ? 'secondary' : 'primary'} variant={item.kind === 'planned' ? 'outlined' : 'filled'} />
                                                             <Typography variant="body2" fontWeight="bold">{item.hours.toFixed(2)}h</Typography>
                                                         </Stack>
                                                         <Typography variant="body2" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>

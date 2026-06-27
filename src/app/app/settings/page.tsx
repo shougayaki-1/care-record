@@ -23,7 +23,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
-import { deleteOrganization, disconnectGoogleCalendar, getAuditLogs, exportAuditLogsCsv, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName } from '@/app/actions/organization';
+import { deleteOrganization, disconnectGoogleCalendar, getAuditLogs, exportAuditLogsCsv, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName, updateTravelCostSettings } from '@/app/actions/organization';
 import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -62,6 +62,7 @@ function SettingsContent() {
     const [googleFolderId, setGoogleFolderId] = useState<string | null>(null);
     const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null);
     const [driveUrl, setDriveUrl] = useState('');
+    const [travelCostRate, setTravelCostRate] = useState('20');
     
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
@@ -84,7 +85,7 @@ function SettingsContent() {
         if (!currentOrg) return;
         const { data } = await supabase
             .from('organizations')
-            .select('name, google_folder_id, google_calendar_id')
+            .select('name, google_folder_id, google_calendar_id, travel_cost_rate_yen_per_km')
             .eq('id', currentOrg.id)
             .single();
         
@@ -92,6 +93,7 @@ function SettingsContent() {
             setOrgName(data.name);
             setGoogleFolderId(data.google_folder_id);
             setGoogleCalendarId(data.google_calendar_id);
+            setTravelCostRate(String(data.travel_cost_rate_yen_per_km ?? 20));
             if(data.google_folder_id) {
                 setDriveUrl(`https://drive.google.com/drive/folders/${data.google_folder_id}`);
             }
@@ -210,6 +212,22 @@ function SettingsContent() {
             setMessage({ type: 'error', text: '連携に失敗しました。GASの設定を確認してください。' });
         } finally {
             setConnecting(false);
+        }
+    };
+
+    const handleSaveTravelCost = async () => {
+        if (!currentOrg) return;
+        setSaving(true);
+        setMessage(null);
+        try {
+            await updateTravelCostSettings(currentOrg.id, Number(travelCostRate));
+            setMessage({ type: 'success', text: '交通費設定を保存しました' });
+            setTimeout(() => setMessage(null), 3000);
+        } catch (e) {
+            console.error(e);
+            setMessage({ type: 'error', text: e instanceof Error ? e.message : '保存失敗' });
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -411,6 +429,30 @@ function SettingsContent() {
                                     )}
                                 </Stack>
                             </Paper>
+
+                            {/* 交通費設定 */}
+                            {canEditOrganization && (
+                                <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
+                                    <Typography variant="h6" fontWeight="bold" gutterBottom>交通費設定</Typography>
+                                    <Typography variant="body2" color="text.secondary" mb={2}>
+                                        記録画面の交通費は、往復距離 × 1kmあたり単価で算出します。
+                                    </Typography>
+                                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                                        <TextField
+                                            label="1kmあたり単価"
+                                            type="number"
+                                            value={travelCostRate}
+                                            onChange={(e) => setTravelCostRate(e.target.value)}
+                                            onWheel={e => (e.target as HTMLElement).blur()}
+                                            sx={{ maxWidth: { sm: 240 } }}
+                                            slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">円/km</Typography> }, htmlInput: { inputMode: 'decimal', step: '1', min: 0 } }}
+                                        />
+                                        <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSaveTravelCost} disabled={saving}>
+                                            保存
+                                        </Button>
+                                    </Stack>
+                                </Paper>
+                            )}
 
                             {/* Google Drive連携 */}
                             <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>

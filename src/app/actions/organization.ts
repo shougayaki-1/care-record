@@ -28,6 +28,29 @@ export async function updateOrganizationDriveFolder(orgId: string, folderId: str
     return { success: true };
 }
 
+export async function updateTravelCostSettings(orgId: string, rateYenPerKm: number) {
+    const { userId } = await assertOrgPermission(orgId, 'organization');
+    const rate = Number(rateYenPerKm);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 10000) {
+        throw new Error('交通費単価は0〜10000円で入力してください');
+    }
+    const { error } = await supabaseAdmin
+        .from('organizations')
+        .update({ travel_cost_rate_yen_per_km: rate })
+        .eq('id', orgId)
+        .is('deleted_at', null);
+    if (error) throw sanitizeDbError(error, 'action.organization');
+    await recordAuditEvent({
+        organizationId: orgId,
+        actorId: userId,
+        action: 'organization.travel_cost_update',
+        resourceType: 'organization',
+        resourceId: orgId,
+        details: { rateYenPerKm: rate },
+    });
+    return { success: true, rateYenPerKm: rate };
+}
+
 export async function disconnectGoogleCalendar(orgId: string) {
     const { userId } = await assertOrgPermission(orgId, 'integrations');
     const { data: org, error: readError } = await supabaseAdmin.from('organizations').select('google_refresh_token').eq('id', orgId).single();

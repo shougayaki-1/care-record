@@ -256,7 +256,7 @@ export default function ReportsPage() {
             });
         });
 
-        const fixedHeader = ['記録ID', 'ステータス', '利用者ID', '利用者名', '実施ヘルパー', '入力者名', '開始日付', '開始時刻', '終了日付', '終了時刻', 'サービス時間(h)', '移動時間(h)', '承認者名', '承認日時', '作成日時', '更新日時'];
+        const fixedHeader = ['記録ID', 'ステータス', '利用者ID', '利用者名', '実施ヘルパー', '入力者名', '開始日付', '開始時刻', '終了日付', '終了時刻', 'サービス時間(h)', '移動時間(h)', '往復距離(km)', '交通費(円)', '承認者名', '承認日時', '作成日時', '更新日時'];
         const headerRow = [...fixedHeader, ...dynamicColumns.map(c => c.header)];
         
         const rows = targetReports.map(r => {
@@ -274,6 +274,7 @@ export default function ReportsPage() {
                 r.id, statusText, r.clients.id, r.clients.name, getHelperNames(r), fbInputter || '不明',
                 formatDate(start), formatTime(start), formatDate(end), formatTime(end),
                 data.service_time || '0', data.travel_time || '0',
+                data.round_trip_distance_km || '0', data.travel_cost_yen || '0',
                 r.approved_by_user?.name || '', r.approved_at ? new Date(r.approved_at).toLocaleString() : '',
                 new Date(r.created_at).toLocaleString(), new Date(r.updated_at).toLocaleString()
             ];

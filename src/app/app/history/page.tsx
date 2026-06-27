@@ -18,8 +18,9 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { InnerPageHeader } from '@/components/ui';
 
 type Report = {
-    id: string; start_at: string; status: 'pending' | 'approved' | 'remanded';
+    id: string; start_at: string; status: 'pending' | 'approved' | 'remanded'; helper_id?: string | null;
     client_id: string; clients: { name: string; } | null;
+    report_values?: { data: { _helpers?: string[] } }[] | null;
 };
 
 // 簡易カレンダーコンポーネント
@@ -94,11 +95,17 @@ export default function HistoryPage() {
             if (!currentOrg) return;
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
+            const { data: myStaff } = await supabase
+                .from('staffs')
+                .select('name')
+                .eq('organization_id', currentOrg.id)
+                .eq('user_id', user.id)
+                .is('deleted_at', null)
+                .maybeSingle();
 
             let query = supabase.from('reports')
-                .select(`id, start_at, status, client_id, clients!inner(name, organization_id)`)
+                .select(`id, start_at, status, helper_id, client_id, clients!inner(name, organization_id), report_values(data)`)
                 .eq('clients.organization_id', currentOrg.id)
-                .eq('helper_id', user.id)
                 .is('deleted_at', null)
                 .neq('status', 'draft')
                 .order('start_at', { ascending: false });
@@ -116,7 +123,12 @@ export default function HistoryPage() {
             const { data } = await query;
             if (data) {
                 const typedData = data as unknown as Report[];
-                setReports(typedData);
+                const myName = myStaff?.name;
+                setReports(typedData.filter((report) => {
+                    if (report.helper_id === user.id) return true;
+                    const helpers = report.report_values?.[0]?.data?._helpers;
+                    return Boolean(myName && Array.isArray(helpers) && helpers.includes(myName));
+                }));
             }
         };
 
