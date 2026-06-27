@@ -6,6 +6,29 @@ import { randomUUID } from 'crypto';
 import { supabaseAdmin, getAuthedUser, assertOrgRole, assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertRoleManagerRemains } from '@/utils/supabase/roleSafety';
+import type { RolePermissions } from '@/utils/permissions';
+
+function isDangerousPermissions(permissions: RolePermissions): boolean {
+  const { accounts, roles, organizationDelete, ownerTransfer } = permissions.management;
+  return accounts || roles || organizationDelete || ownerTransfer;
+}
+
+async function assertDangerousRoleOwnerCheck(
+  orgId: string,
+  roleIds: string[],
+  isOwner: boolean,
+): Promise<void> {
+  if (roleIds.length === 0) return;
+  const { data: orgRoles } = await supabaseAdmin
+    .from('organization_roles')
+    .select('id, permissions')
+    .eq('organization_id', orgId)
+    .in('id', roleIds);
+  const hasDangerous = (orgRoles ?? []).some(r => isDangerousPermissions(r.permissions as RolePermissions));
+  if (hasDangerous && !isOwner) {
+    throw new Error('危険な権限を含むロールの付与はオーナーのみ実行できます');
+  }
+}
 
 const VALID_ROLES = ['owner', 'member'] as const;
 type Role = (typeof VALID_ROLES)[number];
@@ -145,7 +168,8 @@ export async function acceptInvitation(code: string) {
  * code はサーバ側で生成し、actor も改ざんできないようセッションから取得する。
  */
 export async function createInvitation(orgId: string, params: { targetName: string; roleIds?: string[]; staffId?: string | null }) {
-    const { userId } = await assertOrgPermission(orgId, 'accounts');
+    const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
+    await assertDangerousRoleOwnerCheck(orgId, params.roleIds ?? [], isOwner);
     const targetName = params.targetName.trim();
     if (targetName.length < 1 || targetName.length > 100) throw new Error('招待する人の名前を1〜100文字で入力してください');
 
@@ -359,7 +383,7 @@ export async function getInviteStaffCandidates(orgId: string): Promise<InviteSta
     return (data ?? []) as InviteStaffCandidate[];
 }
 
-export async function getOrgRoles(orgId: string): Promise<{ id: string; name: string; color: string | null; is_preset: boolean }[]> {
+export async function getOrgRoles(orgId: string): Promise<{ id: string; name: string; color: string | null; is_preset: boolean; is_dangerous: boolean }[]> {
     const user = await getAuthedUser();
     const { data: member, error } = await supabaseAdmin
         .from('organization_members')
@@ -370,16 +394,22 @@ export async function getOrgRoles(orgId: string): Promise<{ id: string; name: st
     if (error || !member) throw new Error('アクセス権がありません');
     const { data, error: rolesError } = await supabaseAdmin
         .from('organization_roles')
-        .select('id, name, color, is_preset')
+        .select('id, name, color, is_preset, permissions')
         .eq('organization_id', orgId)
         .order('is_preset', { ascending: false });
     if (rolesError) throw new Error('ロール一覧を取得できませんでした');
-    return data ?? [];
+    return (data ?? []).map(r => ({
+        id: r.id,
+        name: r.name,
+        color: r.color,
+        is_preset: r.is_preset,
+        is_dangerous: isDangerousPermissions(r.permissions as RolePermissions),
+    }));
 }
 
 export async function updateMemberRoles(orgId: string, targetUserId: string, roleIds: string[]): Promise<void> {
     const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
-    void isOwner; // used for audit; permission already checked
+    await assertDangerousRoleOwnerCheck(orgId, roleIds, isOwner);
     const { data: targetMember } = await supabaseAdmin.from('organization_members').select('role').eq('organization_id', orgId).eq('user_id', targetUserId).single();
     if (!targetMember) throw new Error('対象のメンバーが見つかりません');
     await assertRoleManagerRemains(orgId, { replacedMemberRoles: { userId: targetUserId, roleIds } });

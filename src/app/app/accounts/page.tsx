@@ -56,7 +56,7 @@ export default function AccountsPage() {
   const [newInviteName, setNewInviteName] = useState('');
   const [selectedInviteStaffId, setSelectedInviteStaffId] = useState('none');
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
-  const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string; color: string | null; is_preset: boolean }[]>([]);
+  const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string; color: string | null; is_preset: boolean; is_dangerous: boolean }[]>([]);
   const [inviteStaffCandidates, setInviteStaffCandidates] = useState<InviteStaffCandidate[]>([]);
 
   // 操作メニュー用
@@ -232,6 +232,7 @@ export default function AccountsPage() {
   if (wsLoading || !currentOrg) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
   const canManageAccounts = checkManagementPermission(currentOrg.effectivePermissions, 'accounts');
   const canManageRoles = checkManagementPermission(currentOrg.effectivePermissions, 'roles');
+  const isOwner = currentOrg?.role === 'owner';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -461,17 +462,20 @@ export default function AccountsPage() {
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 {availableRoles.map((role) => {
                   const selected = editOrgRoleIds.includes(role.id);
+                  const locked = role.is_dangerous && !isOwner;
                   return (
                     <Chip
                       key={role.id}
                       label={role.name}
                       onClick={() => {
+                        if (locked) return;
                         if (selected) setEditOrgRoleIds(prev => prev.filter(id => id !== role.id));
                         else setEditOrgRoleIds(prev => [...prev, role.id]);
                       }}
                       variant={selected ? 'filled' : 'outlined'}
                       sx={{
-                        cursor: 'pointer',
+                        cursor: locked ? 'not-allowed' : 'pointer',
+                        opacity: locked ? 0.4 : 1,
                         borderColor: role.color ?? undefined,
                         color: selected ? '#fff' : (role.color ?? undefined),
                         bgcolor: selected ? (role.color ?? undefined) : undefined,
@@ -496,17 +500,20 @@ export default function AccountsPage() {
                           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                             {availableRoles.map((role) => {
                               const selected = selectedRoleIds.includes(role.id);
+                              const locked = role.is_dangerous && !isOwner;
                               return (
                                 <Chip
                                   key={role.id}
                                   label={role.name}
                                   onClick={() => {
+                                    if (locked) return;
                                     if (selected) setSelectedRoleIds(prev => prev.filter(id => id !== role.id));
                                     else setSelectedRoleIds(prev => [...prev, role.id]);
                                   }}
                                   variant={selected ? 'filled' : 'outlined'}
                                   sx={{
-                                    cursor: 'pointer',
+                                    cursor: locked ? 'not-allowed' : 'pointer',
+                                    opacity: locked ? 0.4 : 1,
                                     borderColor: role.color ?? undefined,
                                     color: selected ? '#fff' : (role.color ?? undefined),
                                     bgcolor: selected ? (role.color ?? undefined) : undefined,
