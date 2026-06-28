@@ -28,6 +28,8 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getGoogleAuthUrlAction } from '@/app/actions/google';
 import LaborPremiumSettings from '@/components/settings/LaborPremiumSettings';
+import ServiceTypeSettings from '@/components/settings/ServiceTypeSettings';
+import StaffRoleSettings from '@/components/settings/StaffRoleSettings';
 
 type AuditLog = {
     id: string;
@@ -609,6 +611,28 @@ function SettingsContent() {
                                         深夜割り増し・時間外割り増しなどの種別と計算方法を管理します。
                                     </Typography>
                                     <LaborPremiumSettings orgId={currentOrg.id} />
+                                </Paper>
+                            )}
+
+                            {/* サービス種別 */}
+                            {canEditOrganization && (
+                                <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
+                                    <Typography variant="h6" fontWeight="bold" gutterBottom>サービス種別</Typography>
+                                    <Typography variant="body2" color="text.secondary" mb={2}>
+                                        シフト内の区間に設定できるサービス種別（例：重度訪問介護、移動支援）を管理します。
+                                    </Typography>
+                                    <ServiceTypeSettings orgId={currentOrg.id} />
+                                </Paper>
+                            )}
+
+                            {/* スタッフ役割 */}
+                            {canEditOrganization && (
+                                <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
+                                    <Typography variant="h6" fontWeight="bold" gutterBottom>スタッフ役割</Typography>
+                                    <Typography variant="body2" color="text.secondary" mb={2}>
+                                        シフト区間内でのスタッフの役割（例：正職員、パート、ボランティア）を管理します。無給フラグを設定することで給与計算から除外できます。
+                                    </Typography>
+                                    <StaffRoleSettings orgId={currentOrg.id} />
                                 </Paper>
                             )}
 

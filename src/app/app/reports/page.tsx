@@ -22,6 +22,7 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { supabase } from '@/lib/supabase';
 import { pdf } from '@react-pdf/renderer';
 import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRecordDocument';
+import { downloadReportZip, buildReportFileName } from '@/utils/reportZipExport';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
@@ -38,6 +39,8 @@ type ReportValuesData = Record<string, FormValue>;
 
 type Report = {
   id: string; start_at: string; end_at: string; created_at: string; updated_at: string; status: ReportStatus; approved_at: string | null;
+  segment_id: string | null;
+  segment?: { service_type: { name: string } | null } | null;
   clients: { id: string; name: string; organization_id: string };
   helper: { name: string };
   approved_by_user?: { name: string };
@@ -64,6 +67,7 @@ export default function ReportsPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [onlyPending, setOnlyPending] = useState(false);
+  const [filterShiftId, setFilterShiftId] = useState<string | null>(null);
   
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const [orderBy, setOrderBy] = useState<string>('start_at');
@@ -75,6 +79,7 @@ export default function ReportsPage() {
   useEffect(() => {
       const statusParam = searchParams.get('status');
       const periodParam = searchParams.get('period');
+      const shiftParam = searchParams.get('shiftId');
       if (statusParam === 'unapproved') setOnlyPending(true); else setOnlyPending(false);
       if (periodParam === 'current_month') {
           const now = new Date();
@@ -83,6 +88,7 @@ export default function ReportsPage() {
           const formatDate = (d: Date) => d.toISOString().split('T')[0];
           setStartDate(formatDate(firstDay)); setEndDate(formatDate(lastDay));
       }
+      setFilterShiftId(shiftParam || null);
   }, [searchParams]);
 
   const fetchClients = useCallback(async () => {
@@ -93,15 +99,26 @@ export default function ReportsPage() {
 
   const fetchReports = useCallback(async () => {
     if (!currentOrg) return;
-    setLoading(true); setSelected([]); 
+    setLoading(true); setSelected([]);
     try {
+      let reportIdsFromShift: string[] | null = null;
+      if (filterShiftId) {
+        const { data: shiftLinks } = await supabase
+          .from('report_shifts')
+          .select('report_id')
+          .eq('shift_id', filterShiftId);
+        reportIdsFromShift = (shiftLinks ?? []).map(r => r.report_id);
+      }
+
       let query = supabase.from('reports').select(`
           *, clients!inner ( id, name, organization_id ),
           helper:profiles!reports_helper_id_fkey ( name ),
           approved_by_user:profiles!reports_approved_by_fkey ( name ),
-          report_values ( data )
+          report_values ( data ),
+          segment:shift_segments ( service_type:service_types ( name ) )
         `).eq('clients.organization_id', currentOrg.id).is('deleted_at', null).neq('status', 'draft');
 
+      if (reportIdsFromShift !== null) query = query.in('id', reportIdsFromShift.length > 0 ? reportIdsFromShift : ['']);
       if (filterClientId !== 'all') query = query.eq('client_id', filterClientId);
       if (startDate) query = query.gte('start_at', `${startDate}T00:00:00`);
       if (endDate) query = query.lte('end_at', `${endDate}T23:59:59`);
@@ -120,7 +137,7 @@ export default function ReportsPage() {
       });
       setReports(sortedData);
     } catch (e) { console.error(e); } finally { setLoading(false); }
-  }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order]);
+  }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order, filterShiftId]);
 
   useEffect(() => { if (!wsLoading && currentOrg) { fetchClients(); fetchReports(); } }, [wsLoading, currentOrg, fetchClients, fetchReports]);
 
@@ -335,11 +352,28 @@ export default function ReportsPage() {
         }));
         
         const validReports = pdfReports.filter((r): r is PdfReportData => r !== null);
-        const blob = await pdf(<ServiceRecordDocument reports={validReports} />).toBlob();
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
-        link.click();
+
+        if (filterShiftId) {
+          const entries = targetReports
+            .map((report, i) => {
+              const pdfData = validReports[i];
+              if (!pdfData) return null;
+              const serviceTypeName = report.segment?.service_type?.name ?? null;
+              return {
+                data: pdfData,
+                fileName: buildReportFileName(report.clients.name, serviceTypeName, report.start_at, report.end_at),
+              };
+            })
+            .filter((e): e is NonNullable<typeof e> => e !== null);
+          const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+          await downloadReportZip(entries, `サービス提供記録_${dateStr}`);
+        } else {
+          const blob = await pdf(<ServiceRecordDocument reports={validReports} />).toBlob();
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
+          link.click();
+        }
       } catch (e) { console.error(e); showToast('PDF作成中にエラーが発生しました', 'error'); }
   };
 
@@ -505,6 +539,7 @@ export default function ReportsPage() {
   let headerTitle = "全件表示";
   if (onlyPending) headerTitle = "未承認・差戻し";
   if (searchParams.get('period') === 'current_month') headerTitle = "今月の記録";
+  if (filterShiftId) headerTitle = "シフト内の記録";
 
   if (wsLoading || !currentOrg) return null;
   const canApproveRecords = checkRecordPermission(currentOrg.effectivePermissions, 'approve', true);

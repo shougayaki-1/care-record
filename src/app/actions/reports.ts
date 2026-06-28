@@ -15,6 +15,7 @@ export type SaveReportInput = {
   reportId?: string | null;
   clientId: string;
   shiftId?: string | null;
+  segmentId?: string | null;
   startAt: string;
   endAt: string;
   status: ReportStatus;
@@ -49,6 +50,12 @@ export async function saveReport(input: SaveReportInput) {
       details: { attemptedStatus: input.status, errorType: error?.code || 'unknown' },
     });
     throw sanitizeDbError(error || new Error('記録を保存できませんでした'), 'action.reports');
+  }
+  if (input.segmentId !== undefined) {
+    await supabaseAdmin
+      .from('reports')
+      .update({ segment_id: input.segmentId || null })
+      .eq('id', String(reportId));
   }
   return { success: true, reportId: String(reportId) };
 }
@@ -336,4 +343,44 @@ export async function auditReportExport(
     resourceType: 'report',
     details: { reportIds: ids, count: ids.length, format },
   });
+}
+
+export type ReportWithSegment = {
+  id: string;
+  status: string;
+  start_at: string;
+  end_at: string;
+  helper_id: string | null;
+  segment_id: string | null;
+  segment: {
+    id: string;
+    service_type_id: string | null;
+    start_at: string;
+    end_at: string;
+    service_type: { id: string; name: string } | null;
+  } | null;
+  profiles: { name: string } | null;
+};
+
+export async function getReportsByShift(
+  organizationId: string,
+  shiftId: string
+): Promise<ReportWithSegment[]> {
+  await assertOrgPermission(organizationId, 'reports');
+  const { data, error } = await supabaseAdmin
+    .from('report_shifts')
+    .select(`
+      report:reports(
+        id, status, start_at, end_at, helper_id, segment_id,
+        profiles(name),
+        segment:shift_segments(
+          id, service_type_id, start_at, end_at,
+          service_type:service_types(id, name)
+        )
+      )
+    `)
+    .eq('shift_id', shiftId)
+    .is('reports.deleted_at', null);
+  if (error) throw new Error('記録を取得できませんでした');
+  return ((data ?? []).map(row => row.report).filter(Boolean)) as unknown as ReportWithSegment[];
 }

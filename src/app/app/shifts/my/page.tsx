@@ -10,6 +10,7 @@ import ListIcon from '@mui/icons-material/List';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import EditNoteIcon from '@mui/icons-material/EditNote';
+import ArticleIcon from '@mui/icons-material/Article';
 import FullCalendar from '@fullcalendar/react';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
@@ -40,7 +41,13 @@ function formatTimeRange(startAt: string, endAt: string): string {
   return `${fmt(startAt)} 〜 ${fmt(endAt)}`;
 }
 
-function ShiftListItem({ shift, onClick }: { shift: MyShiftItem; onClick: () => void }) {
+function ShiftListItem({
+  shift, onClick, onViewReports,
+}: {
+  shift: MyShiftItem;
+  onClick: () => void;
+  onViewReports: () => void;
+}) {
   const isCancelled = shift.status === 'cancelled';
   const clientName = shift.clients?.name ?? '';
   const statusInfo = shift.report ? REPORT_STATUS_LABELS[shift.report.status] : null;
@@ -48,19 +55,19 @@ function ShiftListItem({ shift, onClick }: { shift: MyShiftItem; onClick: () => 
   return (
     <Paper
       variant="outlined"
-      onClick={onClick}
       sx={{
         p: 2,
         borderRadius: 2,
-        cursor: isCancelled ? 'default' : 'pointer',
         opacity: isCancelled ? 0.5 : 1,
-        '&:hover': { bgcolor: isCancelled ? undefined : 'action.hover' },
         display: 'flex',
         alignItems: 'center',
         gap: 2,
       }}
     >
-      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+      <Box
+        sx={{ flexGrow: 1, minWidth: 0, cursor: isCancelled ? 'default' : 'pointer' }}
+        onClick={isCancelled ? undefined : onClick}
+      >
         <Typography variant="caption" color="text.secondary">
           {formatDateLabel(shift.start_at)}
         </Typography>
@@ -74,7 +81,7 @@ function ShiftListItem({ shift, onClick }: { shift: MyShiftItem; onClick: () => 
           {formatTimeRange(shift.start_at, shift.end_at)}
         </Typography>
       </Box>
-      <Box sx={{ flexShrink: 0 }}>
+      <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexShrink: 0 }}>
         {isCancelled ? (
           <Chip label="キャンセル" size="small" color="default" variant="outlined" />
         ) : statusInfo ? (
@@ -82,7 +89,14 @@ function ShiftListItem({ shift, onClick }: { shift: MyShiftItem; onClick: () => 
         ) : (
           <Chip label="未記録" size="small" color="default" variant="outlined" icon={<EditNoteIcon />} />
         )}
-      </Box>
+        {!isCancelled && (
+          <Tooltip title="記録を確認">
+            <IconButton size="small" onClick={(e) => { e.stopPropagation(); onViewReports(); }}>
+              <ArticleIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Stack>
     </Paper>
   );
 }
@@ -145,6 +159,10 @@ export default function MyShiftsPage() {
     router.push(`/app/record/${clientId}?shiftId=${shiftId}`);
   };
 
+  const handleViewReports = (shiftId: string) => {
+    router.push(`/app/reports?shiftId=${shiftId}`);
+  };
+
   const [year, month] = currentMonth.split('-').map(Number);
   const monthLabel = `${year}年${month}月`;
 
@@ -198,6 +216,7 @@ export default function MyShiftsPage() {
                   key={shift.id}
                   shift={shift}
                   onClick={() => handleShiftClick(shift.client_id, shift.id, shift.status === 'cancelled')}
+                  onViewReports={() => handleViewReports(shift.id)}
                 />
               ))
             )}
