@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useTransition } from 'react';
 import dynamic from 'next/dynamic';
 import {
     Box, Typography, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
@@ -30,8 +30,7 @@ import {
 } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { ShiftFormModal, ShiftData } from '@/components/shifts/ShiftFormModal';
-import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
+import type { ShiftData } from '@/components/shifts/ShiftFormModal';
 import { useShiftData, type ShiftDateRange } from '@/hooks/useShiftData';
 import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
@@ -51,6 +50,16 @@ const ShiftCalendarViewer = dynamic(
     }
 );
 
+const ShiftFormModal = dynamic(
+    () => import('@/components/shifts/ShiftFormModal').then((mod) => mod.ShiftFormModal),
+    { ssr: false, loading: () => null }
+);
+
+const ShiftPatternModal = dynamic(
+    () => import('@/components/shifts/ShiftPatternModal').then((mod) => mod.ShiftPatternModal),
+    { ssr: false, loading: () => null }
+);
+
 export default function ShiftManagePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
@@ -60,6 +69,7 @@ export default function ShiftManagePage() {
     const calendarRef = useRef<FullCalendar>(null);
     const handledShiftParamRef = useRef<string | null>(null);
     const calendarInitializedRef = useRef(false);
+    const [isPending, startTransition] = useTransition();
 
     const [generating, setGenerating] = useState(false);
     const [pdfGenerating, setPdfGenerating] = useState(false);
@@ -420,6 +430,13 @@ export default function ShiftManagePage() {
         return desc;
     };
 
+    const handleTabChange = useCallback((_: React.SyntheticEvent, value: TabId) => {
+        if (value !== 'patterns' && activeTab === 'patterns') {
+            calendarInitializedRef.current = false;
+        }
+        startTransition(() => setActiveTab(value));
+    }, [activeTab, startTransition]);
+
     if (wsLoading || !currentOrg) return null;
 
     const canUseOrgWideTabs = currentOrg.effectivePermissions.shifts.view === 'all';
@@ -439,14 +456,7 @@ export default function ShiftManagePage() {
                         <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>ひな形を追加</Button>
                     )}
                 </Box>
-                <Tabs value={activeTab} onChange={(_, v) => {
-                    const nextTab = v as TabId;
-                    // Reset calendar init guard when calendar may remount (e.g. from patterns tab)
-                    if (nextTab !== 'patterns' && activeTab === 'patterns') {
-                        calendarInitializedRef.current = false;
-                    }
-                    setActiveTab(nextTab);
-                }} variant="scrollable" allowScrollButtonsMobile>
+                <Tabs value={activeTab} onChange={handleTabChange} variant="scrollable" allowScrollButtonsMobile>
                     {canUseOrgWideTabs && <Tab label="基本パターン(ひな形)" value="patterns" />}
                     {canUseOrgWideTabs && <Tab label="全体カレンダー" value="fullCalendar" />}
                     <Tab label="自分のシフト" value="myShift" />
@@ -456,6 +466,7 @@ export default function ShiftManagePage() {
             </Box>
 
             <Box sx={{ position: 'relative', flexGrow: 1, p: { xs: 2, sm: 3 }, bgcolor: 'background.default', overflowY: 'auto' }}>
+                {isPending && <LinearProgress sx={{ position: 'absolute', top: 0, left: 0, width: '100%', zIndex: 10 }} />}
                 {isFetching && !initialLoading && (
                     <Box sx={{ position: 'absolute', top: 16, right: 30, zIndex: 10 }}>
                         <CircularProgress size={24} />

@@ -67,7 +67,7 @@ export async function getStatisticsData(
   if (premiumTypesError) throw sanitizeDbError(premiumTypesError, 'action.statistics.premiumTypes');
 
   return {
-    shifts: (shiftsWithLinks ?? []).map(({ report_shifts: _rs, ...s }) => s),
+    shifts: shiftsWithLinks ?? [],
     reports: reports ?? [],
     shiftsWithLinks: shiftsWithLinks ?? [],
     internalWorkRecords,

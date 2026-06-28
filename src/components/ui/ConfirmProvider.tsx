@@ -1,7 +1,7 @@
 // src/components/ui/ConfirmProvider.tsx
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
 import { DialogContentText } from '@mui/material';
 import { AppButton } from './AppButton';
 import { AppDialog } from './AppDialog';
@@ -46,9 +46,10 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const requireMismatch = options.requireText != null && inputValue !== options.requireText;
+    const contextValue = useMemo(() => ({ confirm }), [confirm]);
 
     return (
-        <ConfirmContext.Provider value={{ confirm }}>
+        <ConfirmContext.Provider value={contextValue}>
             {children}
             <AppDialog
                 open={open}

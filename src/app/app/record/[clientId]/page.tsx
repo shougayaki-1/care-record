@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useReducer, useMemo, useCallback } from 'react';
 import {
   Box, Button, Container, Typography, TextField,
   Stack, IconButton, CircularProgress,
@@ -65,6 +65,196 @@ type ShiftSegmentData = {
 type ShiftSuggestion = { id: string; title: string | null; start_at: string; end_at: string; staffName: string | null };
 type LinkedShift = { shift_id: string; is_primary: boolean; shifts: { id: string; title: string | null; start_at: string; end_at: string; shift_staffs: Array<{ staffs: { name: string } | null }> } | null };
 
+type FormState = {
+  clientName: string;
+  template: FormItem[];
+  answers: FormAnswers;
+  selectableStaffs: HelperProfile[];
+  selectedHelpers: string[];
+  startDateTime: string;
+  endDateTime: string;
+  serviceTime: string;
+  travelTime: string;
+  roundTripDistanceKm: string;
+  travelCostRateYenPerKm: number;
+  distanceTouched: boolean;
+  images: { id: string; url: string }[];
+  aiFilledFields: Set<string>;
+  hasAiDraftSource: boolean;
+  isSpanningMonth: boolean;
+  selectedPart: 'part1' | 'part2';
+  originalShiftTimes: { start_at: string; end_at: string } | null;
+};
+
+type UiState = {
+  currentReportId: string | null;
+  currentStatus: ReportStatus | null;
+  isDirty: boolean;
+  openCloseDialog: boolean;
+  loading: boolean;
+  errors: Record<string, string>;
+  submitting: boolean;
+};
+
+type ShiftState = {
+  shiftSuggestions: ShiftSuggestion[];
+  linkedShifts: LinkedShift[];
+  dismissedSuggestions: Set<string>;
+  shiftSegments: ShiftSegmentData[];
+  selectedSegmentId: string | null;
+};
+
+type SetStateValue<T> = T | ((prev: T) => T);
+
+type FormAction =
+  | { type: 'SET_FIELD'; field: keyof FormState; value: SetStateValue<unknown> }
+  | { type: 'SET_ANSWER'; id: string; value: FormAnswers[string] }
+  | { type: 'SET_ANSWERS'; value: SetStateValue<FormAnswers> }
+  | { type: 'CLEAR_ANSWERS' }
+  | { type: 'AI_FILL'; answers: FormAnswers; fields: Set<string> };
+
+type UiAction =
+  | { type: 'SET_FIELD'; field: keyof UiState; value: SetStateValue<unknown> }
+  | { type: 'MARK_DIRTY'; dirty?: boolean }
+  | { type: 'SET_ERROR_MAP'; errors: Record<string, string> }
+  | { type: 'CLEAR_ERROR'; id: string };
+
+type ShiftAction =
+  | { type: 'SET_FIELD'; field: keyof ShiftState; value: SetStateValue<unknown> }
+  | { type: 'DISMISS_SUGGESTION'; id: string };
+
+const resolveStateValue = <T,>(value: SetStateValue<T>, prev: T): T => (
+  typeof value === 'function' ? (value as (prev: T) => T)(prev) : value
+);
+
+const formInitialState: FormState = {
+  clientName: '',
+  template: [],
+  answers: {},
+  selectableStaffs: [],
+  selectedHelpers: [],
+  startDateTime: '',
+  endDateTime: '',
+  serviceTime: '',
+  travelTime: '0',
+  roundTripDistanceKm: '0',
+  travelCostRateYenPerKm: 20,
+  distanceTouched: false,
+  images: [],
+  aiFilledFields: new Set(),
+  hasAiDraftSource: false,
+  isSpanningMonth: false,
+  selectedPart: 'part1',
+  originalShiftTimes: null,
+};
+
+const createUiInitialState = (currentReportId: string | null): UiState => ({
+  currentReportId,
+  currentStatus: null,
+  isDirty: false,
+  openCloseDialog: false,
+  loading: true,
+  errors: {},
+  submitting: false,
+});
+
+const createShiftInitialState = (selectedSegmentId: string | null): ShiftState => ({
+  shiftSuggestions: [],
+  linkedShifts: [],
+  dismissedSuggestions: new Set(),
+  shiftSegments: [],
+  selectedSegmentId,
+});
+
+function formReducer(state: FormState, action: FormAction): FormState {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return { ...state, [action.field]: resolveStateValue(action.value, state[action.field]) };
+    case 'SET_ANSWER':
+      return { ...state, answers: { ...state.answers, [action.id]: action.value } };
+    case 'SET_ANSWERS':
+      return { ...state, answers: resolveStateValue(action.value, state.answers) };
+    case 'CLEAR_ANSWERS':
+      return { ...state, answers: {} };
+    case 'AI_FILL':
+      return {
+        ...state,
+        answers: { ...state.answers, ...action.answers },
+        aiFilledFields: action.fields,
+        hasAiDraftSource: true,
+      };
+    default:
+      return state;
+  }
+}
+
+function uiReducer(state: UiState, action: UiAction): UiState {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return { ...state, [action.field]: resolveStateValue(action.value, state[action.field]) };
+    case 'MARK_DIRTY':
+      return { ...state, isDirty: action.dirty ?? true };
+    case 'SET_ERROR_MAP':
+      return { ...state, errors: action.errors };
+    case 'CLEAR_ERROR': {
+      if (!state.errors[action.id]) return state;
+      const nextErrors = { ...state.errors };
+      delete nextErrors[action.id];
+      return { ...state, errors: nextErrors };
+    }
+    default:
+      return state;
+  }
+}
+
+function shiftReducer(state: ShiftState, action: ShiftAction): ShiftState {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return { ...state, [action.field]: resolveStateValue(action.value, state[action.field]) };
+    case 'DISMISS_SUGGESTION':
+      return { ...state, dismissedSuggestions: new Set([...state.dismissedSuggestions, action.id]) };
+    default:
+      return state;
+  }
+}
+
+const FormFieldItem = React.memo(function FormFieldItem({
+  item,
+  value,
+  detailValue,
+  error,
+  isAiFilled,
+  onAnswerChange,
+}: {
+  item: FormItem;
+  value: FormAnswers[string] | undefined;
+  detailValue: string;
+  error?: string;
+  isAiFilled: boolean;
+  onAnswerChange: (id: string, value: FormAnswers[string]) => void;
+}) {
+  const handleChange = useCallback((nextValue: FormAnswers[string]) => {
+    onAnswerChange(item.id, nextValue);
+  }, [item.id, onAnswerChange]);
+
+  const handleDetailChange = useCallback((nextValue: string) => {
+    onAnswerChange(`${item.id}_detail`, nextValue);
+  }, [item.id, onAnswerChange]);
+
+  return (
+    <Box sx={{ p: { xs: 2, sm: 3 }, bgcolor: error ? 'background.danger' : isAiFilled ? 'background.aiHighlight' : 'transparent' }}>
+      <DynamicFormField
+        item={item}
+        value={value}
+        detailValue={detailValue}
+        error={error}
+        onChange={handleChange}
+        onDetailChange={handleDetailChange}
+      />
+    </Box>
+  );
+});
+
 export default function RecordPage() {
   const router = useRouter();
   const { clientId } = useParams();
@@ -77,47 +267,76 @@ export default function RecordPage() {
   const shiftId = searchParams.get('shiftId');
   const segmentId = searchParams.get('segmentId');
 
-  const [currentReportId, setCurrentReportId] = useState<string | null>(paramReportId);
+  const [formState, formDispatch] = useReducer(formReducer, formInitialState);
+  const [uiState, uiDispatch] = useReducer(uiReducer, paramReportId, createUiInitialState);
+  const [shiftState, shiftDispatch] = useReducer(shiftReducer, segmentId, createShiftInitialState);
 
-  const [clientName, setClientName] = useState('');
-  const [template, setTemplate] = useState<FormItem[]>([]);
-  const [answers, setAnswers] = useState<FormAnswers>({});
-  
-  const [selectableStaffs, setSelectableStaffs] = useState<HelperProfile[]>([]);
-  const [selectedHelpers, setSelectedHelpers] = useState<string[]>([]);
-  
-  const [startDateTime, setStartDateTime] = useState('');
-  const [endDateTime, setEndDateTime] = useState('');
-  const [serviceTime, setServiceTime] = useState('');
-  const [travelTime, setTravelTime] = useState('0');
-  const [roundTripDistanceKm, setRoundTripDistanceKm] = useState('0');
-  const [travelCostRateYenPerKm, setTravelCostRateYenPerKm] = useState(20);
-  const [distanceTouched, setDistanceTouched] = useState(false);
-  
-  const [currentStatus, setCurrentStatus] = useState<ReportStatus | null>(null);
-  const [isDirty, setIsDirty] = useState(false);
-  const [images, setImages] = useState<{id: string, url: string}[]>([]);
-  
-  const [openCloseDialog, setOpenCloseDialog] = useState(false);
+  const {
+    clientName,
+    template,
+    answers,
+    selectableStaffs,
+    selectedHelpers,
+    startDateTime,
+    endDateTime,
+    serviceTime,
+    travelTime,
+    roundTripDistanceKm,
+    travelCostRateYenPerKm,
+    distanceTouched,
+    images,
+    aiFilledFields,
+    hasAiDraftSource,
+    isSpanningMonth,
+    selectedPart,
+    originalShiftTimes,
+  } = formState;
+  const { currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting } = uiState;
+  const { shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId } = shiftState;
 
-  const [loading, setLoading] = useState(true);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [submitting, setSubmitting] = useState(false);
+  const setFormField = useCallback(<K extends keyof FormState>(field: K, value: SetStateValue<FormState[K]>) => {
+    formDispatch({ type: 'SET_FIELD', field, value });
+  }, []);
+  const setUiField = useCallback(<K extends keyof UiState>(field: K, value: SetStateValue<UiState[K]>) => {
+    uiDispatch({ type: 'SET_FIELD', field, value });
+  }, []);
+  const setShiftField = useCallback(<K extends keyof ShiftState>(field: K, value: SetStateValue<ShiftState[K]>) => {
+    shiftDispatch({ type: 'SET_FIELD', field, value });
+  }, []);
 
-  const [shiftSuggestions, setShiftSuggestions] = useState<ShiftSuggestion[]>([]);
-  const [linkedShifts, setLinkedShifts] = useState<LinkedShift[]>([]);
-  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
-  const [shiftSegments, setShiftSegments] = useState<ShiftSegmentData[]>([]);
-  const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(segmentId);
+  const setClientName = useCallback((value: SetStateValue<string>) => setFormField('clientName', value), [setFormField]);
+  const setTemplate = useCallback((value: SetStateValue<FormItem[]>) => setFormField('template', value), [setFormField]);
+  const setAnswers = useCallback((value: SetStateValue<FormAnswers>) => formDispatch({ type: 'SET_ANSWERS', value }), []);
+  const setSelectableStaffs = useCallback((value: SetStateValue<HelperProfile[]>) => setFormField('selectableStaffs', value), [setFormField]);
+  const setSelectedHelpers = useCallback((value: SetStateValue<string[]>) => setFormField('selectedHelpers', value), [setFormField]);
+  const setStartDateTime = useCallback((value: SetStateValue<string>) => setFormField('startDateTime', value), [setFormField]);
+  const setEndDateTime = useCallback((value: SetStateValue<string>) => setFormField('endDateTime', value), [setFormField]);
+  const setServiceTime = useCallback((value: SetStateValue<string>) => setFormField('serviceTime', value), [setFormField]);
+  const setTravelTime = useCallback((value: SetStateValue<string>) => setFormField('travelTime', value), [setFormField]);
+  const setRoundTripDistanceKm = useCallback((value: SetStateValue<string>) => setFormField('roundTripDistanceKm', value), [setFormField]);
+  const setTravelCostRateYenPerKm = useCallback((value: SetStateValue<number>) => setFormField('travelCostRateYenPerKm', value), [setFormField]);
+  const setDistanceTouched = useCallback((value: SetStateValue<boolean>) => setFormField('distanceTouched', value), [setFormField]);
+  const setImages = useCallback((value: SetStateValue<{ id: string; url: string }[]>) => setFormField('images', value), [setFormField]);
+  const setAiFilledFields = useCallback((value: SetStateValue<Set<string>>) => setFormField('aiFilledFields', value), [setFormField]);
+  const setHasAiDraftSource = useCallback((value: SetStateValue<boolean>) => setFormField('hasAiDraftSource', value), [setFormField]);
+  const setIsSpanningMonth = useCallback((value: SetStateValue<boolean>) => setFormField('isSpanningMonth', value), [setFormField]);
+  const setSelectedPart = useCallback((value: SetStateValue<'part1' | 'part2'>) => setFormField('selectedPart', value), [setFormField]);
+  const setOriginalShiftTimes = useCallback((value: SetStateValue<{ start_at: string; end_at: string } | null>) => setFormField('originalShiftTimes', value), [setFormField]);
 
-  // AI入力されたフィールドのハイライト管理
-  const [aiFilledFields, setAiFilledFields] = useState<Set<string>>(new Set());
-  const [hasAiDraftSource, setHasAiDraftSource] = useState(false);
+  const setCurrentReportId = useCallback((value: SetStateValue<string | null>) => setUiField('currentReportId', value), [setUiField]);
+  const setCurrentStatus = useCallback((value: SetStateValue<ReportStatus | null>) => setUiField('currentStatus', value), [setUiField]);
+  const setIsDirty = useCallback((value: SetStateValue<boolean>) => setUiField('isDirty', value), [setUiField]);
+  const setOpenCloseDialog = useCallback((value: SetStateValue<boolean>) => setUiField('openCloseDialog', value), [setUiField]);
+  const setLoading = useCallback((value: SetStateValue<boolean>) => setUiField('loading', value), [setUiField]);
+  const setErrors = useCallback((value: SetStateValue<Record<string, string>>) => {
+    uiDispatch({ type: 'SET_ERROR_MAP', errors: resolveStateValue(value, errors) });
+  }, [errors]);
+  const setSubmitting = useCallback((value: SetStateValue<boolean>) => setUiField('submitting', value), [setUiField]);
 
-  // 月末跨ぎ夜勤管理ステート
-  const [isSpanningMonth, setIsSpanningMonth] = useState(false);
-  const [selectedPart, setSelectedPart] = useState<'part1' | 'part2'>('part1');
-  const [originalShiftTimes, setOriginalShiftTimes] = useState<{ start_at: string; end_at: string } | null>(null);
+  const setShiftSuggestions = useCallback((value: SetStateValue<ShiftSuggestion[]>) => setShiftField('shiftSuggestions', value), [setShiftField]);
+  const setLinkedShifts = useCallback((value: SetStateValue<LinkedShift[]>) => setShiftField('linkedShifts', value), [setShiftField]);
+  const setShiftSegments = useCallback((value: SetStateValue<ShiftSegmentData[]>) => setShiftField('shiftSegments', value), [setShiftField]);
+  const setSelectedSegmentId = useCallback((value: SetStateValue<string | null>) => setShiftField('selectedSegmentId', value), [setShiftField]);
 
   const formatDatetimeLocal = useCallback((date: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -149,7 +368,7 @@ export default function RecordPage() {
       setSelectedHelpers(staffNames);
       setSelectedSegmentId(segment.id);
       setCurrentStatus('draft');
-  }, [formatDatetimeLocal]);
+  }, [formatDatetimeLocal, setCurrentStatus, setEndDateTime, setIsSpanningMonth, setOriginalShiftTimes, setSelectedHelpers, setSelectedSegmentId, setServiceTime, setStartDateTime]);
 
   const setupTimeForPart = useCallback((part: 'part1' | 'part2', startIso: string, endIso: string) => {
       const s = new Date(startIso);
@@ -170,7 +389,7 @@ export default function RecordPage() {
           const diff = (e.getTime() - midnight.getTime()) / (1000 * 60 * 60);
           setServiceTime(diff.toString());
       }
-  }, [formatDatetimeLocal]);
+  }, [formatDatetimeLocal, setEndDateTime, setServiceTime, setStartDateTime]);
 
   const handlePartChange = async (part: 'part1' | 'part2') => {
       if (isDirty) {
@@ -256,7 +475,7 @@ export default function RecordPage() {
         }
       }
     } catch (error) { console.error('Error fetching base data:', error); }
-  }, [clientId, currentOrg, currentReportId, shiftId]);
+  }, [clientId, currentOrg, currentReportId, setClientName, setRoundTripDistanceKm, setSelectableStaffs, setSelectedHelpers, setTemplate, setTravelCostRateYenPerKm, shiftId]);
 
   const loadExistingData = useCallback(async (targetId: string) => {
     if (!targetId) return;
@@ -306,13 +525,13 @@ export default function RecordPage() {
         setImages(await getReportImages(currentOrg.id, targetId));
       }
     } catch (e) { console.error(e); showToast('記録の読み込みに失敗しました', 'error'); }
-  }, [showToast, formatDatetimeLocal, currentOrg, travelCostRateYenPerKm]);
+  }, [showToast, formatDatetimeLocal, currentOrg, setAnswers, setCurrentStatus, setDistanceTouched, setEndDateTime, setImages, setIsDirty, setIsSpanningMonth, setOriginalShiftTimes, setRoundTripDistanceKm, setSelectedHelpers, setSelectedPart, setSelectedSegmentId, setServiceTime, setStartDateTime, setTravelCostRateYenPerKm, setTravelTime, travelCostRateYenPerKm]);
 
   useEffect(() => {
     if (currentReportId || distanceTouched || selectableStaffs.length === 0 || selectedHelpers.length === 0) return;
     const staff = selectableStaffs.find((helper) => helper.name === selectedHelpers[0]);
     if (staff) setRoundTripDistanceKm(String(staff.defaultRoundTripDistanceKm || 0));
-  }, [currentReportId, distanceTouched, selectableStaffs, selectedHelpers]);
+  }, [currentReportId, distanceTouched, selectableStaffs, selectedHelpers, setRoundTripDistanceKm]);
 
   useEffect(() => {
     const init = async () => {
@@ -434,7 +653,7 @@ export default function RecordPage() {
     if (!wsLoading && currentOrg) {
       init();
     }
-  }, [wsLoading, currentOrg, paramReportId, shiftId, segmentId, clientId, router, showToast, fetchBaseData, loadExistingData, formatDatetimeLocal, setupTimeForPart, applySegmentDefaults]);
+  }, [wsLoading, currentOrg, paramReportId, shiftId, segmentId, clientId, router, showToast, fetchBaseData, loadExistingData, formatDatetimeLocal, setupTimeForPart, applySegmentDefaults, setCurrentReportId, setCurrentStatus, setEndDateTime, setIsSpanningMonth, setLoading, setOriginalShiftTimes, setSelectedHelpers, setSelectedSegmentId, setServiceTime, setShiftSegments, setStartDateTime]);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -453,16 +672,20 @@ export default function RecordPage() {
       getLinkedShifts(currentReportId).then(data => setLinkedShifts(data as LinkedShift[])),
       getShiftSuggestions(currentOrg.id, currentReportId).then(setShiftSuggestions),
     ]);
-  }, [currentReportId, currentOrg]);
+  }, [currentReportId, currentOrg, setLinkedShifts, setShiftSuggestions]);
 
-  const handleChange = (setter: (val: string) => void, val: string) => { setter(val); setIsDirty(true); };
-  const handleAnswerChange = (id: string, value: string | number | boolean | string[]) => {
-    setAnswers(prev => ({ ...prev, [id]: value }));
-    setIsDirty(true);
-    if (errors[id]) { const ne = { ...errors }; delete ne[id]; setErrors(ne); }
-  };
+  const handleChange = useCallback((setter: (val: string) => void, val: string) => {
+    setter(val);
+    uiDispatch({ type: 'MARK_DIRTY' });
+  }, []);
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAnswerChange = useCallback((id: string, value: FormAnswers[string]) => {
+    formDispatch({ type: 'SET_ANSWER', id, value });
+    uiDispatch({ type: 'MARK_DIRTY' });
+    uiDispatch({ type: 'CLEAR_ERROR', id });
+  }, []);
+
+  const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!currentReportId || !e.target.files || e.target.files.length === 0) return;
     setSubmitting(true);
     try {
@@ -480,9 +703,9 @@ export default function RecordPage() {
     } finally {
         setSubmitting(false);
     }
-  };
+  }, [currentOrg, currentReportId, loadExistingData, setSubmitting, showToast]);
 
-  const handleDeleteReport = async () => {
+  const handleDeleteReport = useCallback(async () => {
       if (currentStatus === 'approved') { showToast('承認済みの記録は削除できません', 'error'); return; }
       if(!(await confirm({ title: '記録の削除', message: '本当に削除しますか？', confirmText: '削除する', confirmColor: 'error' }))) return;
       try {
@@ -494,9 +717,9 @@ export default function RecordPage() {
           console.error(e);
           showToast('削除に失敗しました', 'error');
       }
-  };
+  }, [confirm, currentOrg, currentReportId, currentStatus, router, showToast]);
 
-  const validate = () => {
+  const validate = useCallback(() => {
     const ne: Record<string, string> = {};
     if (!serviceTime) ne['serviceTime'] = '必須項目です';
     if (selectedHelpers.length === 0) ne['helpers'] = '担当スタッフを選択してください';
@@ -506,9 +729,9 @@ export default function RecordPage() {
     });
     setErrors(ne);
     return Object.keys(ne).length === 0;
-  };
+  }, [answers, selectedHelpers.length, serviceTime, setErrors, template]);
 
-  const saveReport = async (status: ReportStatus, skipValidation = false) => {
+  const saveReport = useCallback(async (status: ReportStatus, skipValidation = false) => {
     if (shiftId && shiftSegments.length > 0 && !selectedSegmentId) {
       showToast('記録を作成する前にサービス区間を選択してください', 'warning');
       return false;
@@ -554,37 +777,37 @@ export default function RecordPage() {
       return true;
     } catch (e) { console.error(e); showToast('エラーが発生しました', 'error'); return false; } 
     finally { setSubmitting(false); }
-  };
+  }, [answers, clientId, currentOrg, currentReportId, endDateTime, hasAiDraftSource, roundTripDistanceKm, router, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setSubmitting, shiftId, shiftSegments.length, showToast, startDateTime, travelCostRateYenPerKm, travelTime, validate]);
 
-  const handleDraftSave = async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); } };
-  const handleSubmit = async () => {
+  const handleDraftSave = useCallback(async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); } }, [saveReport, showToast]);
+  const handleSubmit = useCallback(async () => {
       if (!(await confirm({ title: '送信の確認', message: '記録を送信しますか？', confirmText: '送信する' }))) return;
       if (await saveReport('pending')) { showToast('記録を送信しました', 'success'); router.push('/app/record'); }
-  };
-  const handleApprove = async () => {
-      if (!(await confirm({ title: '承認の確認', message: 'この記録を承認しますか？', confirmText: '承認する', confirmColor: 'primary' }))) return;
-      await executeApprove();
-  };
-  const executeApprove = async () => {
+  }, [confirm, router, saveReport, showToast]);
+  const executeApprove = useCallback(async () => {
       if (await saveReport('approved')) {
           showToast('承認しました', 'success');
           router.push('/app/reports');
       }
-  };
-  const handleRemand = async () => {
-      if (!(await confirm({ title: '承認取消の確認', message: '承認を取り消し、差し戻しますか？', confirmText: '差し戻す', confirmColor: 'warning' }))) return;
-      await executeRemand();
-  };
-  const executeRemand = async () => {
+  }, [router, saveReport, showToast]);
+  const handleApprove = useCallback(async () => {
+      if (!(await confirm({ title: '承認の確認', message: 'この記録を承認しますか？', confirmText: '承認する', confirmColor: 'primary' }))) return;
+      await executeApprove();
+  }, [confirm, executeApprove]);
+  const executeRemand = useCallback(async () => {
       if (await saveReport('remanded')) {
           showToast('記録を差し戻しました', 'info');
           router.push('/app/reports');
       }
-  };
+  }, [router, saveReport, showToast]);
+  const handleRemand = useCallback(async () => {
+      if (!(await confirm({ title: '承認取消の確認', message: '承認を取り消し、差し戻しますか？', confirmText: '差し戻す', confirmColor: 'warning' }))) return;
+      await executeRemand();
+  }, [confirm, executeRemand]);
 
-  const handleClose = () => { if (isDirty) setOpenCloseDialog(true); else router.back(); };
-  const handleDialogDiscard = () => { setOpenCloseDialog(false); router.back(); };
-  const handleDialogSaveDraft = async () => { if (await saveReport('draft', true)) { showToast('下書き保存しました'); router.back(); } setOpenCloseDialog(false); };
+  const handleClose = useCallback(() => { if (isDirty) setOpenCloseDialog(true); else router.back(); }, [isDirty, router, setOpenCloseDialog]);
+  const handleDialogDiscard = useCallback(() => { setOpenCloseDialog(false); router.back(); }, [router, setOpenCloseDialog]);
+  const handleDialogSaveDraft = useCallback(async () => { if (await saveReport('draft', true)) { showToast('下書き保存しました'); router.back(); } setOpenCloseDialog(false); }, [router, saveReport, setOpenCloseDialog, showToast]);
 
   const handleAiExtracted = useCallback((result: ExtractionResult) => {
     const filled = new Set(Object.keys(result.values));
@@ -624,7 +847,7 @@ export default function RecordPage() {
     setAiFilledFields(filled);
     setHasAiDraftSource(true);
     setIsDirty(true);
-  }, [formatDatetimeLocal, selectableStaffs]);
+  }, [formatDatetimeLocal, selectableStaffs, setAiFilledFields, setAnswers, setEndDateTime, setHasAiDraftSource, setIsDirty, setSelectedHelpers, setServiceTime, setStartDateTime]);
 
   const groupedSections = useMemo(() => {
     const sections: { title: string; items: FormItem[] }[] = [];
@@ -641,8 +864,10 @@ export default function RecordPage() {
   const canDeleteRecord = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'delete', true));
   const travelCostYen = Math.round((parseFloat(roundTripDistanceKm || '0') || 0) * travelCostRateYenPerKm);
   const requiresSegmentSelection = Boolean(shiftId && shiftSegments.length > 1 && !selectedSegmentId && !currentReportId);
+  const aiClients = useMemo(() => [{ id: clientId as string, name: clientName }], [clientId, clientName]);
+  const aiHelpers = useMemo(() => selectableStaffs.map(s => ({ id: s.id, name: s.name })), [selectableStaffs]);
 
-  const handleStaffChange = (value: string[]) => {
+  const handleStaffChange = useCallback((value: string[]) => {
       setSelectedHelpers(value);
       if (!currentReportId && !distanceTouched) {
           const staff = selectableStaffs.find((helper) => helper.name === value[0]);
@@ -654,7 +879,7 @@ export default function RecordPage() {
           delete newErrors.helpers;
           setErrors(newErrors);
       }
-  };
+  }, [currentReportId, distanceTouched, errors, selectableStaffs, setErrors, setIsDirty, setRoundTripDistanceKm, setSelectedHelpers]);
 
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}><CircularProgress /></Box>;
 
@@ -756,9 +981,7 @@ export default function RecordPage() {
                             setShiftSuggestions(suggestions);
                           } catch (e) { console.error(e); showToast('シフトの紐付けに失敗しました', 'error'); }
                         }}>紐付ける</Button>
-                        <Button size="small" onClick={() =>
-                          setDismissedSuggestions(prev => new Set([...prev, suggestion.id]))
-                        }>無視する</Button>
+                        <Button size="small" onClick={() => shiftDispatch({ type: 'DISMISS_SUGGESTION', id: suggestion.id })}>無視する</Button>
                       </Box>
                     }
                   >
@@ -800,8 +1023,8 @@ export default function RecordPage() {
                 <AiImportButton
                   organizationId={currentOrg?.id ?? ''}
                   formTemplate={template}
-                  clients={[{ id: clientId as string, name: clientName }]}
-                  helpers={selectableStaffs.map(s => ({ id: s.id, name: s.name }))}
+                  clients={aiClients}
+                  helpers={aiHelpers}
                   onExtracted={handleAiExtracted}
                   hasExistingValues={Object.keys(answers).length > 0}
                   disabled={submitting || loading || !currentOrg || requiresSegmentSelection}
@@ -877,22 +1100,17 @@ export default function RecordPage() {
                     <Typography variant="h6" color="text.primary" fontWeight="bold" sx={{ overflowWrap: 'anywhere', lineHeight: 1.3 }}>{section.title}</Typography>
                 </Box>
                 <Stack divider={<Divider />}>
-                    {section.items.map((item) => {
-                    const hasError = !!errors[item.id];
-                    const isAiFilled = aiFilledFields.has(item.id);
-                    return (
-                        <Box key={item.id} sx={{ p: { xs: 2, sm: 3 }, bgcolor: hasError ? 'background.danger' : isAiFilled ? 'background.aiHighlight' : 'transparent' }}>
-                          <DynamicFormField
-                            item={item}
-                            value={answers[item.id]}
-                            detailValue={String(answers[`${item.id}_detail`] ?? '')}
-                            error={errors[item.id]}
-                            onChange={(value) => handleAnswerChange(item.id, value)}
-                            onDetailChange={(value) => handleAnswerChange(`${item.id}_detail`, value)}
-                          />
-                        </Box>
-                    );
-                    })}
+                    {section.items.map((item) => (
+                        <FormFieldItem
+                          key={item.id}
+                          item={item}
+                          value={answers[item.id]}
+                          detailValue={String(answers[`${item.id}_detail`] ?? '')}
+                          error={errors[item.id]}
+                          isAiFilled={aiFilledFields.has(item.id)}
+                          onAnswerChange={handleAnswerChange}
+                        />
+                    ))}
                 </Stack>
                 </Box>
             ))}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { usePathname } from 'next/navigation';
@@ -26,6 +26,7 @@ type WorkspaceContextType = {
   orgList: Workspace[];
   switchOrg: (orgId: string) => void;
   refreshWorkspace: () => Promise<void>;
+  userId: string | null;
   loading: boolean;
   status: WorkspaceLoadStatus;
   errorMessage: string | null;
@@ -42,47 +43,9 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const [loading, setLoading] = useState(shouldLoadWorkspace);
   const [status, setStatus] = useState<WorkspaceLoadStatus>(shouldLoadWorkspace ? 'loading' : 'session_expired');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!shouldLoadWorkspace) {
-      fetchSeq.current += 1;
-      setCurrentOrg(null);
-      setOrgList([]);
-      setLoading(false);
-      setStatus('session_expired');
-      setErrorMessage(null);
-      return;
-    }
-
-    // INITIAL_SESSIONを初回読み込みの唯一の起点にし、二重取得による状態上書きを防ぐ。
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log(`[WorkspaceProvider] Auth event: ${event}`);
-      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        // Authの内部ロック解放後に読み込む。コールバック内でAuth APIを再入させない。
-        setTimeout(() => void fetchWorkspaces(session), 0);
-      } else if (event === 'SIGNED_OUT') {
-        // トークン更新中の一時イベントで正常な表示を消さないよう、現在値を再確認する。
-        setTimeout(() => void (async () => {
-          const { data: { session: currentSession } } = await supabase.auth.getSession();
-          if (currentSession) {
-            await fetchWorkspaces(currentSession);
-            return;
-          }
-          setCurrentOrg(null);
-          setOrgList([]);
-          setLoading(false);
-          setStatus('session_expired');
-          setErrorMessage(null);
-        })(), 0);
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [shouldLoadWorkspace]);
-
-  const fetchWorkspaces = async (knownSession?: Session | null) => {
+  const fetchWorkspaces = useCallback(async (knownSession?: Session | null) => {
     const seq = ++fetchSeq.current;
     const isCurrent = () => seq === fetchSeq.current;
     try {
@@ -97,6 +60,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         if (!isCurrent()) return;
         setOrgList([]);
         setCurrentOrg(null);
+        setUserId(null);
         setStatus('session_expired');
         setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
         return;
@@ -105,6 +69,8 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       // デプロイ前ログインのセッションが user_session_activity に未登録の場合に備えて登録する。
       // getAuthedUser が呼ばれる前に完了させる必要があるため await する。
       await ensureSessionActivity(session.access_token);
+      if (!isCurrent()) return;
+      setUserId(session.user.id);
 
       // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
       // organization_member_roles を JOIN することで 3RTT → 2RTT に削減。
@@ -127,6 +93,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         if (authErr?.code === '401' || authErr?.message?.toLowerCase().includes('jwt')) {
           setOrgList([]);
           setCurrentOrg(null);
+          setUserId(null);
           setStatus('session_expired');
           setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
         } else {
@@ -185,27 +152,79 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  };
+  }, []);
 
-  const refreshWorkspace = async () => {
+  useEffect(() => {
+    if (!shouldLoadWorkspace) {
+      fetchSeq.current += 1;
+      setCurrentOrg(null);
+      setOrgList([]);
+      setUserId(null);
+      setLoading(false);
+      setStatus('session_expired');
+      setErrorMessage(null);
+      return;
+    }
+
+    // INITIAL_SESSIONを初回読み込みの唯一の起点にし、二重取得による状態上書きを防ぐ。
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log(`[WorkspaceProvider] Auth event: ${event}`);
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // Authの内部ロック解放後に読み込む。コールバック内でAuth APIを再入させない。
+        setTimeout(() => void fetchWorkspaces(session), 0);
+      } else if (event === 'SIGNED_OUT') {
+        // トークン更新中の一時イベントで正常な表示を消さないよう、現在値を再確認する。
+        setTimeout(() => void (async () => {
+          const { data: { session: currentSession } } = await supabase.auth.getSession();
+          if (currentSession) {
+            await fetchWorkspaces(currentSession);
+            return;
+          }
+          setCurrentOrg(null);
+          setOrgList([]);
+          setUserId(null);
+          setLoading(false);
+          setStatus('session_expired');
+          setErrorMessage(null);
+        })(), 0);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [fetchWorkspaces, shouldLoadWorkspace]);
+
+  const refreshWorkspace = useCallback(async () => {
     await fetchWorkspaces();
-  };
+  }, [fetchWorkspaces]);
 
-  const switchOrg = async (orgId: string) => {
+  const switchOrg = useCallback(async (orgId: string) => {
     const target = orgList.find(o => o.id === orgId);
     if (target) {
       setCurrentOrg(target);
       await setLastOrganization(orgId);
       window.location.href = '/app'; 
     }
-  };
+  }, [orgList]);
+
+  const contextValue = useMemo(() => ({
+    currentOrg,
+    orgList,
+    switchOrg,
+    refreshWorkspace,
+    userId,
+    loading,
+    status,
+    errorMessage,
+  }), [currentOrg, orgList, switchOrg, refreshWorkspace, userId, loading, status, errorMessage]);
 
   if (loading) {
     return <Box height="100vh" display="flex" justifyContent="center" alignItems="center"><CircularProgress /></Box>;
   }
 
   return (
-    <WorkspaceContext.Provider value={{ currentOrg, orgList, switchOrg, refreshWorkspace, loading, status, errorMessage }}>
+    <WorkspaceContext.Provider value={contextValue}>
       {children}
     </WorkspaceContext.Provider>
   );

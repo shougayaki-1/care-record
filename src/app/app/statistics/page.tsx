@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useDeferredValue, useState, useMemo, useCallback, useTransition } from 'react';
 import {
-    Box, Typography, Paper, CircularProgress, Tabs, Tab, Stack, Button,
+    Box, Typography, Paper, CircularProgress, LinearProgress, Tabs, Tab, Stack, Button,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, IconButton, Collapse, Divider
 } from '@/components/ui/mui';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -20,6 +20,9 @@ import { aggregatePremiumMinutes, type LaborPremiumType } from '@/utils/laborPre
 import { type InternalWorkRecord } from '@/app/actions/internalWork';
 import { getStatisticsData } from '@/app/actions/statistics';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
+import { useFetchData } from '@/hooks/useFetchData';
+import { StaffReportTable } from '@/components/statistics/StaffReportTable';
+import { ShiftVarianceTable } from '@/components/statistics/ShiftVarianceTable';
 
 type ShiftStaffData = { staff_id: string; staffs: { name: string } | null; };
 type ShiftData = { 
@@ -100,6 +103,20 @@ type ShiftVarianceRow = {
     isLegacyReport: boolean;
     isMonthClipped: boolean;
 };
+type StatisticsSourceData = {
+    rawShifts: ShiftData[];
+    rawReports: ReportData[];
+    premiumTypes: LaborPremiumType[];
+    rawShiftsWithLinks: ShiftWithLinks[];
+    internalWorkRecords: InternalWorkRecord[];
+};
+const initialStatisticsSourceData: StatisticsSourceData = {
+    rawShifts: [],
+    rawReports: [],
+    premiumTypes: [],
+    rawShiftsWithLinks: [],
+    internalWorkRecords: [],
+};
 
 function getOverlappingHours(start: Date, end: Date, monthStart: Date, monthEnd: Date): number {
     const overlapStart = start > monthStart ? start : monthStart;
@@ -162,25 +179,17 @@ export default function StatisticsPage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
 
-    const [loading, setLoading] = useState(true);
     const [targetMonth, setTargetMonth] = useState<string>(() => {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     });
     const [tabIndex, setTabIndex] = useState(0); 
+    const [isPending, startTransition] = useTransition();
 
-    const [rawShifts, setRawShifts] = useState<ShiftData[]>([]);
-    const [rawReports, setRawReports] = useState<ReportData[]>([]);
-    const [premiumTypes, setPremiumTypes] = useState<LaborPremiumType[]>([]);
-    const [rawShiftsWithLinks, setRawShiftsWithLinks] = useState<ShiftWithLinks[]>([]);
-    const [internalWorkRecords, setInternalWorkRecords] = useState<InternalWorkRecord[]>([]);
     const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
-    const fetchStatisticsData = useCallback(async () => {
-        if (!currentOrg || !targetMonth) return;
-        setLoading(true);
-
-        try {
+    const fetchStatisticsData = useCallback(async (): Promise<StatisticsSourceData> => {
+        if (!currentOrg || !targetMonth) return initialStatisticsSourceData;
             const [yearStr, monthStr] = targetMonth.split('-');
             const year = parseInt(yearStr, 10);
             const month = parseInt(monthStr, 10) - 1;
@@ -192,24 +201,25 @@ export default function StatisticsPage() {
             const shiftEndRange = new Date(monthEnd.getTime() + (24 * 60 * 60 * 1000)).toISOString();
 
             const data = await getStatisticsData(currentOrg.id, shiftStartRange, shiftEndRange);
-            setRawShifts(data.shifts as ShiftData[]);
-            setRawReports(data.reports as ReportData[]);
-            setInternalWorkRecords(data.internalWorkRecords as InternalWorkRecord[]);
-            setPremiumTypes(data.premiumTypes as LaborPremiumType[]);
-            setRawShiftsWithLinks(data.shiftsWithLinks as ShiftWithLinks[]);
-        } catch (error) {
-            console.error('Statistics fetch failed', error);
-            showToast(error instanceof Error ? `データの取得に失敗しました: ${error.message}` : 'データの取得に失敗しました', 'error');
-        } finally {
-            setLoading(false);
-        }
-    }, [currentOrg, targetMonth, showToast]);
+            return {
+                rawShifts: data.shifts as ShiftData[],
+                rawReports: data.reports as ReportData[],
+                internalWorkRecords: data.internalWorkRecords as InternalWorkRecord[],
+                premiumTypes: data.premiumTypes as LaborPremiumType[],
+                rawShiftsWithLinks: data.shiftsWithLinks as ShiftWithLinks[],
+            };
+    }, [currentOrg, targetMonth]);
 
-    useEffect(() => {
-        if (!wsLoading && currentOrg) fetchStatisticsData();
-    }, [wsLoading, currentOrg, fetchStatisticsData]);
+    const {
+        data: statisticsSourceData,
+        loading,
+    } = useFetchData(fetchStatisticsData, initialStatisticsSourceData, !wsLoading && Boolean(currentOrg), (message) => {
+        showToast(`データの取得に失敗しました: ${message}`, 'error');
+    });
+    const { rawShifts, rawReports, premiumTypes, rawShiftsWithLinks, internalWorkRecords } = statisticsSourceData;
 
-    const aggregatedData = useMemo(() => {
+    const aggregatedDataByTab = useMemo(() => {
+        const computeAggregatedData = (targetTabIndex: 0 | 1) => {
         if (!targetMonth) {
             return {
                 rows: [] as AggregatedRow[],
@@ -266,11 +276,11 @@ export default function StatisticsPage() {
             const isClipped = isSlotClipped(shift.start_at, shift.end_at, clipped);
                 
             if (hours > 0) {
-                if (tabIndex === 1 && shift.clients?.name) {
+                if (targetTabIndex === 1 && shift.clients?.name) {
                     const clientName = Array.isArray(shift.clients) ? shift.clients[0]?.name : shift.clients.name;
                     addHours(clientName, 'planned', hours);
                 }
-                if (tabIndex === 0) {
+                if (targetTabIndex === 0) {
                     const clientName = Array.isArray(shift.clients) ? shift.clients[0]?.name : shift.clients?.name;
                     if (shift.shift_staffs && shift.shift_staffs.length > 0) {
                         shift.shift_staffs.forEach(staff => {
@@ -317,12 +327,12 @@ export default function StatisticsPage() {
             const { serviceHours, travelHours, totalHours: actualHours } = getReportHours(dataObj, report.start_at, report.end_at, monthStart, monthEnd);
 
             if (actualHours > 0) {
-                if (tabIndex === 1 && report.clients?.name) {
+                if (targetTabIndex === 1 && report.clients?.name) {
                     const clientName = Array.isArray(report.clients) ? report.clients[0]?.name : report.clients.name;
                     addHours(clientName, 'actual', actualHours, { serviceHours, travelHours });
                     addStatusCount(clientName, report.status);
                 }
-                if (tabIndex === 0) {
+                if (targetTabIndex === 0) {
                     const actualHelpers = dataObj?._helpers || [];
                     const clipped = clipSlotToMonth(report.start_at, report.end_at, monthStart, monthEnd);
                     const linkedShiftId = report.report_shifts?.[0]?.shift_id ?? null;
@@ -380,7 +390,7 @@ export default function StatisticsPage() {
             }
         });
 
-        if (tabIndex === 0) {
+        if (targetTabIndex === 0) {
             internalWorkRecords.forEach((record) => {
                 const staffName = record.staffs?.name || '未設定(スタッフ名なし)';
                 const hours = Number(record.work_hours) || 0;
@@ -402,7 +412,7 @@ export default function StatisticsPage() {
         const rows = Object.values(statsMap).sort((a, b) => a.name.localeCompare(b.name));
 
         const premiumComparisonPerStaff: Record<string, PremiumComparison> = {};
-        if (tabIndex === 0) {
+        if (targetTabIndex === 0) {
             for (const staffName of Object.keys(statsMap)) {
                 const planned = aggregatePremiumMinutes(premiumTypes, staffShiftsMap[staffName] ?? []);
                 const actual = aggregatePremiumMinutes(premiumTypes, staffReportsMap[staffName] ?? []);
@@ -420,7 +430,18 @@ export default function StatisticsPage() {
         }
 
         return { rows, premiumComparisonPerStaff, detailItemsPerStaff };
-    }, [rawShifts, rawReports, internalWorkRecords, targetMonth, tabIndex, premiumTypes]);
+        };
+
+        return {
+            byStaff: computeAggregatedData(0),
+            byClient: computeAggregatedData(1),
+        };
+    }, [rawShifts, rawReports, internalWorkRecords, targetMonth, premiumTypes]);
+
+    const aggregatedData = tabIndex === 0 ? aggregatedDataByTab.byStaff : aggregatedDataByTab.byClient;
+    const deferredAggregatedData = useDeferredValue(aggregatedData);
+    const isAggregatedStale = aggregatedData !== deferredAggregatedData;
+    const visibleAggregatedData = deferredAggregatedData;
 
     const shiftVarianceRows = useMemo<ShiftVarianceRow[]>(() => {
         if (!targetMonth) return [];
@@ -557,7 +578,7 @@ export default function StatisticsPage() {
     }, [rawShiftsWithLinks, rawReports, targetMonth]);
 
     const aggregatedTotals = useMemo(() => {
-        return aggregatedData.rows.reduce(
+        return visibleAggregatedData.rows.reduce(
             (total, row) => ({
                 plannedHours: total.plannedHours + row.plannedHours,
                 actualHours: total.actualHours + row.actualHours,
@@ -569,13 +590,13 @@ export default function StatisticsPage() {
             }),
             { plannedHours: 0, actualHours: 0, serviceHours: 0, travelHours: 0, internalHours: 0, pending: 0, remanded: 0 },
         );
-    }, [aggregatedData.rows]);
+    }, [visibleAggregatedData.rows]);
 
     const premiumTotals = useMemo(() => {
         if (tabIndex !== 0) return {} as PremiumComparison;
         return premiumTypes.reduce((totals, type) => {
-            const total = aggregatedData.rows.reduce((sum, row) => {
-                const premium = aggregatedData.premiumComparisonPerStaff[row.name]?.[type.id] ?? { planned: 0, actual: 0, diff: 0 };
+            const total = visibleAggregatedData.rows.reduce((sum, row) => {
+                const premium = visibleAggregatedData.premiumComparisonPerStaff[row.name]?.[type.id] ?? { planned: 0, actual: 0, diff: 0 };
                 return {
                     planned: sum.planned + premium.planned,
                     actual: sum.actual + premium.actual,
@@ -585,7 +606,7 @@ export default function StatisticsPage() {
             totals[type.id] = total;
             return totals;
         }, {} as PremiumComparison);
-    }, [aggregatedData.premiumComparisonPerStaff, aggregatedData.rows, premiumTypes, tabIndex]);
+    }, [visibleAggregatedData.premiumComparisonPerStaff, visibleAggregatedData.rows, premiumTypes, tabIndex]);
 
     const shiftVarianceTotals = useMemo(() => {
         return shiftVarianceRows.reduce(
@@ -624,6 +645,15 @@ export default function StatisticsPage() {
             ? `/app/shifts/manage?shiftId=${item.shiftId}&start=${encodeURIComponent(item.startAt)}&month=${targetMonth}`
             : null
     );
+
+    const handleTabChange = useCallback((_: React.SyntheticEvent, value: number) => {
+        startTransition(() => setTabIndex(value));
+    }, [startTransition]);
+
+    const handleTargetMonthChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const value = event.target.value;
+        startTransition(() => setTargetMonth(value));
+    }, [startTransition]);
 
     const handleExportCSV = () => {
         const { rows: aggRows, premiumComparisonPerStaff } = aggregatedData;
@@ -673,7 +703,7 @@ export default function StatisticsPage() {
                     <AssessmentIcon color="action" />
                     <Typography variant="h6" fontWeight="bold" color="text.primary">統計・予実管理</Typography>
                 </Stack>
-                <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="scrollable" allowScrollButtonsMobile>
+                <Tabs value={tabIndex} onChange={handleTabChange} variant="scrollable" allowScrollButtonsMobile>
                     <Tab label="スタッフ別" />
                     <Tab label="利用者別" />
                     <Tab label="シフト差異" />
@@ -681,9 +711,10 @@ export default function StatisticsPage() {
             </Box>
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
+                {(isPending || isAggregatedStale) && <LinearProgress sx={{ mb: 2 }} />}
                 <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} mb={3} spacing={2}>
-                    <MonthField label="対象月" size="small" value={targetMonth} onChange={(e) => setTargetMonth(e.target.value)} sx={{ minWidth: { xs: 0, sm: 200 } }} />
-                    {tabIndex < 2 && <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || aggregatedData.rows.length === 0} sx={{ bgcolor: 'background.paper' }}>CSVダウンロード</Button>}
+                    <MonthField label="対象月" size="small" value={targetMonth} onChange={handleTargetMonthChange} sx={{ minWidth: { xs: 0, sm: 200 } }} />
+                    {tabIndex < 2 && <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || visibleAggregatedData.rows.length === 0} sx={{ bgcolor: 'background.paper' }}>CSVダウンロード</Button>}
                 </Stack>
 
                 {tabIndex < 2 && !loading && (
@@ -725,7 +756,7 @@ export default function StatisticsPage() {
                 <Paper sx={{ p: 0, minHeight: 400, borderRadius: 1, overflow: 'hidden', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
                     {loading ? <Box display="flex" justifyContent="center" alignItems="center" height={300}><CircularProgress /></Box> : (
                         tabIndex < 2 ? (
-                        <>
+                        <StaffReportTable>
                         <Box sx={{ px: { xs: 1.5, sm: 2 }, py: 1.5, bgcolor: 'background.tint', borderBottom: '1px solid', borderColor: 'divider' }}>
                             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 2 }} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
                                 <Typography variant="subtitle2" fontWeight="bold">{tabIndex === 0 ? 'スタッフ別明細' : '利用者別明細'}</Typography>
@@ -747,10 +778,10 @@ export default function StatisticsPage() {
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                    {aggregatedData.rows.length === 0 ? <TableRow><TableCell colSpan={6 + (tabIndex === 0 ? premiumTypes.length : 0)} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow> : (
-                                        aggregatedData.rows.map((row) => {
+                                    {visibleAggregatedData.rows.length === 0 ? <TableRow><TableCell colSpan={6 + (tabIndex === 0 ? premiumTypes.length : 0)} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow> : (
+                                        visibleAggregatedData.rows.map((row) => {
                                             const diff = row.actualHours - row.plannedHours;
-                                            const premiumDiff = premiumTypes.some(t => Math.abs(aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id]?.diff ?? 0) >= 1);
+                                            const premiumDiff = premiumTypes.some(t => Math.abs(visibleAggregatedData.premiumComparisonPerStaff[row.name]?.[t.id]?.diff ?? 0) >= 1);
                                             const hasDiff = Math.abs(diff) >= 0.01 || premiumDiff;
                                             const isExpanded = Boolean(expandedRows[row.name]);
                                             const isAlert = diff < -2 || diff > 2 || premiumDiff;
@@ -788,7 +819,7 @@ export default function StatisticsPage() {
                                                             </Stack>
                                                         </TableCell>
                                                         {tabIndex === 0 && premiumTypes.map(t => {
-                                                            const premium = aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id] ?? { planned: 0, actual: 0, diff: 0 };
+                                                            const premium = visibleAggregatedData.premiumComparisonPerStaff[row.name]?.[t.id] ?? { planned: 0, actual: 0, diff: 0 };
                                                             const diffHours = premium.diff / 60;
                                                             return (
                                                                 <TableCell key={t.id} align="right" sx={{ color: Math.abs(diffHours) >= 0.1 ? 'error.main' : 'inherit' }}>
@@ -803,7 +834,7 @@ export default function StatisticsPage() {
                                                                 <Box sx={{ px: 3, py: 2, bgcolor: 'background.tint' }}>
                                                                     <Typography variant="subtitle2" fontWeight="bold" mb={1}>差異対象シフト・実績</Typography>
                                                                     <Stack spacing={1}>
-                                                                        {(aggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => {
+                                                                        {(visibleAggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => {
                                                                             const recordHref = getDetailRecordHref(item);
                                                                             const shiftHref = getDetailShiftHref(item);
                                                                             return (
@@ -842,11 +873,11 @@ export default function StatisticsPage() {
                             </Table>
                         </TableContainer>
                         <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' }, p: 1.5 }}>
-                            {aggregatedData.rows.length === 0 ? (
+                            {visibleAggregatedData.rows.length === 0 ? (
                                 <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>データがありません</Box>
-                            ) : aggregatedData.rows.map((row, i) => {
+                            ) : visibleAggregatedData.rows.map((row, i) => {
                                 const diff = row.actualHours - row.plannedHours;
-                                const premiumDiff = premiumTypes.some(t => Math.abs(aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id]?.diff ?? 0) >= 1);
+                                const premiumDiff = premiumTypes.some(t => Math.abs(visibleAggregatedData.premiumComparisonPerStaff[row.name]?.[t.id]?.diff ?? 0) >= 1);
                                 const hasDiff = Math.abs(diff) >= 0.01 || premiumDiff;
                                 const isExpanded = Boolean(expandedRows[row.name]);
                                 const isAlert = diff < -2 || diff > 2 || premiumDiff;
@@ -889,7 +920,7 @@ export default function StatisticsPage() {
                                         {tabIndex === 0 && premiumTypes.length > 0 && (
                                             <Stack direction="row" gap={1} flexWrap="wrap" mt={1.5}>
                                                 {premiumTypes.map(t => {
-                                                    const premium = aggregatedData.premiumComparisonPerStaff[row.name]?.[t.id] ?? { planned: 0, actual: 0, diff: 0 };
+                                                    const premium = visibleAggregatedData.premiumComparisonPerStaff[row.name]?.[t.id] ?? { planned: 0, actual: 0, diff: 0 };
                                                     const diffHours = premium.diff / 60;
                                                     return (
                                                         <Chip
@@ -906,7 +937,7 @@ export default function StatisticsPage() {
                                         <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                                             <Divider sx={{ my: 1.5 }} />
                                             <Stack spacing={1}>
-                                                {(aggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => {
+                                                {(visibleAggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => {
                                                     const recordHref = getDetailRecordHref(item);
                                                     const shiftHref = getDetailShiftHref(item);
                                                     return (
@@ -944,9 +975,9 @@ export default function StatisticsPage() {
                                 );
                             })}
                         </Stack>
-                        </>
+                        </StaffReportTable>
                         ) : (
-                        <>
+                        <ShiftVarianceTable>
                         <Box sx={{ px: { xs: 1.5, sm: 2 }, py: 1.5, bgcolor: 'background.tint', borderBottom: '1px solid', borderColor: 'divider' }}>
                             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 2 }} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
                                 <Typography variant="subtitle2" fontWeight="bold">シフト差異合計</Typography>
@@ -1133,7 +1164,7 @@ export default function StatisticsPage() {
                                 );
                             })}
                         </Stack>
-                        </>
+                        </ShiftVarianceTable>
                         )
                     )}
                 </Paper>

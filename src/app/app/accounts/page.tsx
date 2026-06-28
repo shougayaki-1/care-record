@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback, useTransition } from 'react';
+import type { SyntheticEvent } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Chip, Button, TextField, Stack,
   IconButton, Select, MenuItem, FormControl, InputLabel, Menu, Alert, ListItemIcon,
-  CircularProgress, Divider, Tabs, Tab,
+  CircularProgress, Divider, LinearProgress, Tabs, Tab,
 } from '@/components/ui/mui';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -24,6 +25,7 @@ import { createInvitation, getAccountOverview, getInviteStaffCandidates, getOrgR
 import { AppButton, AppDialog, InnerPageHeader, PageBody, PageLayout, PageToolbar } from '@/components/ui';
 import { checkManagementPermission } from '@/utils/permissions';
 import RoleManagementPanel from '@/components/roles/RoleManagementPanel';
+import { useFetchData } from '@/hooks/useFetchData';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -38,17 +40,28 @@ type AccountProfile = {
     staffId?: string | null;
     staffName?: string | null;
 };
+type OrgRoleOption = { id: string; name: string; color: string | null; is_preset: boolean; is_dangerous: boolean };
+type AccountsData = {
+  accountList: AccountProfile[];
+  currentUserId: string;
+  availableRoles: OrgRoleOption[];
+  inviteStaffCandidates: InviteStaffCandidate[];
+};
+const initialAccountsData: AccountsData = {
+  accountList: [],
+  currentUserId: '',
+  availableRoles: [],
+  inviteStaffCandidates: [],
+};
 
 export default function AccountsPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [isPending, startTransition] = useTransition();
   
-  const [isFetching, setIsFetching] = useState(true);
   const [activeTab, setActiveTab] = useState<'accounts' | 'roles'>('accounts');
-  const [accountList, setAccountList] = useState<AccountProfile[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string>('');
   
   // 新規招待用
   const [openInvite, setOpenInvite] = useState(false);
@@ -56,8 +69,6 @@ export default function AccountsPage() {
   const [newInviteName, setNewInviteName] = useState('');
   const [selectedInviteStaffId, setSelectedInviteStaffId] = useState('none');
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
-  const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string; color: string | null; is_preset: boolean; is_dangerous: boolean }[]>([]);
-  const [inviteStaffCandidates, setInviteStaffCandidates] = useState<InviteStaffCandidate[]>([]);
 
   // 操作メニュー用
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
@@ -71,21 +82,16 @@ export default function AccountsPage() {
   // ★追加：削除（取り消し）確認ダイアログ用
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    if (!currentOrg) return;
-    setIsFetching(true);
-    try {
+  const fetchAccountsData = useCallback(async (): Promise<AccountsData> => {
+    if (!currentOrg) return initialAccountsData;
       const [overview, orgRoles, staffCandidates] = await Promise.all([
         getAccountOverview(currentOrg.id),
         getOrgRoles(currentOrg.id).catch(() => []),
         getInviteStaffCandidates(currentOrg.id).catch(() => []),
       ]);
-      setAvailableRoles(orgRoles);
-      setInviteStaffCandidates(staffCandidates);
       // fetchedUserId をローカル変数で保持し sort に使うことで
       // currentUserId state への依存を断ち、二重フェッチループを防ぐ
       const fetchedUserId = overview.currentUserId;
-      setCurrentUserId(fetchedUserId);
       const mergedList: AccountProfile[] = overview.accounts;
 
       mergedList.sort((a, b) => {
@@ -98,16 +104,27 @@ export default function AccountsPage() {
           return 0;
       });
 
-      setAccountList(mergedList);
-    } catch (e) {
-        console.error(e);
-        showToast('データの取得に失敗しました', 'error');
-    } finally {
-        setIsFetching(false);
-    }
-  }, [currentOrg, showToast]);
+      return {
+        accountList: mergedList,
+        currentUserId: fetchedUserId,
+        availableRoles: orgRoles,
+        inviteStaffCandidates: staffCandidates,
+      };
+  }, [currentOrg]);
 
-  useEffect(() => { if (!wsLoading && currentOrg) fetchData(); }, [wsLoading, currentOrg, fetchData]);
+  const {
+    data: accountsData,
+    loading: isFetching,
+    refetch: fetchData,
+  } = useFetchData(fetchAccountsData, initialAccountsData, !wsLoading && Boolean(currentOrg), () => {
+    showToast('データの取得に失敗しました', 'error');
+  });
+  const { accountList, currentUserId, availableRoles, inviteStaffCandidates } = accountsData;
+
+
+  const handleTabChange = useCallback((_: SyntheticEvent, value: 'accounts' | 'roles') => {
+    startTransition(() => setActiveTab(value));
+  }, [startTransition]);
 
   const handleGenerateLink = async () => {
     if (!currentOrg) return;
@@ -241,7 +258,8 @@ export default function AccountsPage() {
       <PageBody>
           {canManageRoles && (
             <Box sx={{ mb: 2, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 0, sm: 1 }, pt: 1 }}>
-              <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} variant="scrollable" allowScrollButtonsMobile>
+              {isPending && <LinearProgress />}
+              <Tabs value={activeTab} onChange={handleTabChange} variant="scrollable" allowScrollButtonsMobile>
                 <Tab label="アカウント" value="accounts" />
                 <Tab label="ロール" value="roles" />
               </Tabs>

@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback, useTransition } from 'react';
 import { 
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Button, Stack, Divider,
-  IconButton, Tooltip, CircularProgress, Chip
+  IconButton, Tooltip, CircularProgress, LinearProgress, Chip
 } from '@/components/ui/mui';
 import BadgeIcon from '@mui/icons-material/Badge';
 import AddIcon from '@mui/icons-material/Add';
@@ -23,6 +23,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, AppTextField, InnerPageHeader, MultiSelectField, PageBody, PageLayout, PageToolbar, SelectField } from '@/components/ui';
+import { useFetchData } from '@/hooks/useFetchData';
 import {
   deleteStaffPositionPreset,
   getStaffPositionPresets,
@@ -51,6 +52,16 @@ type StaffData = {
   profiles?: { name: string } | null;
 };
 type AccountData = { id: string; name: string; };
+type StaffPageData = {
+  staffList: StaffData[];
+  accountList: AccountData[];
+  positionPresets: StaffPositionPreset[];
+};
+const initialStaffPageData: StaffPageData = {
+  staffList: [],
+  accountList: [],
+  positionPresets: [],
+};
 
 export default function StaffPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
@@ -58,11 +69,8 @@ export default function StaffPage() {
   const confirm = useConfirm();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [isPending, startTransition] = useTransition();
   
-  const [isFetching, setIsFetching] = useState(true);
-  const [staffList, setStaffList] = useState<StaffData[]>([]);
-  const [accountList, setAccountList] = useState<AccountData[]>([]);
-  const [positionPresets, setPositionPresets] = useState<StaffPositionPreset[]>([]);
   
   const [openModal, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -75,10 +83,8 @@ export default function StaffPage() {
   const [openPositionDialog, setOpenPositionDialog] = useState(false);
   const [newPositionName, setNewPositionName] = useState('');
 
-  const fetchData = useCallback(async () => {
-    if (!currentOrg) return;
-    setIsFetching(true);
-    try {
+  const fetchStaffData = useCallback(async (): Promise<StaffPageData> => {
+    if (!currentOrg) return initialStaffPageData;
       // 1. スタッフ一覧の取得
       const { data: staffsData, error: staffsError } = await supabase
         .from('staffs')
@@ -88,7 +94,6 @@ export default function StaffPage() {
         .order('name', { ascending: true });
         
       if (staffsError) throw staffsError;
-      setStaffList((staffsData as unknown as StaffData[]) || []);
 
       // 2. メンバーのアカウント一覧を安全に取得 (2段階クエリ)
       const { data: membersData } = await supabase
@@ -110,19 +115,22 @@ export default function StaffPage() {
               });
           }
       }
-      setAccountList(accounts);
-      setPositionPresets(await getStaffPositionPresets(currentOrg.id));
-    } catch (e) {
-        const message = e && typeof e === 'object' && 'message' in e ? String(e.message) : '不明なエラー';
-        const code = e && typeof e === 'object' && 'code' in e ? String(e.code) : undefined;
-        console.error('スタッフデータの取得に失敗しました', { code, message });
-        showToast(`データの取得に失敗しました: ${message}`, 'error');
-    } finally {
-        setIsFetching(false);
-    }
-  }, [currentOrg, showToast]);
+      return {
+        staffList: (staffsData as unknown as StaffData[]) || [],
+        accountList: accounts,
+        positionPresets: await getStaffPositionPresets(currentOrg.id),
+      };
+  }, [currentOrg]);
 
-  useEffect(() => { if (!wsLoading && currentOrg) fetchData(); }, [wsLoading, currentOrg, fetchData]);
+  const {
+    data: staffPageData,
+    loading: isFetching,
+    refetch: fetchData,
+    setData: setStaffPageData,
+  } = useFetchData(fetchStaffData, initialStaffPageData, !wsLoading && Boolean(currentOrg), (message) => {
+    showToast(`データの取得に失敗しました: ${message}`, 'error');
+  });
+  const { staffList, accountList, positionPresets } = staffPageData;
 
   const handleSave = async () => {
     if (!currentOrg || !staffName.trim()) return;
@@ -175,7 +183,7 @@ export default function StaffPage() {
       try {
           await saveStaffPositionPreset(currentOrg.id, newPositionName);
           setNewPositionName('');
-          setPositionPresets(await getStaffPositionPresets(currentOrg.id));
+          await fetchData();
           showToast('役職プリセットを追加しました');
       } catch (e) {
           console.error(e);
@@ -187,7 +195,7 @@ export default function StaffPage() {
       if (!currentOrg) return;
       try {
           await deleteStaffPositionPreset(currentOrg.id, presetId);
-          setPositionPresets(await getStaffPositionPresets(currentOrg.id));
+          await fetchData();
           showToast('役職プリセットを削除しました');
       } catch (e) {
           console.error(e);
@@ -208,7 +216,7 @@ export default function StaffPage() {
     [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
 
     // 楽観的に画面へ反映（在職分を新しい順に、退職分は末尾）
-    setStaffList([...reordered, ...archivedStaff]);
+    startTransition(() => setStaffPageData(prev => ({ ...prev, staffList: [...reordered, ...archivedStaff] })));
 
     try {
       // 連番で sort_order を書き込み、順序を確定する
@@ -227,6 +235,7 @@ export default function StaffPage() {
       <InnerPageHeader icon={<BadgeIcon />} title="スタッフ(名簿)管理" />
 
       <PageBody>
+            {isPending && <LinearProgress sx={{ mb: 1 }} />}
             <PageToolbar>
                 <Box sx={{ minWidth: 0 }}>
                     <Typography variant="subtitle1" fontWeight="bold" color="text.primary">現場スタッフ名簿</Typography>
@@ -239,7 +248,7 @@ export default function StaffPage() {
                             color="inherit"
                             size="small"
                             startIcon={<ArchiveIcon />}
-                            onClick={() => setShowArchived(v => !v)}
+                            onClick={() => startTransition(() => setShowArchived(v => !v))}
                             sx={{ boxShadow: 'none' }}
                         >
                             {showArchived ? '退職者を隠す' : `退職者を表示 (${archivedStaff.length})`}
