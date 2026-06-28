@@ -1,104 +1,38 @@
-### Task 3: UI — ShiftFormModal に自動アサインチェックボックスを追加（方針A フロントエンド）
+### Task 3: Statistics の重複シフトクエリを統合
+**ファイル:** `src/app/actions/statistics.ts`
 
-**Files:**
-- Modify: `src/components/shifts/ShiftFormModal.tsx`
+**現状:** `shifts`（集計用）と `shiftsWithLinks`（予実比較用）で同一期間の `shifts` を2回クエリ。
 
-**Interfaces:**
-- Consumes: `ShiftPayload.autoAssign?: boolean`（Task 2 で追加）
-- `onSave(payload: ShiftPayload, shiftId?: string)` に `autoAssign` を含む payload を渡す
-
-- [ ] **Step 1: ShiftFormModal に autoAssign state とチェックボックス UI を追加する**
-
-`src/components/shifts/ShiftFormModal.tsx` を以下のように修正する。
-
-インポートに `FormControlLabel, Checkbox` を追加（既存の mui import に追記）:
-
+**修正:** Query 1 と Query 3 を1つに統合し、`Promise.all` の4並列に削減:
 ```typescript
-import {
-    Button, Stack,
-    Box, Typography,
-    IconButton, Tooltip, Divider,
-    FormControlLabel, Checkbox     // ← 追加
-} from '@/components/ui/mui';
+const [{ data: shiftsWithLinks, error: shiftsError }, { data: reports, ... }, ...] = await Promise.all([
+  supabaseAdmin.from('shifts').select(`
+    id, start_at, end_at, status, client_id,
+    clients (name),
+    shift_staffs (staff_id, staffs (name)),
+    report_shifts (is_primary, reports (id, start_at, end_at, status, report_values (data)))
+  `)
+  .eq('organization_id', organizationId)
+  .neq('status', 'cancelled')
+  .is('deleted_at', null)
+  .gte('end_at', startAt)
+  .lte('start_at', endAt),
+  // ... 残り3クエリ
+]);
 ```
 
-`useState` の並びに `autoAssign` state を追加（53行目付近）:
-
+`shifts`（シンプル集計用）は `shiftsWithLinks` から派生させる:
 ```typescript
-    const [cancelReason, setCancelReason] = useState('');
-    const [autoAssign, setAutoAssign] = useState(true);   // ← 追加
+return {
+  shifts: (shiftsWithLinks ?? []).map(({ report_shifts: _, ...s }) => s), // report_shifts除去
+  shiftsWithLinks: shiftsWithLinks ?? [],
+  ...
+};
 ```
 
-`useEffect` の else ブランチ（新規作成リセット部分）に reset を追加（75行目付近）:
+ページ側 (`src/app/app/statistics/page.tsx`) の `ShiftData` 型と `ShiftWithLinks` 型の整合性を確認して調整。
 
-```typescript
-            } else {
-                setClientId('');
-                setSelectedStaffIds([]);
-                setStartAt('');
-                setEndAt('');
-                setCancelReason('');
-                setAutoAssign(true);   // ← 追加
-            }
-```
-
-`handleSave` の payload 組み立て部分に `autoAssign` を追加（90行目付近）:
-
-```typescript
-            const payload: ShiftPayload = {
-                organizationId,
-                clientId,
-                title: `${clientName} (${staffNames})`,
-                startAt: new Date(startAt).toISOString(),
-                endAt: new Date(endAt).toISOString(),
-                staffIds: selectedStaffIds,
-                isModified: true,
-                autoAssign: !initialData ? autoAssign : false,   // ← 追加（新規作成時のみ有効）
-            };
-```
-
-JSX の日時フィールドの直後（DateTimeField Stack の後、`{initialData && ...}` の前）にチェックボックスを追加:
-
-```tsx
-                    {/* 新規作成時のみ: 自動アサインチェックボックス */}
-                    {!initialData && (
-                        <FormControlLabel
-                            control={
-                                <Checkbox
-                                    checked={autoAssign}
-                                    onChange={(e) => setAutoAssign(e.target.checked)}
-                                    size="small"
-                                />
-                            }
-                            label={
-                                <Typography variant="body2" color="text.secondary">
-                                    選択したスタッフを基本担当（担当スタッフ設定）にも登録する
-                                </Typography>
-                            }
-                        />
-                    )}
-```
-
-- [ ] **Step 2: TypeScript コンパイルエラーがないことを確認する**
-
-```bash
-cd /Users/shoug/Documents/GitHub/care-record
-npx tsc --noEmit 2>&1 | grep -E "error TS" | head -20
-```
-
-期待: エラーなし
-
-- [ ] **Step 3: コミット**
-
-```bash
-git add src/components/shifts/ShiftFormModal.tsx
-git commit -m "feat(ui): add auto-assign checkbox to ShiftFormModal (方針A)
-
-シフト新規作成時に「選択したスタッフを基本担当にも登録する」チェックボックスを追加。
-デフォルト ON。既存シフト編集時は非表示。
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
-```
+**効果:** Statistics 画面で DBクエリ 5本 → 4本（最重量クエリを削除）
 
 ---
 

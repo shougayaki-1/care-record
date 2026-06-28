@@ -1,44 +1,23 @@
-# Task 3 実装レポート: ShiftFormModal に自動アサインチェックボックスを追加
+# Task 3 Report: Statistics 重複シフトクエリ統合
 
-## 実装概要
+## STATUS: DONE
 
-シフト新規作成時に「選択したスタッフを基本担当にも登録する」チェックボックスを ShiftFormModal に追加した。デフォルト ON、既存シフト編集時は非表示。
+## Commit
+490f6b2 — `perf(db): merge duplicate shifts queries in statistics into single query`
 
-## 実施した変更
+## Summary
+`getStatisticsData()` の `Promise.all` を5並列から4並列に削減。旧 Query 1 (shifts) と Query 3 (shiftsWithLinks) を1本の統合クエリに置き換えた。
 
-### src/components/shifts/ShiftFormModal.tsx
+- 統合クエリは両方のカラム (`status`, `staff_id`, `report_shifts`) をすべて含む
+- `deleted_at IS NULL` フィルタを統合クエリに適用（旧 Query 3 のみにあったフィルタ）
+- `shifts` は `shiftsWithLinks` から `report_shifts` を除去して派生させる
+- `shiftsWithLinksError` チェックを削除し、`shiftsError` に統合
 
-1. **MUI インポート追加**
-   - `FormControlLabel, Checkbox` を `@/components/ui/mui` から追加
+## Type Check
+`npm run typecheck` — エラーなし
 
-2. **State 追加**
-   - `const [autoAssign, setAutoAssign] = useState(true);` を追加
+## Files Modified
+- `/Users/shoug/Documents/GitHub/care-record/src/app/actions/statistics.ts` のみ（page.tsx の型は既に互換性あり、変更不要）
 
-3. **useEffect 修正**
-   - else ブランチ（新規作成リセット部分）に `setAutoAssign(true);` を追加
-
-4. **handleSave 修正**
-   - payload に `autoAssign: !initialData ? autoAssign : false,` を追加
-   - 新規作成時のみ state の値を使用、編集時は false に固定
-
-5. **JSX 追加**
-   - DateTimeField Stack の直後、initialData セクションの前に checkbox を追加
-   - `!initialData` 条件で新規作成時のみ表示
-
-## 検証
-
-```bash
-npx tsc --noEmit 2>&1 | grep -E "error TS" | head -20
-```
-
-TypeScript 型チェック：エラーなし ✓
-
-## コミット
-
-`c9ab29f` feat(ui): add auto-assign checkbox to ShiftFormModal (方針A)
-
-## 備考
-
-- Task 2 で追加された `ShiftPayload.autoAssign?: boolean` を消費
-- checkbox は新規作成（!initialData）時のみ表示される conditional rendering
-- 既存シフト編集時は autoAssign が必ず false になるため、一括アサインは発動しない
+## Concerns
+なし
