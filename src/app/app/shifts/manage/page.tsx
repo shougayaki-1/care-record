@@ -429,7 +429,14 @@ export default function ShiftManagePage() {
                         <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>ひな形を追加</Button>
                     )}
                 </Box>
-                <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as TabId)} variant="scrollable" allowScrollButtonsMobile>
+                <Tabs value={activeTab} onChange={(_, v) => {
+                    const nextTab = v as TabId;
+                    // Reset calendar init guard when calendar may remount (e.g. from patterns tab)
+                    if (nextTab !== 'patterns' && activeTab === 'patterns') {
+                        calendarInitializedRef.current = false;
+                    }
+                    setActiveTab(nextTab);
+                }} variant="scrollable" allowScrollButtonsMobile>
                     {canUseOrgWideTabs && <Tab label="基本パターン(ひな形)" value="patterns" />}
                     {canUseOrgWideTabs && <Tab label="全体カレンダー" value="fullCalendar" />}
                     <Tab label="自分のシフト" value="myShift" />

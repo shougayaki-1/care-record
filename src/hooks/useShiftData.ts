@@ -69,6 +69,10 @@ export const useShiftData = ({
     const masterDataReadyRef = useRef(false);
 
     useEffect(() => {
+        masterDataReadyRef.current = false;
+    }, [currentOrg]);
+
+    useEffect(() => {
         supabase.auth.getUser().then(({ data: { user } }) => {
             if (user) setCurrentUserId(user.id);
         });
