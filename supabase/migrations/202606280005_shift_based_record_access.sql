@@ -40,6 +40,8 @@ AS $$
           -- 従来条件: assignments テーブルに登録済み（helper_id or staff_id）
           private.is_assigned_client_for_user(p_client_id, scope.organization_id, auth.uid())
           -- 追加条件: 当該利用者の shift_staffs に自分の staff_id が入っている
+          -- シフトベースアクセスは時間無制限（過去のシフト含む）。
+          -- 訪問介護の記録は事後入力されるため、シフト日時後もアクセスが必要。
           OR EXISTS (
             SELECT 1
             FROM public.shifts s
@@ -47,6 +49,7 @@ AS $$
             WHERE s.client_id = p_client_id
               AND s.organization_id = scope.organization_id
               AND s.deleted_at IS NULL
+              AND s.status <> 'cancelled'
               AND ss.staff_id = private.get_actor_staff_id(scope.organization_id, auth.uid())
           )
         )
