@@ -93,6 +93,23 @@ export async function saveShiftSegments(
       .insert(staffRows);
     if (staffError) throw new Error('スタッフ割当の保存に失敗しました');
   }
+
+  // Derive shift_staffs from segment staffs (shift_staffs is now a read-only denorm)
+  const segmentIds = inserted.map((s) => s.id);
+  let uniqueStaffIds: string[] = [];
+  if (segmentIds.length > 0) {
+    const { data: segStaffs } = await supabaseAdmin
+      .from('shift_segment_staffs')
+      .select('staff_id')
+      .in('segment_id', segmentIds);
+    uniqueStaffIds = [...new Set((segStaffs ?? []).map((r) => r.staff_id))];
+  }
+  await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
+  if (uniqueStaffIds.length > 0) {
+    await supabaseAdmin.from('shift_staffs').insert(
+      uniqueStaffIds.map((staff_id) => ({ shift_id: shiftId, staff_id }))
+    );
+  }
 }
 
 export async function deleteShiftSegment(orgId: string, segmentId: string): Promise<void> {
