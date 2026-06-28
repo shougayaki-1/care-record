@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import {
-    Box, Typography, Paper, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
+    Box, Typography, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
     FormControlLabel, Radio, RadioGroup, LinearProgress,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem, Alert
 } from '@/components/ui/mui';
@@ -480,7 +480,7 @@ export default function ShiftManagePage() {
                                         {repairingFromBanner ? '修復中...' : '同期を修復する'}
                                     </Button>
                                 }
-                                sx={{ mb: 2, borderRadius: 3, boxShadow: 'none', border: '1px solid', borderColor: 'warning.light' }}
+                                sx={{ mb: 2, borderRadius: 1, boxShadow: 'none', border: '1px solid', borderColor: 'warning.light' }}
                             >
                                 Googleカレンダーと同期されていない予定が <strong>{unsyncedCount} 件</strong> あります。前回の自動展開が途中で中断された場合はこちらから同期を再開できます。
                             </Alert>
@@ -529,7 +529,7 @@ export default function ShiftManagePage() {
 
                         {canUseOrgWideTabs && (
                             <Box sx={{ display: activeTab === 'patterns' ? 'block' : 'none' }}>
-                                <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: 'background.tint', borderColor: 'divider' }}>
+                                <Box sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: 'background.tint', borderTop: 1, borderBottom: 1, borderColor: 'divider' }}>
                                     <Typography variant="body2" sx={{ fontWeight: '500' }}>登録したひな形をベースに、指定月のカレンダーへシフトを一括展開・同期します。</Typography>
                                     <Stack direction="row" spacing={1.5} alignItems="center">
                                         <MonthField size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} />
@@ -540,10 +540,10 @@ export default function ShiftManagePage() {
                                             一括消去する
                                         </Button>
                                     </Stack>
-                                </Paper>
+                                </Box>
 
                                 <Typography variant="subtitle1" fontWeight="bold" mb={2}>登録済みのひな形パターン一覧</Typography>
-                                <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, mb: 4 }}>
+                                <TableContainer sx={{ borderRadius: 1, mb: 4 }}>
                                     <Table>
                                         <TableHead sx={{ bgcolor: 'background.subtle' }}>
                                             <TableRow>
@@ -612,20 +612,20 @@ export default function ShiftManagePage() {
             </Box>
 
             {syncProgress && (
-                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'background.paper', p: 2.5, borderRadius: 3, boxShadow: 3, zIndex: 9999, border: '1px solid', borderColor: 'divider', minWidth: 280 }}>
+                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'background.paper', p: 2.5, borderRadius: 1, boxShadow: 3, zIndex: 9999, border: '1px solid', borderColor: 'divider', minWidth: 280 }}>
                     <Typography variant="body2" fontWeight="bold" gutterBottom>Googleカレンダー同期中...</Typography>
                     <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                         {syncProgress.currentName}
                     </Typography>
                     {syncProgress.total > 1 ? (
                         <>
-                            <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 3 }} />
+                            <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 1 }} />
                             <Typography variant="caption" sx={{ mt: 0.5, display: 'block', textAlign: 'right', fontWeight: 'bold' }}>
                                 {syncProgress.current} / {syncProgress.total} 件完了
                             </Typography>
                         </>
                     ) : (
-                        <LinearProgress sx={{ height: 6, borderRadius: 3 }} />
+                        <LinearProgress sx={{ height: 6, borderRadius: 1 }} />
                     )}
                 </Box>
             )}

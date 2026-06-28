@@ -15,7 +15,8 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { InnerPageHeader } from '@/components/ui';
+import { InnerPageHeader, PageLayout } from '@/components/ui';
+import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 
 type Report = {
     id: string; start_at: string; status: 'pending' | 'approved' | 'remanded'; helper_id?: string | null;
@@ -144,7 +145,7 @@ export default function HistoryPage() {
     if (wsLoading || !currentOrg) return null;
 
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <PageLayout>
             <InnerPageHeader
                 icon={<HistoryIcon />}
                 title="履歴"
@@ -178,8 +179,8 @@ export default function HistoryPage() {
                                                         {new Date(report.start_at).toLocaleDateString()} {new Date(report.start_at).getHours()}:{String(new Date(report.start_at).getMinutes()).padStart(2,'0')}
                                                     </Typography>
                                                     <Chip 
-                                                        label={report.status === 'approved' ? '承認済' : report.status === 'remanded' ? '差戻し' : '未承認'} 
-                                                        color={report.status === 'approved' ? 'success' : report.status === 'remanded' ? 'error' : 'warning'} 
+                                                        label={getReportStatusLabel(report.status)} 
+                                                        color={getReportStatusChipColor(report.status)} 
                                                         size="small" sx={{ height: 20, fontSize: '0.7rem' }}
                                                     />
                                                 </Box>
@@ -218,6 +219,6 @@ export default function HistoryPage() {
                     </Paper>
                 )}
             </Box>
-        </Box>
+        </PageLayout>
     );
 }

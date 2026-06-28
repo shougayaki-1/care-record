@@ -18,6 +18,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
 import { convertToCalendarEvents } from '@/utils/shiftHelper';
+import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 
 type ViewMode = 'list' | 'calendar';
 
@@ -28,13 +29,6 @@ const ShiftCalendarViewer = dynamic(
     loading: () => <Box display="flex" justifyContent="center" pt={8}><CircularProgress /></Box>,
   }
 );
-
-const REPORT_STATUS_LABELS: Record<string, { label: string; color: 'default' | 'primary' | 'warning' | 'success' | 'error' }> = {
-  draft:    { label: '下書き',   color: 'primary' },
-  pending:  { label: '送信済み', color: 'warning' },
-  approved: { label: '承認済み', color: 'success' },
-  remanded: { label: '差戻し',   color: 'error' },
-};
 
 function formatDateLabel(startAt: string): string {
   const d = new Date(startAt);
@@ -58,7 +52,7 @@ function ShiftListItem({
 }) {
   const isCancelled = shift.status === 'cancelled';
   const clientName = shift.clients?.name ?? '';
-  const statusInfo = shift.report ? REPORT_STATUS_LABELS[shift.report.status] : null;
+  const reportStatus = shift.report?.status;
 
   return (
     <Paper
@@ -92,8 +86,8 @@ function ShiftListItem({
       <Stack direction="row" alignItems="center" spacing={0.5} sx={{ flexShrink: 0 }}>
         {isCancelled ? (
           <Chip label="キャンセル" size="small" color="default" variant="outlined" />
-        ) : statusInfo ? (
-          <Chip label={statusInfo.label} size="small" color={statusInfo.color} />
+        ) : reportStatus ? (
+          <Chip label={getReportStatusLabel(reportStatus)} size="small" color={getReportStatusChipColor(reportStatus)} />
         ) : (
           <Chip label="未記録" size="small" color="default" variant="outlined" icon={<EditNoteIcon />} />
         )}

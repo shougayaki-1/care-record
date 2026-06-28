@@ -14,9 +14,10 @@ import TodayIcon from '@mui/icons-material/Today';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { InnerPageHeader } from '@/components/ui';
+import { InnerPageHeader, PageLayout } from '@/components/ui';
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
 import { checkRecordPermission, checkShiftPermission } from '@/utils/permissions';
+import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 
 type Client = { id: string; name: string; };
 type DraftReport = { id: string; created_at: string; };
@@ -107,7 +108,7 @@ export default function RecordSelectPage() {
     const canCreateAnyRecord = currentOrg ? checkRecordPermission(currentOrg.effectivePermissions, 'create', true) : false;
 
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <PageLayout>
             <InnerPageHeader icon={<EditNoteIcon />} title="記録を作成" />
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
@@ -126,7 +127,7 @@ export default function RecordSelectPage() {
                                                 <Box display="flex" alignItems="center" gap={1} mb={0.5} flexWrap="wrap">
                                                     <Chip label={formatShiftTime(shift.start_at, shift.end_at)} color="primary" variant="outlined" size="small" />
                                                     {shift.report && (
-                                                        <Chip label={shift.report.status === 'draft' ? '作成中' : shift.report.status === 'approved' ? '承認済' : shift.report.status === 'remanded' ? '差戻し' : '送信済'} color={shift.report.status === 'remanded' ? 'error' : shift.report.status === 'approved' ? 'success' : 'warning'} size="small" />
+                                                        <Chip label={getReportStatusLabel(shift.report.status)} color={getReportStatusChipColor(shift.report.status)} size="small" />
                                                     )}
                                                 </Box>
                                                 <Typography variant="h6" fontWeight="bold" sx={{ overflowWrap: 'anywhere', lineHeight: 1.3 }}>
@@ -153,7 +154,7 @@ export default function RecordSelectPage() {
                         const drafts = clientDrafts[client.id] || [];
                         return (
                             <Box key={client.id}>
-                                <Card variant="outlined" sx={{ borderRadius: 3 }}>
+                                <Card variant="outlined" sx={{ borderRadius: 1 }}>
                                     <CardActionArea onClick={() => router.push(`/app/record/${client.id}`)} sx={{ p: { xs: 1.5, sm: 2 } }}>
                                         <Box display="flex" alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" gap={1.5}>
                                             <Box display="flex" alignItems="center" gap={1.5} minWidth={0}>
@@ -175,7 +176,7 @@ export default function RecordSelectPage() {
                                                 <CardActionArea onClick={() => router.push(`/app/record/${client.id}?reportId=${draft.id}`)} sx={{ p: 1.5 }}>
                                                     <Stack spacing={0.5}>
                                                         <Box display="flex" alignItems="center" gap={1}>
-                                                            <Chip label="作成中" color="warning" size="small" sx={{ height: 20, fontSize: '0.7rem' }} />
+                                                            <Chip label={getReportStatusLabel('draft')} color={getReportStatusChipColor('draft')} size="small" sx={{ height: 20, fontSize: '0.7rem' }} />
                                                         </Box>
                                                         <Box display="flex" alignItems="center" gap={0.5} color="text.secondary">
                                                             <AccessTimeIcon sx={{ fontSize: 16 }} />
@@ -200,6 +201,6 @@ export default function RecordSelectPage() {
                     )}
                 </Stack>
             </Box>
-        </Box>
+        </PageLayout>
     );
 }

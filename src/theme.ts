@@ -39,7 +39,7 @@ export const designTokens = {
   },
   radius: {
     control: 8,
-    card: 12,
+    card: 8,
     dialog: 28,
     chip: 8,
   },
@@ -103,11 +103,23 @@ const theme = createTheme({
     },
     MuiPaper: {
       defaultProps: { elevation: 0 },
-      styleOverrides: { root: { backgroundImage: 'none', boxShadow: 'none' } },
+      styleOverrides: {
+        root: {
+          backgroundImage: 'none',
+          boxShadow: 'none',
+          borderRadius: designTokens.radius.card,
+        },
+      },
     },
     MuiCard: {
       defaultProps: { variant: 'outlined' },
-      styleOverrides: { root: { borderColor: designTokens.border.default, boxShadow: 'none' } },
+      styleOverrides: {
+        root: {
+          borderColor: designTokens.border.default,
+          borderRadius: designTokens.radius.card,
+          boxShadow: 'none',
+        },
+      },
     },
     MuiDialog: {
       defaultProps: { fullWidth: true },
@@ -133,7 +145,13 @@ const theme = createTheme({
       },
     },
     MuiTableContainer: {
-      styleOverrides: { root: { boxShadow: 'none' } },
+      styleOverrides: {
+        root: {
+          backgroundColor: designTokens.surface.paper,
+          boxShadow: 'none',
+          borderRadius: 0,
+        },
+      },
     },
     MuiAppBar: {
       defaultProps: { elevation: 0, color: 'inherit' },

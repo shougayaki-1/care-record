@@ -18,7 +18,7 @@ import {
     isActiveGoogleEvent, choosePrimaryGoogleEvent,
 } from '@/utils/googleSync';
 import {
-    buildPatternRuleString, isOvernightShift, computeOccurrenceDateTimes,
+    buildPatternRuleString, isOvernightShift, computeOccurrenceDateTimes, computeOccurrenceSegmentDateTimes,
     patternDateKey, jstDateStrFromStartAt, jstDateStrFromOccurrence,
 } from '@/utils/shiftRecurrence';
 
@@ -78,7 +78,21 @@ export type ShiftPatternPayload = {
     endTime: string;
     rrule: string;
     staffIds: string[];
+    segments?: ShiftPatternSegmentInput[];
     autoAssign?: boolean;
+};
+
+export type ShiftPatternSegmentStaffInput = {
+    staff_id: string;
+    staff_role_id?: string | null;
+};
+
+export type ShiftPatternSegmentInput = {
+    service_type_id?: string | null;
+    start_time: string;
+    end_time: string;
+    sort_order?: number;
+    staffs: ShiftPatternSegmentStaffInput[];
 };
 
 /** 指定スタッフを利用者の担当者として upsert する（既存エントリは変更しない） */
@@ -102,8 +116,193 @@ async function upsertAssignmentsForStaffs(organizationId: string, clientId: stri
     if (upsertError) throw upsertError;
 }
 
+function normalizeTimeForDb(time: string): string {
+    if (!time) return time;
+    return time.length === 5 ? `${time}:00` : time;
+}
+
+function uniqueStaffIdsFromSegments(segments: ShiftPatternSegmentInput[] | undefined, fallbackStaffIds: string[]): string[] {
+    const ids = new Set<string>();
+    for (const segment of segments ?? []) {
+        for (const staff of segment.staffs ?? []) {
+            if (staff.staff_id) ids.add(staff.staff_id);
+        }
+    }
+    if (ids.size === 0) fallbackStaffIds.forEach((id) => ids.add(id));
+    return Array.from(ids);
+}
+
+function normalizePatternSegments(payload: ShiftPatternPayload): ShiftPatternSegmentInput[] {
+    const inputSegments = (payload.segments ?? []).filter((segment) => segment.start_time && segment.end_time);
+    const segments = inputSegments.length > 0
+        ? inputSegments
+        : [{
+            service_type_id: null,
+            start_time: payload.startTime,
+            end_time: payload.endTime,
+            staffs: payload.staffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: null })),
+        }];
+
+    return segments.map((segment, index) => ({
+        service_type_id: segment.service_type_id || null,
+        start_time: normalizeTimeForDb(segment.start_time),
+        end_time: normalizeTimeForDb(segment.end_time),
+        sort_order: index,
+        staffs: (segment.staffs ?? [])
+            .filter((staff) => Boolean(staff.staff_id))
+            .map((staff) => ({
+                staff_id: staff.staff_id,
+                staff_role_id: staff.staff_role_id || null,
+            })),
+    }));
+}
+
+async function replacePatternStaffs(patternId: string, staffIds: string[]) {
+    await supabaseAdmin.from('shift_pattern_staffs').delete().eq('pattern_id', patternId);
+    if (staffIds.length > 0) {
+        const inserts: PatternStaffInsert[] = staffIds.map(sid => ({ pattern_id: patternId, staff_id: sid }));
+        const { error } = await supabaseAdmin.from('shift_pattern_staffs').insert(inserts);
+        if (error) throw error;
+    }
+}
+
+async function replaceShiftStaffs(shiftId: string, staffIds: string[]) {
+    await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
+    if (staffIds.length > 0) {
+        const staffInserts: ShiftStaffInsert[] = staffIds.map(sid => ({ shift_id: shiftId, staff_id: sid }));
+        const { error } = await supabaseAdmin.from('shift_staffs').insert(staffInserts);
+        if (error) throw error;
+    }
+}
+
+async function savePatternSegments(patternId: string, segments: ShiftPatternSegmentInput[]) {
+    const normalizedSegments = segments.map((segment, index) => ({
+        ...segment,
+        start_time: normalizeTimeForDb(segment.start_time),
+        end_time: normalizeTimeForDb(segment.end_time),
+        sort_order: index,
+    }));
+
+    const { error: deleteError } = await supabaseAdmin
+        .from('shift_pattern_segments')
+        .delete()
+        .eq('pattern_id', patternId);
+    if (deleteError) throw deleteError;
+
+    if (normalizedSegments.length === 0) return;
+
+    const { data: inserted, error: insertError } = await supabaseAdmin
+        .from('shift_pattern_segments')
+        .insert(normalizedSegments.map((segment) => ({
+            pattern_id: patternId,
+            service_type_id: segment.service_type_id || null,
+            start_time: segment.start_time,
+            end_time: segment.end_time,
+            sort_order: segment.sort_order ?? 0,
+        })))
+        .select('id');
+    if (insertError || !inserted) throw insertError;
+
+    const staffRows = inserted.flatMap((segment, index) =>
+        (normalizedSegments[index].staffs ?? [])
+            .filter((staff) => Boolean(staff.staff_id))
+            .map((staff) => ({
+                segment_id: segment.id,
+                staff_id: staff.staff_id,
+                staff_role_id: staff.staff_role_id || null,
+            }))
+    );
+
+    if (staffRows.length > 0) {
+        const { error: staffError } = await supabaseAdmin
+            .from('shift_pattern_segment_staffs')
+            .insert(staffRows);
+        if (staffError) throw staffError;
+    }
+}
+
+async function saveShiftSegmentsFromPattern(
+    shiftId: string,
+    patternSegments: PatternSegmentRow[] | null | undefined,
+    occurrence: { year: number; month: number; day: number; parentStartTime: string; parentEndTime: string },
+    fallbackStaffIds: string[],
+) {
+    const sourceSegments = (patternSegments && patternSegments.length > 0)
+        ? patternSegments
+        : [{
+            id: '',
+            pattern_id: '',
+            service_type_id: null,
+            start_time: occurrence.parentStartTime,
+            end_time: occurrence.parentEndTime,
+            sort_order: 0,
+            shift_pattern_segment_staffs: fallbackStaffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: null })),
+        }];
+
+    const { error: deleteError } = await supabaseAdmin
+        .from('shift_segments')
+        .delete()
+        .eq('shift_id', shiftId);
+    if (deleteError) throw deleteError;
+
+    const segmentRows = sourceSegments.map((segment, index) => {
+        const { startAt, endAt } = computeOccurrenceSegmentDateTimes(
+            occurrence.year,
+            occurrence.month,
+            occurrence.day,
+            occurrence.parentStartTime,
+            occurrence.parentEndTime,
+            segment.start_time,
+            segment.end_time,
+        );
+        return {
+            shift_id: shiftId,
+            service_type_id: segment.service_type_id ?? null,
+            start_at: startAt,
+            end_at: endAt,
+            sort_order: index,
+        };
+    });
+
+    const { data: inserted, error: insertError } = await supabaseAdmin
+        .from('shift_segments')
+        .insert(segmentRows)
+        .select('id');
+    if (insertError || !inserted) throw insertError;
+
+    const staffRows = inserted.flatMap((segment, index) =>
+        (sourceSegments[index].shift_pattern_segment_staffs ?? [])
+            .filter((staff) => Boolean(staff.staff_id))
+            .map((staff) => ({
+                segment_id: segment.id,
+                staff_id: staff.staff_id,
+                staff_role_id: staff.staff_role_id ?? null,
+            }))
+    );
+
+    if (staffRows.length > 0) {
+        const { error: staffError } = await supabaseAdmin
+            .from('shift_segment_staffs')
+            .insert(staffRows);
+        if (staffError) throw staffError;
+    }
+}
+
 type ShiftStaffInsert = { shift_id: string; staff_id: string; };
 type PatternStaffInsert = { pattern_id: string; staff_id: string; };
+
+type PatternSegmentRow = {
+    id: string;
+    pattern_id: string;
+    service_type_id: string | null;
+    start_time: string;
+    end_time: string;
+    sort_order: number;
+    shift_pattern_segment_staffs?: Array<{
+        staff_id: string;
+        staff_role_id: string | null;
+    }>;
+};
 
 type ShiftUpdateData = {
     title?: string;
@@ -649,10 +848,7 @@ async function createShiftInternal(payload: ShiftPayload, awaitSync: boolean | '
 
         if (shiftError || !shift) throw new Error(shiftError?.message);
 
-        if (payload.staffIds.length > 0) {
-            const staffInserts: ShiftStaffInsert[] = payload.staffIds.map(sid => ({ shift_id: shift.id, staff_id: sid }));
-            await supabaseAdmin.from('shift_staffs').insert(staffInserts);
-        }
+        await replaceShiftStaffs(shift.id, payload.staffIds);
 
         if (awaitSync === 'skip') {
             // カレンダーへの同期を意図的に完全にスキップ（一括展開などのパフォーマンス・レート制限対策用）
@@ -701,9 +897,7 @@ async function updateShiftInternal(shiftId: string, payload: Partial<ShiftPayloa
         }
 
         if (payload.staffIds !== undefined) {
-            await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
-            const staffInserts: ShiftStaffInsert[] = payload.staffIds.map(sid => ({ shift_id: shiftId, staff_id: sid }));
-            if (staffInserts.length > 0) await supabaseAdmin.from('shift_staffs').insert(staffInserts);
+            await replaceShiftStaffs(shiftId, payload.staffIds);
             await supabaseAdmin.from('shifts').update({
                 google_sync_status: 'pending_upsert',
                 google_sync_error: null,
@@ -840,7 +1034,21 @@ export async function getShiftPatterns(organizationId: string) {
         end_time,
         rrule,
         clients (id, name),
-        shift_pattern_staffs (staff_id, staffs (name))
+        shift_pattern_staffs (staff_id, staffs (name)),
+        shift_pattern_segments (
+            id,
+            service_type_id,
+            start_time,
+            end_time,
+            sort_order,
+            service_type:service_types (id, name),
+            shift_pattern_segment_staffs (
+                staff_id,
+                staff_role_id,
+                staff:staffs (id, name),
+                staff_role:staff_roles (id, name, is_unpaid)
+            )
+        )
     `).eq('organization_id', organizationId).is('deleted_at', null).order('start_time', { ascending: true });
     if (error) throw error;
     return data;
@@ -848,20 +1056,20 @@ export async function getShiftPatterns(organizationId: string) {
 
 export async function createShiftPattern(payload: ShiftPatternPayload) {
     const actor = await assertShiftPermission(payload.organizationId, 'create', { clientId: payload.clientId });
+    const segments = normalizePatternSegments(payload);
+    const staffIds = uniqueStaffIdsFromSegments(segments, payload.staffIds);
     const { data: pattern, error } = await supabaseAdmin.from('shift_patterns').insert({
         organization_id: payload.organizationId, client_id: payload.clientId, title: payload.title,
         start_time: payload.startTime, end_time: payload.endTime, rrule: payload.rrule
     }).select('id').single();
     if (error || !pattern) throw error;
 
-    if (payload.staffIds.length > 0) {
-        const inserts: PatternStaffInsert[] = payload.staffIds.map(sid => ({ pattern_id: pattern.id, staff_id: sid }));
-        await supabaseAdmin.from('shift_pattern_staffs').insert(inserts);
-    }
+    await replacePatternStaffs(pattern.id, staffIds);
+    await savePatternSegments(pattern.id, segments);
 
     // 自動アサイン: ひな形作成時に選択スタッフを assignments に登録（チェックボックス ON 時のみ）
-    if (payload.autoAssign && payload.staffIds.length > 0) {
-        await upsertAssignmentsForStaffs(payload.organizationId, payload.clientId, payload.staffIds);
+    if (payload.autoAssign && staffIds.length > 0) {
+        await upsertAssignmentsForStaffs(payload.organizationId, payload.clientId, staffIds);
     }
 
     await recordAuditEvent({ organizationId: payload.organizationId, actorId: actor.userId, action: 'shift_pattern.create', resourceType: 'shift_pattern', resourceId: pattern.id });
@@ -873,6 +1081,8 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
     if (!existing?.organization_id) throw new Error('シフトひな形が見つかりません');
     const actor = await assertShiftPermission(existing.organization_id, 'edit', { patternId, clientId: payload.clientId });
     try {
+        const segments = normalizePatternSegments(payload);
+        const staffIds = uniqueStaffIdsFromSegments(segments, payload.staffIds);
         const { error } = await supabaseAdmin.from('shift_patterns').update({
             client_id: payload.clientId,
             title: payload.title,
@@ -883,12 +1093,8 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
         }).eq('id', patternId);
         if (error) throw error;
 
-        await supabaseAdmin.from('shift_pattern_staffs').delete().eq('pattern_id', patternId);
-
-        if (payload.staffIds.length > 0) {
-            const inserts: PatternStaffInsert[] = payload.staffIds.map(sid => ({ pattern_id: patternId, staff_id: sid }));
-            await supabaseAdmin.from('shift_pattern_staffs').insert(inserts);
-        }
+        await replacePatternStaffs(patternId, staffIds);
+        await savePatternSegments(patternId, segments);
         await recordAuditEvent({ organizationId: actor.organizationId, actorId: actor.userId, action: 'shift_pattern.update', resourceType: 'shift_pattern', resourceId: patternId });
         return { success: true };
     } catch (error) {
@@ -953,7 +1159,17 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
 
     try {
         const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
-            *, shift_pattern_staffs(staff_id)
+            *,
+            shift_pattern_staffs(staff_id),
+            shift_pattern_segments(
+                id,
+                pattern_id,
+                service_type_id,
+                start_time,
+                end_time,
+                sort_order,
+                shift_pattern_segment_staffs(staff_id, staff_role_id)
+            )
         `).eq('organization_id', organizationId).is('deleted_at', null);
 
         if (!patterns || patterns.length === 0) return { total: 0, details: [] };
@@ -1043,7 +1259,23 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 const mm = dateJST.getUTCMonth() + 1;
                 const dd = dateJST.getUTCDate();
 
-                const staffIds = p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
+                const patternSegments = ((p.shift_pattern_segments ?? []) as PatternSegmentRow[])
+                    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+                const segmentStaffIds = uniqueStaffIdsFromSegments(
+                    patternSegments.map((segment) => ({
+                        service_type_id: segment.service_type_id,
+                        start_time: segment.start_time,
+                        end_time: segment.end_time,
+                        staffs: (segment.shift_pattern_segment_staffs ?? []).map((staff) => ({
+                            staff_id: staff.staff_id,
+                            staff_role_id: staff.staff_role_id,
+                        })),
+                    })),
+                    []
+                );
+                const staffIds = segmentStaffIds.length > 0
+                    ? segmentStaffIds
+                    : p.shift_pattern_staffs.map((s: { staff_id: string }) => s.staff_id);
                 const baseJstDateStr = jstDateStrFromOccurrence(dateJST);
 
                 const { startAt, endAt } = computeOccurrenceDateTimes(yy, mm, dd, p.start_time, p.end_time);
@@ -1064,13 +1296,29 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 if (existNormal) {
                     if (!existNormal.is_modified) {
                         // org は冒頭で検証済みのため内部実装を直接呼ぶ（多数回の getUser を回避）
-                        tasks.push(() => updateShiftInternal(existNormal.id, payload, 'skip'));
+                        tasks.push(async () => {
+                            await updateShiftInternal(existNormal.id, payload, 'skip');
+                            await saveShiftSegmentsFromPattern(
+                                existNormal.id,
+                                patternSegments,
+                                { year: yy, month: mm, day: dd, parentStartTime: p.start_time, parentEndTime: p.end_time },
+                                staffIds,
+                            );
+                        });
                         updatedCount++;
                     } else {
                         skippedCount++;
                     }
                 } else {
-                    tasks.push(() => createShiftInternal({ ...payload, patternId: p.id }, 'skip'));
+                    tasks.push(async () => {
+                        const created = await createShiftInternal({ ...payload, patternId: p.id }, 'skip');
+                        await saveShiftSegmentsFromPattern(
+                            created.shiftId,
+                            patternSegments,
+                            { year: yy, month: mm, day: dd, parentStartTime: p.start_time, parentEndTime: p.end_time },
+                            staffIds,
+                        );
+                    });
                     createdCount++;
                 }
             }

@@ -14,6 +14,21 @@ import { buildFloatingDate, buildJstIsoString } from './googleSync';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
+const addDaysUtc = (year: number, month: number, day: number, days: number) => {
+    const date = new Date(Date.UTC(year, month - 1, day));
+    date.setUTCDate(date.getUTCDate() + days);
+    return {
+        year: date.getUTCFullYear(),
+        month: date.getUTCMonth() + 1,
+        day: date.getUTCDate(),
+    };
+};
+
+const minutesOfDay = (timeStr: string): number => {
+    const { hour, minute } = parseHourMinute(timeStr);
+    return hour * 60 + minute;
+};
+
 /** "09:30" -> { hour: 9, minute: 30 } */
 export function parseHourMinute(timeStr: string): { hour: number; minute: number } {
     const [hour, minute] = timeStr.split(':').map(Number);
@@ -73,6 +88,42 @@ export function computeOccurrenceDateTimes(
         startAt: new Date(startAtStr).toISOString(),
         endAt: new Date(endAtStr).toISOString(),
         isOvernight: overnight,
+    };
+}
+
+/**
+ * ひな形内セグメントの時刻を、親シフト出現日の JST 日付へ合成する。
+ * 親シフトが夜勤の場合、親開始時刻より前のセグメント開始は翌日扱いにする。
+ */
+export function computeOccurrenceSegmentDateTimes(
+    year: number,
+    month: number,
+    day: number,
+    parentStartTime: string,
+    parentEndTime: string,
+    segmentStartTime: string,
+    segmentEndTime: string,
+): { startAt: string; endAt: string; isOvernight: boolean } {
+    const parentOvernight = isOvernightShift(parentStartTime, parentEndTime);
+    const parentStartMinutes = minutesOfDay(parentStartTime);
+    const segmentStartMinutes = minutesOfDay(segmentStartTime);
+    const segmentEndMinutes = minutesOfDay(segmentEndTime);
+
+    const startDayOffset = parentOvernight && segmentStartMinutes < parentStartMinutes ? 1 : 0;
+    const endDayOffset = startDayOffset + (segmentEndMinutes <= segmentStartMinutes ? 1 : 0);
+
+    const startDate = addDaysUtc(year, month, day, startDayOffset);
+    const endDate = addDaysUtc(year, month, day, endDayOffset);
+    const start = parseHourMinute(segmentStartTime);
+    const end = parseHourMinute(segmentEndTime);
+
+    const startAtStr = buildJstIsoString(startDate.year, startDate.month, startDate.day, `${pad(start.hour)}:${pad(start.minute)}`);
+    const endAtStr = buildJstIsoString(endDate.year, endDate.month, endDate.day, `${pad(end.hour)}:${pad(end.minute)}`);
+
+    return {
+        startAt: new Date(startAtStr).toISOString(),
+        endAt: new Date(endAtStr).toISOString(),
+        isOvernight: endDayOffset > startDayOffset,
     };
 }
 

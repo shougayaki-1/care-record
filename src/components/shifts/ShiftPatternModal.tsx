@@ -4,9 +4,13 @@ import React, { useState, useEffect } from 'react';
 import {
     Stack, FormControl,
     Select, MenuItem, Box, Typography, Checkbox, FormGroup,
-    FormControlLabel
+    FormControlLabel, IconButton, Tooltip, InputLabel, Button, Chip
 } from '@/components/ui/mui';
-import { ShiftPatternPayload } from '@/app/actions/shift';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { ShiftPatternPayload, type ShiftPatternSegmentInput } from '@/app/actions/shift';
+import { getServiceTypes, type ServiceType } from '@/app/actions/serviceTypes';
+import { getStaffRoles, type StaffRole } from '@/app/actions/staffRoles';
 import { ClientData, StaffData } from './ShiftFormModal';
 import { useToast } from '@/components/ui/ToastProvider';
 import { AppButton, AppDialog, DateTimeField, MultiSelectField, SelectField } from '@/components/ui';
@@ -26,7 +30,22 @@ type Props = {
         end_time: string;
         rrule: string;
         shift_pattern_staffs: { staff_id: string }[];
+        shift_pattern_segments?: {
+            id: string;
+            service_type_id: string | null;
+            start_time: string;
+            end_time: string;
+            sort_order: number;
+            shift_pattern_segment_staffs: { staff_id: string; staff_role_id: string | null }[];
+        }[];
     } | null;
+};
+
+type SegmentDraft = {
+    service_type_id: string;
+    start_time: string;
+    end_time: string;
+    staffs: { staff_id: string; staff_role_id: string }[];
 };
 
 const parseRrule = (rruleStr: string) => {
@@ -77,13 +96,20 @@ const WEEKS_OF_MONTH = [
     { label: '第4', value: '4' }, { label: '第5', value: '5' }
 ];
 
+const normalizeTimeInput = (time: string) => time ? time.slice(0, 5) : '';
+
+const toPayloadTime = (time: string) => time.length === 5 ? `${time}:00` : time;
+
 export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, organizationId, initialData }: Props) => {
     const { showToast } = useToast();
     const [loading, setLoading] = useState(false);
+    const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
+    const [staffRoles, setStaffRoles] = useState<StaffRole[]>([]);
     const [clientId, setClientId] = useState('');
     const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
     const [startTime, setStartTime] = useState('10:00');
     const [endTime, setEndTime] = useState('12:00');
+    const [segments, setSegments] = useState<SegmentDraft[]>([]);
 
     const [freq, setFreq] = useState<'WEEKLY' | 'MONTHLY'>('WEEKLY');
     const [interval, setIntervalCount] = useState<number>(1);
@@ -93,11 +119,38 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
 
     useEffect(() => {
         if (open) {
+            Promise.all([getServiceTypes(organizationId), getStaffRoles(organizationId)])
+                .then(([types, roles]) => {
+                    setServiceTypes(types.filter(t => t.is_active));
+                    setStaffRoles(roles.filter(r => r.is_active));
+                })
+                .catch((error) => {
+                    console.error(error);
+                    showToast('区間設定の選択肢を読み込めませんでした', 'error');
+                });
             if (initialData) {
                 setClientId(initialData.client_id || '');
                 setSelectedStaffIds((initialData.shift_pattern_staffs || []).map((s) => s.staff_id));
                 setStartTime(initialData.start_time ? initialData.start_time.slice(0, 5) : '10:00');
                 setEndTime(initialData.end_time ? initialData.end_time.slice(0, 5) : '12:00');
+                const loadedSegments = (initialData.shift_pattern_segments ?? [])
+                    .slice()
+                    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+                    .map((segment) => ({
+                        service_type_id: segment.service_type_id ?? '',
+                        start_time: normalizeTimeInput(segment.start_time),
+                        end_time: normalizeTimeInput(segment.end_time),
+                        staffs: (segment.shift_pattern_segment_staffs ?? []).map((staff) => ({
+                            staff_id: staff.staff_id,
+                            staff_role_id: staff.staff_role_id ?? '',
+                        })),
+                    }));
+                setSegments(loadedSegments.length > 0 ? loadedSegments : [{
+                    service_type_id: '',
+                    start_time: initialData.start_time ? initialData.start_time.slice(0, 5) : '10:00',
+                    end_time: initialData.end_time ? initialData.end_time.slice(0, 5) : '12:00',
+                    staffs: (initialData.shift_pattern_staffs || []).map((s) => ({ staff_id: s.staff_id, staff_role_id: '' })),
+                }]);
 
                 const parsed = parseRrule(initialData.rrule || '');
                 setFreq(parsed.freq);
@@ -109,6 +162,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 setSelectedStaffIds([]);
                 setStartTime('10:00');
                 setEndTime('12:00');
+                setSegments([]);
                 setFreq('WEEKLY');
                 setIntervalCount(1);
                 setSelectedDays([]);
@@ -116,11 +170,35 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 setAutoAssign(true);
             }
         }
-    }, [open, initialData]);
+    }, [open, initialData, organizationId, showToast]);
+
+    useEffect(() => {
+        if (segments.length > 0) return;
+        if (selectedStaffIds.length === 0) return;
+        setSegments([{
+            service_type_id: '',
+            start_time: startTime,
+            end_time: endTime,
+            staffs: selectedStaffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: '' })),
+        }]);
+    }, [segments.length, selectedStaffIds, startTime, endTime]);
 
     const handleSave = async () => {
-        if (!clientId || !startTime || !endTime || selectedStaffIds.length === 0 || selectedDays.length === 0) {
+        const normalizedSegments = segments.length > 0 ? segments : [{
+            service_type_id: '',
+            start_time: startTime,
+            end_time: endTime,
+            staffs: selectedStaffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: '' })),
+        }];
+        const segmentStaffIds = Array.from(new Set(normalizedSegments.flatMap((segment) => segment.staffs.map((staff) => staff.staff_id).filter(Boolean))));
+        const effectiveStaffIds = segmentStaffIds.length > 0 ? segmentStaffIds : selectedStaffIds;
+
+        if (!clientId || !startTime || !endTime || effectiveStaffIds.length === 0 || selectedDays.length === 0) {
             showToast('必須項目（利用者、担当スタッフ、時間、繰り返し条件）をすべて指定してください', 'warning');
+            return;
+        }
+        if (normalizedSegments.some((segment) => !segment.start_time || !segment.end_time || segment.staffs.filter((staff) => staff.staff_id).length === 0)) {
+            showToast('各区間の時間と担当スタッフを指定してください', 'warning');
             return;
         }
 
@@ -139,7 +217,19 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
         setLoading(true);
         try {
             const clientName = clients.find(c => c.id === clientId)?.name || '';
-            const staffNames = staffs.filter(s => selectedStaffIds.includes(s.id)).map(s => s.name).join(', ');
+            const staffNames = staffs.filter(s => effectiveStaffIds.includes(s.id)).map(s => s.name).join(', ');
+            const payloadSegments: ShiftPatternSegmentInput[] = normalizedSegments.map((segment, index) => ({
+                service_type_id: segment.service_type_id || null,
+                start_time: toPayloadTime(segment.start_time),
+                end_time: toPayloadTime(segment.end_time),
+                sort_order: index,
+                staffs: segment.staffs
+                    .filter((staff) => Boolean(staff.staff_id))
+                    .map((staff) => ({
+                        staff_id: staff.staff_id,
+                        staff_role_id: staff.staff_role_id || null,
+                    })),
+            }));
 
             await onSave({
                 organizationId,
@@ -148,7 +238,8 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 startTime: startTime.length === 5 ? `${startTime}:00` : startTime,
                 endTime: endTime.length === 5 ? `${endTime}:00` : endTime,
                 rrule: rruleStr,
-                staffIds: selectedStaffIds,
+                staffIds: effectiveStaffIds,
+                segments: payloadSegments,
                 autoAssign: !initialData ? autoAssign : false,
             }, initialData?.id);
             onClose();
@@ -163,6 +254,42 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
     const toggleArrayItem = (array: string[], setArray: (val: string[]) => void, item: string) => {
         if (array.includes(item)) setArray(array.filter(i => i !== item));
         else setArray([...array, item]);
+    };
+
+    const handleDefaultStaffChange = (staffIds: string[]) => {
+        const previousStaffIds = selectedStaffIds;
+        setSelectedStaffIds(staffIds);
+        setSegments(prev => {
+            if (prev.length !== 1) return prev;
+            const currentIds = prev[0].staffs.map((staff) => staff.staff_id).filter(Boolean);
+            const isDefaultStaffs = currentIds.length === previousStaffIds.length
+                && currentIds.every((id) => previousStaffIds.includes(id));
+            if (!isDefaultStaffs) return prev;
+            return [{
+                ...prev[0],
+                staffs: staffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: '' })),
+            }];
+        });
+    };
+
+    const updateSegment = (idx: number, patch: Partial<SegmentDraft>) => {
+        setSegments(prev => prev.map((segment, index) => index === idx ? { ...segment, ...patch } : segment));
+    };
+
+    const addSegment = () => {
+        setSegments(prev => [
+            ...prev,
+            {
+                service_type_id: '',
+                start_time: prev.length > 0 ? prev[prev.length - 1].end_time : startTime,
+                end_time: endTime,
+                staffs: selectedStaffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: '' })),
+            },
+        ]);
+    };
+
+    const removeSegment = (idx: number) => {
+        setSegments(prev => prev.filter((_, index) => index !== idx));
     };
 
     return (
@@ -188,7 +315,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                         label="担当スタッフ（複数選択可）"
                         options={staffs}
                         value={staffs.filter((staff) => selectedStaffIds.includes(staff.id))}
-                        onChange={(selected) => setSelectedStaffIds(selected.map((staff) => staff.id))}
+                        onChange={(selected) => handleDefaultStaffChange(selected.map((staff) => staff.id))}
                         getOptionLabel={(staff) => staff.name}
                         getOptionValue={(staff) => staff.id}
                     />
@@ -231,6 +358,131 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                             onChange={(e) => setEndTime(e.target.value)}
                         />
                     </Stack>
+
+                    <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
+                        <Stack direction="row" alignItems="center" justifyContent="space-between" mb={2}>
+                            <Typography variant="subtitle2" fontWeight="bold">サービス区間</Typography>
+                            <Button size="small" startIcon={<AddIcon />} onClick={addSegment}>
+                                区間を追加
+                            </Button>
+                        </Stack>
+                        <Stack spacing={2}>
+                            {segments.length === 0 ? (
+                                <Typography variant="body2" color="text.secondary">
+                                    保存時に基本時間と担当スタッフから1区間を作成します。
+                                </Typography>
+                            ) : segments.map((seg, idx) => (
+                                <Box key={idx} p={2} border="1px solid" borderColor="divider" borderRadius={1.5} bgcolor="background.paper">
+                                    <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1.5}>
+                                        <Typography variant="caption" fontWeight="bold">区間 {idx + 1}</Typography>
+                                        <Tooltip title="この区間を削除">
+                                            <span>
+                                                <IconButton size="small" color="error" onClick={() => removeSegment(idx)} disabled={segments.length <= 1}>
+                                                    <DeleteIcon fontSize="small" />
+                                                </IconButton>
+                                            </span>
+                                        </Tooltip>
+                                    </Stack>
+
+                                    <Stack spacing={1.5}>
+                                        <FormControl fullWidth size="small">
+                                            <InputLabel>サービス種別</InputLabel>
+                                            <Select
+                                                label="サービス種別"
+                                                value={seg.service_type_id}
+                                                onChange={(e) => updateSegment(idx, { service_type_id: e.target.value })}
+                                            >
+                                                <MenuItem value=""><em>未設定</em></MenuItem>
+                                                {serviceTypes.map((type) => (
+                                                    <MenuItem key={type.id} value={type.id}>{type.name}</MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
+
+                                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                                            <DateTimeField
+                                                kind="time"
+                                                label="区間開始"
+                                                fullWidth
+                                                size="small"
+                                                value={seg.start_time}
+                                                onChange={(e) => updateSegment(idx, { start_time: e.target.value })}
+                                            />
+                                            <DateTimeField
+                                                kind="time"
+                                                label="区間終了"
+                                                fullWidth
+                                                size="small"
+                                                value={seg.end_time}
+                                                onChange={(e) => updateSegment(idx, { end_time: e.target.value })}
+                                            />
+                                        </Stack>
+
+                                        <Box>
+                                            <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
+                                                スタッフと役割
+                                            </Typography>
+                                            <Stack spacing={1}>
+                                                {seg.staffs.map((staff, staffIdx) => (
+                                                    <Stack key={staffIdx} direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                                                        <FormControl size="small" sx={{ minWidth: 160, flex: 1 }}>
+                                                            <InputLabel>スタッフ</InputLabel>
+                                                            <Select
+                                                                label="スタッフ"
+                                                                value={staff.staff_id}
+                                                                onChange={(e) => {
+                                                                    const next = [...seg.staffs];
+                                                                    next[staffIdx] = { ...next[staffIdx], staff_id: e.target.value };
+                                                                    updateSegment(idx, { staffs: next });
+                                                                }}
+                                                            >
+                                                                {staffs.map((option) => (
+                                                                    <MenuItem key={option.id} value={option.id}>{option.name}</MenuItem>
+                                                                ))}
+                                                            </Select>
+                                                        </FormControl>
+                                                        <FormControl size="small" sx={{ minWidth: 150, flex: 1 }}>
+                                                            <InputLabel>役割</InputLabel>
+                                                            <Select
+                                                                label="役割"
+                                                                value={staff.staff_role_id}
+                                                                onChange={(e) => {
+                                                                    const next = [...seg.staffs];
+                                                                    next[staffIdx] = { ...next[staffIdx], staff_role_id: e.target.value };
+                                                                    updateSegment(idx, { staffs: next });
+                                                                }}
+                                                            >
+                                                                <MenuItem value=""><em>未設定</em></MenuItem>
+                                                                {staffRoles.map((role) => (
+                                                                    <MenuItem key={role.id} value={role.id}>
+                                                                        {role.name}{role.is_unpaid && <Chip size="small" label="無給" color="warning" variant="outlined" sx={{ ml: 0.5, height: 16, fontSize: '0.65rem' }} />}
+                                                                    </MenuItem>
+                                                                ))}
+                                                            </Select>
+                                                        </FormControl>
+                                                        <IconButton
+                                                            size="small"
+                                                            onClick={() => updateSegment(idx, { staffs: seg.staffs.filter((_, index) => index !== staffIdx) })}
+                                                        >
+                                                            <DeleteIcon fontSize="small" />
+                                                        </IconButton>
+                                                    </Stack>
+                                                ))}
+                                                <Button
+                                                    size="small"
+                                                    startIcon={<AddIcon />}
+                                                    onClick={() => updateSegment(idx, { staffs: [...seg.staffs, { staff_id: '', staff_role_id: '' }] })}
+                                                    sx={{ alignSelf: 'flex-start' }}
+                                                >
+                                                    スタッフを追加
+                                                </Button>
+                                            </Stack>
+                                        </Box>
+                                    </Stack>
+                                </Box>
+                            ))}
+                        </Stack>
+                    </Box>
 
                     <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
                         <Typography variant="subtitle2" fontWeight="bold" mb={2}>繰り返しのスケジュール設定</Typography>

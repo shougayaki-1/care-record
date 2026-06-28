@@ -19,6 +19,7 @@ import { MonthField } from '@/components/ui';
 import { aggregatePremiumMinutes, type LaborPremiumType } from '@/utils/laborPremium';
 import { type InternalWorkRecord } from '@/app/actions/internalWork';
 import { getStatisticsData } from '@/app/actions/statistics';
+import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 
 type ShiftStaffData = { staff_id: string; staffs: { name: string } | null; };
 type ShiftData = { 
@@ -529,7 +530,7 @@ export default function StatisticsPage() {
     const handleExportCSV = () => {
         const { rows: aggRows, premiumComparisonPerStaff } = aggregatedData;
         const premiumHeaders = tabIndex === 0 ? premiumTypes.flatMap(t => [`${t.name}予定(h)`, `${t.name}実績(h)`, `${t.name}差異(h)`]) : [];
-        const header = ['氏名', '予定時間(h)', '実績時間(h)', 'サービス(h)', '移動(h)', '内勤(h)', '差異(h)', '未承認件数', '差戻し件数', ...premiumHeaders];
+        const header = ['氏名', '予定時間(h)', '実績時間(h)', 'サービス(h)', '移動(h)', '内勤(h)', '差異(h)', `${getReportStatusLabel('pending')}件数`, `${getReportStatusLabel('remanded')}件数`, ...premiumHeaders];
         const csvRows = aggRows.map(row => {
             const premiumCells = tabIndex === 0
                 ? premiumTypes.flatMap(t => {
@@ -623,7 +624,7 @@ export default function StatisticsPage() {
                     </Paper>
                 )}
 
-                <Paper sx={{ p: 0, minHeight: 400, borderRadius: 3, overflow: 'hidden', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
+                <Paper sx={{ p: 0, minHeight: 400, borderRadius: 1, overflow: 'hidden', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
                     {loading ? <Box display="flex" justifyContent="center" alignItems="center" height={300}><CircularProgress /></Box> : (
                         tabIndex < 2 ? (
                         <>
@@ -683,8 +684,8 @@ export default function StatisticsPage() {
                                                         <TableCell align="right" sx={{ color: isAlert ? 'error.main' : 'inherit', fontWeight: isAlert ? 'bold' : 'normal' }}>{diff > 0 ? `+${diff.toFixed(2)}` : diff.toFixed(2)}</TableCell>
                                                         <TableCell>
                                                             <Stack direction="row" spacing={0.5} flexWrap="wrap">
-                                                                {row.statusCounts.pending > 0 && <Chip size="small" color="warning" label={`未承認あり ${row.statusCounts.pending}`} />}
-                                                                {row.statusCounts.remanded > 0 && <Chip size="small" color="error" label={`差戻しあり ${row.statusCounts.remanded}`} />}
+                                                                {row.statusCounts.pending > 0 && <Chip size="small" color={getReportStatusChipColor('pending')} label={`${getReportStatusLabel('pending')}あり ${row.statusCounts.pending}`} />}
+                                                                {row.statusCounts.remanded > 0 && <Chip size="small" color={getReportStatusChipColor('remanded')} label={`${getReportStatusLabel('remanded')}あり ${row.statusCounts.remanded}`} />}
                                                                 {row.statusCounts.pending === 0 && row.statusCounts.remanded === 0 && <Typography variant="caption" color="text.secondary">—</Typography>}
                                                             </Stack>
                                                         </TableCell>
@@ -784,8 +785,8 @@ export default function StatisticsPage() {
                                             <Chip size="small" variant="outlined" label={`サービス ${row.serviceHours.toFixed(1)}h`} />
                                             <Chip size="small" variant="outlined" label={`移動 ${row.travelHours.toFixed(1)}h`} />
                                             {tabIndex === 0 && row.internalHours > 0 && <Chip size="small" variant="outlined" label={`内勤 ${row.internalHours.toFixed(1)}h`} />}
-                                            {row.statusCounts.pending > 0 && <Chip size="small" color="warning" label={`未承認あり ${row.statusCounts.pending}`} />}
-                                            {row.statusCounts.remanded > 0 && <Chip size="small" color="error" label={`差戻しあり ${row.statusCounts.remanded}`} />}
+                                            {row.statusCounts.pending > 0 && <Chip size="small" color={getReportStatusChipColor('pending')} label={`${getReportStatusLabel('pending')}あり ${row.statusCounts.pending}`} />}
+                                            {row.statusCounts.remanded > 0 && <Chip size="small" color={getReportStatusChipColor('remanded')} label={`${getReportStatusLabel('remanded')}あり ${row.statusCounts.remanded}`} />}
                                         </Stack>
                                         {tabIndex === 0 && premiumTypes.length > 0 && (
                                             <Stack direction="row" gap={1} flexWrap="wrap" mt={1.5}>

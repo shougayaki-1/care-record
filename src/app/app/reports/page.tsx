@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import type { ReactElement } from 'react';
 import type { DocumentProps } from '@react-pdf/renderer';
 import {
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Button,
+  Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Button,
   CircularProgress, Stack, TextField, MenuItem, Checkbox, TableSortLabel, Switch, FormControlLabel, Divider,
   LinearProgress, Tooltip, Alert
 } from '@/components/ui/mui';
@@ -31,10 +31,10 @@ import { updateClientGoogleLink } from '@/app/actions/clients';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { InnerPageHeader } from '@/components/ui';
+import { InnerPageHeader, PageBody, PageLayout } from '@/components/ui';
 import { checkRecordPermission } from '@/utils/permissions';
+import { getReportStatusChipColor, getReportStatusLabel, type ReportStatus } from '@/utils/reportStatus';
 
-type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 type ReportValuesData = Record<string, FormValue>;
 
 type Report = {
@@ -228,10 +228,6 @@ export default function ReportsPage() {
       return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
-  const getReportStatusLabel = (status: ReportStatus) => status === 'approved' ? '承認済' : status === 'remanded' ? '差戻し' : '未承認';
-
-  const getReportStatusColor = (status: ReportStatus) => status === 'approved' ? 'success' : status === 'remanded' ? 'error' : 'warning';
-
   const isAbnormalReport = (report: Report) => {
       const start = new Date(report.start_at);
       const end = new Date(report.end_at);
@@ -287,8 +283,7 @@ export default function ReportsPage() {
             const end = new Date(r.end_at);
             const formatDate = (d: Date) => `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
             const formatTime = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-            let statusText = '';
-            switch(r.status) { case 'approved': statusText = '承認済'; break; case 'remanded': statusText = '差戻し'; break; case 'pending': statusText = '未承認'; break; default: statusText = r.status; }
+            const statusText = getReportStatusLabel(r.status, r.status);
 
             const fbInputter = Array.isArray(r.helper) ? r.helper[0]?.name : r.helper?.name;
 
@@ -556,17 +551,17 @@ export default function ReportsPage() {
   const canDeleteRecords = checkRecordPermission(currentOrg.effectivePermissions, 'delete', true);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <PageLayout>
         <InnerPageHeader icon={<TagIcon />} title={headerTitle} />
 
-       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
+       <PageBody maxWidth={false}>
            {reports.length >= 500 && (
              <Alert severity="info" sx={{ mb: 2 }}>
                最初の500件を表示しています。日付や利用者で絞り込んでください。
              </Alert>
            )}
 
-           <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.muted', boxShadow: 'none' }}>
+           <Box sx={{ p: 2, mb: 3, bgcolor: 'background.muted' }}>
               <Stack spacing={2}>
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} flexWrap="wrap" useFlexGap>
                     <Box display="flex" alignItems="center" gap={1} color="text.secondary" sx={{ minWidth: 0 }}>
@@ -578,7 +573,7 @@ export default function ReportsPage() {
                         {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                     </TextField>
                     <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: { xs: 0, md: 120 }, bgcolor: 'background.paper', width: { xs: '100%', md: 'auto' } }}>
-                        <MenuItem value="all">全て</MenuItem><MenuItem value="pending">未承認</MenuItem><MenuItem value="approved">承認済</MenuItem>
+                        <MenuItem value="all">全て</MenuItem><MenuItem value="pending">{getReportStatusLabel('pending')}</MenuItem><MenuItem value="approved">{getReportStatusLabel('approved')}</MenuItem>
                     </TextField>
                     <Box display="flex" alignItems="center" gap={1} sx={{ flexDirection: { xs: 'column', sm: 'row' }, width: { xs: '100%', md: 'auto' } }}>
                         <TextField type="date" label="開始日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'background.paper', width: { xs: '100%', sm: 'auto' } }} />
@@ -589,9 +584,9 @@ export default function ReportsPage() {
                     <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none', width: { xs: '100%', md: 'auto' } }}>検索</Button>
                 </Stack>
               </Stack>
-           </Paper>
+           </Box>
            
-           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? 'background.tint' : 'background.paper', display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, border: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
+           <Box sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? 'background.tint' : 'background.paper', display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, borderTop: '1px solid', borderBottom: '1px solid', borderColor: 'divider' }}>
                <Box>
                    <Typography variant="body1" fontWeight="bold">
                        {selected.length > 0 ? `${selected.length} 件選択中` : `検索結果: ${reports.length} 件`}
@@ -616,7 +611,7 @@ export default function ReportsPage() {
                      </Button>
                  )}
                </Stack>
-           </Paper>
+           </Box>
 
            {gasProgress && (
                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'background.paper', p: 2, borderRadius: 2, boxShadow: 3, zIndex: 9999 }}>
@@ -630,7 +625,7 @@ export default function ReportsPage() {
            {loading ? <CircularProgress /> : (
              <>
              {isMobile && (
-               <Stack spacing={1.5}>
+               <Stack divider={<Divider />} sx={{ borderTop: 1, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
                  {reports.map((row) => {
                    const start = new Date(row.start_at);
                    const end = new Date(row.end_at);
@@ -638,7 +633,7 @@ export default function ReportsPage() {
                    const checked = selected.includes(row.id);
 
                    return (
-                     <Paper key={row.id} variant="outlined" sx={{ p: 1.5, bgcolor: isAbnormal ? 'background.danger' : 'background.paper' }}>
+                     <Box key={row.id} sx={{ p: 1.5, bgcolor: isAbnormal ? 'background.danger' : 'background.paper' }}>
                        <Stack spacing={1.25}>
                          <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
                            <Box display="flex" alignItems="center" gap={1} minWidth={0}>
@@ -648,7 +643,7 @@ export default function ReportsPage() {
                                <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{getHelperNames(row)}</Typography>
                              </Box>
                            </Box>
-                           <Chip label={getReportStatusLabel(row.status)} color={getReportStatusColor(row.status)} size="small" variant="outlined" />
+                           <Chip label={getReportStatusLabel(row.status)} color={getReportStatusChipColor(row.status)} size="small" variant="outlined" />
                          </Box>
                          <Box display="flex" alignItems="flex-start" gap={1}>
                            <Box flexGrow={1} minWidth={0}>
@@ -667,13 +662,13 @@ export default function ReportsPage() {
                            </Button>
                          </Box>
                        </Stack>
-                     </Paper>
+                     </Box>
                    );
                  })}
-                 {reports.length === 0 && <Paper variant="outlined" sx={{ py: 5, px: 2, textAlign: 'center', color: 'text.disabled' }}>該当する記録がありません</Paper>}
+                 {reports.length === 0 && <Box sx={{ py: 5, px: 2, textAlign: 'center', color: 'text.disabled' }}>該当する記録がありません</Box>}
                </Stack>
              )}
-             <TableContainer component={Paper} sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
+             <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
                <Table>
                  <TableHead sx={{ bgcolor: 'background.muted' }}>
                    <TableRow>
@@ -698,7 +693,7 @@ export default function ReportsPage() {
                      return (
                          <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 }, bgcolor: isAbnormal ? 'background.danger' : 'inherit' }}>
                            <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
-                           <TableCell><Chip label={getReportStatusLabel(row.status)} color={getReportStatusColor(row.status)} size="small" variant="outlined" /></TableCell>
+                           <TableCell><Chip label={getReportStatusLabel(row.status)} color={getReportStatusChipColor(row.status)} size="small" variant="outlined" /></TableCell>
                            
                            {/* ★修正: 開始から終了までの日時を表示し、異常があればアイコンを出す */}
                            <TableCell>
@@ -735,7 +730,7 @@ export default function ReportsPage() {
              </TableContainer>
              </>
            )}
-       </Box>
-    </Box>
+       </PageBody>
+    </PageLayout>
   );
 }

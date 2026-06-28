@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { 
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Button, Stack,
+  Button, Stack, Divider,
   IconButton, Tooltip, CircularProgress, Chip
 } from '@/components/ui/mui';
 import BadgeIcon from '@mui/icons-material/Badge';
@@ -22,7 +22,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { AppButton, AppDialog, AppTextField, InnerPageHeader, MultiSelectField, SelectField } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, InnerPageHeader, MultiSelectField, PageBody, PageLayout, PageToolbar, SelectField } from '@/components/ui';
 import {
   deleteStaffPositionPreset,
   getStaffPositionPresets,
@@ -223,12 +223,11 @@ export default function StaffPage() {
   if (wsLoading || !currentOrg) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <PageLayout>
       <InnerPageHeader icon={<BadgeIcon />} title="スタッフ(名簿)管理" />
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
-        <Box maxWidth="lg" mx="auto">
-            <Paper variant="outlined" sx={{ p: { xs: 0, sm: 2 }, mb: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
+      <PageBody>
+            <PageToolbar>
                 <Box sx={{ minWidth: 0 }}>
                     <Typography variant="subtitle1" fontWeight="bold" color="text.primary">現場スタッフ名簿</Typography>
                     <Typography variant="caption" color="text.secondary">シフトや記録に「担当者」として名前が出るスタッフを登録します。↑↓で並び替えた順序がPDFやシフトの表示順に反映されます。</Typography>
@@ -253,21 +252,21 @@ export default function StaffPage() {
                         役職プリセット
                     </Button>
                 </Stack>
-            </Paper>
+            </PageToolbar>
 
             {isMobile && (
-                <Stack spacing={1.5}>
+                <Stack divider={<Divider />} sx={{ borderTop: 1, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
                     {isFetching ? (
-                        <Paper variant="outlined" sx={{ py: 4, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Paper>
+                        <Box sx={{ py: 4, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box>
                     ) : visibleStaff.length === 0 ? (
-                        <Paper variant="outlined" sx={{ py: 4, px: 2, textAlign: 'center', color: 'text.secondary' }}>登録がありません</Paper>
+                        <Box sx={{ py: 4, px: 2, textAlign: 'center', color: 'text.secondary' }}>登録がありません</Box>
                     ) : visibleStaff.map((staff) => {
                         const profileName = Array.isArray(staff.profiles) ? staff.profiles[0]?.name : staff.profiles?.name;
                         const isArchived = !!staff.archived_at;
                         const activeIndex = isArchived ? -1 : activeStaff.findIndex(s => s.id === staff.id);
 
                         return (
-                            <Paper key={staff.id} variant="outlined" sx={{ p: 1.5, opacity: isArchived ? 0.65 : 1, bgcolor: isArchived ? 'background.subtle' : 'background.paper' }}>
+                            <Box key={staff.id} sx={{ py: 1.5, opacity: isArchived ? 0.65 : 1, bgcolor: isArchived ? 'background.subtle' : 'background.paper' }}>
                                 <Stack spacing={1.25}>
                                     <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
                                         <Box minWidth={0}>
@@ -307,13 +306,13 @@ export default function StaffPage() {
                                         <Tooltip title="削除"><IconButton size="small" color="error" onClick={() => handleDelete(staff.id, staff.name)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
                                     </Stack>
                                 </Stack>
-                            </Paper>
+                            </Box>
                         );
                     })}
                 </Stack>
             )}
 
-            <TableContainer component={Paper} variant="outlined" sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
+            <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
                 <Table>
                     <TableHead sx={{ bgcolor: 'background.tint' }}>
                         <TableRow>
@@ -397,8 +396,7 @@ export default function StaffPage() {
                     </TableBody>
                 </Table>
             </TableContainer>
-        </Box>
-      </Box>
+      </PageBody>
 
       <AppDialog open={openModal} onClose={() => setModalOpen(false)} maxWidth="xs" title={editId ? 'スタッフの編集' : 'スタッフの追加'} actions={<><AppButton variant="text" intent="secondary" onClick={() => setModalOpen(false)}>キャンセル</AppButton><AppButton onClick={handleSave} disabled={!staffName.trim()}>保存</AppButton></>}>
               <Stack spacing={3} pt={1}>
@@ -439,6 +437,6 @@ export default function StaffPage() {
               </Stack>
           </Stack>
       </AppDialog>
-    </Box>
+    </PageLayout>
   );
 }

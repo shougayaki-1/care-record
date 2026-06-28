@@ -1,6 +1,7 @@
 import {
   CircularProgress,
   Box,
+  Divider,
   Stack,
   Table,
   TableBody,
@@ -57,12 +58,19 @@ export function DataTable<T>({
 
   if (mobileCardRender && isMobile) {
     return (
-      <Box role="list" aria-label="データ一覧" sx={sx}>
+      <Box
+        role="list"
+        aria-label="データ一覧"
+        sx={[
+          { borderTop: 1, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' },
+          ...(Array.isArray(sx) ? sx : [sx]),
+        ]}
+      >
         {loading && <Box role="status" aria-label="読み込み中" sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress size={28} /></Box>}
         {!loading && rows.length > 0 && (
-          <Stack spacing={1.5}>
+          <Stack divider={<Divider />}>
             {rows.map((row) => (
-              <Box key={getRowKey(row)} role="listitem" onClick={() => onRowClick?.(row)} sx={{ cursor: onRowClick ? 'pointer' : undefined }}>
+              <Box key={getRowKey(row)} role="listitem" onClick={() => onRowClick?.(row)} sx={{ cursor: onRowClick ? 'pointer' : undefined, py: 1.5 }}>
                 {mobileCardRender(row)}
               </Box>
             ))}
@@ -74,7 +82,21 @@ export function DataTable<T>({
   }
 
   return (
-    <TableContainer tabIndex={0} aria-label="データ一覧" sx={[{ overflowX: 'auto' }, ...(Array.isArray(sx) ? sx : [sx])]} {...props}>
+    <TableContainer
+      tabIndex={0}
+      aria-label="データ一覧"
+      sx={[
+        {
+          overflowX: 'auto',
+          borderTop: 1,
+          borderBottom: 1,
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+        },
+        ...(Array.isArray(sx) ? sx : [sx]),
+      ]}
+      {...props}
+    >
       <Table sx={{ minWidth }}>
         <TableHead><TableRow>{columns.map((column) => <TableCell key={column.key} align={column.align}>{column.header}</TableCell>)}</TableRow></TableHead>
         <TableBody>

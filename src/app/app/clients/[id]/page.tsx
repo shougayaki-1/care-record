@@ -36,7 +36,7 @@ import { STANDARD_TEMPLATES, COMPREHENSIVE_TEMPLATE, FormItem } from '@/constant
 import { convertSchemaToReadable, FormItem as HelperFormItem } from '../../../../utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { AppButton, AppDialog, CheckboxGroupField } from '@/components/ui';
+import { AppButton, AppDialog, CheckboxGroupField, PageLayout } from '@/components/ui';
 import {
     getClientAssignmentPermissionHints,
     saveClientAssignments,
@@ -369,7 +369,7 @@ export default function ClientSettingsPage() {
     if (loading) return <Box p={4}><CircularProgress /></Box>;
 
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <PageLayout>
             <Box sx={{ p: { xs: 1.5, sm: 2 }, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', flexShrink: 0 }}>
                 <Stack direction="row" alignItems="center" spacing={2} mb={2}>
                     <IconButton onClick={() => router.back()}><ArrowBackIcon /></IconButton>
@@ -478,7 +478,7 @@ export default function ClientSettingsPage() {
                                     getOptionValue={(staff) => staff.id}
                                 />
                                 {assignedStaffIds.length > 0 && (
-                                    <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.muted' }}>
+                                    <Box sx={{ p: 2, bgcolor: 'background.muted', borderTop: 1, borderBottom: 1, borderColor: 'divider' }}>
                                         <Typography variant="subtitle2" fontWeight="bold" gutterBottom>スタッフ別 往復移動距離</Typography>
                                         <Stack spacing={1.5}>
                                             {allStaffs.filter((staff) => assignedStaffIds.includes(staff.id)).map((staff) => (
@@ -508,7 +508,7 @@ export default function ClientSettingsPage() {
                                                 </Stack>
                                             ))}
                                         </Stack>
-                                    </Paper>
+                                    </Box>
                                 )}
                             </Stack>
                         </CardContent>
@@ -734,6 +734,6 @@ export default function ClientSettingsPage() {
                         )}
                     </Box>
             </AppDialog>
-        </Box>
+        </PageLayout>
     );
 }

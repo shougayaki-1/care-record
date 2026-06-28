@@ -10,6 +10,7 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
+import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 
 type HeaderToolbarConfig = {
     left?: string;
@@ -37,22 +38,6 @@ type ReportStatus = {
     id: string;
     status: string;
     is_primary: boolean;
-};
-
-const reportStatusLabel = (status: string): string => {
-    if (status === 'draft') return '作成中';
-    if (status === 'approved') return '承認済';
-    if (status === 'remanded') return '差戻し';
-    if (status === 'pending') return '提出済';
-    return '記録あり';
-};
-
-const reportStatusColor = (status: string): 'default' | 'warning' | 'success' | 'error' | 'info' => {
-    if (status === 'approved') return 'success';
-    if (status === 'remanded') return 'error';
-    if (status === 'pending') return 'info';
-    if (status === 'draft') return 'warning';
-    return 'default';
 };
 
 export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
@@ -90,8 +75,8 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                     statuses.slice(0, 2).map((report) => (
                         <Chip
                             key={report.id}
-                            label={reportStatusLabel(report.status)}
-                            color={reportStatusColor(report.status)}
+                            label={getReportStatusLabel(report.status, '記録あり')}
+                            color={getReportStatusChipColor(report.status)}
                             size="small"
                             variant={report.is_primary ? 'filled' : 'outlined'}
                             sx={{ height: 20, fontSize: '0.7rem' }}

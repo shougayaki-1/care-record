@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Box, Button, Container, Typography, TextField,
-  Paper, Stack, IconButton, CircularProgress,
+  Stack, IconButton, CircularProgress,
   Divider,
   Tabs, Tab, Alert, Chip
 } from '@/components/ui/mui';
@@ -32,7 +32,7 @@ import {
 } from '@/app/actions/reports';
 import { getShiftSuggestions, addShiftLink, removeShiftLink, getLinkedShifts } from '@/app/actions/reportShifts';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { AiImportButton, AppButton, AppDialog, DateTimeField, DynamicFormField, InnerPageHeader, MultiSelectField } from '@/components/ui';
+import { AiImportButton, AppButton, AppDialog, DateTimeField, DynamicFormField, InnerPageHeader, MultiSelectField, PageLayout } from '@/components/ui';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { checkRecordPermission } from '@/utils/permissions';
 import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
@@ -575,10 +575,10 @@ export default function RecordPage() {
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}><CircularProgress /></Box>;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <PageLayout>
        <InnerPageHeader
             icon={<IconButton edge="start" onClick={handleClose} sx={{ color: 'action.active' }}><CloseIcon /></IconButton>}
-            title={currentReportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済みの記録' : '記録を修正')) : `${clientName} 様`}
+            title={currentReportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済の記録' : '記録を修正')) : `${clientName} 様`}
             actions={(
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent="flex-end">
                 {currentReportId && currentStatus !== 'approved' && canDeleteRecord && (
@@ -603,7 +603,7 @@ export default function RecordPage() {
             
             {/* 月末跨ぎの夜勤の場合のみ表示される分割選択タブコントロール */}
             {isSpanningMonth && (
-                <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.warning', borderColor: 'warning.light', borderRadius: 3 }}>
+                <Box sx={{ p: 2, bgcolor: 'background.warning', borderColor: 'warning.light', borderRadius: 1 }}>
                     <Typography variant="subtitle2" fontWeight="bold" color="warning.dark" mb={1.5}>
                         ⚠ このシフトは月末を跨ぐ夜勤のため、請求都合上00:00で分割して記録を登録します。
                     </Typography>
@@ -617,7 +617,7 @@ export default function RecordPage() {
                         <Tab value="part1" label={`前半（月末日の24:00まで: ${formatTimeForLabel(originalShiftTimes?.start_at)} 〜 24:00）`} />
                         <Tab value="part2" label={`後半（翌月1日の00:00から: 00:00 〜 ${formatTimeForLabel(originalShiftTimes?.end_at)}）`} />
                     </Tabs>
-                </Paper>
+                </Box>
             )}
 
             {shiftSuggestions
@@ -697,7 +697,7 @@ export default function RecordPage() {
               </Box>
             )}
 
-            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, bgcolor: 'background.paper' }}>
+            <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, bgcolor: 'background.paper' }}>
                 <Stack spacing={3}>
 
                 <Box sx={{ bgcolor: aiFilledFields.has('_helpers') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
@@ -756,10 +756,10 @@ export default function RecordPage() {
                     </Stack>
                 </Box>
                 </Stack>
-            </Paper>
+            </Box>
 
             {groupedSections.map((section, idx) => (
-                <Paper key={idx} variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', bgcolor: 'background.paper' }}>
+                <Box key={idx} sx={{ borderRadius: 1, overflow: 'hidden', bgcolor: 'background.paper' }}>
                 <Box sx={{ bgcolor: 'background.muted', px: { xs: 2, sm: 3 }, py: { xs: 1.5, sm: 2 }, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
                     <Box sx={{ width: 6, height: 28, bgcolor: 'primary.main', borderRadius: 1, mr: 2, flexShrink: 0 }} />
                     <Typography variant="h6" color="text.primary" fontWeight="bold" sx={{ overflowWrap: 'anywhere', lineHeight: 1.3 }}>{section.title}</Typography>
@@ -782,10 +782,10 @@ export default function RecordPage() {
                     );
                     })}
                 </Stack>
-                </Paper>
+                </Box>
             ))}
 
-            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, mt: 3, borderRadius: 3 }}>
+            <Box sx={{ p: { xs: 2, sm: 3 }, mt: 3, borderRadius: 1 }}>
                 <Typography variant="subtitle2" fontWeight="bold" gutterBottom>画像添付</Typography>
                 <Stack direction="row" gap={2} flexWrap="wrap">
                     {images.map(img => (
@@ -798,7 +798,7 @@ export default function RecordPage() {
                     </IconButton>
                 </Stack>
                 {!currentReportId && <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>※一度下書き保存すると画像を添付できます</Typography>}
-            </Paper>
+            </Box>
 
             </Stack>
         </Container>
@@ -813,6 +813,6 @@ export default function RecordPage() {
       >
         <Typography>入力内容が保存されていません。下書きとして保存しますか？</Typography>
       </AppDialog>
-    </Box>
+    </PageLayout>
   );
 }
