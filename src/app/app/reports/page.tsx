@@ -6,7 +6,7 @@ import type { DocumentProps } from '@react-pdf/renderer';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Button,
   CircularProgress, Stack, TextField, MenuItem, Checkbox, TableSortLabel, Switch, FormControlLabel, Divider,
-  LinearProgress, Tooltip
+  LinearProgress, Tooltip, Alert
 } from '@/components/ui/mui';
 import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
@@ -64,7 +64,10 @@ export default function ReportsPage() {
 
   const [filterClientId, setFilterClientId] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [startDate, setStartDate] = useState('');
+  const [startDate, setStartDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  });
   const [endDate, setEndDate] = useState('');
   const [onlyPending, setOnlyPending] = useState(false);
   const [filterShiftId, setFilterShiftId] = useState<string | null>(null);
@@ -125,6 +128,7 @@ export default function ReportsPage() {
       if (onlyPending) query = query.in('status', ['pending', 'remanded']);
       else if (filterStatus !== 'all') query = query.eq('status', filterStatus);
 
+      query = query.limit(500);
       const { data, error } = await query;
       if (error) throw error;
       const sortedData = (data as unknown) as Report[] || [];
@@ -556,6 +560,12 @@ export default function ReportsPage() {
         <InnerPageHeader icon={<TagIcon />} title={headerTitle} />
 
        <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
+           {reports.length >= 500 && (
+             <Alert severity="info" sx={{ mb: 2 }}>
+               最初の500件を表示しています。日付や利用者で絞り込んでください。
+             </Alert>
+           )}
+
            <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.muted', boxShadow: 'none' }}>
               <Stack spacing={2}>
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} flexWrap="wrap" useFlexGap>
