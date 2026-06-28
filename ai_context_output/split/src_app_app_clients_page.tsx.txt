@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Box, IconButton, Paper, Stack, Tooltip } from '@/components/ui/mui';
+import { Box, IconButton, Stack, Tooltip } from '@/components/ui/mui';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -14,7 +14,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { AppButton, AppDialog, AppTextField, DataTable, PageHeader, StatusChip, SwitchField } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, DataTable, PageBody, PageHeader, PageLayout, StatusChip, SwitchField } from '@/components/ui';
 import { createClient, setClientArchived, softDeleteClient, updateClientName } from '@/app/actions/clients';
 
 type Client = {
@@ -136,22 +136,20 @@ export default function ClientsPage() {
   if (loading || wsLoading) return null;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, md: 3 }, bgcolor: 'background.default' }}>
+    <PageLayout>
+      <PageBody>
         <PageHeader
           title={<Stack direction="row" alignItems="center" gap={1}><PeopleIcon color="action" />利用者管理</Stack>}
           actions={<><SwitchField checked={showArchived} onChange={e => setShowArchived(e.target.checked)} label="アーカイブを表示" /><AppButton startIcon={<AddIcon />} onClick={() => setOpenAdd(true)}>新規登録</AppButton></>}
         />
 
         <DataTable
-          component={Paper}
-          sx={{ border: 1, borderColor: 'divider', borderRadius: 3 }}
           rows={clients}
           getRowKey={(client) => client.id}
           getRowSx={(client) => ({ opacity: client.archived_at ? 0.6 : 1, bgcolor: client.archived_at ? 'background.subtle' : 'inherit' })}
           emptyTitle="利用者が登録されていません"
           mobileCardRender={(client) => (
-            <Paper variant="outlined" sx={{ p: 1.5, opacity: client.archived_at ? 0.6 : 1, bgcolor: client.archived_at ? 'background.subtle' : 'background.paper' }}>
+            <Box sx={{ px: 1.5, opacity: client.archived_at ? 0.6 : 1, bgcolor: client.archived_at ? 'background.subtle' : 'background.paper' }}>
               <Stack spacing={1.25}>
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={1}>
                   <Box sx={{ minWidth: 0 }}>
@@ -185,7 +183,7 @@ export default function ClientsPage() {
                   )}
                 </Stack>
               </Stack>
-            </Paper>
+            </Box>
           )}
           columns={[
             { key: 'name', header: '利用者氏名', render: (client) => client.name },
@@ -216,7 +214,7 @@ export default function ClientsPage() {
             )},
           ]}
         />
-      </Box>
+      </PageBody>
 
       <AppDialog open={openAdd} onClose={() => setOpenAdd(false)} title="利用者の追加" actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenAdd(false)}>キャンセル</AppButton><AppButton loading={isSubmitting} onClick={handleAddClient}>登録</AppButton></>}>
         <AppTextField autoFocus margin="dense" label="利用者氏名" value={newName} onChange={(e) => setNewName(e.target.value)} />
@@ -225,6 +223,6 @@ export default function ClientsPage() {
       <AppDialog open={openEdit} onClose={() => setOpenEdit(false)} title="利用者名の変更" actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenEdit(false)}>キャンセル</AppButton><AppButton loading={isSubmitting} onClick={handleUpdateClient}>保存</AppButton></>}>
         <AppTextField autoFocus margin="dense" label="利用者氏名" value={editName} onChange={(e) => setEditName(e.target.value)} />
       </AppDialog>
-    </Box>
+    </PageLayout>
   );
 }

@@ -5,6 +5,7 @@ import {
     buildPatternDtStart,
     buildPatternRuleString,
     computeOccurrenceDateTimes,
+    computeOccurrenceSegmentDateTimes,
     patternDateKey,
     jstDateStrFromStartAt,
     jstDateStrFromOccurrence,
@@ -91,6 +92,35 @@ describe('computeOccurrenceDateTimes', () => {
     it('終了は常に開始より後（夜勤でも逆転しない）', () => {
         const r = computeOccurrenceDateTimes(2026, 2, 28, '20:00', '05:00');
         expect(new Date(r.endAt).getTime()).toBeGreaterThan(new Date(r.startAt).getTime());
+    });
+});
+
+describe('computeOccurrenceSegmentDateTimes', () => {
+    it('日勤セグメントを親シフト開始日へ合成する', () => {
+        const r = computeOccurrenceSegmentDateTimes(2026, 6, 28, '09:00', '15:00', '10:00', '14:00');
+        expect(r.isOvernight).toBe(false);
+        expect(r.startAt).toBe('2026-06-28T01:00:00.000Z');
+        expect(r.endAt).toBe('2026-06-28T05:00:00.000Z');
+    });
+
+    it('夜勤の前半セグメントは終了を翌日に繰り上げる', () => {
+        const r = computeOccurrenceSegmentDateTimes(2026, 6, 28, '22:00', '06:00', '22:00', '00:00');
+        expect(r.isOvernight).toBe(true);
+        expect(r.startAt).toBe('2026-06-28T13:00:00.000Z');
+        expect(r.endAt).toBe('2026-06-28T15:00:00.000Z');
+    });
+
+    it('夜勤の0時以降セグメントは開始・終了とも翌日扱いにする', () => {
+        const r = computeOccurrenceSegmentDateTimes(2026, 6, 28, '22:00', '06:00', '00:00', '06:00');
+        expect(r.isOvernight).toBe(false);
+        expect(r.startAt).toBe('2026-06-28T15:00:00.000Z');
+        expect(r.endAt).toBe('2026-06-28T21:00:00.000Z');
+    });
+
+    it('月末夜勤の0時以降セグメントは翌月1日へ合成する', () => {
+        const r = computeOccurrenceSegmentDateTimes(2026, 6, 30, '22:00', '06:00', '00:00', '06:00');
+        expect(r.startAt).toBe('2026-06-30T15:00:00.000Z');
+        expect(r.endAt).toBe('2026-06-30T21:00:00.000Z');
     });
 });
 

@@ -1,7 +1,6 @@
 import {
   Box,
   Chip,
-  Paper,
   Stack,
   Typography,
   type BoxProps,
@@ -10,8 +9,52 @@ import {
 } from '@mui/material';
 import type { ReactNode } from 'react';
 
+export function PageLayout({ children, sx, ...props }: BoxProps) {
+  return (
+    <Box
+      {...props}
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        minWidth: 0,
+        bgcolor: 'background.default',
+        ...sx,
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+export interface PageBodyProps extends Omit<BoxProps, 'maxWidth'> {
+  maxWidth?: BoxProps['maxWidth'] | false;
+}
+
+export function PageBody({ children, maxWidth = 'lg', sx, ...props }: PageBodyProps) {
+  const content = maxWidth === false ? children : (
+    <Box sx={{ width: '100%', maxWidth, mx: 'auto', minWidth: 0 }}>{children}</Box>
+  );
+
+  return (
+    <Box
+      {...props}
+      sx={{
+        flexGrow: 1,
+        minHeight: 0,
+        overflowY: 'auto',
+        bgcolor: 'background.default',
+        p: { xs: 2, sm: 3 },
+        ...sx,
+      }}
+    >
+      {content}
+    </Box>
+  );
+}
+
 export function PageContainer({ children, sx, ...props }: BoxProps) {
-  return <Box {...props} sx={{ flexGrow: 1, overflowY: 'auto', bgcolor: 'background.default', p: { xs: 2, md: 3 }, ...sx }}>{children}</Box>;
+  return <PageBody {...props} sx={sx}>{children}</PageBody>;
 }
 
 export function PageHeader({ title, description, actions }: { title: ReactNode; description?: ReactNode; actions?: ReactNode }) {
@@ -81,8 +124,61 @@ export function InnerPageHeader({
   );
 }
 
+export function PageToolbar({ children, sx, ...props }: BoxProps) {
+  return (
+    <Box
+      {...props}
+      sx={{
+        display: 'flex',
+        flexDirection: { xs: 'column', sm: 'row' },
+        alignItems: { xs: 'stretch', sm: 'center' },
+        justifyContent: 'space-between',
+        gap: 1.5,
+        mb: 2,
+        minWidth: 0,
+        ...sx,
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+export function PageSection({ children, sx, ...props }: BoxProps) {
+  return (
+    <Box
+      {...props}
+      sx={{
+        py: { xs: 2, sm: 2.5 },
+        borderTop: 1,
+        borderColor: 'divider',
+        minWidth: 0,
+        '&:first-of-type': { borderTop: 0, pt: 0 },
+        ...sx,
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
 export function SectionCard({ children, sx, ...props }: PaperProps) {
-  return <Paper variant="outlined" {...props} sx={{ p: { xs: 2, md: 3 }, ...sx }}>{children}</Paper>;
+  const boxProps = { ...props };
+  delete boxProps.elevation;
+  delete boxProps.square;
+  delete boxProps.variant;
+  return (
+    <PageSection
+      {...(boxProps as BoxProps)}
+      sx={{
+        p: { xs: 2, md: 3 },
+        bgcolor: 'background.paper',
+        ...sx,
+      }}
+    >
+      {children}
+    </PageSection>
+  );
 }
 
 export function EmptyState({ title = 'データがありません', description, action }: { title?: ReactNode; description?: ReactNode; action?: ReactNode }) {

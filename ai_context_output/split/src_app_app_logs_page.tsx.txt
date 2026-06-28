@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import {
-  Alert, Box, Button, Chip, Divider, Paper, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs, TextField, Typography,
+  Alert, Box, Button, Chip, Divider, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs, TextField, Typography,
 } from '@/components/ui/mui';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
-import { InnerPageHeader } from '@/components/ui';
+import { InnerPageHeader, PageBody, PageLayout, PageSection } from '@/components/ui';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { exportAuditLogsCsv, getAuditLogs, listCloudLogEntries, type CloudLogEntry } from '@/app/actions/organization';
 import { checkManagementPermission } from '@/utils/permissions';
@@ -77,12 +77,12 @@ export default function LogsPage() {
   if (!canView) return <Box p={3}><Alert severity="warning">操作ログを閲覧する権限がありません。</Alert></Box>;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <PageLayout>
       <InnerPageHeader icon={<ListAltIcon />} title="ログ" />
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
-        <Stack spacing={2} maxWidth="lg" mx="auto">
+      <PageBody>
+        <Stack spacing={2}>
           {message && <Alert severity="error">{message}</Alert>}
-          <Paper variant="outlined">
+          <PageSection sx={{ py: 0 }}>
             <Tabs value={tab} onChange={(_, value) => setTab(value)} variant="scrollable" allowScrollButtonsMobile>
               <Tab value="audit" label="監査ログ" icon={<ListAltIcon fontSize="small" />} iconPosition="start" />
               <Tab value="cloud" label="GCPログ" icon={<CloudQueueIcon fontSize="small" />} iconPosition="start" />
@@ -148,9 +148,9 @@ export default function LogsPage() {
                 </TableBody>
               </Table>
             )}
-          </Paper>
+          </PageSection>
         </Stack>
-      </Box>
-    </Box>
+      </PageBody>
+    </PageLayout>
   );
 }

@@ -13,7 +13,6 @@ import {
   ListItem,
   ListItemIcon,
   ListItemText,
-  Paper,
   Stack,
   Tooltip,
   Typography,
@@ -519,9 +518,8 @@ export default function AiImportPage() {
       <AiInfoPanel variant="page" />
 
       {/* アップロードエリア */}
-      <Paper
+      <Box
         ref={dropRef}
-        variant="outlined"
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
         sx={{
@@ -547,11 +545,11 @@ export default function AiImportPage() {
         <Typography color="text.secondary">
           PDFや画像（JPEG・PNG・WebP）をドラッグ&ドロップ、またはクリックして選択
         </Typography>
-      </Paper>
+      </Box>
 
       {/* ファイルリスト */}
       {fileEntries.length > 0 && (
-        <Paper variant="outlined" sx={{ mb: 2, p: 1 }}>
+        <Box sx={{ mb: 2, p: 1, borderTop: 1, borderBottom: 1, borderColor: 'divider' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
             <Typography variant="subtitle2">{fileEntries.length} ファイル選択中</Typography>
             <Tooltip title="選択したファイルを1記録としてまとめる">
@@ -569,7 +567,7 @@ export default function AiImportPage() {
             </Tooltip>
           </Box>
           <List dense>{fileListItems}</List>
-        </Paper>
+        </Box>
       )}
 
       {/* 処理ボタン */}
@@ -623,7 +621,7 @@ export default function AiImportPage() {
 
       {/* 結果テーブル */}
       {rows.length > 0 && (
-        <Paper variant="outlined" sx={{ p: 2 }}>
+        <Box sx={{ py: 2 }}>
           <AiImportReviewTable
             rows={rows}
             clients={clients}
@@ -632,7 +630,7 @@ export default function AiImportPage() {
             onSaveSelected={handleSaveSelected}
             saving={saving}
           />
-        </Paper>
+        </Box>
       )}
     </Box>
   );

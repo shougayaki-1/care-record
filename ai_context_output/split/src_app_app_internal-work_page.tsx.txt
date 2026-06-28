@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert, Box, Button, Chip, Divider, Paper, Stack, TextField, Typography,
+  Alert, Box, Button, Chip, Divider, Stack, TextField, Typography,
   MenuItem,
 } from '@/components/ui/mui';
 import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import AddIcon from '@mui/icons-material/Add';
-import { InnerPageHeader, MonthField } from '@/components/ui';
+import { InnerPageHeader, MonthField, PageBody, PageLayout, PageSection, PageToolbar } from '@/components/ui';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import {
@@ -82,22 +82,20 @@ export default function InternalWorkPage() {
   if (wsLoading || !currentOrg) return null;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <PageLayout>
       <InnerPageHeader icon={<WorkHistoryIcon />} title="内勤を記録" />
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
-        <Stack spacing={3} maxWidth={760} mx="auto">
-          <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, borderRadius: 3 }}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
+      <PageBody maxWidth={760}>
+        <Stack spacing={3}>
+          <PageToolbar>
               <Alert severity="info" sx={{ flex: 1 }}>会議・研修・事務作業など、利用者に紐づかない勤務実績を登録します。</Alert>
               <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpenDialog(true)} disabled={!canCreateInternalWork || staffOptions.length === 0}>
                 内勤を記録
               </Button>
-            </Stack>
-          </Paper>
+          </PageToolbar>
 
-          <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden' }}>
-            <Box sx={{ p: 2, bgcolor: 'background.muted', borderBottom: '1px solid', borderColor: 'divider' }}>
+          <PageSection sx={{ py: 0 }}>
+            <Box sx={{ py: 2, bgcolor: 'background.default', borderBottom: '1px solid', borderColor: 'divider' }}>
               <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2}>
                 <Typography fontWeight="bold">{canViewAll ? '内勤履歴' : '自分の内勤履歴'}</Typography>
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
@@ -147,10 +145,10 @@ export default function InternalWorkPage() {
                 </Box>
               ))}
             </Stack>
-          </Paper>
+          </PageSection>
         </Stack>
-      </Box>
+      </PageBody>
       <InternalWorkDialog open={openDialog} organizationId={currentOrg.id} staffOptions={staffOptions} onClose={() => setOpenDialog(false)} onSaved={loadRecords} />
-    </Box>
+    </PageLayout>
   );
 }

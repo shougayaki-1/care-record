@@ -5,7 +5,9 @@
 // - ログイン成功/失敗・ログアウトの監査記録（アクセスの記録）
 // パスワードログインをサーバーで行うことで、上記を確実に一元化する（@supabase/ssr のサーバーログインパターン）。
 
-import { createSessionClient, getAuthedUser, registerSessionActivity, revokeCurrentSession, touchCurrentSession } from '@/utils/supabase/auth';
+import { createSessionClient, getAuthedUser, registerSessionActivity, revokeCurrentSession, touchCurrentSession, supabaseAdmin, SESSION_ABSOLUTE_HOURS } from '@/utils/supabase/auth';
+import { decodeJwtSessionId } from '@/utils/jwt';
+import { createHash } from 'crypto';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import {
   isLoginRateLimited,
@@ -120,6 +122,31 @@ export async function recordLogout(): Promise<void> {
 /** アイドルタイムアウト用。ブラウザCookieではなくサーバー側セッション活動を更新する。 */
 export async function heartbeatSession(): Promise<void> {
   await touchCurrentSession();
+}
+
+/**
+ * クライアント側セッションが user_session_activity に未登録の場合（デプロイ前のセッション等）に登録する。
+ * access_token をサーバーへ送り、Auth サーバーで検証した上で upsert する。
+ */
+export async function ensureSessionActivity(accessToken: string): Promise<void> {
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(accessToken);
+    if (error || !user) return;
+    const sessionId = decodeJwtSessionId(accessToken);
+    if (!sessionId) return;
+    const sessionHash = createHash('sha256').update(accessToken).digest('hex');
+    const absoluteExpiresAt = new Date(Date.now() + SESSION_ABSOLUTE_HOURS * 60 * 60 * 1000).toISOString();
+    await supabaseAdmin.from('user_session_activity').upsert({
+      auth_session_id: sessionId,
+      session_hash: sessionHash,
+      user_id: user.id,
+      last_activity: new Date().toISOString(),
+      absolute_expires_at: absoluteExpiresAt,
+      revoked_at: null,
+    }, { onConflict: 'auth_session_id', ignoreDuplicates: false });
+  } catch {
+    // 最善努力のため、失敗してもサイレントに無視する。
+  }
 }
 
 /** OAuth コールバックなど、確立済みセッションのログイン成功を記録する。 */

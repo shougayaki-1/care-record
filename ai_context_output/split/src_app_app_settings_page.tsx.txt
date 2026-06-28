@@ -3,10 +3,10 @@
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
 import { 
-  Box, Typography, Paper, Alert, CircularProgress, LinearProgress, Stack, Divider,
+  Box, Typography, Alert, CircularProgress, LinearProgress, Stack, Divider,
   Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow
 } from '@/components/ui/mui';
-import { AppButton, AppDialog, AppTextField, DateTimeField, NumberField } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, DateTimeField, NumberField, PageBody, PageLayout } from '@/components/ui';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
@@ -397,7 +397,7 @@ function SettingsContent() {
     const canDeleteOrganization = currentOrg.role === 'owner' && checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete');
 
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <PageLayout>
             <Box sx={{ borderBottom: 1, borderColor: 'divider', px: { xs: 2, sm: 3 }, bgcolor: 'background.paper' }}>
                 <Stack direction="row" alignItems="center" height={64} spacing={2}>
                     <SettingsIcon sx={{ color: 'action.active' }} />
@@ -408,14 +408,13 @@ function SettingsContent() {
                 </Tabs>
             </Box>
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
-                <Box sx={{ maxWidth: 800, mx: 'auto' }}>
+            <PageBody maxWidth={800}>
                     {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
                     {tabIndex === 0 && (
                         <Stack spacing={3}>
                             {/* 基本情報 */}
-                            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
+                            <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
                                 <Typography variant="h6" fontWeight="bold" gutterBottom>基本情報</Typography>
                                 <Stack spacing={4}>
                                     <Box>
@@ -431,11 +430,11 @@ function SettingsContent() {
                                         </Box>
                                     )}
                                 </Stack>
-                            </Paper>
+                            </Box>
 
                             {/* 交通費設定 */}
                             {canEditOrganization && (
-                                <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
+                                <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
                                     <Typography variant="h6" fontWeight="bold" gutterBottom>交通費設定</Typography>
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         記録画面の交通費は、往復距離 × 1kmあたり単価で算出します。
@@ -452,11 +451,11 @@ function SettingsContent() {
                                             保存
                                         </AppButton>
                                     </Stack>
-                                </Paper>
+                                </Box>
                             )}
 
                             {/* Google Drive連携 */}
-                            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>
+                            <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>
                                 <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={2}>
                                     <CloudQueueIcon color="primary" fontSize="large" />
                                     <Box sx={{ minWidth: 0 }}>
@@ -504,10 +503,10 @@ function SettingsContent() {
                                         </Typography>
                                     )}
                                 </Box>
-                            </Paper>
+                            </Box>
 
                             {/* Googleカレンダー連携 (OAuth方式) */}
-                            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, borderColor: googleCalendarId ? 'success.main' : 'divider', bgcolor: googleCalendarId ? 'background.success' : 'background.paper' }}>
+                            <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: googleCalendarId ? 'success.main' : 'divider', bgcolor: googleCalendarId ? 'background.success' : 'background.paper' }}>
                                 <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={2}>
                                     <CalendarMonthIcon color="success" fontSize="large" />
                                     <Box sx={{ minWidth: 0 }}>
@@ -546,7 +545,7 @@ function SettingsContent() {
 
                                                 {canRepairCalendarSync && syncProgress && (
                                                     <Box sx={{ mt: 1 }}>
-                                                        <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 3 }} />
+                                                        <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 1 }} />
                                                         <Typography variant="caption" color="text.secondary">{syncProgress.current} / {syncProgress.total} 件 処理中...</Typography>
                                                     </Box>
                                                 )}
@@ -597,43 +596,43 @@ function SettingsContent() {
                                         </Typography>
                                     )}
                                 </Box>
-                            </Paper>
+                            </Box>
 
                             {/* 労働時間ルール */}
                             {canEditOrganization && (
-                                <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
+                                <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
                                     <Typography variant="h6" fontWeight="bold" gutterBottom>労働時間ルール</Typography>
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         深夜割り増し・時間外割り増しなどの種別と計算方法を管理します。
                                     </Typography>
                                     <LaborPremiumSettings orgId={currentOrg.id} />
-                                </Paper>
+                                </Box>
                             )}
 
                             {/* サービス種別 */}
                             {canEditOrganization && (
-                                <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
+                                <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
                                     <Typography variant="h6" fontWeight="bold" gutterBottom>サービス種別</Typography>
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         シフト内の区間に設定できるサービス種別（例：重度訪問介護、移動支援）を管理します。
                                     </Typography>
                                     <ServiceTypeSettings orgId={currentOrg.id} />
-                                </Paper>
+                                </Box>
                             )}
 
                             {/* スタッフ役割 */}
                             {canEditOrganization && (
-                                <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
+                                <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
                                     <Typography variant="h6" fontWeight="bold" gutterBottom>スタッフ役割</Typography>
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         シフト区間内でのスタッフの役割（例：正職員、パート、ボランティア）を管理します。無給フラグを設定することで給与計算から除外できます。
                                     </Typography>
                                     <StaffRoleSettings orgId={currentOrg.id} />
-                                </Paper>
+                                </Box>
                             )}
 
                             {/* 危険な設定 */}
-                            <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, borderColor: 'error.light', bgcolor: 'background.danger' }}>
+                            <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: 'error.light', bgcolor: 'background.danger' }}>
                                 <Stack direction="row" alignItems="center" gap={1} mb={2}>
                                     <WarningIcon color="error" />
                                     <Typography variant="h6" fontWeight="bold" color="error">危険な設定</Typography>
@@ -666,12 +665,12 @@ function SettingsContent() {
                                         </>
                                     )}
                                 </Stack>
-                            </Paper>
+                            </Box>
                         </Stack>
                     )}
 
                     {tabIndex === 1 && (
-                        <Paper variant="outlined">
+                        <Box>
                             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} sx={{ p: 2 }}>
                                 <DateTimeField kind="date" label="開始日" size="small" value={logFrom} onChange={(e) => setLogFrom(e.target.value)} />
                                 <DateTimeField kind="date" label="終了日" size="small" value={logTo} onChange={(e) => setLogTo(e.target.value)} />
@@ -704,10 +703,9 @@ function SettingsContent() {
                                     )}
                                 </TableBody>
                             </Table>
-                        </Paper>
+                        </Box>
                     )}
-                </Box>
-            </Box>
+            </PageBody>
 
             <AppDialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)} title="事業所の完全削除" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton><AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name}>削除実行</AppButton></>}>
                     <Typography color="error" sx={{ mb: 2 }}>
@@ -729,7 +727,7 @@ function SettingsContent() {
                         オーナー権限を持っている場合は、事前に他のメンバーへ権限を譲渡する必要があります。
                     </Typography>
             </AppDialog>
-        </Box>
+        </PageLayout>
     );
 }
 

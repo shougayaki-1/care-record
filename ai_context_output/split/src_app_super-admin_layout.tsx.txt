@@ -7,6 +7,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
+import { logoutCurrentUser } from '@/utils/clientLogout';
 
 export default function SuperAdminLayout({ children }: { children: React.ReactNode }) {
     const router = useRouter();
@@ -35,7 +36,7 @@ export default function SuperAdminLayout({ children }: { children: React.ReactNo
     }, [router, showToast]);
 
     const handleLogout = async () => {
-        await supabase.auth.signOut();
+        await logoutCurrentUser();
         router.push('/');
     };
 

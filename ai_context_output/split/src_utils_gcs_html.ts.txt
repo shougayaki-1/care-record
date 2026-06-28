@@ -1,3 +1,5 @@
+import { REPORT_STATUS_LABELS } from '@/utils/reportStatus';
+
 export type BackupRow = {
   id: string;
   clientName: string;
@@ -5,13 +7,6 @@ export type BackupRow = {
   endAt: string;
   helperName: string;
   status: string;
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: '下書き',
-  pending: '承認待ち',
-  approved: '承認済み',
-  remanded: '差し戻し',
 };
 
 export function generateBackupHtml(date: string, rows: BackupRow[]): string {
@@ -55,10 +50,10 @@ tr:hover td{background:#fafafa}
   <input type="search" id="q" placeholder="利用者名・担当者で絞り込み" oninput="render()">
   <select id="status" onchange="render()">
     <option value="">すべてのステータス</option>
-    <option value="approved">承認済み</option>
-    <option value="pending">承認待ち</option>
-    <option value="draft">下書き</option>
-    <option value="remanded">差し戻し</option>
+    <option value="approved">${REPORT_STATUS_LABELS.approved}</option>
+    <option value="pending">${REPORT_STATUS_LABELS.pending}</option>
+    <option value="draft">${REPORT_STATUS_LABELS.draft}</option>
+    <option value="remanded">${REPORT_STATUS_LABELS.remanded}</option>
   </select>
   <span class="count" id="count"></span>
 </div>
@@ -78,7 +73,7 @@ tr:hover td{background:#fafafa}
 </div>
 <script>
 const ALL = ${dataJson};
-const LABELS = ${JSON.stringify(STATUS_LABELS)};
+const LABELS = ${JSON.stringify(REPORT_STATUS_LABELS)};
 const BADGE = {approved:'badge-approved',pending:'badge-pending',draft:'badge-draft',remanded:'badge-remanded'};
 function fmt(s){if(!s)return'-';const d=new Date(s);return d.toLocaleDateString('ja-JP')+'\\u00a0'+d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});}
 function render(){

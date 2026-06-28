@@ -26,7 +26,13 @@ export async function getStatisticsData(
         id, start_at, end_at, status, client_id,
         clients (name),
         shift_staffs (staff_id, staffs(name)),
-        report_shifts (is_primary, reports(id, start_at, end_at, status, report_values(data)))
+        report_shifts (is_primary, reports(id, start_at, end_at, status, segment_id, deleted_at, report_values(data))),
+        shift_segments (
+          id, start_at, end_at, sort_order,
+          service_type:service_types(name),
+          shift_segment_staffs(staff_id, staff:staffs(name)),
+          reports(id, start_at, end_at, status, segment_id, deleted_at, report_values(data))
+        )
       `)
       .eq('organization_id', organizationId)
       .neq('status', 'cancelled')
@@ -36,7 +42,7 @@ export async function getStatisticsData(
     supabaseAdmin
       .from('reports')
       .select(`
-        id, start_at, end_at, status, client_id,
+        id, start_at, end_at, status, client_id, segment_id,
         clients!inner (id, name, organization_id),
         helper:profiles!reports_helper_id_fkey (name),
         report_values (data),

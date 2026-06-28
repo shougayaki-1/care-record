@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Chip, Button, TextField, Stack,
   IconButton, Select, MenuItem, FormControl, InputLabel, Menu, Alert, ListItemIcon,
   CircularProgress, Divider, Tabs, Tab,
@@ -21,7 +21,7 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { createInvitation, getAccountOverview, getInviteStaffCandidates, getOrgRoles, updateAccountRole, updateMemberRoles, removeAccount, type InviteStaffCandidate } from '@/app/actions/accounts';
-import { AppButton, AppDialog, InnerPageHeader } from '@/components/ui';
+import { AppButton, AppDialog, InnerPageHeader, PageBody, PageLayout, PageToolbar } from '@/components/ui';
 import { checkManagementPermission } from '@/utils/permissions';
 import RoleManagementPanel from '@/components/roles/RoleManagementPanel';
 
@@ -235,11 +235,10 @@ export default function AccountsPage() {
   const isOwner = currentOrg?.role === 'owner';
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <PageLayout>
       <InnerPageHeader icon={<KeyIcon />} title="アカウント・権限管理" />
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
-        <Box maxWidth="lg" mx="auto">
+      <PageBody>
           {canManageRoles && (
             <Box sx={{ mb: 2, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 0, sm: 1 }, pt: 1 }}>
               <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} variant="scrollable" allowScrollButtonsMobile>
@@ -251,7 +250,7 @@ export default function AccountsPage() {
 
           {activeTab === 'accounts' && (
             <>
-            <Paper variant="outlined" sx={{ p: { xs: 0, sm: 2 }, mb: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
+            <PageToolbar>
                 <Box sx={{ minWidth: 0 }}>
                     <Typography variant="subtitle1" fontWeight="bold" color="text.primary">システムログインアカウント</Typography>
                     <Typography variant="caption" color="text.secondary">アプリにログインできるユーザーと、その権限を管理します。</Typography>
@@ -261,16 +260,16 @@ export default function AccountsPage() {
                       新しい人を招待
                   </AppButton>
                 )}
-            </Paper>
+            </PageToolbar>
 
             {isMobile && (
-                <Stack spacing={1.5}>
+                <Stack divider={<Divider />} sx={{ borderTop: 1, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
                     {isFetching ? (
-                        <Paper variant="outlined" sx={{ py: 4, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Paper>
+                        <Box sx={{ py: 4, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box>
                     ) : accountList.length === 0 ? (
-                        <Paper variant="outlined" sx={{ py: 4, px: 2, textAlign: 'center', color: 'text.secondary' }}>アカウントがありません</Paper>
+                        <Box sx={{ py: 4, px: 2, textAlign: 'center', color: 'text.secondary' }}>アカウントがありません</Box>
                     ) : accountList.map((account) => (
-                        <Paper key={account.id} variant="outlined" sx={{ p: 1.5 }}>
+                        <Box key={account.id} sx={{ py: 1.5 }}>
                             <Stack spacing={1.25}>
                                 <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
                                     <Box minWidth={0}>
@@ -305,12 +304,12 @@ export default function AccountsPage() {
                                     <Chip label={account.status === 'active' ? '有効' : '招待中'} color={account.status === 'active' ? 'success' : 'warning'} size="small" variant="filled" />
                                 </Box>
                             </Stack>
-                        </Paper>
+                        </Box>
                     ))}
                 </Stack>
             )}
 
-            <TableContainer component={Paper} variant="outlined" sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
+            <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
                 <Table>
                     <TableHead sx={{ bgcolor: 'background.tint' }}>
                         <TableRow>
@@ -400,8 +399,7 @@ export default function AccountsPage() {
           {activeTab === 'roles' && canManageRoles && (
             <RoleManagementPanel embedded onRolesChanged={fetchData} />
           )}
-        </Box>
-      </Box>
+      </PageBody>
 
       {/* --- アクションメニュー --- */}
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={handleMenuClose}>
@@ -547,6 +545,6 @@ export default function AccountsPage() {
              )}
           </Stack>
       </AppDialog>
-    </Box>
+    </PageLayout>
   );
 }

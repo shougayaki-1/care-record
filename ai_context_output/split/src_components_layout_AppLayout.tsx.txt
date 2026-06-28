@@ -37,7 +37,7 @@ import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { markNotificationRead } from '@/app/actions/user';
-import { recordLogout } from '@/app/actions/auth';
+import { logoutCurrentUser } from '@/utils/clientLogout';
 import IdleTimeout from '@/components/auth/IdleTimeout';
 import { checkManagementPermission, checkShiftPermission, type ManagementArea } from '@/utils/permissions';
 
@@ -187,9 +187,7 @@ const TopAppBar = ({
 
   const handleLogout = async () => {
     setAccountAnchor(null);
-    // 監査記録はサインアウト前（まだ認証済みのうち）に行う。
-    await recordLogout();
-    await supabase.auth.signOut();
+    await logoutCurrentUser();
     router.push('/');
   };
 

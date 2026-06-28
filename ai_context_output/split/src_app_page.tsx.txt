@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import { Box, Paper, CircularProgress, Container, Alert } from '@/components/ui/mui'; // Alert追加
 import { useRouter, useSearchParams } from 'next/navigation'; // useSearchParams追加
-import { supabase } from '@/lib/supabase';
 import { AuthForm } from '@/components/auth/AuthForm';
+import { supabase } from '@/lib/supabase';
+import { logoutCurrentUser } from '@/utils/clientLogout';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,7 +24,7 @@ export default function LoginPage() {
       // サーバー側セッション検証でアイドルタイムアウト/期限切れと判定された場合は
       // Supabase セッションも破棄してログイン画面を表示する（リダイレクトループ防止）
       if (reasonParam === 'idle_timeout') {
-        await supabase.auth.signOut();
+        await logoutCurrentUser();
         setChecking(false);
         return;
       }
@@ -46,7 +47,7 @@ export default function LoginPage() {
       }
     };
     checkSession();
-  }, [router, reasonParam]);
+  }, [router, searchParams, reasonParam]);
 
   if (checking) {
     return (

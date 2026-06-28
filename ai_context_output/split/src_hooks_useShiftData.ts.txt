@@ -18,6 +18,20 @@ export type FetchedPatternData = {
     rrule: string;
     clients: { name: string } | null;
     shift_pattern_staffs: { staff_id: string; staffs: { name: string } | null; }[];
+    shift_pattern_segments?: {
+        id: string;
+        service_type_id: string | null;
+        start_time: string;
+        end_time: string;
+        sort_order: number;
+        service_type?: { id: string; name: string } | null;
+        shift_pattern_segment_staffs: {
+            staff_id: string;
+            staff_role_id: string | null;
+            staff?: { id: string; name: string } | null;
+            staff_role?: { id: string; name: string; is_unpaid: boolean } | null;
+        }[];
+    }[];
 };
 
 type TabId = 'patterns' | 'fullCalendar' | 'myShift' | 'byStaff' | 'byClient';
