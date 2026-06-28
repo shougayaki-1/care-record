@@ -6,6 +6,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import { AppDialog, DateTimeField } from '@/components/ui';
 import { useToast } from '@/components/ui/ToastProvider';
 import { saveInternalWork } from '@/app/actions/internalWork';
+import type { InternalWorkStaffOption } from '@/app/actions/internalWork';
 
 const WORK_TYPES = [
   { value: 'meeting', label: '会議' },
@@ -23,11 +24,13 @@ function formatDatetimeLocal(date: Date) {
 export default function InternalWorkDialog({
   open,
   organizationId,
+  staffOptions,
   onClose,
   onSaved,
 }: {
   open: boolean;
   organizationId: string;
+  staffOptions: InternalWorkStaffOption[];
   onClose: () => void;
   onSaved?: () => void | Promise<void>;
 }) {
@@ -35,6 +38,7 @@ export default function InternalWorkDialog({
   const now = useMemo(() => new Date(), []);
   const [title, setTitle] = useState('会議');
   const [workType, setWorkType] = useState('meeting');
+  const [staffId, setStaffId] = useState('');
   const [startAt, setStartAt] = useState(() => formatDatetimeLocal(now));
   const [endAt, setEndAt] = useState(() => formatDatetimeLocal(new Date(now.getTime() + 60 * 60 * 1000)));
   const [workHours, setWorkHours] = useState('1');
@@ -46,6 +50,7 @@ export default function InternalWorkDialog({
     try {
       await saveInternalWork({
         organizationId,
+        staffId: staffId || staffOptions[0]?.id || null,
         title,
         workType,
         startAt: new Date(startAt).toISOString(),
@@ -81,6 +86,18 @@ export default function InternalWorkDialog({
       )}
     >
       <Stack spacing={2} pt={1}>
+        <TextField
+          select
+          label="対象スタッフ"
+          value={staffId || staffOptions[0]?.id || ''}
+          onChange={(e) => setStaffId(e.target.value)}
+          fullWidth
+          disabled={staffOptions.length <= 1}
+        >
+          {staffOptions.map((staff) => (
+            <MenuItem key={staff.id} value={staff.id}>{staff.name}</MenuItem>
+          ))}
+        </TextField>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
           <TextField label="件名" value={title} onChange={(e) => setTitle(e.target.value)} fullWidth />
           <TextField select label="種別" value={workType} onChange={(e) => setWorkType(e.target.value)} sx={{ minWidth: { sm: 180 } }}>

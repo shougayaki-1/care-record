@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Chip, Divider, Paper, Stack, TextField, Typography,
+  MenuItem,
 } from '@/components/ui/mui';
 import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import AddIcon from '@mui/icons-material/Add';
@@ -10,10 +11,13 @@ import { InnerPageHeader } from '@/components/ui';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import {
-  listMyInternalWorkRecords,
+  listInternalWorkRecords,
+  listInternalWorkStaffOptions,
   type InternalWorkRecord,
+  type InternalWorkStaffOption,
 } from '@/app/actions/internalWork';
 import InternalWorkDialog from '@/components/internal-work/InternalWorkDialog';
+import { normalizePermissions } from '@/utils/permissions';
 
 function monthRange(month: string) {
   const [year, mon] = month.split('-').map(Number);
@@ -34,26 +38,46 @@ export default function InternalWorkPage() {
   const now = useMemo(() => new Date(), []);
   const [targetMonth, setTargetMonth] = useState(() => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
   const [records, setRecords] = useState<InternalWorkRecord[]>([]);
+  const [staffOptions, setStaffOptions] = useState<InternalWorkStaffOption[]>([]);
+  const [selectedStaffId, setSelectedStaffId] = useState('all');
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
+  const internalWorkPermissions = normalizePermissions(currentOrg?.effectivePermissions).internalWork;
+  const canViewAll = internalWorkPermissions.view === 'all';
+  const canCreateInternalWork = internalWorkPermissions.create !== 'none';
 
   const loadRecords = useCallback(async () => {
     if (!currentOrg) return;
     setLoading(true);
     try {
       const { start, end } = monthRange(targetMonth);
-      setRecords(await listMyInternalWorkRecords(currentOrg.id, start, end));
+      const staffId = canViewAll && selectedStaffId !== 'all' ? selectedStaffId : null;
+      setRecords(await listInternalWorkRecords(currentOrg.id, start, end, staffId));
     } catch (e) {
       console.error(e);
       showToast('内勤実績の取得に失敗しました', 'error');
     } finally {
       setLoading(false);
     }
-  }, [currentOrg, targetMonth, showToast]);
+  }, [currentOrg, targetMonth, selectedStaffId, canViewAll, showToast]);
+
+  const loadStaffOptions = useCallback(async () => {
+    if (!currentOrg) return;
+    try {
+      const options = await listInternalWorkStaffOptions(currentOrg.id);
+      setStaffOptions(options);
+    } catch (e) {
+      console.error(e);
+      showToast('スタッフ一覧の取得に失敗しました', 'error');
+    }
+  }, [currentOrg, showToast]);
 
   useEffect(() => {
-    if (!wsLoading && currentOrg) void loadRecords();
-  }, [wsLoading, currentOrg, loadRecords]);
+    if (!wsLoading && currentOrg) {
+      void loadStaffOptions();
+      void loadRecords();
+    }
+  }, [wsLoading, currentOrg, loadStaffOptions, loadRecords]);
 
   if (wsLoading || !currentOrg) return null;
 
@@ -66,7 +90,7 @@ export default function InternalWorkPage() {
           <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, borderRadius: 3 }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
               <Alert severity="info" sx={{ flex: 1 }}>会議・研修・事務作業など、利用者に紐づかない勤務実績を登録します。</Alert>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpenDialog(true)}>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpenDialog(true)} disabled={!canCreateInternalWork || staffOptions.length === 0}>
                 内勤を記録
               </Button>
             </Stack>
@@ -75,8 +99,25 @@ export default function InternalWorkPage() {
           <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden' }}>
             <Box sx={{ p: 2, bgcolor: 'background.muted', borderBottom: '1px solid', borderColor: 'divider' }}>
               <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2}>
-                <Typography fontWeight="bold">自分の内勤履歴</Typography>
-                <TextField type="month" size="small" value={targetMonth} onChange={(e) => setTargetMonth(e.target.value)} slotProps={{ inputLabel: { shrink: true } }} />
+                <Typography fontWeight="bold">{canViewAll ? '内勤履歴' : '自分の内勤履歴'}</Typography>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                  {canViewAll && (
+                    <TextField
+                      select
+                      size="small"
+                      label="スタッフ"
+                      value={selectedStaffId}
+                      onChange={(e) => setSelectedStaffId(e.target.value)}
+                      sx={{ minWidth: 180 }}
+                    >
+                      <MenuItem value="all">全員</MenuItem>
+                      {staffOptions.map((staff) => (
+                        <MenuItem key={staff.id} value={staff.id}>{staff.name}</MenuItem>
+                      ))}
+                    </TextField>
+                  )}
+                  <TextField type="month" size="small" value={targetMonth} onChange={(e) => setTargetMonth(e.target.value)} slotProps={{ inputLabel: { shrink: true } }} />
+                </Stack>
               </Stack>
             </Box>
             <Stack divider={<Divider />}>
@@ -95,6 +136,11 @@ export default function InternalWorkPage() {
                       <Typography variant="body2" color="text.secondary">
                         {new Date(record.start_at).toLocaleString('ja-JP')} 〜 {new Date(record.end_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
                       </Typography>
+                      {canViewAll && (
+                        <Typography variant="caption" color="text.secondary">
+                          {record.staffs?.name ?? 'スタッフ未設定'}
+                        </Typography>
+                      )}
                     </Box>
                     <Typography fontWeight="bold">{Number(record.work_hours).toFixed(2)}h</Typography>
                   </Stack>
@@ -104,7 +150,7 @@ export default function InternalWorkPage() {
           </Paper>
         </Stack>
       </Box>
-      <InternalWorkDialog open={openDialog} organizationId={currentOrg.id} onClose={() => setOpenDialog(false)} onSaved={loadRecords} />
+      <InternalWorkDialog open={openDialog} organizationId={currentOrg.id} staffOptions={staffOptions} onClose={() => setOpenDialog(false)} onSaved={loadRecords} />
     </Box>
   );
 }

@@ -4,6 +4,7 @@
 export type RecordScope = 'all' | 'assigned' | 'none';
 export type RecordAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
 export type ShiftAction = 'view' | 'create' | 'edit' | 'delete';
+export type InternalWorkAction = 'view' | 'create';
 export type ManagementArea =
   | 'staffs'
   | 'clients'
@@ -19,6 +20,7 @@ export type ManagementArea =
 export type RolePermissions = {
   records: Record<RecordAction, RecordScope>;
   shifts: Record<ShiftAction, RecordScope>;
+  internalWork: Record<InternalWorkAction, RecordScope>;
   management: Record<ManagementArea, boolean>;
 };
 
@@ -27,6 +29,7 @@ export type RolePermissions = {
 export const EMPTY_PERMISSIONS: RolePermissions = {
   records: { view: 'none', create: 'none', edit: 'none', delete: 'none', approve: 'none' },
   shifts:  { view: 'none', create: 'none', edit: 'none', delete: 'none' },
+  internalWork: { view: 'none', create: 'none' },
   management: {
     staffs: false,
     clients: false,
@@ -44,6 +47,7 @@ export const EMPTY_PERMISSIONS: RolePermissions = {
 export const FULL_PERMISSIONS: RolePermissions = {
   records: { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
   shifts:  { view: 'all', create: 'all', edit: 'all', delete: 'all' },
+  internalWork: { view: 'all', create: 'all' },
   management: {
     staffs: true,
     clients: true,
@@ -62,6 +66,7 @@ export const FULL_PERMISSIONS: RolePermissions = {
 export const PRESET_MANAGER_PERMISSIONS: RolePermissions = {
   records: { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
   shifts:  { view: 'all', create: 'all', edit: 'all', delete: 'all' },
+  internalWork: { view: 'all', create: 'all' },
   management: {
     staffs: true,
     clients: true,
@@ -80,6 +85,7 @@ export const PRESET_MANAGER_PERMISSIONS: RolePermissions = {
 export const PRESET_STAFF_PERMISSIONS: RolePermissions = {
   records: { view: 'assigned', create: 'assigned', edit: 'assigned', delete: 'none', approve: 'none' },
   shifts:  { view: 'assigned', create: 'none', edit: 'none', delete: 'none' },
+  internalWork: { view: 'assigned', create: 'assigned' },
   management: {
     staffs: false,
     clients: false,
@@ -115,22 +121,36 @@ export function mergePermissions(roles: RolePermissions[]): RolePermissions {
   const result: RolePermissions = {
     records: { ...EMPTY_PERMISSIONS.records },
     shifts: { ...EMPTY_PERMISSIONS.shifts },
+    internalWork: { ...EMPTY_PERMISSIONS.internalWork },
     management: { ...EMPTY_PERMISSIONS.management },
   };
 
   for (const role of roles) {
+    const normalized = normalizePermissions(role);
     for (const action of Object.keys(result.records) as RecordAction[]) {
-      result.records[action] = mergeScope(result.records[action], role.records[action]);
+      result.records[action] = mergeScope(result.records[action], normalized.records[action]);
     }
     for (const action of Object.keys(result.shifts) as ShiftAction[]) {
-      result.shifts[action] = mergeScope(result.shifts[action], role.shifts[action]);
+      result.shifts[action] = mergeScope(result.shifts[action], normalized.shifts[action]);
+    }
+    for (const action of Object.keys(result.internalWork) as InternalWorkAction[]) {
+      result.internalWork[action] = mergeScope(result.internalWork[action], normalized.internalWork[action]);
     }
     for (const area of Object.keys(result.management) as ManagementArea[]) {
-      result.management[area] = result.management[area] || Boolean(role.management?.[area]);
+      result.management[area] = result.management[area] || Boolean(normalized.management?.[area]);
     }
   }
 
   return result;
+}
+
+export function normalizePermissions(permissions: Partial<RolePermissions> | null | undefined): RolePermissions {
+  return {
+    records: { ...EMPTY_PERMISSIONS.records, ...(permissions?.records ?? {}) },
+    shifts: { ...EMPTY_PERMISSIONS.shifts, ...(permissions?.shifts ?? {}) },
+    internalWork: { ...EMPTY_PERMISSIONS.internalWork, ...(permissions?.internalWork ?? {}) },
+    management: { ...EMPTY_PERMISSIONS.management, ...(permissions?.management ?? {}) },
+  };
 }
 
 /**
@@ -164,6 +184,17 @@ export function checkShiftPermission(
   const scope = permissions.shifts[action];
   if (scope === 'all') return true;
   if (scope === 'assigned') return isAssigned;
+  return false;
+}
+
+export function checkInternalWorkPermission(
+  permissions: RolePermissions,
+  action: InternalWorkAction,
+  isSelf: boolean
+): boolean {
+  const scope = permissions.internalWork[action];
+  if (scope === 'all') return true;
+  if (scope === 'assigned') return isSelf;
   return false;
 }
 

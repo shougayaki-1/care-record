@@ -47,6 +47,7 @@ function ScopeToggle({
 
 type RecordAction = keyof RolePermissions['records'];
 type ShiftAction = keyof RolePermissions['shifts'];
+type InternalWorkAction = keyof RolePermissions['internalWork'];
 
 const RECORD_ROWS: Array<{ label: string; action: RecordAction; allowAssigned: boolean }> = [
   { label: '閲覧', action: 'view',    allowAssigned: true },
@@ -61,6 +62,11 @@ const SHIFT_ROWS: Array<{ label: string; action: ShiftAction; allowAssigned: boo
   { label: '作成', action: 'create', allowAssigned: true },
   { label: '編集', action: 'edit',   allowAssigned: true },
   { label: '削除', action: 'delete', allowAssigned: false },
+];
+
+const INTERNAL_WORK_ROWS: Array<{ label: string; action: InternalWorkAction; allowAssigned: boolean }> = [
+  { label: '閲覧', action: 'view', allowAssigned: true },
+  { label: '作成', action: 'create', allowAssigned: true },
 ];
 
 const MGMT_ITEMS: Array<{ label: string; key: keyof RolePermissions['management']; description: string }> = [
@@ -81,6 +87,8 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
     onChange({ ...value, records: { ...value.records, [action]: scope } });
   const setShifts = (action: ShiftAction, scope: RecordScope) =>
     onChange({ ...value, shifts: { ...value.shifts, [action]: scope } });
+  const setInternalWork = (action: InternalWorkAction, scope: RecordScope) =>
+    onChange({ ...value, internalWork: { ...value.internalWork, [action]: scope } });
   const setMgmt = (area: keyof RolePermissions['management'], checked: boolean) =>
     onChange({ ...value, management: { ...value.management, [area]: checked } });
 
@@ -127,6 +135,21 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
               {/* 承認列はシフトに存在しないため空セル */}
               <TableCell />
             </TableRow>
+            <TableRow>
+              <TableCell sx={{ whiteSpace: 'nowrap' }}>内勤</TableCell>
+              {INTERNAL_WORK_ROWS.map(r => (
+                <TableCell key={r.action} align="center">
+                  <ScopeToggle
+                    scope={value.internalWork[r.action]}
+                    onChange={s => setInternalWork(r.action, s)}
+                    allowAssigned={r.allowAssigned}
+                  />
+                </TableCell>
+              ))}
+              <TableCell />
+              <TableCell />
+              <TableCell />
+            </TableRow>
           </TableBody>
         </Table>
       </TableContainer>
@@ -160,6 +183,23 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
                 <ScopeToggle
                   scope={value.shifts[r.action]}
                   onChange={s => setShifts(r.action, s)}
+                  allowAssigned={r.allowAssigned}
+                />
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
+        <Box sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+          <Typography variant="subtitle2" fontWeight="bold" mb={1}>内勤</Typography>
+          <Stack spacing={1}>
+            {INTERNAL_WORK_ROWS.map(r => (
+              <Stack key={r.action} direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
+                  {r.label}
+                </Typography>
+                <ScopeToggle
+                  scope={value.internalWork[r.action]}
+                  onChange={s => setInternalWork(r.action, s)}
                   allowAssigned={r.allowAssigned}
                 />
               </Stack>

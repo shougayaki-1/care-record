@@ -5,6 +5,7 @@ import { sanitizeDbError } from '@/utils/errors';
 import { randomUUID } from 'crypto';
 import { supabaseAdmin, createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
+import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 
 export async function updateOwnProfile(name: string, agreeToTerms = false) {
     const { id: userId } = await getAuthedUser();
@@ -48,11 +49,13 @@ export async function uploadOwnAvatar(formData: FormData) {
     const { id: userId } = await getAuthedUser();
     const file = formData.get('avatar');
     if (!(file instanceof File)) throw new Error('画像を選択してください');
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('JPEG、PNG、WebP形式の画像を選択してください');
-    if (file.size < 1 || file.size > 5 * 1024 * 1024) throw new Error('画像は5MB以下にしてください');
-    const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1];
-    const path = `${userId}/${randomUUID()}.${extension}`;
-    const { error: uploadError } = await supabaseAdmin.storage.from('avatars').upload(path, file, { contentType: file.type, upsert: false });
+    const sanitized = await sanitizeUploadedImage(file);
+    const path = `${userId}/${randomUUID()}.${sanitized.extension}`;
+    const { error: uploadError } = await supabaseAdmin.storage.from('avatars').upload(path, sanitized.bytes, {
+        contentType: sanitized.contentType,
+        upsert: false,
+        cacheControl: '3600',
+    });
     if (uploadError) throw new Error(uploadError.message);
     const { data } = supabaseAdmin.storage.from('avatars').getPublicUrl(path);
     const { error } = await supabaseAdmin.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', userId);

@@ -18,7 +18,7 @@ import {
 import RolePermissionsMatrix from '@/components/roles/RolePermissionsMatrix';
 import ColorPresetPicker from '@/components/roles/ColorPresetPicker';
 import type { RolePermissions } from '@/utils/permissions';
-import { checkManagementPermission, EMPTY_PERMISSIONS } from '@/utils/permissions';
+import { checkManagementPermission, EMPTY_PERMISSIONS, normalizePermissions } from '@/utils/permissions';
 
 type OrgRole = {
   id: string;
@@ -51,7 +51,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
     setLoading(true);
     try {
       const data = await getOrgRolesFull(currentOrg.id);
-      setRoles(data as OrgRole[]);
+      setRoles((data as OrgRole[]).map((role) => ({ ...role, permissions: normalizePermissions(role.permissions) })));
     } catch {
       showToast('ロール一覧の取得に失敗しました', 'error');
     } finally {
@@ -79,7 +79,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
     setEditRole(null);
     setFormName('');
     setFormColor('#6366f1');
-    setFormPerms(EMPTY_PERMISSIONS);
+    setFormPerms(normalizePermissions(EMPTY_PERMISSIONS));
   };
 
   const openEdit = (role: OrgRole) => {
@@ -87,7 +87,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
     setEditRole(role);
     setFormName(role.name);
     setFormColor(role.color ?? '#6366f1');
-    setFormPerms(role.permissions);
+    setFormPerms(normalizePermissions(role.permissions));
   };
 
   const handleSave = async () => {
