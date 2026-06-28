@@ -14,8 +14,8 @@ import {
 } from '@/utils/permissions';
 
 export type OrgRole = 'owner' | 'member';
-export const SESSION_IDLE_MINUTES = 16;
-export const SESSION_ABSOLUTE_HOURS = 12;
+export const SESSION_IDLE_MINUTES = 1440;
+export const SESSION_ABSOLUTE_HOURS = 24;
 
 // RLS をバイパスする管理クライアント（検証通過後の実処理用に共有）
 // フォールバック値により、環境変数未設定でもモジュール初期化時に throw しない。

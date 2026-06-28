@@ -135,7 +135,7 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
     if (isProtected && user) {
         const { data: { session } } = await supabase.auth.getSession();
         const sessionId = session?.access_token ? authSessionId(session.access_token) : null;
-        const idleCutoff = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+        const idleCutoff = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
         const now = new Date().toISOString();
 
         // user と sessionId は直前に Auth サーバーで検証済み。
@@ -188,7 +188,7 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
                 url.search = 'reason=idle_timeout';
                 return redirectWithSession(url);
             }
-            const absoluteExpiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+            const absoluteExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
             const { error: bootstrapError } = await supabaseAdmin.from('user_session_activity').insert({
                 session_hash: await hashAccessToken(session.access_token),
                 auth_session_id: sessionId,

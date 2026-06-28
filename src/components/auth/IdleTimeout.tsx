@@ -12,8 +12,8 @@ import { logoutCurrentUser } from '@/utils/clientLogout';
 import { AppDialog } from '@/components/ui/AppDialog';
 import { AppButton } from '@/components/ui/AppButton';
 
-// 無操作からタイムアウト警告までの時間（ミリ秒）。既定15分。
-const IDLE_LIMIT_MS = 15 * 60 * 1000;
+// 無操作からタイムアウト警告までの時間（ミリ秒）。既定24時間。
+const IDLE_LIMIT_MS = 24 * 60 * 60 * 1000;
 // 警告表示から自動ログアウトまでの猶予（ミリ秒）。
 const WARNING_GRACE_MS = 60 * 1000;
 const HEARTBEAT_INTERVAL_MS = 60 * 1000;
