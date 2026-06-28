@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import type { Part } from '@google-cloud/vertexai';
-import { assertOrgRole } from '@/utils/supabase/auth';
+import { getAuthedUser, assertOrgRole } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { getGenerativeModel } from '@/lib/ai/gemini';
 import { buildExtractionPrompt } from '@/lib/ai/extractPrompt';
@@ -28,9 +28,14 @@ export async function POST(request: NextRequest) {
   }
 
   let authedUserId: string;
+  let authedSessionId: string;
   try {
-    const { userId } = await assertOrgRole(organizationId);
-    authedUserId = userId;
+    // getAuthedUser で sessionId を取得しつつ、assertOrgRole で org 所属を検証する。
+    // assertOrgRole 内部でも getAuthedUser を呼ぶが二重コストは無視できる（DB 1クエリ差）。
+    const user = await getAuthedUser();
+    authedUserId = user.id;
+    authedSessionId = user.sessionId;
+    await assertOrgRole(organizationId);
   } catch {
     return new Response('Unauthorized', { status: 401 });
   }
@@ -71,8 +76,9 @@ export async function POST(request: NextRequest) {
       actorId: authedUserId,
       action: 'ai_import.started',
       resourceType: 'ai_import',
+      sessionId: authedSessionId,
       outcome: 'success',
-      details: { file_count: files.length, organization_id: organizationId },
+      details: { file_count: files.length },
     });
   } catch (auditErr) {
     // 監査ログの失敗はリクエストをブロックしない（ログだけ出す）
