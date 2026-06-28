@@ -66,6 +66,8 @@ export const useShiftData = ({
     const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
     const [unsyncedCount, setUnsyncedCount] = useState(0);
 
+    const masterDataReadyRef = useRef(false);
+
     useEffect(() => {
         supabase.auth.getUser().then(({ data: { user } }) => {
             if (user) setCurrentUserId(user.id);
@@ -103,6 +105,8 @@ export const useShiftData = ({
             }
         } catch (error) {
             console.error(error);
+        } finally {
+            masterDataReadyRef.current = true;
         }
     }, [currentOrg, currentUserId]);
 
@@ -140,6 +144,12 @@ export const useShiftData = ({
 
     const fetchData = useCallback(async (isBackground = false, range?: ShiftDateRange) => {
         if (!currentOrg) return;
+        // myShift tab requires knowing the current staff — skip until master data is ready
+        if (activeTab === 'myShift' && !masterDataReadyRef.current) {
+            setInitialLoading(false);
+            setIsFetching(false);
+            return;
+        }
         if (!isBackground) setInitialLoading(true);
         setIsFetching(true);
 

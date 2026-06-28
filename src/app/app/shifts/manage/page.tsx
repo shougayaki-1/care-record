@@ -58,6 +58,7 @@ export default function ShiftManagePage() {
     const searchParams = useSearchParams();
     const calendarRef = useRef<FullCalendar>(null);
     const handledShiftParamRef = useRef<string | null>(null);
+    const calendarInitializedRef = useRef(false);
 
     const [generating, setGenerating] = useState(false);
     const [pdfGenerating, setPdfGenerating] = useState(false);
@@ -149,6 +150,10 @@ export default function ShiftManagePage() {
 
     const handleCalendarDatesSet = useCallback((info: DatesSetArg) => {
         if (activeTab === 'patterns') return;
+        if (!calendarInitializedRef.current) {
+            calendarInitializedRef.current = true;
+            return; // Initial calendar render triggers this — let useEffect handle it
+        }
         const range: ShiftDateRange = { start: info.start, end: info.end };
         fetchData(true, range);
     }, [activeTab, fetchData]);
