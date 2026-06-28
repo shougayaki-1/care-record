@@ -9,8 +9,12 @@ import {
 } from '@/components/ui/mui';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditNoteIcon from '@mui/icons-material/EditNote';
+import AddIcon from '@mui/icons-material/Add';
 import ShiftSegmentEditor from './ShiftSegmentEditor';
 import { ShiftPayload } from '@/app/actions/shift';
+import type { SaveSegmentInput } from '@/app/actions/shiftSegments';
+import { getServiceTypes, type ServiceType } from '@/app/actions/serviceTypes';
+import { getStaffRoles, type StaffRole } from '@/app/actions/staffRoles';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, AppTextField, DateTimeField, MultiSelectField, SelectField } from '@/components/ui';
@@ -27,6 +31,13 @@ export type ShiftData = {
     status: string;
     cancel_reason: string | null;
     shift_staffs: { staff_id: string; }[];
+};
+
+type SegmentDraft = {
+    service_type_id: string;
+    start_at: string;
+    end_at: string;
+    staffs: { staff_id: string; staff_role_id: string }[];
 };
 
 type Props = {
@@ -51,56 +62,102 @@ export const ShiftFormModal = ({
     const [loading, setLoading] = useState(false);
 
     const [clientId, setClientId] = useState('');
-    const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
     const [startAt, setStartAt] = useState('');
     const [endAt, setEndAt] = useState('');
     const [cancelReason, setCancelReason] = useState('');
     const [autoAssign, setAutoAssign] = useState(true);
 
+    const [segments, setSegments] = useState<SegmentDraft[]>([]);
+    const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const [staffRoles, setStaffRoles] = useState<StaffRole[]>([]);
+
     useEffect(() => {
-        if (open) {
-            if (initialData) {
-                setClientId(initialData.client_id || '');
-                // YYYY-MM-DDTHH:mm の形にフォーマットしてdatetime-localに安全に適用
-                const formatDatetime = (isoStr: string) => {
-                    if (!isoStr) return '';
-                    const d = new Date(isoStr);
-                    const pad = (n: number) => String(n).padStart(2, '0');
-                    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-                };
-                setStartAt(formatDatetime(initialData.start_at));
-                setEndAt(formatDatetime(initialData.end_at));
-                setCancelReason(initialData.cancel_reason || '');
-                setSelectedStaffIds((initialData.shift_staffs || []).map(s => s.staff_id));
-            } else {
-                setClientId('');
-                setSelectedStaffIds([]);
-                setStartAt('');
-                setEndAt('');
-                setCancelReason('');
-                setAutoAssign(true);
-            }
+        if (!open) return;
+
+        // Load master data for the inline segment editor
+        Promise.all([
+            getServiceTypes(organizationId),
+            getStaffRoles(organizationId),
+        ]).then(([types, roles]) => {
+            setServiceTypes(types);
+            setStaffRoles(roles);
+        });
+
+        if (initialData) {
+            setClientId(initialData.client_id || '');
+            const formatDatetime = (isoStr: string) => {
+                if (!isoStr) return '';
+                const d = new Date(isoStr);
+                const pad = (n: number) => String(n).padStart(2, '0');
+                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            };
+            setStartAt(formatDatetime(initialData.start_at));
+            setEndAt(formatDatetime(initialData.end_at));
+            setCancelReason(initialData.cancel_reason || '');
+            setSegments([]); // EDIT mode: ShiftSegmentEditor handles loading from server
+        } else {
+            setClientId('');
+            setSegments([]);
+            setStartAt('');
+            setEndAt('');
+            setCancelReason('');
+            setAutoAssign(true);
         }
-    }, [open, initialData]);
+    }, [open, initialData, organizationId]);
+
+    // Seed one blank segment when start/end time are set (CREATE mode only)
+    useEffect(() => {
+        if (initialData || segments.length > 0) return;
+        if (!startAt || !endAt) return;
+        setSegments([{
+            service_type_id: '',
+            start_at: startAt,
+            end_at: endAt,
+            staffs: [],
+        }]);
+    }, [startAt, endAt, initialData, segments.length]);
 
     const handleSave = async () => {
-        if (!clientId || !startAt || !endAt || selectedStaffIds.length === 0) {
-            showToast('必須項目（利用者、スタッフ、日時）をすべて入力してください', 'warning');
+        if (!clientId || !startAt || !endAt) {
+            showToast('必須項目（利用者、日時）をすべて入力してください', 'warning');
             return;
+        }
+        if (!initialData) {
+            // CREATE: validate inline segments
+            if (segments.length === 0) {
+                showToast('サービス区間を1つ以上追加してください', 'warning');
+                return;
+            }
+            if (segments.some(s => s.staffs.length === 0)) {
+                showToast('すべてのサービス区間に担当スタッフを設定してください', 'warning');
+                return;
+            }
         }
         setLoading(true);
         try {
             const clientName = clients.find(c => c.id === clientId)?.name || '';
-            const staffNames = staffs.filter(s => selectedStaffIds.includes(s.id)).map(s => s.name).join(', ');
+            const staffNames = segments.flatMap(s =>
+                s.staffs.map(ss => staffs.find(st => st.id === ss.staff_id)?.name ?? '')
+            ).filter(Boolean);
+            const uniqueStaffNames = [...new Set(staffNames)];
 
             const payload: ShiftPayload = {
                 organizationId,
                 clientId,
-                title: `${clientName} (${staffNames})`,
+                title: clientName + (uniqueStaffNames.length > 0 ? ` (${uniqueStaffNames.join(', ')})` : ''),
                 startAt: new Date(startAt).toISOString(),
                 endAt: new Date(endAt).toISOString(),
-                staffIds: selectedStaffIds,
-                isModified: true, // 手動で保存したため「個別調整済み」フラグを立てる
+                segments: !initialData
+                    ? segments.map((s, i): SaveSegmentInput => ({
+                        service_type_id: s.service_type_id || null,
+                        start_at: new Date(s.start_at).toISOString(),
+                        end_at: new Date(s.end_at).toISOString(),
+                        sort_order: i,
+                        staffs: s.staffs.map(ss => ({ staff_id: ss.staff_id, staff_role_id: ss.staff_role_id || null })),
+                    }))
+                    : undefined,
+                isModified: true,
                 autoAssign: !initialData ? autoAssign : false,
             };
 
@@ -210,16 +267,6 @@ export const ShiftFormModal = ({
                         onChange={setClientId}
                     />
 
-                    <MultiSelectField
-                        required
-                        label="担当スタッフ（複数選択可）"
-                        options={staffs}
-                        value={staffs.filter((staff) => selectedStaffIds.includes(staff.id))}
-                        onChange={(selected) => setSelectedStaffIds(selected.map((staff) => staff.id))}
-                        getOptionLabel={(staff) => staff.name}
-                        getOptionValue={(staff) => staff.id}
-                    />
-
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                         <DateTimeField
                             label="開始日時"
@@ -239,22 +286,76 @@ export const ShiftFormModal = ({
                         />
                     </Stack>
 
-                    {/* 新規作成時のみ: 自動アサインチェックボックス */}
+                    {/* CREATE モードのみ: インラインセグメント編集 */}
                     {!initialData && (
-                        <FormControlLabel
-                            control={
-                                <Checkbox
-                                    checked={autoAssign}
-                                    onChange={(e) => setAutoAssign(e.target.checked)}
-                                    size="small"
-                                />
-                            }
-                            label={
-                                <Typography variant="body2" color="text.secondary">
-                                    選択したスタッフを基本担当（担当スタッフ設定）にも登録する
+                        <>
+                            <Box border="1px solid" borderColor="divider" borderRadius={2} p={2}>
+                                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                                    サービス区間・担当スタッフ（必須）
                                 </Typography>
-                            }
-                        />
+                                <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+                                    時間帯ごとにサービス種別と担当スタッフを設定してください。
+                                </Typography>
+                                {segments.map((seg, idx) => (
+                                    <Box key={idx} mb={2} p={1.5} border="1px solid" borderColor="divider" borderRadius={1}>
+                                        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+                                            <Typography variant="caption">区間 {idx + 1}</Typography>
+                                            <IconButton size="small" color="error"
+                                                onClick={() => setSegments(prev => prev.filter((_, i) => i !== idx))}>
+                                                <DeleteIcon fontSize="small" />
+                                            </IconButton>
+                                        </Stack>
+                                        {/* 開始/終了 */}
+                                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} mb={1}>
+                                            <DateTimeField label="開始" size="small" fullWidth value={seg.start_at}
+                                                onChange={e => setSegments(prev => prev.map((s, i) => i === idx ? { ...s, start_at: e.target.value } : s))} />
+                                            <DateTimeField label="終了" size="small" fullWidth value={seg.end_at}
+                                                onChange={e => setSegments(prev => prev.map((s, i) => i === idx ? { ...s, end_at: e.target.value } : s))} />
+                                        </Stack>
+                                        {/* サービス種別 */}
+                                        <SelectField
+                                            label="サービス種別"
+                                            size="small"
+                                            value={seg.service_type_id}
+                                            options={[{ value: '', label: '（なし）' }, ...serviceTypes.map(t => ({ value: t.id, label: t.name }))]}
+                                            onChange={val => setSegments(prev => prev.map((s, i) => i === idx ? { ...s, service_type_id: val } : s))}
+                                        />
+                                        {/* 担当スタッフ（必須） */}
+                                        <MultiSelectField
+                                            required
+                                            label="担当スタッフ（必須）"
+                                            options={staffs}
+                                            value={staffs.filter(st => seg.staffs.some(ss => ss.staff_id === st.id))}
+                                            onChange={selected => setSegments(prev => prev.map((s, i) =>
+                                                i === idx ? { ...s, staffs: selected.map(st => ({ staff_id: st.id, staff_role_id: '' })) } : s
+                                            ))}
+                                            getOptionLabel={st => st.name}
+                                            getOptionValue={st => st.id}
+                                        />
+                                    </Box>
+                                ))}
+                                <Button size="small" startIcon={<AddIcon />}
+                                    onClick={() => setSegments(prev => [...prev, { service_type_id: '', start_at: startAt, end_at: endAt, staffs: [] }])}>
+                                    区間を追加
+                                </Button>
+                            </Box>
+
+                            {/* 新規作成時のみ: 自動アサインチェックボックス */}
+                            <FormControlLabel
+                                control={
+                                    <Checkbox
+                                        checked={autoAssign}
+                                        onChange={(e) => setAutoAssign(e.target.checked)}
+                                        size="small"
+                                    />
+                                }
+                                label={
+                                    <Typography variant="body2" color="text.secondary">
+                                        担当スタッフを基本担当（担当スタッフ設定）にも登録する
+                                    </Typography>
+                                }
+                            />
+                        </>
                     )}
 
                     {initialData && (
@@ -262,10 +363,10 @@ export const ShiftFormModal = ({
                             <Divider sx={{ my: 1 }} />
                             <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
                                 <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
-                                    サービス区間（任意）
+                                    サービス区間（必須）
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                                    時間帯ごとにサービス種別・スタッフ役割を設定できます。設定した区間ごとにサービス提供記録が作成されます。
+                                    時間帯ごとにサービス種別・担当スタッフを設定してください。設定した区間ごとにサービス提供記録が作成されます。
                                 </Typography>
                                 <ShiftSegmentEditor
                                     orgId={organizationId}
