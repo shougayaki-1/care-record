@@ -4,7 +4,8 @@ import React, { useState, useEffect } from 'react';
 import {
     Button, Stack,
     Box, Typography,
-    IconButton, Tooltip, Divider
+    IconButton, Tooltip, Divider,
+    FormControlLabel, Checkbox
 } from '@/components/ui/mui';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ShiftSegmentEditor from './ShiftSegmentEditor';
@@ -51,6 +52,7 @@ export const ShiftFormModal = ({
     const [startAt, setStartAt] = useState('');
     const [endAt, setEndAt] = useState('');
     const [cancelReason, setCancelReason] = useState('');
+    const [autoAssign, setAutoAssign] = useState(true);
 
     useEffect(() => {
         if (open) {
@@ -73,6 +75,7 @@ export const ShiftFormModal = ({
                 setStartAt('');
                 setEndAt('');
                 setCancelReason('');
+                setAutoAssign(true);
             }
         }
     }, [open, initialData]);
@@ -94,7 +97,8 @@ export const ShiftFormModal = ({
                 startAt: new Date(startAt).toISOString(),
                 endAt: new Date(endAt).toISOString(),
                 staffIds: selectedStaffIds,
-                isModified: true // 手動で保存したため「個別調整済み」フラグを立てる
+                isModified: true, // 手動で保存したため「個別調整済み」フラグを立てる
+                autoAssign: !initialData ? autoAssign : false,
             };
 
             await onSave(payload, initialData?.id);
@@ -215,6 +219,24 @@ export const ShiftFormModal = ({
                             onChange={(e) => setEndAt(e.target.value)}
                         />
                     </Stack>
+
+                    {/* 新規作成時のみ: 自動アサインチェックボックス */}
+                    {!initialData && (
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={autoAssign}
+                                    onChange={(e) => setAutoAssign(e.target.checked)}
+                                    size="small"
+                                />
+                            }
+                            label={
+                                <Typography variant="body2" color="text.secondary">
+                                    選択したスタッフを基本担当（担当スタッフ設定）にも登録する
+                                </Typography>
+                            }
+                        />
+                    )}
 
                     {initialData && (
                         <>
