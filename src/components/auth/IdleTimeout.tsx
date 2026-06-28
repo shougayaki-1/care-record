@@ -7,8 +7,8 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import { heartbeatSession, recordLogout } from '@/app/actions/auth';
+import { heartbeatSession } from '@/app/actions/auth';
+import { logoutCurrentUser } from '@/utils/clientLogout';
 import { AppDialog } from '@/components/ui/AppDialog';
 import { AppButton } from '@/components/ui/AppButton';
 
@@ -33,8 +33,7 @@ export default function IdleTimeout() {
 
   const logout = useCallback(async () => {
     if (countdownTimer.current) clearInterval(countdownTimer.current);
-    await recordLogout();
-    await supabase.auth.signOut();
+    await logoutCurrentUser();
     router.push('/?reason=idle_timeout');
   }, [router]);
 

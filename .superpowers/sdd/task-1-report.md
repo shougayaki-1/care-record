@@ -1,11 +1,12 @@
 ## Status: DONE
 
-## Commits: 8dd5e47
+## Commits: aa99f5b
 
-## Tests: npm run typecheck (tsc --noEmit) — 0 errors
+## Tests: npx tsc --noEmit — 0 errors
 
 ## Changes
-- `src/app/actions/shift.ts`: Added `report_shifts (shift_id, is_primary, reports (id, status, deleted_at))` to SELECT in `getShifts()`; replaced `await attachReportStatuses(data ?? [])` with synchronous inline mapping; removed `attachReportStatuses()` function (23 lines deleted)
-- Net diff: 1 file changed, 13 insertions(+), 25 deletions(-)
+- Created `supabase/migrations/202606280010_segment_only_staffing.sql` (262 lines)
+- Drops and recreates `public.save_report_atomic` with OR conditions checking both `shift_staffs` (legacy) and `shift_segment_staffs` (new) in the `assigned` scope access checks for create, edit, and approve paths
+- Also extends the auto shift resolution block to check both tables
 
-## Self-review: none
+## Concerns: none — purely additive OR condition; `npx supabase db push` must be run manually to apply to remote DB

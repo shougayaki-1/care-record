@@ -152,8 +152,8 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
         const supabaseAdmin = getSupabaseAdmin(supabaseUrl, serviceRoleKey);
         if (!sessionId) {
             // JWT に session_id フィールドがない（古いトークン形式 or JWT テンプレートの設定問題）。
-            // idle_timeout にリダイレクトすると page.tsx が signOut() を呼び出し新規セッションを
-            // 破棄してしまうため、別のエラーコードを使う。
+            // idle_timeout にリダイレクトすると page.tsx がログアウト後処理を呼び出し
+            // 新規セッションを破棄してしまうため、別のエラーコードを使う。
             console.error('[middleware] JWT has no session_id. userId:', user.id, 'path:', path);
             const url = request.nextUrl.clone();
             url.pathname = '/';
@@ -172,15 +172,31 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
             return redirectWithSession(url);
         }
         if (!activity && session?.access_token && isFreshJwt(session.access_token)) {
+            const { data: existingSession, error: existingSessionError } = await supabaseAdmin
+                .from('user_session_activity').select('session_hash')
+                .eq('auth_session_id', sessionId).eq('user_id', user.id).maybeSingle();
+            if (existingSessionError) {
+                console.error('[middleware] existing session activity lookup failed', existingSessionError.message, 'sessionId:', sessionId);
+                const url = request.nextUrl.clone();
+                url.pathname = '/';
+                url.search = 'error=session_validation_unavailable';
+                return redirectWithSession(url);
+            }
+            if (existingSession) {
+                const url = request.nextUrl.clone();
+                url.pathname = '/';
+                url.search = 'reason=idle_timeout';
+                return redirectWithSession(url);
+            }
             const absoluteExpiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
-            const { error: bootstrapError } = await supabaseAdmin.from('user_session_activity').upsert({
+            const { error: bootstrapError } = await supabaseAdmin.from('user_session_activity').insert({
                 session_hash: await hashAccessToken(session.access_token),
                 auth_session_id: sessionId,
                 user_id: user.id,
                 last_activity: now,
                 absolute_expires_at: absoluteExpiresAt,
                 revoked_at: null,
-            }, { onConflict: 'session_hash' });
+            });
             if (!bootstrapError) {
                 console.warn('[middleware] bootstrapped missing fresh session activity. sessionId:', sessionId, 'userId:', user.id);
                 response.headers.set('Content-Security-Policy', csp);

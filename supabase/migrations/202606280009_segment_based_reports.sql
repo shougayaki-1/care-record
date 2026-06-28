@@ -1,19 +1,11 @@
-## Task 1: DB Migration — アクセス制御を `shift_segment_staffs` にも対応
+-- Treat shift_segments as the unit for service records while keeping the
+-- legacy report_shifts link to the parent shift.
 
-`save_report_atomic` 内で `assigned` スコープのアクセスチェックが `shift_staffs` のみを参照している。セグメントのスタッフも認識できるよう OR 条件を追加する。
+CREATE UNIQUE INDEX IF NOT EXISTS reports_active_segment_unique_idx
+  ON public.reports (segment_id)
+  WHERE segment_id IS NOT NULL AND deleted_at IS NULL;
 
-**Files:**
-- Create: `supabase/migrations/202606280010_segment_only_staffing.sql`
-
-- [ ] **Step 1: `save_report_atomic` の `shift_staffs` 参照を OR で `shift_segment_staffs` にも拡張する**
-
-`supabase/migrations/202606280010_segment_only_staffing.sql` を作成:
-
-```sql
--- Extend access control for "assigned" scope to also check shift_segment_staffs
--- so that records remain creatable after shift_staffs stops being populated.
-
-DROP FUNCTION IF EXISTS public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text);
+DROP FUNCTION IF EXISTS public.save_report_atomic(uuid, uuid, uuid, uuid, timestamptz, timestamptz, text, jsonb, text);
 
 CREATE OR REPLACE FUNCTION public.save_report_atomic(
   p_organization_id uuid,
@@ -109,29 +101,14 @@ BEGIN
        )
        AND NOT (
          actor_staff_id IS NOT NULL
-         AND (
-           -- legacy: shift_staffs (kept for backward compat)
-           EXISTS (
-             SELECT 1 FROM public.shifts s
-             JOIN public.shift_staffs ss ON ss.shift_id = s.id
-              WHERE s.client_id = p_client_id
-                AND s.organization_id = p_organization_id
-                AND s.deleted_at IS NULL
-                AND s.status <> 'cancelled'
-                AND ss.staff_id = actor_staff_id
-           )
-           OR
-           -- new: shift_segment_staffs (segment-based)
-           EXISTS (
-             SELECT 1 FROM public.shifts s
-             JOIN public.shift_segments seg ON seg.shift_id = s.id
-             JOIN public.shift_segment_staffs sss ON sss.segment_id = seg.id
-              WHERE s.client_id = p_client_id
-                AND s.organization_id = p_organization_id
-                AND s.deleted_at IS NULL
-                AND s.status <> 'cancelled'
-                AND sss.staff_id = actor_staff_id
-           )
+         AND EXISTS (
+           SELECT 1 FROM public.shifts s
+           JOIN public.shift_staffs ss ON ss.shift_id = s.id
+            WHERE s.client_id = p_client_id
+              AND s.organization_id = p_organization_id
+              AND s.deleted_at IS NULL
+              AND s.status <> 'cancelled'
+              AND ss.staff_id = actor_staff_id
          )
        )
     THEN RAISE EXCEPTION 'access_denied'; END IF;
@@ -145,16 +122,10 @@ BEGIN
          AND s.deleted_at IS NULL
          AND s.start_at < p_end_at
          AND s.end_at > p_start_at
-         AND (
-           EXISTS (
-             SELECT 1 FROM public.shift_staffs ss
-              WHERE ss.shift_id = s.id AND ss.staff_id = actor_staff_id
-           )
-           OR EXISTS (
-             SELECT 1 FROM public.shift_segments seg
-             JOIN public.shift_segment_staffs sss ON sss.segment_id = seg.id
-              WHERE seg.shift_id = s.id AND sss.staff_id = actor_staff_id
-           )
+         AND EXISTS (
+           SELECT 1 FROM public.shift_staffs ss
+            WHERE ss.shift_id = s.id
+              AND ss.staff_id = actor_staff_id
          )
        ORDER BY
          abs(extract(epoch FROM (s.start_at - p_start_at))) + abs(extract(epoch FROM (s.end_at - p_end_at))),
@@ -202,26 +173,14 @@ BEGIN
        )
        AND NOT (
          actor_staff_id IS NOT NULL
-         AND (
-           EXISTS (
-             SELECT 1 FROM public.shifts s
-             JOIN public.shift_staffs ss ON ss.shift_id = s.id
-              WHERE s.client_id = p_client_id
-                AND s.organization_id = p_organization_id
-                AND s.deleted_at IS NULL
-                AND s.status <> 'cancelled'
-                AND ss.staff_id = actor_staff_id
-           )
-           OR EXISTS (
-             SELECT 1 FROM public.shifts s
-             JOIN public.shift_segments seg ON seg.shift_id = s.id
-             JOIN public.shift_segment_staffs sss ON sss.segment_id = seg.id
-              WHERE s.client_id = p_client_id
-                AND s.organization_id = p_organization_id
-                AND s.deleted_at IS NULL
-                AND s.status <> 'cancelled'
-                AND sss.staff_id = actor_staff_id
-           )
+         AND EXISTS (
+           SELECT 1 FROM public.shifts s
+           JOIN public.shift_staffs ss ON ss.shift_id = s.id
+            WHERE s.client_id = p_client_id
+              AND s.organization_id = p_organization_id
+              AND s.deleted_at IS NULL
+              AND s.status <> 'cancelled'
+              AND ss.staff_id = actor_staff_id
          )
        )
     THEN RAISE EXCEPTION 'access_denied'; END IF;
@@ -272,23 +231,3 @@ $$;
 
 REVOKE ALL ON FUNCTION public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text) TO authenticated;
-```
-
-- [ ] **Step 2: Supabase ダッシュボードまたは CLI でマイグレーションを適用**
-
-```bash
-npx supabase db push
-# または: npx supabase migration up
-```
-
-Expected: "202606280010_segment_only_staffing applied successfully"
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add supabase/migrations/202606280010_segment_only_staffing.sql
-git commit -m "feat(db): extend access control to check shift_segment_staffs for assigned scope"
-```
-
----
-

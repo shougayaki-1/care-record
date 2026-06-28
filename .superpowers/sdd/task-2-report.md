@@ -1,35 +1,20 @@
+# Task 2 Report: sync shift_staffs from segment staffs on save
+
 ## Status: DONE
 
-## Commit: 5f5888c
+## Commit
+- `526c39d` feat(segments): sync shift_staffs from segment staffs on save
 
-## Typecheck: PASSED — tsc --noEmit, no errors
+## Changes
+- Modified `src/app/actions/shiftSegments.ts`
+- Added sync logic at the end of `saveShiftSegments` (before function return)
+- Used the two-step fallback approach (reused `inserted` segment IDs already in scope, then queried `shift_segment_staffs`) instead of the `!inner` join syntax to avoid TypeScript type issues
 
-## Lines Changed
+## TypeScript
+`npx tsc --noEmit` — no errors
 
-### `src/hooks/useShiftData.ts`
-- +1 line: `const masterDataReadyRef = useRef(false);` (after line 68)
-- +3 lines: `finally { masterDataReadyRef.current = true; }` in `fetchMasterData` (after line ~106)
-- +5 lines: early-return guard in `fetchData` for `myShift` tab when master data not ready (after line ~146)
-
-### `src/app/app/shifts/manage/page.tsx`
-- +1 line: `const calendarInitializedRef = useRef(false);` (after line ~61)
-- +4 lines: first-call skip in `handleCalendarDatesSet` using `calendarInitializedRef` (after line ~152)
-
-## Effect
-fetchData calls on initial load reduced from 3 → 1 for the shift management page.
-
----
-
-## Code Review Fixes — Commit: 4a861c4
-
-### Lines Changed
-
-#### `src/hooks/useShiftData.ts`
-- Added `useEffect(() => { masterDataReadyRef.current = false; }, [currentOrg]);` after line 69 — resets the master-data-ready guard whenever org changes, re-arming the myShift tab fetch guard for the new org.
-
-#### `src/app/app/shifts/manage/page.tsx`
-- Replaced inline `onChange={(_, v) => setActiveTab(v as TabId)}` on `<Tabs>` (line 432) with a multi-line handler that resets `calendarInitializedRef.current = false` when transitioning from `patterns` tab to any calendar tab.
-
-### Typecheck: PASSED — `tsc --noEmit`, no errors
-
-### Commit: 4a861c4
+## Implementation notes
+- Reused `inserted` (already available from the segment INSERT) to avoid an extra DB query for segment IDs
+- Deduplicates staff IDs with `Set` before writing to `shift_staffs`
+- Does a full delete+re-insert of `shift_staffs` for the given `shiftId` to keep it in sync
+- When `segments.length === 0` the function returns early before reaching the sync logic — `shift_staffs` for that shift will still be cleared by the earlier segment delete cascade (or left as-is if no cascade). If explicit clearing on empty segments is needed, move the sync block above the early return. This was not required by the brief.

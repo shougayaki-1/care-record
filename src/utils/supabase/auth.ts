@@ -83,15 +83,24 @@ export async function registerSessionActivity(session: Session): Promise<string>
     const sessionHash = hashAccessToken(session.access_token);
     const authSessionId = getAuthSessionId(session.access_token);
     const absoluteExpiresAt = new Date(Date.now() + SESSION_ABSOLUTE_HOURS * 60 * 60 * 1000).toISOString();
-    const { error } = await supabaseAdmin.from('user_session_activity').upsert({
+    const { error } = await supabaseAdmin.from('user_session_activity').insert({
         session_hash: sessionHash,
         auth_session_id: authSessionId,
         user_id: session.user.id,
         last_activity: new Date().toISOString(),
         absolute_expires_at: absoluteExpiresAt,
         revoked_at: null,
-    }, { onConflict: 'session_hash' });
+    });
     if (error) {
+        if (error.code === '23505') {
+            const { data: existing, error: existingError } = await supabaseAdmin
+                .from('user_session_activity')
+                .select('auth_session_id')
+                .eq('auth_session_id', authSessionId)
+                .eq('user_id', session.user.id)
+                .maybeSingle();
+            if (!existingError && existing) return authSessionId;
+        }
         console.error('[auth] registerSessionActivity failed:', error.message, 'authSessionId:', authSessionId, 'userId:', session.user.id);
         throw new Error(`セッションを登録できませんでした: ${error.message}`);
     }

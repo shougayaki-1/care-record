@@ -42,6 +42,7 @@ export async function saveReport(input: SaveReportInput) {
     p_report_id: input.reportId || null,
     p_client_id: input.clientId,
     p_shift_id: input.shiftId || null,
+    p_segment_id: input.segmentId || null,
     p_start_at: input.startAt,
     p_end_at: input.endAt,
     p_status: input.status,
@@ -54,12 +55,6 @@ export async function saveReport(input: SaveReportInput) {
       details: { attemptedStatus: input.status, errorType: error?.code || 'unknown' },
     });
     throw sanitizeDbError(error || new Error('記録を保存できませんでした'), 'action.reports');
-  }
-  if (input.segmentId !== undefined) {
-    await supabaseAdmin
-      .from('reports')
-      .update({ segment_id: input.segmentId || null })
-      .eq('id', String(reportId));
   }
   if (input.status === 'draft' && input.auditSource === 'ai_import') {
     await recordAuditEvent({

@@ -1,24 +1,19 @@
-# SDD Progress Ledger — Plan: CareRecord パフォーマンス改善
+# SDD Progress Ledger — Plan: サービス区間を唯一の時間・スタッフ単位とする
 
 ## Tasks
-- [ ] Task 7: DBインデックス追加
-- [ ] Task 1: getShifts+attachReportStatuses統合
-- [ ] Task 2: useShiftData多重fetch防止
-- [ ] Task 3: Statistics重複クエリ統合
-- [ ] Task 4: WorkspaceContext 3RTT→2RTT
-- [ ] Task 5: TopAppBar並列化
-- [ ] Task 6: Reportsページネーション
-- [ ] Task 8: Recordページ並列化
+- [x] Task 1: DB Migration — shift_segment_staffs アクセス制御対応
+- [x] Task 2: shiftSegments.ts — shift_staffs 自動同期
+- [x] Task 3: shift.ts — staffIds 削除、segments 追加
+- [x] Task 4: ShiftFormModal — スタッフピッカー廃止、インラインセグメント必須化
+- [x] Task 5: ShiftPatternModal — staffIds フォールバック削除、セグメント必須化
+- [x] Task 6: Record Page — segmentId 必須化
 
 ## Log
-Base commit: 84d095c
-
-## Log
-Task 7 (DBインデックス): complete (commits 84d095c..a232f8c, review clean)
-Task 1 (getShifts統合): complete (commits a232f8c..8dd5e47, review clean)
-Task 2 (useShiftData多重fetch防止): complete (commits 8dd5e47..4a861c4, review clean — Critical+Important fix: reset refs on org/tab change)
-Task 3 (Statistics重複クエリ): complete (commits 4a861c4..490f6b2, review clean)
-Task 4 (WorkspaceContext): complete (commits 490f6b2..21fd88d, review clean — Critical+Important fix: isCurrent guard + JWT error handling)
-Task 5 (TopAppBar並列化): complete (commits 21fd88d..4172d68, review clean)
-Task 6 (Reportsページネーション): complete (commits 4172d68..e6d78d8, review clean)
-Task 8 (Recordページ並列化): complete (commits e6d78d8..11a163c, review clean)
+Base commit: 382c1bf
+Task 1: complete (commits 382c1bf..aa99f5b, review clean — Minor: shift_segments has no deleted_at, finding is N/A)
+Task 2: complete (commits aa99f5b..526c39d, review clean)
+Task 3: complete (commits 526c39d..80cfe43, review clean)
+Task 4: complete (commits 80cfe43..45cd2d6, review clean — Minor: staffRoles fetch unused (plan-mandated); key=idx; no catch on Promise.all)
+Task 5: complete (commits 45cd2d6..b07959a, review clean)
+Task 6: complete (commits b07959a..bc4a3d1, review clean)
+Fix: complete (commit 196cb4e — Google Calendar sync ordering + deleteShiftSegment shift_staffs sync)
