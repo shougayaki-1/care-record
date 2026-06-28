@@ -61,7 +61,9 @@ async function streamExtract(
   onRecord: (result: ExtractionResult, fileIndex: number) => void,
   onError: (message: string, fileIndex: number) => void,
 ): Promise<number> {
-  const response = await fetch('/api/ai/extract', {
+  const orgId = (formData.get('organizationId') as string) ?? '';
+  const extractUrl = `/api/ai/extract?organizationId=${encodeURIComponent(orgId)}`;
+  const response = await fetch(extractUrl, {
     method: 'POST',
     body: formData,
   });

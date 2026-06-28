@@ -690,12 +690,13 @@ export default function RecordPage() {
             {currentStatus !== 'approved' && (
               <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <AiImportButton
+                  organizationId={currentOrg?.id ?? ''}
                   formTemplate={template}
                   clients={[{ id: clientId as string, name: clientName }]}
                   helpers={selectableStaffs.map(s => ({ id: s.id, name: s.name }))}
                   onExtracted={handleAiExtracted}
                   hasExistingValues={Object.keys(answers).length > 0}
-                  disabled={submitting || loading}
+                  disabled={submitting || loading || !currentOrg}
                 />
               </Box>
             )}

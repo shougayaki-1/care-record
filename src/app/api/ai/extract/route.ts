@@ -13,16 +13,9 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
-  // 1. FormData の取り出し
-  let formData: FormData;
-  try {
-    formData = await request.formData();
-  } catch {
-    return new Response('Bad Request: invalid form data', { status: 400 });
-  }
-
-  // 2. 組織境界チェック（認証 + 所属確認）
-  const organizationId = formData.get('organizationId') as string | null;
+  // 1. 組織境界チェック（認証 + 所属確認）— FormData解析前に実施してDoSを防ぐ
+  // organizationId はURLパラメータで受け取る（body解析前にチェック可能にするため）
+  const organizationId = request.nextUrl.searchParams.get('organizationId');
   if (!organizationId) {
     return new Response('Bad Request: organizationId is required', { status: 400 });
   }
@@ -30,14 +23,20 @@ export async function POST(request: NextRequest) {
   let authedUserId: string;
   let authedSessionId: string;
   try {
-    // getAuthedUser で sessionId を取得しつつ、assertOrgRole で org 所属を検証する。
-    // assertOrgRole 内部でも getAuthedUser を呼ぶが二重コストは無視できる（DB 1クエリ差）。
     const user = await getAuthedUser();
     authedUserId = user.id;
     authedSessionId = user.sessionId;
     await assertOrgRole(organizationId);
   } catch {
     return new Response('Unauthorized', { status: 401 });
+  }
+
+  // 2. FormData の取り出し（認証済み後）
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return new Response('Bad Request: invalid form data', { status: 400 });
   }
 
   // 3. ファイル取得とファイル数の検証

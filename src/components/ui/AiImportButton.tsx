@@ -17,6 +17,7 @@ import type { FormItem, PromptCandidate } from '@/lib/ai/extractPrompt';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 
 export type AiImportButtonProps = {
+  organizationId: string;
   formTemplate: FormItem[];
   clients: PromptCandidate[];
   helpers: PromptCandidate[];
@@ -26,6 +27,7 @@ export type AiImportButtonProps = {
 };
 
 export function AiImportButton({
+  organizationId,
   formTemplate,
   clients,
   helpers,
@@ -80,7 +82,8 @@ export function AiImportButton({
       formData.set('clients', JSON.stringify(clients));
       formData.set('helpers', JSON.stringify(helpers));
 
-      const response = await fetch('/api/ai/extract', {
+      const extractUrl = `/api/ai/extract?organizationId=${encodeURIComponent(organizationId)}`;
+      const response = await fetch(extractUrl, {
         method: 'POST',
         body: formData,
       });
