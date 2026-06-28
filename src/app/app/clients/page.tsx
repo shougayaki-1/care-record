@@ -17,11 +17,12 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, AppTextField, DataTable, PageHeader, StatusChip } from '@/components/ui';
 import { createClient, setClientArchived, softDeleteClient, updateClientName } from '@/app/actions/clients';
 
-type Client = { 
-    id: string; 
-    name: string; 
-    created_at: string; 
-    archived_at: string | null; 
+type Client = {
+    id: string;
+    name: string;
+    created_at: string;
+    archived_at: string | null;
+    assignments: { staff_id: string }[];
 };
 
 export default function ClientsPage() {
@@ -48,7 +49,7 @@ export default function ClientsPage() {
     try {
       let query = supabase
         .from('clients')
-        .select('*')
+        .select('id, name, created_at, archived_at, assignments(staff_id)')
         .eq('organization_id', currentOrg.id)
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
@@ -161,6 +162,12 @@ export default function ClientsPage() {
                   </Box>
                   {client.archived_at ? <StatusChip label="アーカイブ" /> : <StatusChip label="有効" tone="success" />}
                 </Box>
+                <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>
+                  {client.assignments.length === 0
+                    ? <StatusChip label="⚠️ 担当未設定" tone="warning" />
+                    : <Box sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>担当者 {client.assignments.length}名</Box>
+                  }
+                </Box>
                 <Stack direction="row" justifyContent="flex-end" spacing={0.5} useFlexGap flexWrap="wrap">
                   {!client.archived_at && (
                     <>
@@ -183,6 +190,11 @@ export default function ClientsPage() {
           columns={[
             { key: 'name', header: '利用者氏名', render: (client) => client.name },
             { key: 'status', header: '状態', render: (client) => client.archived_at ? <StatusChip label="アーカイブ" /> : <StatusChip label="有効" tone="success" /> },
+            { key: 'assignments', header: '担当者数', render: (client) =>
+                client.assignments.length === 0
+                  ? <StatusChip label="⚠️ 担当未設定" tone="warning" />
+                  : <>{client.assignments.length}名</>
+            },
             { key: 'actions', header: '操作', align: 'right', render: (client) => (
                         <Stack direction="row" justifyContent="flex-end" spacing={1}>
                             {!client.archived_at && (
