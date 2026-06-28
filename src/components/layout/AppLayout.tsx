@@ -31,6 +31,7 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import KeyIcon from '@mui/icons-material/Key';
 import BackupIcon from '@mui/icons-material/Backup';
 import ListAltIcon from '@mui/icons-material/ListAlt';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -407,6 +408,7 @@ const NavDrawer = ({
         <Typography sx={categoryStyle}>記録</Typography>
         <List disablePadding>
           {navButton('記録を作成', <EditNoteIcon fontSize="small" />, '/app/record')}
+          {navButton('AI一括取込', <AutoFixHighIcon fontSize="small" />, '/app/ai-import')}
           {navButton('内勤を記録', <WorkHistoryIcon fontSize="small" />, '/app/internal-work')}
           {navButton('自分の履歴', <HistoryIcon fontSize="small" />, '/app/history')}
         </List>

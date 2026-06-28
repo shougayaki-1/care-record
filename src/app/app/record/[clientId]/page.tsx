@@ -32,56 +32,15 @@ import {
 } from '@/app/actions/reports';
 import { getShiftSuggestions, addShiftLink, removeShiftLink, getLinkedShifts } from '@/app/actions/reportShifts';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { AppButton, AppDialog, DateTimeField, DynamicFormField, InnerPageHeader, MultiSelectField } from '@/components/ui';
+import { AiImportButton, AppButton, AppDialog, DateTimeField, DynamicFormField, InnerPageHeader, MultiSelectField } from '@/components/ui';
+import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { checkRecordPermission } from '@/utils/permissions';
+import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
 
 type FormItem = {
   id: string; label: string; type: 'text' | 'number' | 'checkbox' | 'time' | 'select' | 'section' | 'multicheckbox';
   options?: string; required: boolean; hasDetail?: boolean;
 };
-
-const DEFAULT_TEMPLATE: FormItem[] = [
-    { id: 'sec_medical', label: '【医療的ケア・身体介護】', type: 'section', required: false },
-    { id: 'sputum_suction', label: '痰等の吸引（気管・口腔）', type: 'checkbox', required: false },
-    { id: 'sputum_cleaning', label: '痰等の吸引に関わる物品の清掃等', type: 'checkbox', required: false },
-    { id: 'meal_help', label: '食事介助', type: 'multicheckbox', options: '朝,昼,晩,他', required: false, hasDetail: true },
-    { id: 'water_supply', label: '水分補給', type: 'checkbox', required: false },
-    { id: 'medication', label: '服薬介助', type: 'checkbox', required: false },
-    { id: 'excretion', label: '排泄介助', type: 'checkbox', required: false, hasDetail: true },
-    { id: 'urine_disposal', label: '排尿：尿破棄 (ml)', type: 'number', required: false },
-    { id: 'oral_care', label: '口腔ケア', type: 'checkbox', required: false },
-    { id: 'body_cleaning', label: '清拭・整容介助', type: 'multicheckbox', options: '全身,顔,上肢,下肢,手,足,背,陰部,頭部,臀部,整髪,耳掃除,爪切り,髭剃り,その他', required: false, hasDetail: true },
-    { id: 'partial_bath', label: '部分浴', type: 'multicheckbox', options: '手,足,洗髪,陰部洗浄', required: false },
-    { id: 'medical_app', label: '処置（シップ・薬・座薬・点眼）', type: 'multicheckbox', options: 'シップ貼付,薬塗布,座薬挿入,点眼', required: false },
-    { id: 'change_clothes', label: '更衣介助', type: 'checkbox', required: false, hasDetail: true },
-    { id: 'observation', label: '観察', type: 'multicheckbox', options: 'モニター,皮膚,体位置,表情,他', required: false, hasDetail: true },
-    { id: 'vital_check', label: 'バイタル測定（実施項目）', type: 'multicheckbox', options: '体温,血圧,脈拍,SpO2,他', required: false, hasDetail: true },
-    { id: 'temp_adjust', label: '温度調整', type: 'multicheckbox', options: '体温,室温', required: false },
-    { id: 'sec_support', label: '【生活援助・移動支援】', type: 'section', required: false },
-    { id: 'position_change', label: '体位・安楽', type: 'multicheckbox', options: '体位交換,良肢位,疼痛緩和,褥瘡予防', required: false },
-    { id: 'env_maintenance', label: '環境整備', type: 'checkbox', required: false },
-    { id: 'daily_assist_group', label: '日常の補佐', type: 'multicheckbox', options: 'コミュニケーション支援,各関節・筋肉の運動の補助,パソコン等の操作・設定,電話等の補助,書類の整理,家電等の設定・操作,他', required: false, hasDetail: true },
-    { id: 'bedding_change', label: '寝具交換', type: 'checkbox', required: false, hasDetail: true },
-    { id: 'transfer_assist', label: '移乗介助', type: 'checkbox', required: false },
-    { id: 'move_assist', label: '移動介助（手押し車いす）', type: 'checkbox', required: false },
-    { id: 'outing_assist', label: '外出介助', type: 'checkbox', required: false },
-    { id: 'outing_prep', label: '外出に関する必要物品の用意・後片付', type: 'checkbox', required: false },
-    { id: 'sec_housework', label: '【家事・その他】', type: 'section', required: false },
-    { id: 'cooking', label: '調理・配膳', type: 'multicheckbox', options: '調理,配膳,下膳,後片付け', required: false },
-    { id: 'cleaning', label: '掃除等・ゴミ出し', type: 'multicheckbox', options: '玄関,居間,寝室,台所,廊下,トイレ,浴室,洗面所,物品庫,掃除機,拭き掃除,他', required: false, hasDetail: true },
-    { id: 'clothes_mending', label: '衣類の整理・補修', type: 'multicheckbox', options: '衣類の整理,被服の補修', required: false },
-    { id: 'proxy_service', label: '代行業務', type: 'multicheckbox', options: '買物,銀行,郵便局,薬受け取り,他', required: false, hasDetail: true },
-    { id: 'goods_organize', label: '物品整理', type: 'multicheckbox', options: '医薬品,衣料品,食料品,他', required: false, hasDetail: true },
-    { id: 'laundry', label: '洗濯', type: 'multicheckbox', options: '干す,収納', required: false },
-    { id: 'consultation', label: '相談援助', type: 'multicheckbox', options: '相談援助,情報収集,提供', required: false },
-    { id: 'watching', label: '見守り', type: 'checkbox', required: false },
-    { id: 'other_note', label: 'その他', type: 'text', required: false },
-    { id: 'hospital_comm', label: '入院時コミュニケーション支援', type: 'checkbox', required: false },
-    { id: 'sec_confirm', label: '【確認事項】', type: 'section', required: false },
-    { id: 'benefit_change', label: '●給付変更事項', type: 'multicheckbox', options: '時間延長,時間短縮,追加訪問,時間変更', required: false },
-    { id: 'exit_check', label: '●退出時確認事項', type: 'multicheckbox', options: '鍵,火元,電気,水道,戸締まり,ガス元栓,ボイラー', required: false },
-    { id: 'special_note', label: '《特記事項》', type: 'text', required: false },
-];
 
 type FormAnswers = Record<string, string | number | boolean | string[]>;
 type HelperProfile = { id: string; name: string; defaultRoundTripDistanceKm?: number };
@@ -136,6 +95,10 @@ export default function RecordPage() {
   const [shiftSuggestions, setShiftSuggestions] = useState<ShiftSuggestion[]>([]);
   const [linkedShifts, setLinkedShifts] = useState<LinkedShift[]>([]);
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
+
+  // AI入力されたフィールドのハイライト管理
+  const [aiFilledFields, setAiFilledFields] = useState<Set<string>>(new Set());
+  const [hasAiDraftSource, setHasAiDraftSource] = useState(false);
 
   // 月末跨ぎ夜勤管理ステート
   const [isSpanningMonth, setIsSpanningMonth] = useState(false);
@@ -491,9 +454,13 @@ export default function RecordPage() {
         status,
         shiftId: shiftId || null,
         values: finalData,
+        ...(status === 'draft' && hasAiDraftSource
+          ? { auditSource: 'ai_import' as const, auditFileCount: 1 }
+          : {}),
       });
       const targetReportId = result.reportId;
       if (!currentReportId) setCurrentReportId(targetReportId);
+      if (status === 'draft') setHasAiDraftSource(false);
       setIsDirty(false);
       
       if (!currentReportId && targetReportId) {
@@ -535,6 +502,46 @@ export default function RecordPage() {
   const handleClose = () => { if (isDirty) setOpenCloseDialog(true); else router.back(); };
   const handleDialogDiscard = () => { setOpenCloseDialog(false); router.back(); };
   const handleDialogSaveDraft = async () => { if (await saveReport('draft', true)) { showToast('下書き保存しました'); router.back(); } setOpenCloseDialog(false); };
+
+  const handleAiExtracted = useCallback((result: ExtractionResult) => {
+    const filled = new Set(Object.keys(result.values));
+    setAnswers(prev => ({ ...prev, ...result.values }));
+
+    const { date, start_at: startAt, end_at: endAt, helper_names: helperNames } = result.meta;
+    const startDate = date && startAt ? new Date(`${date}T${startAt}:00`) : null;
+    const endDate = date && endAt ? new Date(`${date}T${endAt}:00`) : null;
+    if (startDate && Number.isFinite(startDate.getTime())) {
+      setStartDateTime(formatDatetimeLocal(startDate));
+      filled.add('startDateTime');
+    }
+    if (endDate && Number.isFinite(endDate.getTime())) {
+      setEndDateTime(formatDatetimeLocal(endDate));
+      filled.add('endDateTime');
+    }
+    if (
+      startDate &&
+      endDate &&
+      Number.isFinite(startDate.getTime()) &&
+      Number.isFinite(endDate.getTime()) &&
+      endDate > startDate
+    ) {
+      const diffHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
+      setServiceTime(String(diffHours));
+      filled.add('serviceTime');
+    }
+
+    const matchedHelpers = helperNames
+      .map((name) => selectableStaffs.find((staff) => staff.name.includes(name) || name.includes(staff.name))?.name)
+      .filter((name): name is string => Boolean(name));
+    if (matchedHelpers.length > 0) {
+      setSelectedHelpers(Array.from(new Set(matchedHelpers)));
+      filled.add('_helpers');
+    }
+
+    setAiFilledFields(filled);
+    setHasAiDraftSource(true);
+    setIsDirty(true);
+  }, [formatDatetimeLocal, selectableStaffs]);
 
   const groupedSections = useMemo(() => {
     const sections: { title: string; items: FormItem[] }[] = [];
@@ -676,10 +683,24 @@ export default function RecordPage() {
               </Box>
             )}
 
+            {currentStatus !== 'approved' && (
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <AiImportButton
+                  organizationId={currentOrg?.id ?? ''}
+                  formTemplate={template}
+                  clients={[{ id: clientId as string, name: clientName }]}
+                  helpers={selectableStaffs.map(s => ({ id: s.id, name: s.name }))}
+                  onExtracted={handleAiExtracted}
+                  hasExistingValues={Object.keys(answers).length > 0}
+                  disabled={submitting || loading || !currentOrg}
+                />
+              </Box>
+            )}
+
             <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, bgcolor: 'background.paper' }}>
                 <Stack spacing={3}>
 
-                <Box>
+                <Box sx={{ bgcolor: aiFilledFields.has('_helpers') ? '#fffde7' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
                     </Typography>
@@ -697,7 +718,7 @@ export default function RecordPage() {
                     />
                 </Box>
 
-                <Box>
+                <Box sx={{ bgcolor: aiFilledFields.has('startDateTime') || aiFilledFields.has('endDateTime') ? '#fffde7' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <CalendarTodayIcon fontSize="small" /> サービス日時
                     </Typography>
@@ -708,7 +729,7 @@ export default function RecordPage() {
                     </Stack>
                 </Box>
 
-                <Box>
+                <Box sx={{ bgcolor: aiFilledFields.has('serviceTime') ? '#fffde7' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <AccessTimeIcon fontSize="small" /> 提供時間 <Typography component="span" color="error">*</Typography>
                     </Typography>
@@ -746,8 +767,9 @@ export default function RecordPage() {
                 <Stack divider={<Divider />}>
                     {section.items.map((item) => {
                     const hasError = !!errors[item.id];
+                    const isAiFilled = aiFilledFields.has(item.id);
                     return (
-                        <Box key={item.id} sx={{ p: { xs: 2, sm: 3 }, bgcolor: hasError ? 'background.danger' : 'transparent' }}>
+                        <Box key={item.id} sx={{ p: { xs: 2, sm: 3 }, bgcolor: hasError ? 'background.danger' : isAiFilled ? '#fffde7' : 'transparent' }}>
                           <DynamicFormField
                             item={item}
                             value={answers[item.id]}
