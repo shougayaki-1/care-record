@@ -102,10 +102,11 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       }
 
       // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
+      // organization_member_roles を JOIN することで 3RTT → 2RTT に削減。
       const [{ data: members, error: memberError }, { data: profile, error: profileError }] = await Promise.all([
         supabase
           .from('organization_members')
-          .select('organization_id, role, organizations!inner(id, name)')
+          .select('organization_id, role, organizations!inner(id, name), organization_member_roles(organization_roles(permissions))')
           .eq('user_id', session.user.id),
         supabase
           .from('profiles')
@@ -127,7 +128,8 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
           ? member.organizations[0]
           : member.organizations;
         const role = member.role as string;
-        return { organization, role };
+        const memberRoles = member.organization_member_roles ?? [];
+        return { organization, role, memberRoles };
       });
 
       if (parsedMembers.some(({ organization, role }) => !organization || !['owner', 'member'].includes(role))) {
@@ -137,54 +139,19 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         return;
       }
 
-      const organizationIds = parsedMembers
-        .map(({ organization }) => organization?.id)
-        .filter((id): id is string => Boolean(id));
-      const roleLinksByOrg = new Map<string, RolePermissions[]>();
-
-      if (organizationIds.length > 0) {
-        const { data: roleLinks, error: roleLinksError } = await supabase
-          .from('organization_member_roles')
-          .select('organization_id, organization_roles(permissions)')
-          .eq('user_id', session.user.id)
-          .in('organization_id', organizationIds);
-        if (!isCurrent()) return;
-        if (roleLinksError) {
-          console.error('Workspace role lookup failed', roleLinksError);
-          if (roleLinksError.code === '401' || roleLinksError.message.toLowerCase().includes('jwt')) {
-            setOrgList([]);
-            setCurrentOrg(null);
-            setStatus('session_expired');
-            setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
-          } else {
-            setStatus('error');
-            setErrorMessage('権限情報を取得できませんでした。時間をおいて再試行してください。');
-          }
-          return;
-        }
-
-        (roleLinks ?? []).forEach((roleLink) => {
-          const orgId = roleLink.organization_id as string;
-          const orgRole = Array.isArray(roleLink.organization_roles)
-            ? roleLink.organization_roles[0]
-            : roleLink.organization_roles;
-          const permissions = orgRole?.permissions as RolePermissions | undefined;
-          if (!permissions) return;
-          const current = roleLinksByOrg.get(orgId) ?? [];
-          current.push(permissions);
-          roleLinksByOrg.set(orgId, current);
-        });
-      }
-
       const list: Workspace[] = [];
-      for (const { organization, role } of parsedMembers) {
+      for (const { organization, role, memberRoles } of parsedMembers) {
         if (!organization || !['owner', 'member'].includes(role)) {
           setStatus('forbidden');
           setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
           return;
         }
 
-        const rolePerms = roleLinksByOrg.get(organization.id) ?? [];
+        const rolePerms: RolePermissions[] = memberRoles.flatMap((omr: { organization_roles: { permissions: RolePermissions } | { permissions: RolePermissions }[] | null }) => {
+          const orgRole = Array.isArray(omr.organization_roles) ? omr.organization_roles[0] : omr.organization_roles;
+          if (!orgRole?.permissions) return [];
+          return [orgRole.permissions as RolePermissions];
+        });
         const effectivePermissions = role === 'owner' ? FULL_PERMISSIONS : mergePermissions(rolePerms);
 
         list.push({ id: organization.id, name: organization.name, role: role as OrganizationRole, effectivePermissions });
