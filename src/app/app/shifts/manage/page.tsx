@@ -7,7 +7,7 @@ import {
     FormControlLabel, Radio, RadioGroup, LinearProgress,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem, Alert
 } from '@/components/ui/mui';
-import { AppButton, AppDialog, MonthField } from '@/components/ui';
+import { AppButton, AppDialog, CalendarPageSkeleton, MonthField } from '@/components/ui';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -46,7 +46,7 @@ const ShiftCalendarViewer = dynamic(
     () => import('@/components/shifts/ShiftCalendarViewer').then((mod) => mod.ShiftCalendarViewer),
     {
         ssr: false,
-        loading: () => <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>,
+        loading: () => <CalendarPageSkeleton />,
     }
 );
 
