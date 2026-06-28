@@ -299,15 +299,15 @@ export default function AiImportPage() {
         formData.append('files[]', entry.file);
       }
 
-      // グループ化: グループIDでまとめたファイルのインデックスリストを送る
+      // グループ化: number[][] 形式でRoute Handlerに送る
       if (groups.length > 0) {
-        const grouping = groups
-          .map((g) => ({
-            fileIndices: g.fileIds
+        const grouping: number[][] = groups
+          .map((g) =>
+            g.fileIds
               .map((fid) => orderedEntries.findIndex((e) => e.id === fid))
               .filter((i) => i >= 0),
-          }))
-          .filter((g) => g.fileIndices.length > 1);
+          )
+          .filter((indices) => indices.length > 1);
         if (grouping.length > 0) {
           formData.set('grouping', JSON.stringify(grouping));
         }
@@ -381,7 +381,7 @@ export default function AiImportPage() {
           startAt,
           endAt,
           status: 'draft',
-          values: { data: row.result.values },
+          values: { ...row.result.values, _helpers: [] },
         });
         return id;
       }),

@@ -77,7 +77,7 @@ export function AiImportButton({
     setErrorMessage(null);
     try {
       const formData = new FormData();
-      formData.set('file', file);
+      formData.append('files[]', file);
       formData.set('formTemplate', JSON.stringify(formTemplate));
       formData.set('clients', JSON.stringify(clients));
       formData.set('helpers', JSON.stringify(helpers));

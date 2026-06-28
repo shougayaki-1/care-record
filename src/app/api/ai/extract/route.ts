@@ -155,7 +155,8 @@ export async function POST(request: NextRequest) {
           try {
             parsed = JSON.parse(text) as { records: unknown[] };
           } catch {
-            throw new Error(`Gemini のレスポンスが JSON として解析できませんでした: ${text.slice(0, 200)}`);
+            console.error(`[ai/extract] Gemini response was not valid JSON: ${text.slice(0, 200)}`);
+            throw new Error('AI の応答形式が不正でした');
           }
 
           const validated = ExtractionResponseSchema.parse(parsed);
