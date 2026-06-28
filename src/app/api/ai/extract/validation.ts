@@ -56,3 +56,31 @@ export function validateFile(file: File): FileValidationResult {
   }
   return { ok: true };
 }
+
+/**
+ * Gemini呼び出し単位のファイルグループを作る。
+ * grouping指定時も未指定のファイルは単独グループとして残す。
+ */
+export function buildProcessingGroups(fileCount: number, grouping: number[][] | null): number[][] {
+  if (!grouping || grouping.length === 0) {
+    return Array.from({ length: fileCount }, (_, i) => [i]);
+  }
+
+  const used = new Set<number>();
+  const groups: number[][] = [];
+
+  for (const rawGroup of grouping) {
+    const group = Array.from(
+      new Set(rawGroup.filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < fileCount)),
+    );
+    if (group.length === 0) continue;
+    group.forEach((idx) => used.add(idx));
+    groups.push(group);
+  }
+
+  for (let i = 0; i < fileCount; i++) {
+    if (!used.has(i)) groups.push([i]);
+  }
+
+  return groups;
+}

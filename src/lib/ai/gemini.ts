@@ -1,4 +1,5 @@
 import { VertexAI } from '@google-cloud/vertexai';
+import { MODEL_NAME } from './model';
 
 type ServiceAccountCredentials = {
   client_email?: string;
@@ -27,26 +28,26 @@ function parseServiceAccountCredentials(): ServiceAccountCredentials | undefined
   }
 }
 
-const project = process.env.GCP_PROJECT_ID;
-if (!project) throw new Error('GCP_PROJECT_ID is required');
-const location = process.env.VERTEX_AI_LOCATION ?? 'asia-northeast1';
-
-const credentials = parseServiceAccountCredentials();
-
-export const vertexAI = new VertexAI({
-  project,
-  location,
-  ...(credentials
-    ? {
-        googleAuthOptions: {
-          credentials,
-        },
-      }
-    : {}),
-});
-
-export const MODEL_NAME = 'gemini-2.0-flash-001';
+let vertexAI: VertexAI | null = null;
 
 export function getGenerativeModel() {
+  if (!vertexAI) {
+    const project = process.env.GCP_PROJECT_ID;
+    if (!project) throw new Error('GCP_PROJECT_ID is required');
+    const location = process.env.VERTEX_AI_LOCATION ?? 'asia-northeast1';
+    const credentials = parseServiceAccountCredentials();
+
+    vertexAI = new VertexAI({
+      project,
+      location,
+      ...(credentials
+        ? {
+            googleAuthOptions: {
+              credentials,
+            },
+          }
+        : {}),
+    });
+  }
   return vertexAI.getGenerativeModel({ model: MODEL_NAME });
 }

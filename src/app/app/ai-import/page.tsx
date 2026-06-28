@@ -27,16 +27,18 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
 import { saveReport } from '@/app/actions/reports';
-import { DEFAULT_TEMPLATE } from '@/app/app/record/[clientId]/page';
+import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
 import { AiImportReviewTable, type ReviewRow } from '@/components/ui/AiImportReviewTable';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { readAiExtractSse } from '@/lib/ai/sseClient';
 
 type FileEntry = {
   id: string;
   file: File;
   groupId: string | null; // null = ungrouped, string = group UUID
+  previewUrl: string | null;
 };
 
 type FileGroup = {
@@ -55,11 +57,52 @@ function matchName(aiName: string, candidates: Candidate[]): string | null {
   return found?.id ?? null;
 }
 
+function pickCandidateId(candidateId: string | null | undefined, candidates: Candidate[]): string | null {
+  if (!candidateId) return null;
+  return candidates.some((candidate) => candidate.id === candidateId) ? candidateId : null;
+}
+
+function pickFirstCandidateId(candidateIds: string[] | undefined, candidates: Candidate[]): string | null {
+  for (const candidateId of candidateIds ?? []) {
+    const matched = pickCandidateId(candidateId, candidates);
+    if (matched) return matched;
+  }
+  return null;
+}
+
+function buildProcessingGroups(fileEntries: FileEntry[], groups: FileGroup[]): number[][] {
+  const groupedIndices = new Set<number>();
+  const result: number[][] = [];
+
+  for (const group of groups) {
+    const indices = group.fileIds
+      .map((fid) => fileEntries.findIndex((entry) => entry.id === fid))
+      .filter((index) => index >= 0);
+    if (indices.length > 0) {
+      indices.forEach((index) => groupedIndices.add(index));
+      result.push(indices);
+    }
+  }
+
+  fileEntries.forEach((_, index) => {
+    if (!groupedIndices.has(index)) result.push([index]);
+  });
+
+  return result;
+}
+
+function isValidDraftTime(date: string, startAt: string, endAt: string): boolean {
+  const start = new Date(`${date}T${startAt}:00`);
+  const end = new Date(`${date}T${endAt}:00`);
+  return Boolean(date && startAt && endAt && Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && end > start);
+}
+
 /** SSEストリームを読んで ExtractionResult を収集する */
 async function streamExtract(
   formData: FormData,
   onRecord: (result: ExtractionResult, fileIndex: number) => void,
   onError: (message: string, fileIndex: number) => void,
+  onGroupDone: (fileIndex: number) => void,
 ): Promise<number> {
   const orgId = (formData.get('organizationId') as string) ?? '';
   const extractUrl = `/api/ai/extract?organizationId=${encodeURIComponent(orgId)}`;
@@ -73,67 +116,19 @@ async function streamExtract(
     throw new Error(text || `サーバーエラー (${response.status})`);
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   let total = 0;
-  let currentEvent = '';
-  let currentData = '';
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-
-    for (const line of lines) {
-      if (line.startsWith('event:')) {
-        currentEvent = line.slice(6).trim();
-      } else if (line.startsWith('data:')) {
-        currentData = line.slice(5).trim();
-      } else if (line === '') {
-        if (currentEvent === 'record' && currentData) {
-          try {
-            const parsed = JSON.parse(currentData) as {
-              type: string;
-              index: number;
-              fileIndex: number;
-              result: ExtractionResult;
-            };
-            if (parsed.type === 'record' && parsed.result) {
-              onRecord(parsed.result, parsed.fileIndex);
-            }
-          } catch {
-            // ignore parse errors
-          }
-        } else if (currentEvent === 'error' && currentData) {
-          try {
-            const parsed = JSON.parse(currentData) as {
-              type: string;
-              fileIndex: number;
-              message: string;
-            };
-            if (parsed.type === 'error') {
-              onError(parsed.message, parsed.fileIndex);
-            }
-          } catch {
-            // ignore
-          }
-        } else if (currentEvent === 'done' && currentData) {
-          try {
-            const parsed = JSON.parse(currentData) as { type: string; total: number };
-            if (parsed.type === 'done') total = parsed.total;
-          } catch {
-            // ignore
-          }
-        }
-        currentEvent = '';
-        currentData = '';
-      }
+  await readAiExtractSse(response.body, (event) => {
+    if (event.type === 'record') {
+      onRecord(event.result, event.fileIndex);
+    } else if (event.type === 'error') {
+      onError(event.message, event.fileIndex);
+    } else if (event.type === 'group_done') {
+      onGroupDone(event.fileIndex);
+    } else if (event.type === 'done') {
+      total = event.total;
     }
-  }
+  });
 
   return total;
 }
@@ -200,6 +195,7 @@ export default function AiImportPage() {
       id: crypto.randomUUID(),
       file: f,
       groupId: null,
+      previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
     }));
     setFileEntries((prev) => [...prev, ...entries]);
   }, []);
@@ -220,6 +216,8 @@ export default function AiImportPage() {
   };
 
   const removeFile = (id: string) => {
+    const target = fileEntries.find((f) => f.id === id);
+    if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
     setFileEntries((prev) => prev.filter((f) => f.id !== id));
     setSelectedFileIds((prev) => {
       const next = new Set(prev);
@@ -245,6 +243,11 @@ export default function AiImportPage() {
   const mergeSelected = () => {
     if (selectedFileIds.size < 2) return;
     const ids = Array.from(selectedFileIds);
+    const selectedEntries = fileEntries.filter((entry) => ids.includes(entry.id));
+    if (selectedEntries.some((entry) => !entry.file.type.startsWith('image/'))) {
+      showToast('PDFは単独で処理します。画像ファイルだけを選択してください。', 'warning');
+      return;
+    }
     const groupId = crypto.randomUUID();
     setGroups((prev) => {
       // Remove these ids from any existing group
@@ -299,38 +302,33 @@ export default function AiImportPage() {
         formData.append('files[]', entry.file);
       }
 
-      // グループ化: number[][] 形式でRoute Handlerに送る
-      if (groups.length > 0) {
-        const grouping: number[][] = groups
-          .map((g) =>
-            g.fileIds
-              .map((fid) => orderedEntries.findIndex((e) => e.id === fid))
-              .filter((i) => i >= 0),
-          )
-          .filter((indices) => indices.length > 1);
-        if (grouping.length > 0) {
-          formData.set('grouping', JSON.stringify(grouping));
-        }
-      }
+      const processingGroups = buildProcessingGroups(orderedEntries, groups);
+      formData.set('grouping', JSON.stringify(processingGroups));
 
-      setTotalCount(orderedEntries.length);
+      setTotalCount(processingGroups.length);
 
       await streamExtract(
         formData,
         (result, fileIndex) => {
-          setProcessedCount((n) => n + 1);
           const aiMeta = result.meta;
-          const clientId = matchName(aiMeta.client_name, clients);
+          const clientId =
+            pickCandidateId(aiMeta.client_id_candidate, clients) ??
+            matchName(aiMeta.client_name, clients);
           const helperId =
-            aiMeta.helper_names.length > 0
+            pickFirstCandidateId(aiMeta.helper_id_candidates, helpers) ??
+            (aiMeta.helper_names.length > 0
               ? matchName(aiMeta.helper_names[0], helpers)
-              : null;
+              : null);
           const autoConfirm =
             result.confidence === 'high' && clientId !== null && helperId !== null;
 
           const row: ReviewRow = {
             id: crypto.randomUUID(),
             fileIndex,
+            fileName: orderedEntries[fileIndex]?.file.name ?? '',
+            fileType: orderedEntries[fileIndex]?.file.type ?? '',
+            previewUrl: orderedEntries[fileIndex]?.previewUrl ?? null,
+            fileCount: processingGroups.find((group) => group[0] === fileIndex)?.length ?? 1,
             result,
             date: aiMeta.date,
             startAt: aiMeta.start_at,
@@ -341,8 +339,28 @@ export default function AiImportPage() {
           };
           setRows((prev) => [...prev, row]);
         },
-        (message) => {
+        (message, fileIndex) => {
+          const row: ReviewRow = {
+            id: crypto.randomUUID(),
+            fileIndex,
+            fileName: orderedEntries[fileIndex]?.file.name ?? '',
+            fileType: orderedEntries[fileIndex]?.file.type ?? '',
+            previewUrl: orderedEntries[fileIndex]?.previewUrl ?? null,
+            fileCount: processingGroups.find((group) => group[0] === fileIndex)?.length ?? 1,
+            result: null,
+            errorMessage: message,
+            date: '',
+            startAt: '',
+            endAt: '',
+            clientId: null,
+            helperId: null,
+            status: 'error',
+          };
+          setRows((prev) => [...prev, row]);
           setProcessError(message);
+        },
+        () => {
+          setProcessedCount((n) => n + 1);
         },
       );
     } catch (err) {
@@ -370,6 +388,13 @@ export default function AiImportPage() {
       ids.map(async (id) => {
         const row = rows.find((r) => r.id === id);
         if (!row || !row.clientId) throw new Error('利用者が未選択です');
+        if (!row.helperId) throw new Error('スタッフが未選択です');
+        if (!row.result) throw new Error('読み取り結果がありません');
+        if (!isValidDraftTime(row.date, row.startAt, row.endAt)) {
+          throw new Error('開始・終了日時が不正です');
+        }
+        const helper = helpers.find((h) => h.id === row.helperId);
+        if (!helper) throw new Error('スタッフが未選択です');
 
         const date = row.date;
         const startAt = `${date}T${row.startAt}:00`;
@@ -381,7 +406,9 @@ export default function AiImportPage() {
           startAt,
           endAt,
           status: 'draft',
-          values: { ...row.result.values, _helpers: [] },
+          values: { ...row.result.values, _helpers: [helper.name] },
+          auditSource: 'ai_import',
+          auditFileCount: row.fileCount,
         });
         return id;
       }),
@@ -405,7 +432,7 @@ export default function AiImportPage() {
       showToast(`${errorCount} 件の保存に失敗しました`, 'error');
     }
     setSaving(false);
-  }, [rows, currentOrg, showToast]);
+  }, [rows, currentOrg, helpers, showToast]);
 
   const fileIcon = (file: File) => {
     if (file.type === 'application/pdf') return <PictureAsPdfIcon fontSize="small" color="error" />;
@@ -557,6 +584,9 @@ export default function AiImportPage() {
             variant="outlined"
             color="inherit"
             onClick={() => {
+              fileEntries.forEach((entry) => {
+                if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+              });
               setFileEntries([]);
               setGroups([]);
               setSelectedFileIds(new Set());

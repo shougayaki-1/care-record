@@ -15,6 +15,7 @@ import {
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import type { FormItem, PromptCandidate } from '@/lib/ai/extractPrompt';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
+import { readAiExtractSse } from '@/lib/ai/sseClient';
 
 export type AiImportButtonProps = {
   organizationId: string;
@@ -93,66 +94,16 @@ export function AiImportButton({
         throw new Error(text || `サーバーエラー (${response.status})`);
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
       let extracted = false;
 
-      outer: while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        // Parse SSE lines
-        const lines = buffer.split('\n');
-        // Keep the last (potentially incomplete) line in buffer
-        buffer = lines.pop() ?? '';
-
-        let currentEvent = '';
-        let currentData = '';
-
-        for (const line of lines) {
-          if (line.startsWith('event:')) {
-            currentEvent = line.slice(6).trim();
-          } else if (line.startsWith('data:')) {
-            currentData = line.slice(5).trim();
-          } else if (line === '') {
-            // Dispatch the event
-            if (currentEvent === 'record' && currentData && !extracted) {
-              try {
-                const parsed = JSON.parse(currentData) as {
-                  type: string;
-                  index: number;
-                  fileIndex: number;
-                  result: ExtractionResult;
-                };
-                if (parsed.type === 'record' && parsed.result) {
-                  extracted = true;
-                  onExtracted(parsed.result);
-                  // Cancel remaining stream to avoid consuming more data
-                  await reader.cancel();
-                  break outer;
-                }
-              } catch {
-                // ignore parse errors on individual events
-              }
-            } else if (currentEvent === 'error' && currentData) {
-              let sseError: Error | null = null;
-              try {
-                const parsed = JSON.parse(currentData) as { type: string; message: string };
-                if (parsed.type === 'error') {
-                  sseError = new Error(parsed.message || 'AIの読み取りに失敗しました');
-                }
-              } catch {
-                // ignore JSON parse errors on error events
-              }
-              if (sseError) throw sseError;
-            }
-            currentEvent = '';
-            currentData = '';
-          }
+      await readAiExtractSse(response.body, (event) => {
+        if (event.type === 'record' && !extracted) {
+          extracted = true;
+          onExtracted(event.result);
+        } else if (event.type === 'error') {
+          throw new Error(event.message || 'AIの読み取りに失敗しました');
         }
-      }
+      });
 
       if (!extracted) {
         throw new Error('AIから結果を受信できませんでした');
@@ -183,7 +134,7 @@ export function AiImportButton({
         disabled={disabled || loading}
         aria-busy={loading || undefined}
       >
-        {loading ? 'AIが記録を読み取っています...' : '紙から入力'}
+        {loading ? 'AIが記録を読み取っています...' : hasExistingValues ? '紙で上書き補完' : '紙から入力'}
       </Button>
 
       {/* 上書き確認ダイアログ */}

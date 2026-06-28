@@ -4,6 +4,7 @@ import {
   FormValuesSchema,
   ExtractionResultSchema,
   ExtractionResponseSchema,
+  ExtractionResponseVertexSchema,
 } from './extractSchema';
 
 describe('MetaSchema', () => {
@@ -14,6 +15,8 @@ describe('MetaSchema', () => {
       end_at: '11:30',
       client_name: '山田太郎',
       helper_names: ['田中花子', '佐藤次郎'],
+      client_id_candidate: 'client-1',
+      helper_id_candidates: ['helper-1', 'helper-2'],
     };
     const result = MetaSchema.parse(input);
     expect(result.date).toBe('2026-06-28');
@@ -21,15 +24,19 @@ describe('MetaSchema', () => {
     expect(result.end_at).toBe('11:30');
     expect(result.client_name).toBe('山田太郎');
     expect(result.helper_names).toEqual(['田中花子', '佐藤次郎']);
+    expect(result.client_id_candidate).toBe('client-1');
+    expect(result.helper_id_candidates).toEqual(['helper-1', 'helper-2']);
   });
 
-  it('helper_names が空配列でもパースできる', () => {
+  it('候補IDが null / 空配列でもパースできる', () => {
     const input = {
       date: '2026-01-01',
       start_at: '10:00',
       end_at: '12:00',
       client_name: 'テスト利用者',
       helper_names: [],
+      client_id_candidate: null,
+      helper_id_candidates: [],
     };
     expect(() => MetaSchema.parse(input)).not.toThrow();
   });
@@ -41,6 +48,8 @@ describe('MetaSchema', () => {
       end_at: '11:00',
       client_name: '山田太郎',
       helper_names: [],
+      client_id_candidate: null,
+      helper_id_candidates: [],
     };
     expect(() => MetaSchema.parse(input)).toThrow();
   });
@@ -76,6 +85,8 @@ describe('ExtractionResultSchema', () => {
       end_at: '11:00',
       client_name: '山田太郎',
       helper_names: ['田中花子'],
+      client_id_candidate: 'client-1',
+      helper_id_candidates: ['helper-1'],
     },
     values: {
       sputum_suction: true,
@@ -129,6 +140,8 @@ describe('ExtractionResponseSchema', () => {
         end_at: '11:00',
         client_name: '山田太郎',
         helper_names: [],
+        client_id_candidate: null,
+        helper_id_candidates: [],
       },
       values: { sputum_suction: false },
       confidence: 'medium' as const,
@@ -142,5 +155,21 @@ describe('ExtractionResponseSchema', () => {
   it('records が空でもパースできる', () => {
     const result = ExtractionResponseSchema.parse({ records: [] });
     expect(result.records).toEqual([]);
+  });
+});
+
+describe('ExtractionResponseVertexSchema', () => {
+  it('Vertex AI structured output 用の records スキーマを持つ', () => {
+    expect(ExtractionResponseVertexSchema.type).toBe('OBJECT');
+    expect(ExtractionResponseVertexSchema.required).toContain('records');
+    expect(ExtractionResponseVertexSchema.properties?.records.type).toBe('ARRAY');
+  });
+
+  it('候補IDフィールドを required meta として定義している', () => {
+    const recordItem = ExtractionResponseVertexSchema.properties?.records.items;
+    const meta = recordItem?.properties?.meta;
+    expect(meta?.required).toContain('client_id_candidate');
+    expect(meta?.required).toContain('helper_id_candidates');
+    expect(meta?.properties?.client_id_candidate.nullable).toBe(true);
   });
 });

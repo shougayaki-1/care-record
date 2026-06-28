@@ -95,7 +95,9 @@ export function buildExtractionPrompt({
         "start_at": "HH:MM",
         "end_at": "HH:MM",
         "client_name": "読み取った利用者名",
-        "helper_names": ["読み取ったスタッフ名1", "スタッフ名2"]
+        "helper_names": ["読み取ったスタッフ名1", "スタッフ名2"],
+        "client_id_candidate": "候補リストから照合した利用者ID。不明なら null",
+        "helper_id_candidates": ["候補リストから照合したスタッフID。不明なら空配列"]
       },
       "values": {
         "フィールドid": 値,
@@ -118,8 +120,10 @@ export function buildExtractionPrompt({
 7. section タイプのフィールドは values に含めないでください。
 8. hasDetail フィールドは "{id}_detail" キーに詳細テキストを string で格納してください。
 9. 利用者名とスタッフ名は、候補リストと照合して最も近い名前に補正してください。
-10. confidence は全フィールドの読み取り品質を総合評価してください: high（ほぼ全て読み取れた）/ medium（大部分読み取れたが一部不明瞭）/ low（多数のフィールドが不明瞭または欠損）。
-11. warnings には読み取れなかったフィールドや判断が難しかった箇所を日本語で記載してください。
+10. 候補リストから利用者を特定できる場合は client_id_candidate にその id を返してください。特定できない場合は null を返してください。
+11. 候補リストからスタッフを特定できる場合は helper_id_candidates に該当する id を返してください。特定できない場合は [] を返してください。
+12. confidence は全フィールドの読み取り品質を総合評価してください: high（ほぼ全て読み取れた）/ medium（大部分読み取れたが一部不明瞭）/ low（多数のフィールドが不明瞭または欠損）。
+13. warnings には読み取れなかったフィールドや判断が難しかった箇所を日本語で記載してください。
 
 ## フォームフィールド定義
 

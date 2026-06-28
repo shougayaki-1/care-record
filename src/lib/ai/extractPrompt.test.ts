@@ -74,6 +74,8 @@ describe('buildExtractionPrompt', () => {
     });
     expect(systemPrompt).toContain('山田太郎');
     expect(systemPrompt).toContain('鈴木花子');
+    expect(systemPrompt).toContain('client-1');
+    expect(systemPrompt).toContain('client_id_candidate');
   });
 
   it('スタッフ名候補が systemPrompt に含まれる', () => {
@@ -83,6 +85,8 @@ describe('buildExtractionPrompt', () => {
       helpers: SAMPLE_HELPERS,
     });
     expect(systemPrompt).toContain('田中一郎');
+    expect(systemPrompt).toContain('helper-1');
+    expect(systemPrompt).toContain('helper_id_candidates');
   });
 
   it('候補が空のとき "候補なし" が含まれる', () => {

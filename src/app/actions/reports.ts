@@ -7,6 +7,7 @@ import { assertOrgPermission, assertRecordPermission, createSessionClient, getAu
 import { randomUUID } from 'crypto';
 import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
+import { MODEL_NAME } from '@/lib/ai/model';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 
@@ -20,6 +21,9 @@ export type SaveReportInput = {
   endAt: string;
   status: ReportStatus;
   values: Record<string, unknown>;
+  auditSource?: 'ai_import';
+  auditModel?: string;
+  auditFileCount?: number;
 };
 
 export async function saveReport(input: SaveReportInput) {
@@ -56,6 +60,21 @@ export async function saveReport(input: SaveReportInput) {
       .from('reports')
       .update({ segment_id: input.segmentId || null })
       .eq('id', String(reportId));
+  }
+  if (input.status === 'draft' && input.auditSource === 'ai_import') {
+    await recordAuditEvent({
+      organizationId: input.organizationId,
+      actorId: user.id,
+      action: 'ai_draft.created',
+      resourceType: 'report',
+      resourceId: String(reportId),
+      sessionId: user.sessionId,
+      details: {
+        source: 'ai_import',
+        model: input.auditModel || MODEL_NAME,
+        file_count: input.auditFileCount ?? 1,
+      },
+    });
   }
   return { success: true, reportId: String(reportId) };
 }

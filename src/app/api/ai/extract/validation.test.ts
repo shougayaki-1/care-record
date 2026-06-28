@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   validateFileCount,
   validateFile,
+  buildProcessingGroups,
   MAX_FILES,
   MAX_FILE_SIZE,
 } from './validation';
@@ -40,6 +41,20 @@ describe('validateFileCount', () => {
     if (!result.ok) {
       expect(result.reason).toContain(String(MAX_FILES));
     }
+  });
+});
+
+describe('buildProcessingGroups', () => {
+  it('grouping がない場合は1ファイル1グループを返す', () => {
+    expect(buildProcessingGroups(3, null)).toEqual([[0], [1], [2]]);
+  });
+
+  it('grouping がある場合も未グループのファイルを単独グループとして残す', () => {
+    expect(buildProcessingGroups(4, [[0, 1]])).toEqual([[0, 1], [2], [3]]);
+  });
+
+  it('範囲外や重複した index を除外する', () => {
+    expect(buildProcessingGroups(3, [[0, 0, 99], [-1, 2]])).toEqual([[0], [2], [1]]);
   });
 });
 

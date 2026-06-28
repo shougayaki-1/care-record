@@ -34,7 +34,15 @@ describe('formatSseEvent', () => {
       index: 0,
       fileIndex: 0,
       result: {
-        meta: { date: '2026-06-28', start_at: '09:00', end_at: '11:00', client_name: '山田太郎', helper_names: [] },
+        meta: {
+          date: '2026-06-28',
+          start_at: '09:00',
+          end_at: '11:00',
+          client_name: '山田太郎',
+          helper_names: [],
+          client_id_candidate: null,
+          helper_id_candidates: [],
+        },
         values: {},
         confidence: 'high',
         warnings: [],

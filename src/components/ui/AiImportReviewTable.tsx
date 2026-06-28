@@ -23,18 +23,25 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import SaveIcon from '@mui/icons-material/Save';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import ImageIcon from '@mui/icons-material/Image';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 
 export type ReviewRow = {
   id: string;
   fileIndex: number;
-  result: ExtractionResult;
+  fileName: string;
+  fileType: string;
+  previewUrl: string | null;
+  fileCount: number;
+  result: ExtractionResult | null;
+  errorMessage?: string;
   date: string;
   startAt: string;
   endAt: string;
   clientId: string | null;
   helperId: string | null;
-  status: 'pending' | 'confirmed' | 'skipped';
+  status: 'pending' | 'confirmed' | 'skipped' | 'error';
   saveStatus?: 'saving' | 'saved' | 'error';
 };
 
@@ -97,6 +104,7 @@ export function AiImportReviewTable({
           <TableHead>
             <TableRow>
               <TableCell padding="checkbox" />
+              <TableCell>プレビュー</TableCell>
               <TableCell>状態</TableCell>
               <TableCell>日付</TableCell>
               <TableCell>開始</TableCell>
@@ -111,6 +119,13 @@ export function AiImportReviewTable({
             {rows.map((row) => {
               const isConfirmed = row.status === 'confirmed';
               const isSkipped = row.status === 'skipped';
+              const isError = row.status === 'error';
+              const warnings = [
+                ...(row.errorMessage ? [row.errorMessage] : []),
+                ...(row.result?.warnings ?? []),
+                ...(row.result && !row.clientId ? ['利用者候補なし'] : []),
+                ...(row.result && !row.helperId ? ['スタッフ候補なし'] : []),
+              ];
               return (
                 <TableRow
                   key={row.id}
@@ -123,13 +138,51 @@ export function AiImportReviewTable({
                   <TableCell padding="checkbox">
                     <Checkbox
                       checked={isConfirmed}
-                      disabled={isSkipped || row.saveStatus === 'saved'}
+                      disabled={isSkipped || isError || row.saveStatus === 'saved'}
                       onChange={(e) =>
                         onRowChange(row.id, {
                           status: e.target.checked ? 'confirmed' : 'pending',
                         })
                       }
                     />
+                  </TableCell>
+
+                  {/* プレビュー */}
+                  <TableCell>
+                    <Tooltip title={row.fileName || 'アップロードファイル'}>
+                      <Box
+                        sx={{
+                          width: 56,
+                          height: 56,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          borderRadius: 1,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          overflow: 'hidden',
+                          bgcolor: 'background.default',
+                        }}
+                      >
+                        {row.previewUrl ? (
+                          <Box
+                            component="img"
+                            src={row.previewUrl}
+                            alt={row.fileName}
+                            sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : row.fileType === 'application/pdf' ? (
+                          <PictureAsPdfIcon color="error" />
+                        ) : (
+                          <ImageIcon color="disabled" />
+                        )}
+                      </Box>
+                    </Tooltip>
+                    {row.fileCount > 1 && (
+                      <Typography variant="caption" color="text.secondary">
+                        {row.fileCount}枚
+                      </Typography>
+                    )}
                   </TableCell>
 
                   {/* ステータスアイコン */}
@@ -142,6 +195,10 @@ export function AiImportReviewTable({
                       <Typography variant="caption" color="text.secondary">保存中</Typography>
                     ) : row.saveStatus === 'error' ? (
                       <Tooltip title="保存エラー">
+                        <WarningAmberIcon color="error" fontSize="small" />
+                      </Tooltip>
+                    ) : isError ? (
+                      <Tooltip title={row.errorMessage ?? '読み取り失敗'}>
                         <WarningAmberIcon color="error" fontSize="small" />
                       </Tooltip>
                     ) : isConfirmed ? (
@@ -165,7 +222,7 @@ export function AiImportReviewTable({
                       type="date"
                       value={row.date}
                       size="small"
-                      disabled={isSkipped || row.saveStatus === 'saved'}
+                      disabled={isSkipped || isError || row.saveStatus === 'saved'}
                       onChange={(e) => onRowChange(row.id, { date: e.target.value })}
                       sx={{ width: 140 }}
                       slotProps={{ htmlInput: { style: { padding: '4px 6px' } } }}
@@ -178,7 +235,7 @@ export function AiImportReviewTable({
                       type="time"
                       value={row.startAt}
                       size="small"
-                      disabled={isSkipped || row.saveStatus === 'saved'}
+                      disabled={isSkipped || isError || row.saveStatus === 'saved'}
                       onChange={(e) => onRowChange(row.id, { startAt: e.target.value })}
                       sx={{ width: 100 }}
                       slotProps={{ htmlInput: { style: { padding: '4px 6px' } } }}
@@ -191,7 +248,7 @@ export function AiImportReviewTable({
                       type="time"
                       value={row.endAt}
                       size="small"
-                      disabled={isSkipped || row.saveStatus === 'saved'}
+                      disabled={isSkipped || isError || row.saveStatus === 'saved'}
                       onChange={(e) => onRowChange(row.id, { endAt: e.target.value })}
                       sx={{ width: 100 }}
                       slotProps={{ htmlInput: { style: { padding: '4px 6px' } } }}
@@ -204,7 +261,7 @@ export function AiImportReviewTable({
                       <Select
                         value={row.clientId ?? ''}
                         displayEmpty
-                        disabled={isSkipped || row.saveStatus === 'saved'}
+                        disabled={isSkipped || isError || row.saveStatus === 'saved'}
                         onChange={(e) =>
                           onRowChange(row.id, { clientId: e.target.value || null })
                         }
@@ -230,7 +287,7 @@ export function AiImportReviewTable({
                       <Select
                         value={row.helperId ?? ''}
                         displayEmpty
-                        disabled={isSkipped || row.saveStatus === 'saved'}
+                        disabled={isSkipped || isError || row.saveStatus === 'saved'}
                         onChange={(e) =>
                           onRowChange(row.id, { helperId: e.target.value || null })
                         }
@@ -252,17 +309,28 @@ export function AiImportReviewTable({
 
                   {/* 信頼度 */}
                   <TableCell>
-                    <Chip
-                      label={confidenceLabel[row.result.confidence] ?? row.result.confidence}
-                      color={confidenceColor[row.result.confidence] ?? 'default'}
-                      size="small"
-                    />
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      {row.result ? (
+                        <Chip
+                          label={confidenceLabel[row.result.confidence] ?? row.result.confidence}
+                          color={confidenceColor[row.result.confidence] ?? 'default'}
+                          size="small"
+                        />
+                      ) : (
+                        <Chip label="失敗" color="error" size="small" />
+                      )}
+                      {warnings.length > 0 && (
+                        <Tooltip title={warnings.join(' / ')}>
+                          <WarningAmberIcon color="warning" fontSize="small" />
+                        </Tooltip>
+                      )}
+                    </Box>
                   </TableCell>
 
                   {/* 操作ボタン */}
                   <TableCell>
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
-                      {!isConfirmed && !isSkipped && row.saveStatus !== 'saved' && (
+                      {!isConfirmed && !isSkipped && !isError && row.saveStatus !== 'saved' && (
                         <Button
                           size="small"
                           variant="outlined"

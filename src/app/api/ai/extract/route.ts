@@ -3,11 +3,13 @@ import type { Part } from '@google-cloud/vertexai';
 import { getAuthedUser, assertOrgRole } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { getGenerativeModel } from '@/lib/ai/gemini';
+import { MODEL_NAME } from '@/lib/ai/model';
 import { buildExtractionPrompt } from '@/lib/ai/extractPrompt';
-import { ExtractionResponseSchema } from '@/lib/ai/extractSchema';
+import { ExtractionResponseSchema, ExtractionResponseVertexSchema } from '@/lib/ai/extractSchema';
+import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 import type { FormItem, PromptCandidate } from '@/lib/ai/extractPrompt';
 import { formatSseEvent } from './sseUtils';
-import { validateFileCount, validateFile } from './validation';
+import { buildProcessingGroups, validateFileCount, validateFile } from './validation';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -77,16 +79,14 @@ export async function POST(request: NextRequest) {
       resourceType: 'ai_import',
       sessionId: authedSessionId,
       outcome: 'success',
-      details: { file_count: files.length },
+      details: { source: 'ai_import', model: MODEL_NAME, file_count: files.length },
     });
   } catch (auditErr) {
     // 監査ログの失敗はリクエストをブロックしない（ログだけ出す）
     console.error('[ai/extract] Failed to write audit log:', auditErr);
   }
 
-  // グループリストを構築する (grouping 未指定の場合は1ファイル1グループ)
-  const groups: number[][] =
-    grouping ?? files.map((_, i) => [i]);
+  const groups = buildProcessingGroups(files.length, grouping);
 
   // 6. SSE ストリームを生成
   const { systemPrompt, userPromptTemplate } = buildExtractionPrompt({
@@ -126,11 +126,21 @@ export async function POST(request: NextRequest) {
               throw new Error(fileResult.reason);
             }
 
-            const arrayBuffer = await file.arrayBuffer();
+            const isImage = file.type.startsWith('image/');
+            const fileBytes = isImage
+              ? await sanitizeUploadedImage(file).then((sanitized) => ({
+                  mimeType: sanitized.contentType,
+                  data: sanitized.bytes,
+                }))
+              : {
+                  mimeType: file.type,
+                  data: Buffer.from(await file.arrayBuffer()),
+                };
+
             parts.push({
               inlineData: {
-                mimeType: file.type,
-                data: Buffer.from(arrayBuffer).toString('base64'),
+                mimeType: fileBytes.mimeType,
+                data: fileBytes.data.toString('base64'),
               },
             });
           }
@@ -146,6 +156,7 @@ export async function POST(request: NextRequest) {
             systemInstruction: { role: 'system', parts: [{ text: systemPrompt }] },
             generationConfig: {
               responseMimeType: 'application/json',
+              responseSchema: ExtractionResponseVertexSchema,
             },
           });
 
@@ -173,12 +184,17 @@ export async function POST(request: NextRequest) {
           }
         } catch (err) {
           // e. エラーは error イベントとして送信、処理を継続
-          const message = err instanceof Error ? err.message : String(err);
-          console.error(`[ai/extract] Error processing file group [${group.join(',')}]: ${message}`);
+          const rawMessage = err instanceof Error ? err.message : String(err);
+          console.error(`[ai/extract] Error processing file group [${group.join(',')}]: ${rawMessage}`);
           sendEvent('error', {
             type: 'error',
             fileIndex,
-            message,
+            message: toUserFacingErrorMessage(rawMessage),
+          });
+        } finally {
+          sendEvent('group_done', {
+            type: 'group_done',
+            fileIndex,
           });
         }
       }
@@ -199,4 +215,18 @@ export async function POST(request: NextRequest) {
       'Connection': 'keep-alive',
     },
   });
+}
+
+function toUserFacingErrorMessage(message: string): string {
+  if (
+    message.includes('対応していないファイル形式') ||
+    message.includes('ファイルサイズ') ||
+    message.includes('画像サイズ') ||
+    message.includes('正常な画像') ||
+    message.includes('安全でないファイル')
+  ) {
+    return message;
+  }
+  if (message.includes('AI の応答形式')) return message;
+  return 'AIの読み取りに失敗しました。ファイルを確認して再度お試しください。';
 }
