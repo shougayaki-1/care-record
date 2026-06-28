@@ -2,10 +2,22 @@
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
-import { decodeJwtSessionId } from '@/utils/jwt';
+import { decodeJwtPayload, decodeJwtSessionId } from '@/utils/jwt';
 
 function authSessionId(accessToken: string): string | null {
     return decodeJwtSessionId(accessToken);
+}
+
+async function hashAccessToken(accessToken: string): Promise<string> {
+    const bytes = new TextEncoder().encode(accessToken);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function isFreshJwt(accessToken: string): boolean {
+    const iat = decodeJwtPayload(accessToken)?.iat;
+    if (typeof iat !== 'number') return false;
+    return Date.now() - iat * 1000 <= 5 * 60 * 1000;
 }
 
 export async function updateSession(request: NextRequest, nonce: string, csp: string) {
@@ -116,6 +128,23 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
             url.pathname = '/';
             url.search = 'error=session_validation_unavailable';
             return redirectWithSession(url);
+        }
+        if (!activity && session?.access_token && isFreshJwt(session.access_token)) {
+            const absoluteExpiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+            const { error: bootstrapError } = await supabaseAdmin.from('user_session_activity').upsert({
+                session_hash: await hashAccessToken(session.access_token),
+                auth_session_id: sessionId,
+                user_id: user.id,
+                last_activity: now,
+                absolute_expires_at: absoluteExpiresAt,
+                revoked_at: null,
+            }, { onConflict: 'session_hash' });
+            if (!bootstrapError) {
+                console.warn('[middleware] bootstrapped missing fresh session activity. sessionId:', sessionId, 'userId:', user.id);
+                response.headers.set('Content-Security-Policy', csp);
+                return response;
+            }
+            console.error('[middleware] session activity bootstrap failed', bootstrapError.message, 'sessionId:', sessionId);
         }
         if (!activity) {
             console.error('[middleware] session activity not found. sessionId:', sessionId, 'userId:', user.id, 'idleCutoff:', idleCutoff);

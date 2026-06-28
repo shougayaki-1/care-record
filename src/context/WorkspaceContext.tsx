@@ -1,9 +1,9 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-// useRouterは使用していなかったので削除
+import { usePathname } from 'next/navigation';
 import { CircularProgress, Box } from '@mui/material';
 import { setLastOrganization } from '@/app/actions/user';
 import { FULL_PERMISSIONS, mergePermissions, type RolePermissions } from '@/utils/permissions';
@@ -33,13 +33,26 @@ type WorkspaceContextType = {
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined);
 
 export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) => {
+  const pathname = usePathname();
+  const shouldLoadWorkspace = pathname.startsWith('/app') || pathname.startsWith('/super-admin');
+  const fetchSeq = useRef(0);
   const [currentOrg, setCurrentOrg] = useState<Workspace | null>(null);
   const [orgList, setOrgList] = useState<Workspace[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<WorkspaceLoadStatus>('loading');
+  const [loading, setLoading] = useState(shouldLoadWorkspace);
+  const [status, setStatus] = useState<WorkspaceLoadStatus>(shouldLoadWorkspace ? 'loading' : 'session_expired');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!shouldLoadWorkspace) {
+      fetchSeq.current += 1;
+      setCurrentOrg(null);
+      setOrgList([]);
+      setLoading(false);
+      setStatus('session_expired');
+      setErrorMessage(null);
+      return;
+    }
+
     // INITIAL_SESSIONを初回読み込みの唯一の起点にし、二重取得による状態上書きを防ぐ。
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log(`[WorkspaceProvider] Auth event: ${event}`);
@@ -66,9 +79,11 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [shouldLoadWorkspace]);
 
   const fetchWorkspaces = async (knownSession?: Session | null) => {
+    const seq = ++fetchSeq.current;
+    const isCurrent = () => seq === fetchSeq.current;
     try {
       setLoading(true);
       setStatus('loading');
@@ -78,6 +93,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         : { data: { session: knownSession }, error: null };
       const { data: { session }, error: sessionError } = sessionResult;
       if (sessionError || !session?.user) {
+        if (!isCurrent()) return;
         setOrgList([]);
         setCurrentOrg(null);
         setStatus('session_expired');
@@ -99,6 +115,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       ]);
 
       if (memberError || profileError) {
+        if (!isCurrent()) return;
         console.error('Workspace lookup failed', { memberError, profileError });
         setStatus('error');
         setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
@@ -117,11 +134,25 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
           return;
         }
 
-        const { data: roleLinks } = await supabase
+        const { data: roleLinks, error: roleLinksError } = await supabase
           .from('organization_member_roles')
           .select('organization_roles(permissions)')
           .eq('organization_id', organization.id)
           .eq('user_id', session.user.id);
+        if (!isCurrent()) return;
+        if (roleLinksError) {
+          console.error('Workspace role lookup failed', roleLinksError);
+          if (roleLinksError.code === '401' || roleLinksError.message.toLowerCase().includes('jwt')) {
+            setOrgList([]);
+            setCurrentOrg(null);
+            setStatus('session_expired');
+            setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
+          } else {
+            setStatus('error');
+            setErrorMessage('権限情報を取得できませんでした。時間をおいて再試行してください。');
+          }
+          return;
+        }
         const rolePerms: RolePermissions[] = (roleLinks ?? [])
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .map((r: any) => {
@@ -135,22 +166,25 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       }
 
       if (list.length === 0) {
+        if (!isCurrent()) return;
         setOrgList([]);
         setCurrentOrg(null);
         setStatus('no_membership');
         return;
       }
 
+      if (!isCurrent()) return;
       setOrgList(list);
       const target = list.find(o => o.id === profile?.last_organization_id) || list[0];
       setCurrentOrg(target);
       setStatus('ready');
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('Workspace fetch error:', error);
       setStatus('error');
       setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   };
 
