@@ -33,36 +33,55 @@ export default function RecordSelectPage() {
         if (!currentOrg) return;
         try {
             const { data: { user } } = await supabase.auth.getUser();
-            let targetClients: Client[] = [];
+            if (!user) return;
 
             const canCreateAll = currentOrg.effectivePermissions.records.create === 'all';
             const canCreateAssigned = currentOrg.effectivePermissions.records.create === 'assigned';
-            if (canCreateAll) {
-                const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
-                if (data) targetClients = data as Client[];
-            } else if (canCreateAssigned) {
-                const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', user?.id);
-                if (data) {
-                    const assignments = data as unknown as { clients: Client | null }[];
-                    targetClients = assignments.map(d => d.clients).filter((c): c is Client => c !== null);
-                }
-            }
+            const canViewShifts = checkShiftPermission(currentOrg.effectivePermissions, 'view', true);
+
+            // Step 1: clients and shifts in parallel (both need user but not each other)
+            const start = new Date();
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(start);
+            end.setDate(end.getDate() + 1);
+            end.setMilliseconds(end.getMilliseconds() - 1);
+
+            const [targetClients, shiftsResult] = await Promise.all([
+                // Clients fetch
+                (async (): Promise<Client[]> => {
+                    if (canCreateAll) {
+                        const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
+                        return (data ?? []) as Client[];
+                    } else if (canCreateAssigned) {
+                        const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', user.id);
+                        return ((data ?? []) as unknown as { clients: Client | null }[])
+                            .map(d => d.clients).filter((c): c is Client => c !== null);
+                    }
+                    return [];
+                })(),
+                // Shifts fetch (if permission exists)
+                canViewShifts
+                    ? getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString())
+                    : Promise.resolve([] as MyShiftItem[]),
+            ]);
+
             setClients(targetClients);
+            setTodayShifts(shiftsResult.filter(s => s.status !== 'cancelled'));
 
-            if (user && checkShiftPermission(currentOrg.effectivePermissions, 'view', true)) {
-                const start = new Date();
-                start.setHours(0, 0, 0, 0);
-                const end = new Date(start);
-                end.setDate(end.getDate() + 1);
-                end.setMilliseconds(end.getMilliseconds() - 1);
-                const shifts = await getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString());
-                setTodayShifts(shifts.filter((shift) => shift.status !== 'cancelled'));
-            }
-
-            if (user && targetClients.length > 0) {
-                const { data: drafts } = await supabase.from('reports').select('id, client_id, created_at').eq('helper_id', user.id).eq('status', 'draft').is('deleted_at', null).in('client_id', targetClients.map(c => c.id)).order('created_at', { ascending: false });
+            // Step 2: drafts (needs client IDs from step 1)
+            if (targetClients.length > 0) {
+                const { data: drafts } = await supabase.from('reports')
+                    .select('id, client_id, created_at')
+                    .eq('helper_id', user.id)
+                    .eq('status', 'draft')
+                    .is('deleted_at', null)
+                    .in('client_id', targetClients.map(c => c.id))
+                    .order('created_at', { ascending: false });
                 const draftsMap: Record<string, DraftReport[]> = {};
-                if (drafts) drafts.forEach((d) => { if (!draftsMap[d.client_id]) draftsMap[d.client_id] = []; draftsMap[d.client_id].push({ id: d.id, created_at: d.created_at }); });
+                if (drafts) drafts.forEach((d) => {
+                    if (!draftsMap[d.client_id]) draftsMap[d.client_id] = [];
+                    draftsMap[d.client_id].push({ id: d.id, created_at: d.created_at });
+                });
                 setClientDrafts(draftsMap);
             }
         } catch (e) { console.error(e); } finally { setLoading(false); }
