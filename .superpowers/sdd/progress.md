@@ -1,18 +1,16 @@
-# SDD Progress Ledger — Plan: AI記録取込機能
+# SDD Progress Ledger — Plan: シフト連動型記録権限修正
 
 ## Tasks
-- [ ] Task 1: 依存パッケージ追加・環境変数定義
-- [ ] Task 2: AIクライアント層の実装 (gemini.ts / extractSchema.ts / extractPrompt.ts)
-- [ ] Task 3: Route Handler実装（SSE）
-- [ ] Task 4: 単票モード UI（A/B） — AiImportButton + record/[clientId]統合
-- [ ] Task 5: 一括取込ページ（C） — /ai-import + AiImportReviewTable
-- [ ] Task 6: 監査ログ・セキュリティ
+- [ ] Task 1: DB マイグレーション — can_access_client + save_report_atomic に shift_staffs OR 条件追加
+- [ ] Task 2: Server Action — autoAssign オプション追加 (ShiftPayload, ShiftPatternPayload, createShift, createShiftPattern)
+- [ ] Task 3: UI — ShiftFormModal に自動アサインチェックボックス追加
+- [ ] Task 4: UI — ShiftPatternModal に自動アサインチェックボックス追加
+- [ ] Task 5: UI — 利用者一覧に担当者数列追加
 
 ## Log
-Task 1 (依存パッケージ追加): complete (commits 0f1c7f5..ef332b0, review clean)
-Task 2 (AIクライアント層): complete (commits ef332b0..1f1e574, review clean — Important fix applied for GCP_PROJECT_ID guard)
-Task 3 (Route Handler SSE): complete (commits 1f1e574..6afb28f, review clean — fixes applied: ReadableStream error guard + PII-safe logging)
-Task 4 (単票モードUI): complete (commits 6afb28f..389f23f, review clean — fixes applied: SSE error flag + batch setAnswers)
-Task 5 (一括取込ページ): complete (commits 389f23f..6a32d1a, review clean — fixes applied: confirmation dialog + useCallback stale closure)
-Task 6 (監査ログ・セキュリティ): complete (commits 6a32d1a..1c0657c, review clean — Critical fix applied: organizationId moved to URL param before FormData parse)
-Final whole-branch review: complete (commits 0f1c7f5..d77a994, Critical×3+Important×1 fixed: FormData key, grouping format, values shape, PHI leak)
+Task 1 (DBマイグレーション): complete (commits 6a8c37a..84e86f5, review clean)
+Task 2 (autoAssign Server Action): complete (commits 84e86f5..4bcf44b, review clean — Important fix: error propagation in upsertAssignmentsForStaffs)
+Task 3 (ShiftFormModal checkbox): complete (commits 4bcf44b..c9ab29f, review clean)
+Task 4 (ShiftPatternModal checkbox): complete (commits c9ab29f..ca6df7e, review clean)
+Task 5 (clients list assignment count): complete (commits ca6df7e..06bf2bb, review clean)
+Final whole-branch review: complete (commits 6a8c37a..7d6e90f, Critical×0, Important×3 fixed: cancelled-shift guard in can_access_client + save_report_atomic auth checks ×2, design comment added)

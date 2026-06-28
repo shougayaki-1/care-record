@@ -28,7 +28,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CopyAllIcon from '@mui/icons-material/CopyAll';
 
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { callGasApi } from '@/app/actions/gas';
@@ -38,15 +38,18 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, CheckboxGroupField } from '@/components/ui';
 import {
+    getClientAssignmentPermissionHints,
     saveClientAssignments,
     saveClientForm,
     updateClientGoogleLink,
+    type AssignmentPermissionHint,
 } from '@/app/actions/clients';
 
 type Staff = { id: string; name: string; userId: string | null };
 
 export default function ClientSettingsPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const params = useParams();
     const clientId = params.id as string;
     const { currentOrg, loading: wsLoading } = useWorkspace();
@@ -61,6 +64,8 @@ export default function ClientSettingsPage() {
     
     const [allStaffs, setAllStaffs] = useState<Staff[]>([]);
     const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([]);
+    const [roundTripDistances, setRoundTripDistances] = useState<Record<string, string>>({});
+    const [permissionHints, setPermissionHints] = useState<AssignmentPermissionHint[]>([]);
     
     const [templateId, setTemplateId] = useState('');
 
@@ -71,6 +76,7 @@ export default function ClientSettingsPage() {
     const [openCopyDialog, setOpenCopyDialog] = useState(false);
     const [copyTab, setCopyTab] = useState(0); 
     const [otherClients, setOtherClients] = useState<{id: string, name: string}[]>([]);
+    const showSetupWizard = searchParams.get('setup') === '1';
 
     const fetchClientData = useCallback(async () => {
         try {
@@ -104,14 +110,21 @@ export default function ClientSettingsPage() {
                 }));
                 setAllStaffs(staffs);
 
-                const { data: assigns } = await supabase.from('assignments').select('staff_id, helper_id').eq('client_id', clientId);
+                const { data: assigns } = await supabase.from('assignments').select('staff_id, helper_id, round_trip_distance_km').eq('client_id', clientId);
                 if (assigns) {
                     const staffIdByUserId = new Map(staffs.filter((staff) => staff.userId).map((staff) => [staff.userId, staff.id]));
                     const ids = assigns
                         .map((assignment) => assignment.staff_id || staffIdByUserId.get(assignment.helper_id))
                         .filter((id): id is string => Boolean(id));
                     setAssignedStaffIds(ids);
+                    const distances: Record<string, string> = {};
+                    assigns.forEach((assignment) => {
+                        const staffId = assignment.staff_id || staffIdByUserId.get(assignment.helper_id);
+                        if (staffId) distances[staffId] = String(assignment.round_trip_distance_km ?? 0);
+                    });
+                    setRoundTripDistances(distances);
                 }
+                setPermissionHints(await getClientAssignmentPermissionHints(currentOrg.id, clientId));
             }
 
         } catch (error) {
@@ -179,7 +192,10 @@ export default function ClientSettingsPage() {
         setMessage(null);
         try {
             if (!currentOrg) throw new Error('事業所が選択されていません');
-            await saveClientAssignments(currentOrg.id, clientId, assignedStaffIds);
+            const distancePayload = Object.fromEntries(
+                assignedStaffIds.map((staffId) => [staffId, Number(roundTripDistances[staffId] || 0)])
+            );
+            await saveClientAssignments(currentOrg.id, clientId, assignedStaffIds, distancePayload);
 
             setMessage({ type: 'success', text: '担当スタッフを更新しました！' });
             setTimeout(() => setMessage(null), 3000);
@@ -354,27 +370,36 @@ export default function ClientSettingsPage() {
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', flexShrink: 0 }}>
+            <Box sx={{ p: { xs: 1.5, sm: 2 }, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', flexShrink: 0 }}>
                 <Stack direction="row" alignItems="center" spacing={2} mb={2}>
                     <IconButton onClick={() => router.back()}><ArrowBackIcon /></IconButton>
-                    <Box>
+                    <Box sx={{ minWidth: 0 }}>
                         <Typography variant="caption" color="text.secondary">利用者設定</Typography>
-                        <Typography variant="h5" fontWeight="bold">{clientName} 様</Typography>
+                        <Typography variant="h5" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{clientName} 様</Typography>
                     </Box>
                 </Stack>
-                <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="fullWidth">
+                <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="scrollable" allowScrollButtonsMobile>
                     <Tab icon={<DescriptionIcon />} label="記録フォーム" />
                     <Tab icon={<AssignmentIndIcon />} label="担当スタッフ" />
                     <Tab icon={<FolderIcon />} label="帳票・連携" />
                 </Tabs>
             </Box>
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
                 {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
+                {showSetupWizard && (
+                    <Alert
+                        severity="info"
+                        sx={{ mb: 3 }}
+                        action={<Button color="inherit" size="small" onClick={() => router.replace(`/app/clients/${clientId}`)}>完了</Button>}
+                    >
+                        利用者を追加しました。記録フォーム、担当スタッフ、帳票・連携の順に設定してください。
+                    </Alert>
+                )}
 
                 {tabIndex === 0 && (
                     <Box>
-                        <Box display="flex" justifyContent="flex-end" gap={1} mb={2}>
+                        <Box display="flex" justifyContent="flex-end" gap={1} mb={2} sx={{ flexWrap: 'wrap', '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
                             <Button 
                                 variant="outlined" 
                                 startIcon={<ContentCopyIcon />} 
@@ -388,22 +413,29 @@ export default function ClientSettingsPage() {
                                 <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid' : 'none', borderLeftColor: 'primary.main', bgcolor: item.type === 'section' ? 'background.tint' : 'background.paper' }}>
                                     <CardContent sx={{ p: '16px !important' }}>
                                         <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2}>
-                                            <Stack direction="column" spacing={0.5}>
+                                            <Stack
+                                                direction={{ xs: 'row', md: 'column' }}
+                                                spacing={0.5}
+                                                sx={{
+                                                    width: { xs: '100%', md: 'auto' },
+                                                    justifyContent: { xs: 'space-between', md: 'flex-start' },
+                                                }}
+                                            >
                                                 <IconButton size="small" onClick={() => moveField(index, 'up')} disabled={index === 0}><ArrowUpwardIcon fontSize="small" /></IconButton>
                                                 <IconButton size="small" onClick={() => moveField(index, 'down')} disabled={index === formItems.length - 1}><ArrowDownwardIcon fontSize="small" /></IconButton>
-                                                <IconButton color="error" size="small" onClick={() => removeField(index)} sx={{ mt: 1 }}><DeleteIcon fontSize="small" /></IconButton>
+                                                <IconButton color="error" size="small" onClick={() => removeField(index)} sx={{ mt: { md: 1 } }}><DeleteIcon fontSize="small" /></IconButton>
                                             </Stack>
                                             <Box sx={{ flexGrow: 1, width: '100%' }}>
                                                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} mb={1}>
-                                                    <TextField select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ minWidth: 160 }} slotProps={{ input: { startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null } }}>
+                                                    <TextField select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ width: { xs: '100%', md: 'auto' }, minWidth: { md: 160 } }} slotProps={{ input: { startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null } }}>
                                                         <MenuItem value="section" sx={{ fontWeight: 'bold', color: 'primary.main' }}>■ セクション見出し</MenuItem>
                                                         <Divider /><MenuItem value="checkbox">チェック (ON/OFF)</MenuItem><MenuItem value="multicheckbox">複数選択</MenuItem><MenuItem value="text">テキスト入力</MenuItem><MenuItem value="number">数値入力</MenuItem><MenuItem value="select">1つ選択 (ラジオ)</MenuItem><MenuItem value="time">時間</MenuItem>
                                                     </TextField>
                                                     <TextField label={item.type === 'section' ? "セクション名" : "質問内容"} size="small" fullWidth value={item.label} onChange={(e) => updateField(index, 'label', e.target.value)} sx={{ '& .MuiInputBase-input': { fontWeight: item.type === 'section' ? 'bold' : 'normal', fontSize: item.type === 'section' ? '1.1rem' : '1rem' } }} />
-                                                    {item.type !== 'section' && <FormControlLabel control={<Switch size="small" checked={item.required} onChange={(e) => updateField(index, 'required', e.target.checked)} />} label="必須" sx={{ minWidth: 80 }} />}
+                                                    {item.type !== 'section' && <FormControlLabel control={<Switch size="small" checked={item.required} onChange={(e) => updateField(index, 'required', e.target.checked)} />} label="必須" sx={{ minWidth: 80, alignSelf: { xs: 'flex-start', md: 'center' } }} />}
                                                 </Stack>
                                                 {(item.type === 'checkbox' || item.type === 'multicheckbox' || item.type === 'select') && (
-                                                    <FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: 1 }} />
+                                                    <FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: { xs: 0, sm: 1 } }} />
                                                 )}
                                                 {(item.type === 'select' || item.type === 'multicheckbox') && (
                                                     <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={item.options || ''} onChange={(e) => updateField(index, 'options', e.target.value)} slotProps={{ input: { startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} /> } }} />
@@ -422,7 +454,12 @@ export default function ClientSettingsPage() {
                     <Card variant="outlined">
                         <CardContent>
                             <Typography variant="subtitle1" fontWeight="bold" gutterBottom>この利用者を担当するスタッフを選択してください</Typography>
-                            <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。</Typography>
+                            <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。往復距離は記録作成時の初期値になります。</Typography>
+                            {permissionHints.some((hint) => hint.canCreateAllRecords) && (
+                                <Alert severity="info" sx={{ mb: 2 }}>
+                                    全体の記録作成権限を持つスタッフは、ここで担当に入っていなくても記録を作成できます。
+                                </Alert>
+                            )}
                             <Stack spacing={3}>
                                 <CheckboxGroupField
                                     label="メンバー（ログインユーザー）"
@@ -440,6 +477,39 @@ export default function ClientSettingsPage() {
                                     getOptionLabel={(staff) => staff.name}
                                     getOptionValue={(staff) => staff.id}
                                 />
+                                {assignedStaffIds.length > 0 && (
+                                    <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.muted' }}>
+                                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>スタッフ別 往復移動距離</Typography>
+                                        <Stack spacing={1.5}>
+                                            {allStaffs.filter((staff) => assignedStaffIds.includes(staff.id)).map((staff) => (
+                                                <Stack key={staff.id} direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                                                    <Box sx={{ minWidth: { sm: 180 } }}>
+                                                        <Typography sx={{ fontWeight: 'bold', overflowWrap: 'anywhere' }}>{staff.name}</Typography>
+                                                        {permissionHints.find((hint) => hint.staffId === staff.id)?.canCreateAllRecords && (
+                                                            <Chip
+                                                                label="全体権限で記録作成可"
+                                                                size="small"
+                                                                color="success"
+                                                                variant="outlined"
+                                                                sx={{ mt: 0.5 }}
+                                                            />
+                                                        )}
+                                                    </Box>
+                                                    <TextField
+                                                        label="往復距離"
+                                                        type="number"
+                                                        size="small"
+                                                        value={roundTripDistances[staff.id] ?? '0'}
+                                                        onChange={(e) => setRoundTripDistances(prev => ({ ...prev, [staff.id]: e.target.value }))}
+                                                        onWheel={e => (e.target as HTMLElement).blur()}
+                                                        sx={{ maxWidth: { sm: 220 } }}
+                                                        slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">km</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.1', min: 0 } }}
+                                                    />
+                                                </Stack>
+                                            ))}
+                                        </Stack>
+                                    </Paper>
+                                )}
                             </Stack>
                         </CardContent>
                     </Card>
@@ -591,8 +661,8 @@ export default function ClientSettingsPage() {
                 )}
             </Box>
 
-            <Paper elevation={3} sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center', bgcolor: 'background.paper', flexShrink: 0, zIndex: 10 }}>
-                <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={() => { if (tabIndex === 0) handleSaveForm(); if (tabIndex === 1) handleSaveAssignments(); if (tabIndex === 2) handleSaveTemplateId(); }} disabled={isSaving} sx={{ minWidth: 300, fontWeight: 'bold', height: 48 }}>
+            <Paper elevation={3} sx={{ p: { xs: 1.5, sm: 2 }, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center', bgcolor: 'background.paper', flexShrink: 0, zIndex: 10 }}>
+                <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={() => { if (tabIndex === 0) handleSaveForm(); if (tabIndex === 1) handleSaveAssignments(); if (tabIndex === 2) handleSaveTemplateId(); }} disabled={isSaving} sx={{ width: { xs: '100%', sm: 'auto' }, minWidth: { sm: 300 }, fontWeight: 'bold', height: 48 }}>
                     {isSaving ? '保存中...' : '設定を保存'}
                 </Button>
             </Paper>

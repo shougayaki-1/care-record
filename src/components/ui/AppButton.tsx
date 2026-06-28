@@ -7,6 +7,8 @@ export type ButtonIntent = 'primary' | 'secondary' | 'danger' | 'warning' | 'suc
 export interface AppButtonProps extends Omit<ButtonProps, 'color'> {
   intent?: ButtonIntent;
   loading?: boolean;
+  target?: string;
+  rel?: string;
 }
 
 const colorByIntent: Record<ButtonIntent, ButtonProps['color']> = {

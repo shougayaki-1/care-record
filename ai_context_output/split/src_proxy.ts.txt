@@ -8,13 +8,14 @@ function createNonce(): string {
 export async function proxy(request: NextRequest) {
   const nonce = createNonce();
   const developmentEval = process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : '';
+  const wasmEval = " 'wasm-unsafe-eval'";
   const csp = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${developmentEval}`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${wasmEval}${developmentEval}`,
     `style-src 'self' 'nonce-${nonce}'`,
     "img-src 'self' data: blob: https://*.supabase.co https://*.googleusercontent.com https://lh3.googleusercontent.com",
     "font-src 'self' data:",
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.googleapis.com https://accounts.google.com",
+    "connect-src 'self' data: https://*.supabase.co wss://*.supabase.co https://www.googleapis.com https://accounts.google.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

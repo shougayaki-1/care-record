@@ -2,13 +2,15 @@
 
 import { sanitizeDbError } from '@/utils/errors';
 
-import { supabaseAdmin, getAuthedUser, assertOrgRole } from '@/utils/supabase/auth';
+import { supabaseAdmin, getAuthedUser, assertOrgRole, assertOrgPermission, assertOwner } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
+import { assertRoleManagerRemains } from '@/utils/supabase/roleSafety';
+import { google } from 'googleapis';
 
 export async function updateOrganizationName(orgId: string, name: string) {
-    const { userId } = await assertOrgRole(orgId, ['owner']);
+    const { userId } = await assertOrgPermission(orgId, 'organization');
     const normalized = name.trim();
     if (normalized.length < 1 || normalized.length > 100) throw new Error('事業所名は1〜100文字で入力してください');
     const { error } = await supabaseAdmin.from('organizations').update({ name: normalized }).eq('id', orgId).is('deleted_at', null);
@@ -18,7 +20,7 @@ export async function updateOrganizationName(orgId: string, name: string) {
 }
 
 export async function updateOrganizationDriveFolder(orgId: string, folderId: string | null) {
-    const { userId } = await assertOrgRole(orgId, ['owner']);
+    const { userId } = await assertOrgPermission(orgId, 'integrations');
     const normalized = folderId?.trim() || null;
     if (normalized && normalized.length > 255) throw new Error('フォルダIDが不正です');
     const { error } = await supabaseAdmin.from('organizations').update({ google_folder_id: normalized }).eq('id', orgId).is('deleted_at', null);
@@ -27,8 +29,31 @@ export async function updateOrganizationDriveFolder(orgId: string, folderId: str
     return { success: true };
 }
 
+export async function updateTravelCostSettings(orgId: string, rateYenPerKm: number) {
+    const { userId } = await assertOrgPermission(orgId, 'organization');
+    const rate = Number(rateYenPerKm);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 10000) {
+        throw new Error('交通費単価は0〜10000円で入力してください');
+    }
+    const { error } = await supabaseAdmin
+        .from('organizations')
+        .update({ travel_cost_rate_yen_per_km: rate })
+        .eq('id', orgId)
+        .is('deleted_at', null);
+    if (error) throw sanitizeDbError(error, 'action.organization');
+    await recordAuditEvent({
+        organizationId: orgId,
+        actorId: userId,
+        action: 'organization.travel_cost_update',
+        resourceType: 'organization',
+        resourceId: orgId,
+        details: { rateYenPerKm: rate },
+    });
+    return { success: true, rateYenPerKm: rate };
+}
+
 export async function disconnectGoogleCalendar(orgId: string) {
-    const { userId } = await assertOrgRole(orgId, ['owner']);
+    const { userId } = await assertOrgPermission(orgId, 'integrations');
     const { data: org, error: readError } = await supabaseAdmin.from('organizations').select('google_refresh_token').eq('id', orgId).single();
     if (readError) throw new Error(readError.message);
     let revoked = false;
@@ -47,8 +72,9 @@ export async function disconnectGoogleCalendar(orgId: string) {
 }
 
 export async function deleteOrganization(orgId: string) {
-    // 権限チェック: 呼び出し元がこの事業所の owner であることをセッションから検証
-    const { userId } = await assertOrgRole(orgId, ['owner']);
+    // 権限チェック: owner かつ organizationDelete 権限が必要
+    const { userId, isOwner } = await assertOrgPermission(orgId, 'organizationDelete');
+    if (!isOwner) throw new Error('事業所の削除はオーナーのみ実行できます');
 
     const { data: organization, error: orgReadError } = await supabaseAdmin
         .from('organizations')
@@ -98,12 +124,15 @@ export async function leaveOrganization(orgId: string) {
     const { data: members } = await supabaseAdmin.from('organization_members')
         .select('role, user_id').eq('organization_id', orgId);
 
+    const me = members?.find(m => m.user_id === userId);
+    if (!me) throw new Error('この事業所のメンバーではありません');
+
     const owners = members?.filter(m => m.role === 'owner') || [];
-    const me = members?.find(m => m.user_id === userId); 
 
     if (me?.role === 'owner' && owners.length <= 1 && (members?.length || 0) > 1) {
         throw new Error('あなたが唯一のオーナーです。脱退する前に他のメンバーにオーナー権限を譲渡するか、事業所を削除してください。');
     }
+    await assertRoleManagerRemains(orgId, { removedMemberId: userId });
 
     const { error } = await supabaseAdmin.from('organization_members')
         .delete().eq('organization_id', orgId).eq('user_id', userId);
@@ -121,22 +150,19 @@ export async function leaveOrganization(orgId: string) {
 
 export async function transferOwner(orgId: string, newOwnerId: string) {
     // 譲渡できるのは現 owner 本人のみ。現 owner はセッションから取得する
-    const { userId: currentOwnerId } = await assertOrgRole(orgId, ['owner']);
-    if (newOwnerId === currentOwnerId) throw new Error('譲渡先が不正です');
+    const { userId: currentOwnerId } = await assertOwner(orgId);
+    await assertOrgPermission(orgId, 'ownerTransfer');
 
-    // 譲渡先が同じ事業所のメンバーであることを確認
-    const { data: target } = await supabaseAdmin.from('organization_members')
-        .select('user_id').eq('organization_id', orgId).eq('user_id', newOwnerId).single();
-    if (!target) throw new Error('譲渡先がこの事業所のメンバーではありません');
-
-    // トランザクション的に処理
-    const { error: error1 } = await supabaseAdmin.from('organization_members')
-        .update({ role: 'owner' }).eq('organization_id', orgId).eq('user_id', newOwnerId);
-    if (error1) throw error1;
-
-    const { error: error2 } = await supabaseAdmin.from('organization_members')
-        .update({ role: 'manager' }).eq('organization_id', orgId).eq('user_id', currentOwnerId);
-    if (error2) throw error2;
+    // 両方の UPDATE を単一トランザクション内で原子的に実行する RPC を使用
+    // 分割 UPDATE だと1件目成功・2件目失敗で2オーナー状態になりうるため
+    const { error } = await supabaseAdmin.rpc('transfer_owner_atomic', {
+        p_org_id: orgId,
+        p_new_owner_id: newOwnerId,
+        p_current_owner_id: currentOwnerId,
+    });
+    if (error?.message === 'invalid_transfer_target') throw new Error('譲渡先が不正です');
+    if (error?.message === 'target_not_member') throw new Error('譲渡先がこの事業所のメンバーではありません');
+    if (error) throw sanitizeDbError(error, 'action.organization');
 
     return { success: true };
 }
@@ -163,7 +189,7 @@ function applyAuditFilters<T extends { gte: (c: string, v: string) => T; lte: (c
 }
 
 export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {}) {
-    await assertOrgRole(orgId, ['owner', 'manager']);
+    await assertOrgPermission(orgId, 'auditLogs');
     const limit = Math.min(Math.max(filters.limit ?? 100, 1), 200);
     const offset = Math.max(filters.offset ?? 0, 0);
     // SQLで profiles への FK を貼ったので結合可能になります
@@ -182,7 +208,7 @@ export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {})
 
 /** 監査ログをCSV化して返す。監査エビデンス出力自体も監査記録する。 */
 export async function exportAuditLogsCsv(orgId: string, filters: AuditLogFilters = {}): Promise<{ filename: string; csv: string }> {
-    const { userId } = await assertOrgRole(orgId, ['owner', 'manager']);
+    const { userId } = await assertOrgPermission(orgId, 'auditLogs');
     const EXPORT_CAP = 10000;
     let query = supabaseAdmin
         .from('audit_events')
@@ -226,5 +252,51 @@ export async function addAuditLog(params: { orgId: string, action: string, targe
         resourceType: 'legacy',
         resourceId: params.target,
         details: params.details,
+    });
+}
+
+export type CloudLogFilters = {
+    from?: string | null;
+    to?: string | null;
+    severity?: string | null;
+    text?: string | null;
+    limit?: number;
+};
+
+export type CloudLogEntry = {
+    timestamp: string;
+    severity: string;
+    logName: string;
+    text: string;
+};
+
+export async function listCloudLogEntries(orgId: string, filters: CloudLogFilters = {}): Promise<CloudLogEntry[]> {
+    await assertOrgPermission(orgId, 'auditLogs');
+    const projectId = process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+    if (!projectId) throw new Error('GCP_PROJECT_ID が設定されていません');
+
+    const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/cloud-platform.read-only'] });
+    const logging = google.logging({ version: 'v2', auth });
+    const filterParts: string[] = [];
+    if (filters.from) filterParts.push(`timestamp >= "${filters.from}"`);
+    if (filters.to) filterParts.push(`timestamp <= "${filters.to}"`);
+    if (filters.severity) filterParts.push(`severity >= ${filters.severity}`);
+    if (filters.text?.trim()) filterParts.push(`textPayload:"${filters.text.trim().replace(/"/g, '\\"')}"`);
+    const res = await logging.entries.list({
+        requestBody: {
+            resourceNames: [`projects/${projectId}`],
+            filter: filterParts.join(' AND ') || undefined,
+            orderBy: 'timestamp desc',
+            pageSize: Math.min(Math.max(filters.limit ?? 100, 1), 200),
+        },
+    });
+    return (res.data.entries ?? []).map((entry) => {
+        const payload = entry.textPayload ?? (entry.jsonPayload ? JSON.stringify(entry.jsonPayload) : entry.protoPayload ? JSON.stringify(entry.protoPayload) : '');
+        return {
+            timestamp: entry.timestamp ?? '',
+            severity: entry.severity ?? 'DEFAULT',
+            logName: entry.logName ?? '',
+            text: payload,
+        };
     });
 }

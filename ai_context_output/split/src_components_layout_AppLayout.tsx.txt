@@ -13,10 +13,13 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import TagIcon from '@mui/icons-material/Tag';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import HistoryIcon from '@mui/icons-material/History';
+import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import PeopleIcon from '@mui/icons-material/People';
 import BadgeIcon from '@mui/icons-material/Badge';
 import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -26,6 +29,9 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import KeyIcon from '@mui/icons-material/Key';
+import BackupIcon from '@mui/icons-material/Backup';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -33,17 +39,20 @@ import { supabase } from '@/lib/supabase';
 import { markNotificationRead } from '@/app/actions/user';
 import { recordLogout } from '@/app/actions/auth';
 import IdleTimeout from '@/components/auth/IdleTimeout';
-import { hasOrganizationPermission, type OrganizationPermission } from '@/utils/permissions';
+import { checkManagementPermission, checkShiftPermission, type ManagementArea } from '@/utils/permissions';
 
 const SIDEBAR_WIDTH = 256;
+const SIDEBAR_COLLAPSED_WIDTH = 72;
 
-const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; permission: OrganizationPermission }> = [
-  { prefix: '/app/accounts', permission: 'viewAccounts' },
-  { prefix: '/app/settings', permission: 'viewAuditLogs' },
-  { prefix: '/app/clients', permission: 'manageClients' },
-  { prefix: '/app/staff', permission: 'manageStaffs' },
-  { prefix: '/app/reports', permission: 'viewReports' },
-  { prefix: '/app/statistics', permission: 'viewManagement' },
+const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; area: ManagementArea }> = [
+  { prefix: '/app/accounts', area: 'accounts' },
+  { prefix: '/app/settings/roles', area: 'roles' },
+  { prefix: '/app/clients', area: 'clients' },
+  { prefix: '/app/staff', area: 'staffs' },
+  { prefix: '/app/reports', area: 'reports' },
+  { prefix: '/app/statistics', area: 'reports' },
+  { prefix: '/app/logs', area: 'auditLogs' },
+  { prefix: '/app/backup', area: 'auditLogs' },
 ];
 
 type Notification = {
@@ -93,7 +102,7 @@ const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | n
       onClose={onClose}
       anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-      slotProps={{ paper: { sx: { width: 320, maxHeight: 400 } } }}
+      slotProps={{ paper: { sx: { width: { xs: 'calc(100vw - 32px)', sm: 320 }, maxWidth: 320, maxHeight: 400 } } }}
     >
       <Box p={2} borderBottom="1px solid" borderColor="divider">
         <Typography fontWeight="bold">通知</Typography>
@@ -179,7 +188,7 @@ const TopAppBar = ({
 
   return (
     <AppBar position="static">
-      <Toolbar sx={{ gap: 1 }}>
+      <Toolbar sx={{ gap: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 } }}>
         {showMenuButton && (
           <IconButton edge="start" onClick={onMenuClick} sx={{ mr: 1 }} aria-label="メニューを開く">
             <MenuIcon />
@@ -203,8 +212,9 @@ const TopAppBar = ({
             color: 'text.primary',
             textTransform: 'none',
             borderRadius: 2,
-            px: 1.5,
-            maxWidth: { xs: 180, sm: 280 },
+            px: { xs: 1, sm: 1.5 },
+            minWidth: 0,
+            maxWidth: { xs: 150, sm: 280 },
             '& .MuiButton-startIcon': { color: 'primary.main' }
           }}
         >
@@ -293,7 +303,17 @@ const TopAppBar = ({
 };
 
 // 左ナビゲーション（Google 風：白基調・丸ピルの選択スタイル）
-const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onClose?: () => void }) => {
+const NavDrawer = ({
+  currentOrg,
+  onClose,
+  sidebarOpen = true,
+  onToggle,
+}: {
+  currentOrg: Workspace | null,
+  onClose?: () => void,
+  sidebarOpen?: boolean,
+  onToggle?: () => void,
+}) => {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -313,20 +333,29 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
     return false;
   };
 
-  const isAdmin = hasOrganizationPermission(currentOrg.role, 'viewManagement');
+  const isAdmin = Object.values(currentOrg.effectivePermissions.management).some(Boolean);
+  const canViewShiftManagement = checkShiftPermission(currentOrg.effectivePermissions, 'view', true);
 
   const categoryStyle = {
-    px: 3, pt: 2.5, pb: 1,
+    px: 3,
+    pt: sidebarOpen ? 2.5 : 1,
+    pb: sidebarOpen ? 1 : 0,
     fontSize: '0.75rem',
     fontWeight: 500,
-    color: 'text.secondary'
+    color: 'text.secondary',
+    opacity: sidebarOpen ? 1 : 0,
+    height: sidebarOpen ? 'auto' : 8,
+    overflow: 'hidden',
+    transition: 'opacity 0.2s ease, height 0.2s ease, padding 0.2s ease',
   };
 
   // Google（Gmail）風の丸ピル選択スタイル
   const itemStyle = (active: boolean) => ({
-    mx: 1.5,
+    mx: sidebarOpen ? 1.5 : 0.5,
     my: 0.25,
     borderRadius: '24px',
+    justifyContent: sidebarOpen ? 'flex-start' : 'center',
+    minHeight: 48,
     color: active ? 'primary.main' : 'text.primary',
     bgcolor: active ? (t: Theme) => alpha(t.palette.primary.main, 0.12) : 'transparent',
     fontWeight: active ? 600 : 500,
@@ -335,118 +364,107 @@ const NavDrawer = ({ currentOrg, onClose }: { currentOrg: Workspace | null, onCl
     },
     '& .MuiListItemIcon-root': {
       color: active ? 'primary.main' : 'text.secondary',
-      minWidth: 36
+      minWidth: sidebarOpen ? 36 : 0,
+      justifyContent: 'center',
     }
   });
 
+  const textProps = {
+    sx: {
+      opacity: sidebarOpen ? 1 : 0,
+      width: sidebarOpen ? 'auto' : 0,
+      whiteSpace: 'nowrap',
+      transition: 'opacity 0.2s ease, width 0.2s ease',
+    },
+    primaryTypographyProps: { fontSize: '0.95rem' },
+  };
+
+  const navButton = (label: string, icon: React.ReactNode, path: string, queryCheck?: { key: string, val: string }) => {
+    const activePath = path.split('?')[0];
+    return (
+    <ListItem disablePadding>
+      <Tooltip title={sidebarOpen ? '' : label} placement="right" arrow>
+        <ListItemButton onClick={() => handleNav(path)} sx={itemStyle(isActive(activePath, queryCheck))}>
+          <ListItemIcon>{icon}</ListItemIcon>
+          <ListItemText primary={label} {...textProps} />
+        </ListItemButton>
+      </Tooltip>
+    </ListItem>
+    );
+  };
+
   return (
     <Box sx={{
-      width: SIDEBAR_WIDTH,
+      width: sidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_COLLAPSED_WIDTH,
       bgcolor: 'background.paper',
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      overflowY: 'auto'
+      overflowX: 'hidden',
+      overflowY: 'auto',
+      transition: 'width 0.2s ease',
     }}>
       <Box sx={{ flexGrow: 1, py: 1 }}>
         <Typography sx={categoryStyle}>記録</Typography>
         <List disablePadding>
-          <ListItem disablePadding>
-            <ListItemButton onClick={() => handleNav('/app/record')} sx={itemStyle(isActive('/app/record'))}>
-              <ListItemIcon><EditNoteIcon fontSize="small" /></ListItemIcon>
-              <ListItemText primary="記録を作成" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-            </ListItemButton>
-          </ListItem>
-          <ListItem disablePadding>
-            <ListItemButton onClick={() => handleNav('/app/history')} sx={itemStyle(isActive('/app/history'))}>
-              <ListItemIcon><HistoryIcon fontSize="small" /></ListItemIcon>
-              <ListItemText primary="自分の履歴" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-            </ListItemButton>
-          </ListItem>
+          {navButton('記録を作成', <EditNoteIcon fontSize="small" />, '/app/record')}
+          {navButton('AI一括取込', <AutoFixHighIcon fontSize="small" />, '/app/ai-import')}
+          {navButton('内勤を記録', <WorkHistoryIcon fontSize="small" />, '/app/internal-work')}
+          {navButton('自分の履歴', <HistoryIcon fontSize="small" />, '/app/history')}
         </List>
 
         <Typography sx={categoryStyle}>シフト</Typography>
         <List disablePadding>
-          {/* 旧「シフト一覧(list)」と「全体シフト管理(manage)」への分岐を廃止し、統合された1つのシフトカレンダーに一本化 */}
-          <ListItem disablePadding>
-            <ListItemButton onClick={() => handleNav('/app/shifts/manage')} sx={itemStyle(isActive('/app/shifts/manage'))}>
-              <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
-              <ListItemText primary="シフト管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-            </ListItemButton>
-          </ListItem>
+          {navButton('自分のシフト', <EditNoteIcon fontSize="small" />, '/app/shifts/my')}
+          {canViewShiftManagement && (
+            navButton('シフト管理', <CalendarMonthIcon fontSize="small" />, '/app/shifts/manage')
+          )}
         </List>
 
         {isAdmin && (
           <>
-            <Box onClick={() => setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: 'pointer', '&:hover': { color: 'text.primary' } }}>
+            <Box onClick={() => sidebarOpen && setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: sidebarOpen ? 'pointer' : 'default', '&:hover': { color: 'text.primary' } }}>
               提供記録一覧
               {openReports ? <ExpandLess fontSize="small" sx={{ ml: 'auto' }} /> : <ExpandMore fontSize="small" sx={{ ml: 'auto' }} />}
             </Box>
-            <Collapse in={openReports} timeout="auto" unmountOnExit>
+            <Collapse in={sidebarOpen ? openReports : true} timeout="auto" unmountOnExit>
               <List disablePadding>
-                <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/reports')} sx={itemStyle(isActive('/app/reports'))}>
-                    <ListItemIcon><TagIcon fontSize="small" /></ListItemIcon>
-                    <ListItemText primary="全件表示" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
-                </ListItem>
-                <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/reports?status=unapproved')} sx={itemStyle(isActive('/app/reports', { key: 'status', val: 'unapproved' }))}>
-                    <ListItemIcon><WarningAmberIcon fontSize="small" color="warning" /></ListItemIcon>
-                    <ListItemText primary="未承認・差戻し" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
-                </ListItem>
-                <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/reports?period=current_month')} sx={itemStyle(isActive('/app/reports', { key: 'period', val: 'current_month' }))}>
-                    <ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>
-                    <ListItemText primary="今月の記録" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
-                </ListItem>
+                {navButton('全件表示', <TagIcon fontSize="small" />, '/app/reports')}
+                {navButton('未承認・差戻し', <WarningAmberIcon fontSize="small" color="warning" />, '/app/reports?status=unapproved', { key: 'status', val: 'unapproved' })}
+                {navButton('今月の記録', <CalendarMonthIcon fontSize="small" />, '/app/reports?period=current_month', { key: 'period', val: 'current_month' })}
               </List>
             </Collapse>
 
             <Typography sx={categoryStyle}>管理</Typography>
             <List disablePadding>
               {isAdmin && (
-                <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/settings')} sx={itemStyle(isActive('/app/settings'))}>
-                    <ListItemIcon><BusinessIcon fontSize="small" /></ListItemIcon>
-                    <ListItemText primary="事業所設定" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
-                </ListItem>
+                navButton('事業所設定', <BusinessIcon fontSize="small" />, '/app/settings')
               )}
 
-              <ListItem disablePadding>
-                <ListItemButton onClick={() => handleNav('/app/clients')} sx={itemStyle(isActive('/app/clients'))}>
-                  <ListItemIcon><PeopleIcon fontSize="small" /></ListItemIcon>
-                  <ListItemText primary="利用者管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                </ListItemButton>
-              </ListItem>
-              <ListItem disablePadding>
-                <ListItemButton onClick={() => handleNav('/app/staff')} sx={itemStyle(isActive('/app/staff'))}>
-                  <ListItemIcon><BadgeIcon fontSize="small" /></ListItemIcon>
-                  <ListItemText primary="スタッフ(名簿)管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                </ListItemButton>
-              </ListItem>
+              {navButton('利用者管理', <PeopleIcon fontSize="small" />, '/app/clients')}
+              {navButton('スタッフ(名簿)管理', <BadgeIcon fontSize="small" />, '/app/staff')}
 
-              {hasOrganizationPermission(currentOrg.role, 'viewAccounts') && (
-                <ListItem disablePadding>
-                  <ListItemButton onClick={() => handleNav('/app/accounts')} sx={itemStyle(isActive('/app/accounts'))}>
-                    <ListItemIcon><KeyIcon fontSize="small" /></ListItemIcon>
-                    <ListItemText primary="アカウント(権限)管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                  </ListItemButton>
-                </ListItem>
+              {checkManagementPermission(currentOrg.effectivePermissions, 'accounts') && (
+                navButton('アカウント・権限管理', <KeyIcon fontSize="small" />, '/app/accounts')
               )}
-              <ListItem disablePadding>
-                <ListItemButton onClick={() => handleNav('/app/statistics')} sx={itemStyle(isActive('/app/statistics'))}>
-                  <ListItemIcon><AssessmentIcon fontSize="small" /></ListItemIcon>
-                  <ListItemText primary="統計・予実管理" primaryTypographyProps={{ fontSize: '0.95rem' }} />
-                </ListItemButton>
-              </ListItem>
+              {navButton('統計・予実管理', <AssessmentIcon fontSize="small" />, '/app/statistics')}
+              {checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs') &&
+                navButton('ログ', <ListAltIcon fontSize="small" />, '/app/logs')}
+              {checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs') &&
+                navButton('バックアップ閲覧', <BackupIcon fontSize="small" />, '/app/backup')}
             </List>
           </>
         )}
       </Box>
+      {onToggle && (
+        <Box sx={{ borderTop: '1px solid', borderColor: 'divider', p: 1 }}>
+          <Tooltip title={sidebarOpen ? 'サイドバーを折りたたむ' : 'サイドバーを展開'} placement="right" arrow>
+            <IconButton onClick={onToggle} aria-label={sidebarOpen ? 'サイドバーを折りたたむ' : 'サイドバーを展開'} sx={{ width: '100%' }}>
+              {sidebarOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
+            </IconButton>
+          </Tooltip>
+        </Box>
+      )}
     </Box>
   );
 };
@@ -457,9 +475,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = window.localStorage.getItem('care-record-sidebar-open');
+    return stored === null ? true : stored === 'true';
+  });
   const { orgList, currentOrg, switchOrg } = useWorkspace();
-  const requiredPermission = PROTECTED_MANAGEMENT_ROUTES.find(({ prefix }) => pathname.startsWith(prefix))?.permission;
-  const accessDenied = Boolean(currentOrg && requiredPermission && !hasOrganizationPermission(currentOrg.role, requiredPermission));
+  const sidebarWidth = sidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_COLLAPSED_WIDTH;
+
+  useEffect(() => {
+    window.localStorage.setItem('care-record-sidebar-open', String(sidebarOpen));
+  }, [sidebarOpen]);
+  const matchedRoute = PROTECTED_MANAGEMENT_ROUTES.find(({ prefix }) => pathname.startsWith(prefix));
+  const shiftAccessDenied = Boolean(
+    currentOrg && pathname.startsWith('/app/shifts/manage') && !checkShiftPermission(currentOrg.effectivePermissions, 'view', true)
+  );
+  const accessDenied = Boolean(
+    shiftAccessDenied || (currentOrg && matchedRoute && !(
+      checkManagementPermission(currentOrg.effectivePermissions, matchedRoute.area)
+    ))
+  );
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>
@@ -475,14 +510,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
         {/* デスクトップ：常時表示のナビ */}
         <Box sx={{
-          width: SIDEBAR_WIDTH,
+          width: sidebarWidth,
           flexShrink: 0,
           display: { xs: 'none', md: 'block' },
           borderRight: '1px solid',
           borderColor: 'divider',
-          height: '100%'
+          height: '100%',
+          transition: 'width 0.2s ease',
         }}>
-          <NavDrawer currentOrg={currentOrg} />
+          <NavDrawer currentOrg={currentOrg} sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(v => !v)} />
         </Box>
 
         {/* モバイル：一時的なドロワー */}

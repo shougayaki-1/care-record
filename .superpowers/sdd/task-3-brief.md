@@ -1,61 +1,104 @@
-# Task 3: 組織削除にowner必須チェックを追加
+### Task 3: UI — ShiftFormModal に自動アサインチェックボックスを追加（方針A フロントエンド）
 
-## Context
-care-record は Next.js + Supabase のヘルスケア記録アプリ（branch: permission-design-cleanup）。
-組織削除は `organizationDelete` 権限だけでは不可にし、owner であることも必須にする。
+**Files:**
+- Modify: `src/components/shifts/ShiftFormModal.tsx`
 
-## Target Files
-- `/Users/shoug/Documents/GitHub/care-record/src/app/actions/organization.ts`
-- `/Users/shoug/Documents/GitHub/care-record/src/app/app/settings/page.tsx`
+**Interfaces:**
+- Consumes: `ShiftPayload.autoAssign?: boolean`（Task 2 で追加）
+- `onSave(payload: ShiftPayload, shiftId?: string)` に `autoAssign` を含む payload を渡す
 
-## Required Changes
+- [ ] **Step 1: ShiftFormModal に autoAssign state とチェックボックス UI を追加する**
 
-### 1. src/app/actions/organization.ts の deleteOrganization
+`src/components/shifts/ShiftFormModal.tsx` を以下のように修正する。
 
-現在:
+インポートに `FormControlLabel, Checkbox` を追加（既存の mui import に追記）:
+
 ```typescript
-export async function deleteOrganization(orgId: string) {
-    // 権限チェック: 呼び出し元がこの事業所の owner であることをセッションから検証
-    const { userId } = await assertOrgPermission(orgId, 'organizationDelete');
+import {
+    Button, Stack,
+    Box, Typography,
+    IconButton, Tooltip, Divider,
+    FormControlLabel, Checkbox     // ← 追加
+} from '@/components/ui/mui';
 ```
 
-変更後（assertOrgPermission の返り値の isOwner を使い、2重DBアクセスを避ける）:
+`useState` の並びに `autoAssign` state を追加（53行目付近）:
+
 ```typescript
-export async function deleteOrganization(orgId: string) {
-    // 権限チェック: owner かつ organizationDelete 権限が必要
-    const { userId, isOwner } = await assertOrgPermission(orgId, 'organizationDelete');
-    if (!isOwner) throw new Error('事業所の削除はオーナーのみ実行できます');
+    const [cancelReason, setCancelReason] = useState('');
+    const [autoAssign, setAutoAssign] = useState(true);   // ← 追加
 ```
 
-コメントも更新する。
+`useEffect` の else ブランチ（新規作成リセット部分）に reset を追加（75行目付近）:
 
-### 2. src/app/app/settings/page.tsx の canDeleteOrganization
-
-現在:
 ```typescript
-const canDeleteOrganization = checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete');
+            } else {
+                setClientId('');
+                setSelectedStaffIds([]);
+                setStartAt('');
+                setEndAt('');
+                setCancelReason('');
+                setAutoAssign(true);   // ← 追加
+            }
 ```
 
-変更後:
+`handleSave` の payload 組み立て部分に `autoAssign` を追加（90行目付近）:
+
 ```typescript
-const canDeleteOrganization = currentOrg.role === 'owner' && checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete');
+            const payload: ShiftPayload = {
+                organizationId,
+                clientId,
+                title: `${clientName} (${staffNames})`,
+                startAt: new Date(startAt).toISOString(),
+                endAt: new Date(endAt).toISOString(),
+                staffIds: selectedStaffIds,
+                isModified: true,
+                autoAssign: !initialData ? autoAssign : false,   // ← 追加（新規作成時のみ有効）
+            };
 ```
 
-（`currentOrg.role` は WorkspaceContext の Workspace 型に `role: OrganizationRole` として存在する）
+JSX の日時フィールドの直後（DateTimeField Stack の後、`{initialData && ...}` の前）にチェックボックスを追加:
 
-## Verification Commands
+```tsx
+                    {/* 新規作成時のみ: 自動アサインチェックボックス */}
+                    {!initialData && (
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={autoAssign}
+                                    onChange={(e) => setAutoAssign(e.target.checked)}
+                                    size="small"
+                                />
+                            }
+                            label={
+                                <Typography variant="body2" color="text.secondary">
+                                    選択したスタッフを基本担当（担当スタッフ設定）にも登録する
+                                </Typography>
+                            }
+                        />
+                    )}
+```
+
+- [ ] **Step 2: TypeScript コンパイルエラーがないことを確認する**
+
 ```bash
 cd /Users/shoug/Documents/GitHub/care-record
-npx tsc --noEmit 2>&1 | head -30
+npx tsc --noEmit 2>&1 | grep -E "error TS" | head -20
 ```
 
-## Report File
-`/Users/shoug/Documents/GitHub/care-record/.superpowers/sdd/task-3-report.md` に書いてください。
+期待: エラーなし
 
-## Report Format
+- [ ] **Step 3: コミット**
+
+```bash
+git add src/components/shifts/ShiftFormModal.tsx
+git commit -m "feat(ui): add auto-assign checkbox to ShiftFormModal (方針A)
+
+シフト新規作成時に「選択したスタッフを基本担当にも登録する」チェックボックスを追加。
+デフォルト ON。既存シフト編集時は非表示。
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ```
-STATUS: DONE
-COMMITS: <hash>
-TESTS: <TypeScriptチェック結果>
-CONCERNS: （あれば）
-```
+
+---
+

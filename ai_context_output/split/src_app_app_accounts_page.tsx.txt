@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { 
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
+import {
+  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Chip, Button, TextField, Stack,
   IconButton, Select, MenuItem, FormControl, InputLabel, Menu, Alert, ListItemIcon,
-  CircularProgress
+  CircularProgress, Divider, Tabs, Tab,
 } from '@/components/ui/mui';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -15,29 +15,38 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SyncAltIcon from '@mui/icons-material/SyncAlt'; 
 import KeyIcon from '@mui/icons-material/Key';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
-import { createInvitation, getAccountOverview, updateAccountRole, removeAccount } from '@/app/actions/accounts';
-import { AppButton, AppDialog } from '@/components/ui';
-import { hasOrganizationPermission } from '@/utils/permissions';
+import { createInvitation, getAccountOverview, getInviteStaffCandidates, getOrgRoles, updateAccountRole, updateMemberRoles, removeAccount, type InviteStaffCandidate } from '@/app/actions/accounts';
+import { AppButton, AppDialog, InnerPageHeader } from '@/components/ui';
+import { checkManagementPermission } from '@/utils/permissions';
+import RoleManagementPanel from '@/components/roles/RoleManagementPanel';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
-type AccountProfile = { 
-    id: string; 
-    name: string; 
-    email?: string; 
-    role: string; 
-    status: 'active' | 'invited'; 
-    invitation_code?: string; 
+type AccountProfile = {
+    id: string;
+    name: string;
+    email?: string;
+    role: string;
+    roles: { id: string; name: string; color: string | null }[];
+    status: 'active' | 'invited';
+    invitation_code?: string;
+    staffId?: string | null;
+    staffName?: string | null;
 };
 
 export default function AccountsPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
   const [isFetching, setIsFetching] = useState(true);
+  const [activeTab, setActiveTab] = useState<'accounts' | 'roles'>('accounts');
   const [accountList, setAccountList] = useState<AccountProfile[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>('');
   
@@ -45,7 +54,10 @@ export default function AccountsPage() {
   const [openInvite, setOpenInvite] = useState(false);
   const [generatedLink, setGeneratedLink] = useState('');
   const [newInviteName, setNewInviteName] = useState('');
-  const [newInviteRole, setNewInviteRole] = useState('staff');
+  const [selectedInviteStaffId, setSelectedInviteStaffId] = useState('none');
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+  const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string; color: string | null; is_preset: boolean; is_dangerous: boolean }[]>([]);
+  const [inviteStaffCandidates, setInviteStaffCandidates] = useState<InviteStaffCandidate[]>([]);
 
   // 操作メニュー用
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
@@ -54,6 +66,7 @@ export default function AccountsPage() {
   // ダイアログ用
   const [openRoleDialog, setOpenRoleDialog] = useState(false);
   const [editRole, setEditRole] = useState('staff');
+  const [editOrgRoleIds, setEditOrgRoleIds] = useState<string[]>([]);
   
   // ★追加：削除（取り消し）確認ダイアログ用
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
@@ -62,13 +75,22 @@ export default function AccountsPage() {
     if (!currentOrg) return;
     setIsFetching(true);
     try {
-      const overview = await getAccountOverview(currentOrg.id);
-      setCurrentUserId(overview.currentUserId);
+      const [overview, orgRoles, staffCandidates] = await Promise.all([
+        getAccountOverview(currentOrg.id),
+        getOrgRoles(currentOrg.id).catch(() => []),
+        getInviteStaffCandidates(currentOrg.id).catch(() => []),
+      ]);
+      setAvailableRoles(orgRoles);
+      setInviteStaffCandidates(staffCandidates);
+      // fetchedUserId をローカル変数で保持し sort に使うことで
+      // currentUserId state への依存を断ち、二重フェッチループを防ぐ
+      const fetchedUserId = overview.currentUserId;
+      setCurrentUserId(fetchedUserId);
       const mergedList: AccountProfile[] = overview.accounts;
-      
+
       mergedList.sort((a, b) => {
-          if (a.id === currentUserId) return -1;
-          if (b.id === currentUserId) return 1;
+          if (a.id === fetchedUserId) return -1;
+          if (b.id === fetchedUserId) return 1;
           if (a.role === 'owner' && b.role !== 'owner') return -1;
           if (a.role !== 'owner' && b.role === 'owner') return 1;
           if (a.status === 'active' && b.status !== 'active') return -1;
@@ -77,20 +99,24 @@ export default function AccountsPage() {
       });
 
       setAccountList(mergedList);
-    } catch (e) { 
-        console.error(e); 
+    } catch (e) {
+        console.error(e);
         showToast('データの取得に失敗しました', 'error');
     } finally {
         setIsFetching(false);
     }
-  }, [currentOrg, currentUserId, showToast]);
+  }, [currentOrg, showToast]);
 
   useEffect(() => { if (!wsLoading && currentOrg) fetchData(); }, [wsLoading, currentOrg, fetchData]);
 
   const handleGenerateLink = async () => {
     if (!currentOrg) return;
     try {
-        const { code } = await createInvitation(currentOrg.id, { targetName: newInviteName, role: newInviteRole });
+        const { code } = await createInvitation(currentOrg.id, {
+          targetName: newInviteName,
+          roleIds: selectedRoleIds,
+          staffId: selectedInviteStaffId === 'none' ? null : selectedInviteStaffId,
+        });
         setGeneratedLink(`${BASE_URL}/join?code=${code}`);
         fetchData();
     } catch (e) {
@@ -124,41 +150,46 @@ export default function AccountsPage() {
   };
 
   const openRoleEditDialog = () => {
-      if (!selectedAccount) return;
-      setEditRole(selectedAccount.role);
-      setOpenRoleDialog(true);
-      handleMenuClose();
+    if (!selectedAccount) return;
+    setEditRole(selectedAccount.role === 'owner' ? 'owner' : 'member');
+    setEditOrgRoleIds(selectedAccount.roles?.map(r => r.id) ?? []);
+    setOpenRoleDialog(true);
+    handleMenuClose();
   };
 
   const executeRoleChange = async () => {
-      if (!currentOrg || !selectedAccount) return;
-      try {
-          if (selectedAccount.id === currentUserId && selectedAccount.role === 'owner' && editRole !== 'owner') {
-              const ownerCount = accountList.filter(a => a.role === 'owner' && a.status === 'active').length;
-              if (ownerCount <= 1) {
-                  showToast('あなたは最後のオーナーです。他の人にオーナー権限を付与してから変更してください。', 'error');
-                  setOpenRoleDialog(false);
-                  return;
-              }
-          }
-
-          await updateAccountRole(currentOrg.id, {
-              targetId: selectedAccount.id,
-              status: selectedAccount.status === 'active' ? 'active' : 'invited',
-              newRole: editRole,
-          });
-
-          showToast('権限を変更しました');
+    if (!currentOrg || !selectedAccount) return;
+    try {
+      if (selectedAccount.id === currentUserId && selectedAccount.role === 'owner' && editRole !== 'owner') {
+        const ownerCount = accountList.filter(a => a.role === 'owner' && a.status === 'active').length;
+        if (ownerCount <= 1) {
+          showToast('あなたは最後のオーナーです。他の人にオーナー権限を付与してから変更してください。', 'error');
           setOpenRoleDialog(false);
-          fetchData();
-
-          if (selectedAccount.id === currentUserId && editRole !== 'owner') {
-              setTimeout(() => window.location.reload(), 1000);
-          }
-      } catch (error) { 
-          console.error(error); 
-          showToast('変更に失敗しました', 'error'); 
+          return;
+        }
       }
+
+      await updateAccountRole(currentOrg.id, {
+        targetId: selectedAccount.id,
+        status: selectedAccount.status === 'active' ? 'active' : 'invited',
+        newRole: editRole,
+      });
+
+      if (selectedAccount.status === 'active') {
+        await updateMemberRoles(currentOrg.id, selectedAccount.id, editOrgRoleIds);
+      }
+
+      showToast('権限を変更しました');
+      setOpenRoleDialog(false);
+      fetchData();
+
+      if (selectedAccount.id === currentUserId) {
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    } catch (error) {
+      console.error(error);
+      showToast('変更に失敗しました', 'error');
+    }
   };
 
   // ★修正：削除（取り消し）メニューをクリックした際の処理（ダイアログを開くだけ）
@@ -199,30 +230,87 @@ export default function AccountsPage() {
   };
 
   if (wsLoading || !currentOrg) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
-  const isOwner = hasOrganizationPermission(currentOrg.role, 'manageAccounts');
+  const canManageAccounts = checkManagementPermission(currentOrg.effectivePermissions, 'accounts');
+  const canManageRoles = checkManagementPermission(currentOrg.effectivePermissions, 'roles');
+  const isOwner = currentOrg?.role === 'owner';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-        <KeyIcon sx={{ color: 'action.active', mr: 2 }} />
-        <Typography variant="h6" fontWeight="bold" color="text.primary">アカウント(権限)管理</Typography>
-      </Box>
+      <InnerPageHeader icon={<KeyIcon />} title="アカウント・権限管理" />
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3, bgcolor: 'background.default' }}>
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
         <Box maxWidth="lg" mx="auto">
-            <Paper variant="outlined" sx={{ p: 2, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
-                <Box>
+          {canManageRoles && (
+            <Box sx={{ mb: 2, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 0, sm: 1 }, pt: 1 }}>
+              <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} variant="scrollable" allowScrollButtonsMobile>
+                <Tab label="アカウント" value="accounts" />
+                <Tab label="ロール" value="roles" />
+              </Tabs>
+            </Box>
+          )}
+
+          {activeTab === 'accounts' && (
+            <>
+            <Paper variant="outlined" sx={{ p: { xs: 0, sm: 2 }, mb: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, borderRadius: 3, boxShadow: 'none', border: 'none', bgcolor: 'transparent' }}>
+                <Box sx={{ minWidth: 0 }}>
                     <Typography variant="subtitle1" fontWeight="bold" color="text.primary">システムログインアカウント</Typography>
                     <Typography variant="caption" color="text.secondary">アプリにログインできるユーザーと、その権限を管理します。</Typography>
                 </Box>
-                {isOwner && (
-                  <Button variant="contained" startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); setNewInviteName(''); setNewInviteRole('staff'); }} sx={{ boxShadow: 'none' }}>
+                {canManageAccounts && (
+                  <AppButton startIcon={<PersonAddIcon />} onClick={() => { setOpenInvite(true); setGeneratedLink(''); setNewInviteName(''); setSelectedInviteStaffId('none'); setSelectedRoleIds([]); }} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>
                       新しい人を招待
-                  </Button>
+                  </AppButton>
                 )}
             </Paper>
 
-            <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, boxShadow: 'none' }}>
+            {isMobile && (
+                <Stack spacing={1.5}>
+                    {isFetching ? (
+                        <Paper variant="outlined" sx={{ py: 4, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Paper>
+                    ) : accountList.length === 0 ? (
+                        <Paper variant="outlined" sx={{ py: 4, px: 2, textAlign: 'center', color: 'text.secondary' }}>アカウントがありません</Paper>
+                    ) : accountList.map((account) => (
+                        <Paper key={account.id} variant="outlined" sx={{ p: 1.5 }}>
+                            <Stack spacing={1.25}>
+                                <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
+                                    <Box minWidth={0}>
+                                        <Typography variant="subtitle2" fontWeight={account.id === currentUserId ? 'bold' : 'normal'} sx={{ color: account.status === 'invited' ? 'text.secondary' : 'text.primary', overflowWrap: 'anywhere' }}>
+                                            {account.name} {account.id === currentUserId && <Typography component="span" variant="caption" color="primary" ml={0.5}>(あなた)</Typography>}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.disabled" display="block" sx={{ overflowWrap: 'anywhere' }}>
+                                            {account.status === 'invited' ? '未登録' : (account.email || 'メールアドレス非公開')}
+                                        </Typography>
+                                        {account.status === 'invited' && account.staffName && (
+                                            <Typography variant="caption" color="text.secondary" display="block" sx={{ overflowWrap: 'anywhere' }}>
+                                                名簿: {account.staffName}
+                                            </Typography>
+                                        )}
+                                    </Box>
+                                    {(canManageAccounts || account.id === currentUserId) && (
+                                        <IconButton size="small" onClick={(e) => handleMenuOpen(e, account)} sx={{ flexShrink: 0 }}>
+                                            <MoreVertIcon fontSize="small" />
+                                        </IconButton>
+                                    )}
+                                </Box>
+                                <Box display="flex" gap={0.75} flexWrap="wrap">
+                                    {account.role === 'owner' ? (
+                                        <Chip label="オーナー" size="small" color="primary" variant="filled" sx={{ fontWeight: 'bold' }} />
+                                    ) : account.roles && account.roles.length > 0 ? (
+                                        account.roles.map((r) => (
+                                            <Chip key={r.id} label={r.name} size="small" variant="outlined" sx={{ borderColor: r.color ?? undefined, color: r.color ?? undefined }} />
+                                        ))
+                                    ) : (
+                                        <Chip label="一般" size="small" color="default" variant="outlined" />
+                                    )}
+                                    <Chip label={account.status === 'active' ? '有効' : '招待中'} color={account.status === 'active' ? 'success' : 'warning'} size="small" variant="filled" />
+                                </Box>
+                            </Stack>
+                        </Paper>
+                    ))}
+                </Stack>
+            )}
+
+            <TableContainer component={Paper} variant="outlined" sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
                 <Table>
                     <TableHead sx={{ bgcolor: 'background.tint' }}>
                         <TableRow>
@@ -248,16 +336,42 @@ export default function AccountsPage() {
                                         <Typography variant="caption" color="text.disabled" display="block">
                                             {account.status === 'invited' ? '未登録' : (account.email || 'メールアドレス非公開')}
                                         </Typography>
+                                        {account.status === 'invited' && account.staffName && (
+                                            <Typography variant="caption" color="text.secondary" display="block">
+                                                名簿: {account.staffName}
+                                            </Typography>
+                                        )}
                                     </Box>
                                 </TableCell>
                                 <TableCell>
-                                    <Chip 
-                                        label={account.role === 'owner' ? 'オーナー' : (account.role === 'manager' ? '管理者' : '一般(ヘルパー)')} 
-                                        size="small" 
-                                        color={account.role === 'owner' ? 'primary' : 'default'} 
-                                        variant={account.role === 'owner' ? 'filled' : 'outlined'}
-                                        sx={{ fontWeight: account.role === 'owner' ? 'bold' : 'normal' }}
-                                    />
+                                    {account.role === 'owner' ? (
+                                        <Chip
+                                            label="オーナー"
+                                            size="small"
+                                            color="primary"
+                                            variant="filled"
+                                            sx={{ fontWeight: 'bold' }}
+                                        />
+                                    ) : account.roles && account.roles.length > 0 ? (
+                                        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                                            {account.roles.map((r) => (
+                                                <Chip
+                                                    key={r.id}
+                                                    label={r.name}
+                                                    size="small"
+                                                    variant="outlined"
+                                                    sx={{ borderColor: r.color ?? undefined, color: r.color ?? undefined }}
+                                                />
+                                            ))}
+                                        </Box>
+                                    ) : (
+                                        <Chip
+                                            label="一般"
+                                            size="small"
+                                            color="default"
+                                            variant="outlined"
+                                        />
+                                    )}
                                 </TableCell>
                                 <TableCell>
                                     <Chip 
@@ -268,7 +382,7 @@ export default function AccountsPage() {
                                     />
                                 </TableCell>
                                 <TableCell align="center">
-                                    {(isOwner || account.id === currentUserId) && (
+                                    {(canManageAccounts || account.id === currentUserId) && (
                                         <IconButton size="small" onClick={(e) => handleMenuOpen(e, account)}>
                                             <MoreVertIcon fontSize="small" />
                                         </IconButton>
@@ -280,6 +394,12 @@ export default function AccountsPage() {
                     </TableBody>
                 </Table>
             </TableContainer>
+            </>
+          )}
+
+          {activeTab === 'roles' && canManageRoles && (
+            <RoleManagementPanel embedded onRolesChanged={fetchData} />
+          )}
         </Box>
       </Box>
 
@@ -292,7 +412,7 @@ export default function AccountsPage() {
               </MenuItem>
           )}
 
-          {isOwner && (
+          {canManageAccounts && (
               <MenuItem onClick={openRoleEditDialog} sx={{ py: 1.5 }}>
                   <ListItemIcon><SyncAltIcon fontSize="small" color="primary" /></ListItemIcon> 
                   権限を変更
@@ -315,28 +435,58 @@ export default function AccountsPage() {
               </Typography>
       </AppDialog>
 
-      {/* --- 権限変更ダイアログ --- */}
-      <AppDialog open={openRoleDialog} onClose={() => setOpenRoleDialog(false)} maxWidth="xs" title="権限の変更" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenRoleDialog(false)}>キャンセル</AppButton><AppButton onClick={executeRoleChange}>変更を保存</AppButton></>}>
-              <Box pt={1}>
-                  <Typography variant="body2" mb={2}>
-                      <b>{selectedAccount?.name}</b> さんのシステム権限を変更します。
-                  </Typography>
-                  <FormControl fullWidth size="small">
-                      <InputLabel>システム権限</InputLabel>
-                      <Select value={editRole} onChange={(e) => setEditRole(e.target.value)} label="システム権限">
-                          <MenuItem value="staff">一般(ヘルパー) - 記録の作成のみ</MenuItem>
-                          <MenuItem value="manager">管理者 - シフト管理・利用者管理</MenuItem>
-                          {selectedAccount?.status === 'active' && (
-                            <MenuItem value="owner">オーナー - 全ての権限・事業所設定</MenuItem>
-                          )}
-                      </Select>
-                  </FormControl>
-                  {selectedAccount?.id === currentUserId && editRole !== 'owner' && (
-                      <Alert severity="warning" sx={{ mt: 2 }}>
-                          自分の権限を降格させると、再度オーナーに戻ることはできません。
-                      </Alert>
-                  )}
+      {/* --- 権限・ロール変更ダイアログ --- */}
+      <AppDialog open={openRoleDialog} onClose={() => setOpenRoleDialog(false)} maxWidth="xs" title="権限・ロールの変更" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenRoleDialog(false)}>キャンセル</AppButton><AppButton onClick={executeRoleChange}>変更を保存</AppButton></>}>
+        <Box pt={1}>
+          <Typography variant="body2" mb={2}>
+            <b>{selectedAccount?.name}</b> さんの権限を変更します。
+          </Typography>
+          <FormControl fullWidth size="small">
+            <InputLabel>システム権限</InputLabel>
+            <Select value={editRole} onChange={(e) => setEditRole(e.target.value)} label="システム権限">
+              <MenuItem value="member">メンバー - 権限はロールで管理</MenuItem>
+              {selectedAccount?.status === 'active' && (
+                <MenuItem value="owner">オーナー - 所有者</MenuItem>
+              )}
+            </Select>
+          </FormControl>
+          {selectedAccount?.id === currentUserId && editRole !== 'owner' && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              自分の所有者区分を変更すると、再度オーナーに戻るには別のオーナーによる移譲が必要です。
+            </Alert>
+          )}
+          {availableRoles.length > 0 && selectedAccount?.status === 'active' && (
+            <>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle2" mb={1}>割り当てるロール</Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {availableRoles.map((role) => {
+                  const selected = editOrgRoleIds.includes(role.id);
+                  const locked = role.is_dangerous && !isOwner;
+                  return (
+                    <Chip
+                      key={role.id}
+                      label={role.name}
+                      onClick={() => {
+                        if (locked) return;
+                        if (selected) setEditOrgRoleIds(prev => prev.filter(id => id !== role.id));
+                        else setEditOrgRoleIds(prev => [...prev, role.id]);
+                      }}
+                      variant={selected ? 'filled' : 'outlined'}
+                      sx={{
+                        cursor: locked ? 'not-allowed' : 'pointer',
+                        opacity: locked ? 0.4 : 1,
+                        borderColor: role.color ?? undefined,
+                        color: selected ? '#fff' : (role.color ?? undefined),
+                        bgcolor: selected ? (role.color ?? undefined) : undefined,
+                      }}
+                    />
+                  );
+                })}
               </Box>
+            </>
+          )}
+        </Box>
       </AppDialog>
 
       {/* --- 新規招待ダイアログ --- */}
@@ -344,20 +494,53 @@ export default function AccountsPage() {
           <Stack spacing={3} alignItems="center" py={1}>
              {!generatedLink ? (
                  <>
+                    {availableRoles.length > 0 && (
+                        <Box width="100%">
+                          <Typography variant="subtitle2" mb={1}>付与するロール</Typography>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                            {availableRoles.map((role) => {
+                              const selected = selectedRoleIds.includes(role.id);
+                              const locked = role.is_dangerous && !isOwner;
+                              return (
+                                <Chip
+                                  key={role.id}
+                                  label={role.name}
+                                  onClick={() => {
+                                    if (locked) return;
+                                    if (selected) setSelectedRoleIds(prev => prev.filter(id => id !== role.id));
+                                    else setSelectedRoleIds(prev => [...prev, role.id]);
+                                  }}
+                                  variant={selected ? 'filled' : 'outlined'}
+                                  sx={{
+                                    cursor: locked ? 'not-allowed' : 'pointer',
+                                    opacity: locked ? 0.4 : 1,
+                                    borderColor: role.color ?? undefined,
+                                    color: selected ? '#fff' : (role.color ?? undefined),
+                                    bgcolor: selected ? (role.color ?? undefined) : undefined,
+                                  }}
+                                />
+                              );
+                            })}
+                          </Box>
+                        </Box>
+                    )}
+                    <TextField label="招待する人の名前" placeholder="例: 山田 太郎" size="small" fullWidth required value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} helperText="招待された人の表示名として使われます" />
                     <FormControl fullWidth size="small">
-                        <InputLabel>システム権限</InputLabel>
-                        <Select label="システム権限" value={newInviteRole} onChange={(e) => setNewInviteRole(e.target.value as string)}>
-                            <MenuItem value="staff">一般(ヘルパー)</MenuItem>
-                            <MenuItem value="manager">管理者</MenuItem>
-                        </Select>
+                      <InputLabel>スタッフ名簿との紐付け</InputLabel>
+                      <Select value={selectedInviteStaffId} onChange={(e) => setSelectedInviteStaffId(e.target.value)} label="スタッフ名簿との紐付け">
+                        <MenuItem value="none">紐付けない</MenuItem>
+                        {inviteStaffCandidates.map((staff) => (
+                          <MenuItem key={staff.id} value={staff.id}>
+                            {staff.name}{staff.positions && staff.positions.length > 0 ? `（${staff.positions.join('・')}）` : ''}
+                          </MenuItem>
+                        ))}
+                      </Select>
                     </FormControl>
-                    <TextField label="管理用の名前 (任意)" placeholder="例: 山田 太郎" size="small" fullWidth value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} />
-                    <Button variant="contained" onClick={handleGenerateLink} fullWidth sx={{ py: 1, boxShadow: 'none' }}>招待リンクを発行</Button>
+                    <Button variant="contained" onClick={handleGenerateLink} disabled={!newInviteName.trim()} fullWidth sx={{ py: 1, boxShadow: 'none' }}>招待リンクを発行</Button>
                  </>
              ) : (
                  <>
-                    <Typography variant="body2" textAlign="center">相手にこのQRコードを読み取ってもらうか、<br/>リンクを共有してください。</Typography>
-                    <Box component="img" src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(generatedLink)}`} alt="QR Code" sx={{ width: 150, height: 150, border: '1px solid', borderColor: 'divider', p: 1, borderRadius: 2 }} />
+                    <Typography variant="body2" textAlign="center">以下のリンクを相手に共有してください。</Typography>
                     <TextField value={generatedLink} fullWidth size="small" slotProps={{ input: { readOnly: true, endAdornment: (<IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}><ContentCopyIcon /></IconButton>) } }} />
                     <Button variant="outlined" startIcon={<ShareIcon />} fullWidth onClick={handleShare}>共有メニューを開く</Button>
                  </>

@@ -15,7 +15,7 @@ export type WorkspaceResult =
   | { status: 'forbidden'; message: string }
   | { status: 'error'; message: string };
 
-const VALID_ROLES: OrgRole[] = ['owner', 'manager', 'staff'];
+const VALID_ROLES: OrgRole[] = ['owner', 'member'];
 
 /**
  * ログイン直後の所属解決をRLSの成否に依存させないための境界。

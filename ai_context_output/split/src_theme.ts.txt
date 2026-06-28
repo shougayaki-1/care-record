@@ -15,15 +15,15 @@ declare module '@mui/material/styles' {
 
 export const designTokens = {
   brand: {
-    main: '#2255CC',
-    light: '#6699FF',
-    dark: '#003399',
+    main: '#1A73E8',
+    light: '#4285F4',
+    dark: '#1557B0',
   },
   surface: {
-    canvas: '#F6F7F9',
+    canvas: '#FFFFFF',
     paper: '#FFFFFF',
     subtle: '#FAFAFA',
-    tint: '#F0F5FF',
+    tint: '#E8F0FE',
     muted: '#F2F3F5',
   },
   status: {
@@ -36,9 +36,10 @@ export const designTokens = {
     strong: '#D0D4DB',
   },
   radius: {
-    control: 10,
+    control: 8,
     card: 12,
-    dialog: 16,
+    dialog: 28,
+    chip: 8,
   },
   shadow: {
     floating: '0 8px 32px rgba(30, 42, 70, 0.12)',
@@ -68,7 +69,7 @@ const theme = createTheme({
   },
   shape: { borderRadius: designTokens.radius.card },
   typography: {
-    fontFamily: 'Inter, "Helvetica Neue", Arial, sans-serif',
+    fontFamily: 'Roboto, "Helvetica Neue", Arial, sans-serif',
     h4: { fontWeight: 700, letterSpacing: '-0.02em' },
     h5: { fontWeight: 700, letterSpacing: '-0.01em' },
     h6: { fontWeight: 700 },
@@ -97,10 +98,13 @@ const theme = createTheme({
         root: { minHeight: 40, borderRadius: designTokens.radius.control },
       },
     },
-    MuiPaper: { styleOverrides: { root: { backgroundImage: 'none' } } },
+    MuiPaper: {
+      defaultProps: { elevation: 0 },
+      styleOverrides: { root: { backgroundImage: 'none', boxShadow: 'none' } },
+    },
     MuiCard: {
       defaultProps: { variant: 'outlined' },
-      styleOverrides: { root: { borderColor: designTokens.border.default } },
+      styleOverrides: { root: { borderColor: designTokens.border.default, boxShadow: 'none' } },
     },
     MuiDialog: {
       defaultProps: { fullWidth: true },
@@ -112,7 +116,7 @@ const theme = createTheme({
     MuiDialogActions: { styleOverrides: { root: { padding: '12px 24px 20px', gap: 8 } } },
     MuiChip: {
       defaultProps: { size: 'small' },
-      styleOverrides: { root: { borderRadius: 8, fontWeight: 600 } },
+      styleOverrides: { root: { borderRadius: designTokens.radius.chip, fontWeight: 600 } },
     },
     MuiAlert: { styleOverrides: { root: { borderRadius: designTokens.radius.control } } },
     MuiTableHead: {
@@ -124,6 +128,9 @@ const theme = createTheme({
       styleOverrides: {
         head: { color: '#5C5E66', fontWeight: 700 },
       },
+    },
+    MuiTableContainer: {
+      styleOverrides: { root: { boxShadow: 'none' } },
     },
     MuiAppBar: {
       defaultProps: { elevation: 0, color: 'inherit' },

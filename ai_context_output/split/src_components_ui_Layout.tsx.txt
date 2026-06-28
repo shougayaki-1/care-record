@@ -26,8 +26,63 @@ export function PageHeader({ title, description, actions }: { title: ReactNode; 
   );
 }
 
+export function InnerPageHeader({
+  icon,
+  title,
+  actions,
+}: {
+  icon?: ReactNode;
+  title: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <Box
+      sx={{
+        minHeight: { xs: 64, sm: 64 },
+        flexShrink: 0,
+        borderBottom: 1,
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+        display: 'flex',
+        flexDirection: { xs: actions ? 'column' : 'row', sm: 'row' },
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        px: { xs: 2, sm: 3 },
+        py: { xs: actions ? 1.25 : 0, sm: 0 },
+        gap: { xs: 1, sm: 2 },
+      }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, width: '100%', minWidth: 0 }}>
+        {icon && <Box sx={{ color: 'action.active', display: 'flex', flexShrink: 0 }}>{icon}</Box>}
+        <Typography
+          variant="h6"
+          fontWeight="bold"
+          color="text.primary"
+          sx={{ flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.25 }}
+        >
+          {title}
+        </Typography>
+      </Box>
+      {actions && (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: { xs: 'flex-end', sm: 'flex-start' },
+            gap: 1,
+            flexWrap: 'wrap',
+            width: { xs: '100%', sm: 'auto' },
+          }}
+        >
+          {actions}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 export function SectionCard({ children, sx, ...props }: PaperProps) {
-  return <Paper variant="outlined" {...props} sx={{ p: { xs: 2, md: 3 }, borderRadius: 3, ...sx }}>{children}</Paper>;
+  return <Paper variant="outlined" {...props} sx={{ p: { xs: 2, md: 3 }, ...sx }}>{children}</Paper>;
 }
 
 export function EmptyState({ title = 'データがありません', description, action }: { title?: ReactNode; description?: ReactNode; action?: ReactNode }) {

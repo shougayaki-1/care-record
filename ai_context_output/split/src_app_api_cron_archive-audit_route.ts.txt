@@ -1,10 +1,12 @@
 import { createHmac } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/utils/supabase/auth';
+import { uploadToGCS } from '@/utils/gcs/upload';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 const DESTINATION = 'primary-worm';
+const GCS_BUCKET = 'care-record-archive-7y';
 
 function authorized(request: NextRequest): boolean {
   return !!process.env.CRON_SECRET && request.headers.get('authorization') === `Bearer ${process.env.CRON_SECRET}`;
@@ -12,9 +14,12 @@ function authorized(request: NextRequest): boolean {
 
 export async function GET(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  const endpoint = process.env.AUDIT_ARCHIVE_URL;
-  const secret = process.env.AUDIT_ARCHIVE_HMAC_SECRET;
-  if (!endpoint || !secret) return NextResponse.json({ error: 'archive_not_configured' }, { status: 503 });
+
+  const gcsEnabled = !!process.env.GCP_SERVICE_ACCOUNT_KEY_JSON;
+  const hmacEndpoint = process.env.AUDIT_ARCHIVE_URL;
+  const hmacSecret = process.env.AUDIT_ARCHIVE_HMAC_SECRET;
+  const hmacEnabled = !!(hmacEndpoint && hmacSecret);
+  if (!gcsEnabled && !hmacEnabled) return NextResponse.json({ error: 'archive_not_configured' }, { status: 503 });
 
   const { data: checkpoint } = await supabaseAdmin.from('audit_archive_checkpoints')
     .select('last_created_at,last_event_id').eq('destination', DESTINATION).maybeSingle();
@@ -28,12 +33,27 @@ export async function GET(request: NextRequest) {
   );
   if (events.length === 0) return NextResponse.json({ ok: true, archived: 0 });
 
-  const body = JSON.stringify({ schemaVersion: 1, exportedAt: new Date().toISOString(), events });
-  const signature = createHmac('sha256', secret).update(body).digest('hex');
-  const response = await fetch(endpoint, { method: 'POST', headers: {
-    'Content-Type': 'application/json', 'X-CareRecord-Signature': signature,
-  }, body, cache: 'no-store' });
-  if (!response.ok) return NextResponse.json({ error: 'archive_write_failed' }, { status: 502 });
+  const exportedAt = new Date().toISOString();
+  const body = JSON.stringify({ schemaVersion: 1, exportedAt, events });
+
+  if (gcsEnabled) {
+    const ts = exportedAt.replace(/[:.]/g, '-');
+    const ym = exportedAt.slice(0, 7);
+    try {
+      await uploadToGCS(GCS_BUCKET, `audit/${ym}/${ts}.json`, body);
+    } catch (err) {
+      console.error('[cron:archive-audit] GCS upload failed', err);
+      return NextResponse.json({ error: 'gcs_upload_failed' }, { status: 500 });
+    }
+  }
+
+  if (hmacEnabled) {
+    const signature = createHmac('sha256', hmacSecret!).update(body).digest('hex');
+    const response = await fetch(hmacEndpoint!, { method: 'POST', headers: {
+      'Content-Type': 'application/json', 'X-CareRecord-Signature': signature,
+    }, body, cache: 'no-store' });
+    if (!response.ok) return NextResponse.json({ error: 'archive_write_failed' }, { status: 502 });
+  }
 
   const last = events[events.length - 1];
   const { error: checkpointError } = await supabaseAdmin.from('audit_archive_checkpoints').upsert({

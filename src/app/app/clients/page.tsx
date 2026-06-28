@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Box, IconButton, Paper, Stack, Tooltip, Switch, FormControlLabel } from '@/components/ui/mui';
+import { Box, IconButton, Paper, Stack, Tooltip } from '@/components/ui/mui';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -14,7 +14,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { AppButton, AppDialog, AppTextField, DataTable, PageHeader, StatusChip } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, DataTable, PageHeader, StatusChip, SwitchField } from '@/components/ui';
 import { createClient, setClientArchived, softDeleteClient, updateClientName } from '@/app/actions/clients';
 
 type Client = {
@@ -76,7 +76,7 @@ export default function ClientsPage() {
     setIsSubmitting(true);
     try {
       const data = await createClient(currentOrg.id, newName);
-      setClients([data, ...clients]);
+      setClients([{ ...data, assignments: [] }, ...clients]);
       setOpenAdd(false);
       setNewName('');
       showToast('登録しました');
@@ -140,7 +140,7 @@ export default function ClientsPage() {
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, md: 3 }, bgcolor: 'background.default' }}>
         <PageHeader
           title={<Stack direction="row" alignItems="center" gap={1}><PeopleIcon color="action" />利用者管理</Stack>}
-          actions={<><FormControlLabel control={<Switch checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />} label="アーカイブを表示" /><AppButton startIcon={<AddIcon />} onClick={() => setOpenAdd(true)}>新規登録</AppButton></>}
+          actions={<><SwitchField checked={showArchived} onChange={e => setShowArchived(e.target.checked)} label="アーカイブを表示" /><AppButton startIcon={<AddIcon />} onClick={() => setOpenAdd(true)}>新規登録</AppButton></>}
         />
 
         <DataTable

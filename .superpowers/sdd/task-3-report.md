@@ -1,39 +1,44 @@
-# Task 3 実装レポート: 組織削除にowner必須チェックを追加
+# Task 3 実装レポート: ShiftFormModal に自動アサインチェックボックスを追加
 
 ## 実装概要
 
-組織削除に `organizationDelete` 権限に加えて、owner ロール要件を追加した。
+シフト新規作成時に「選択したスタッフを基本担当にも登録する」チェックボックスを ShiftFormModal に追加した。デフォルト ON、既存シフト編集時は非表示。
 
 ## 実施した変更
 
-### 1. src/app/actions/organization.ts
-deleteOrganization 関数：
-- `assertOrgPermission` の返り値から `isOwner` を取得
-- `isOwner` が false の場合にエラーを throw
-- コメントを更新：「owner かつ organizationDelete 権限が必要」
+### src/components/shifts/ShiftFormModal.tsx
 
-変更行数：3行（コメント更新 + 変数追加 + 条件判定追加）
+1. **MUI インポート追加**
+   - `FormControlLabel, Checkbox` を `@/components/ui/mui` から追加
 
-### 2. src/app/app/settings/page.tsx
-canDeleteOrganization の判定ロジック：
-- 既存：`checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete')`
-- 変更後：`currentOrg.role === 'owner' && checkManagementPermission(...)`
+2. **State 追加**
+   - `const [autoAssign, setAutoAssign] = useState(true);` を追加
 
-変更行数：1行
+3. **useEffect 修正**
+   - else ブランチ（新規作成リセット部分）に `setAutoAssign(true);` を追加
+
+4. **handleSave 修正**
+   - payload に `autoAssign: !initialData ? autoAssign : false,` を追加
+   - 新規作成時のみ state の値を使用、編集時は false に固定
+
+5. **JSX 追加**
+   - DateTimeField Stack の直後、initialData セクションの前に checkbox を追加
+   - `!initialData` 条件で新規作成時のみ表示
 
 ## 検証
 
 ```bash
-npx tsc --noEmit
+npx tsc --noEmit 2>&1 | grep -E "error TS" | head -20
 ```
 
-TypeScript 型チェック：パス ✓
+TypeScript 型チェック：エラーなし ✓
 
 ## コミット
 
-`6035afe` feat: require owner for organization deletion
+`c9ab29f` feat(ui): add auto-assign checkbox to ShiftFormModal (方針A)
 
 ## 備考
 
-- 2重DB アクセスを避けるため、既存の assertOrgPermission の戻り値を活用
-- currentOrg.role は WorkspaceContext の Workspace 型に存在する OrganizationRole フィールド
+- Task 2 で追加された `ShiftPayload.autoAssign?: boolean` を消費
+- checkbox は新規作成（!initialData）時のみ表示される conditional rendering
+- 既存シフト編集時は autoAssign が必ず false になるため、一括アサインは発動しない

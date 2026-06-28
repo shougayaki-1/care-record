@@ -3,10 +3,11 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertOrgRole, createSessionClient, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgPermission, assertRecordPermission, createSessionClient, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
 import { randomUUID } from 'crypto';
 import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
+import { MODEL_NAME } from '@/lib/ai/model';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 
@@ -15,21 +16,15 @@ export type SaveReportInput = {
   reportId?: string | null;
   clientId: string;
   shiftId?: string | null;
+  segmentId?: string | null;
   startAt: string;
   endAt: string;
   status: ReportStatus;
   values: Record<string, unknown>;
+  auditSource?: 'ai_import';
+  auditModel?: string;
+  auditFileCount?: number;
 };
-
-async function assertStaffAssignment(userId: string, clientId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('assignments')
-    .select('client_id')
-    .eq('helper_id', userId)
-    .eq('client_id', clientId)
-    .maybeSingle();
-  if (error || !data) throw new Error('この利用者の記録を作成する権限がありません');
-}
 
 export async function saveReport(input: SaveReportInput) {
   const startAt = new Date(input.startAt);
@@ -60,6 +55,27 @@ export async function saveReport(input: SaveReportInput) {
     });
     throw sanitizeDbError(error || new Error('記録を保存できませんでした'), 'action.reports');
   }
+  if (input.segmentId !== undefined) {
+    await supabaseAdmin
+      .from('reports')
+      .update({ segment_id: input.segmentId || null })
+      .eq('id', String(reportId));
+  }
+  if (input.status === 'draft' && input.auditSource === 'ai_import') {
+    await recordAuditEvent({
+      organizationId: input.organizationId,
+      actorId: user.id,
+      action: 'ai_draft.created',
+      resourceType: 'report',
+      resourceId: String(reportId),
+      sessionId: user.sessionId,
+      details: {
+        source: 'ai_import',
+        model: input.auditModel || MODEL_NAME,
+        file_count: input.auditFileCount ?? 1,
+      },
+    });
+  }
   return { success: true, reportId: String(reportId) };
 }
 
@@ -70,7 +86,8 @@ export async function transitionReports(
 ) {
   const ids = Array.from(new Set(reportIds.filter(Boolean)));
   if (ids.length === 0 || ids.length > 100) throw new Error('対象件数が不正です');
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  await assertOrgPermission(organizationId, 'reports');
+  const { userId } = await assertRecordPermission(organizationId, 'approve', { reportIds: ids });
 
   const { data: clients, error: clientError } = await supabaseAdmin
     .from('clients').select('id').eq('organization_id', organizationId);
@@ -129,7 +146,7 @@ export async function softDeleteReports(
     throw new Error('削除理由を2〜500文字で入力してください');
   }
 
-  const { userId, role } = await assertOrgRole(organizationId);
+  const { userId } = await assertRecordPermission(organizationId, 'delete', { reportIds: uniqueIds, includeDeleted: true });
   const { data: clients, error: clientError } = await supabaseAdmin
     .from('clients')
     .select('id')
@@ -154,12 +171,6 @@ export async function softDeleteReports(
   if (reports.some((report) => report.status === 'approved')) {
     throw new Error('承認済みの記録は削除できません');
   }
-  if (role === 'staff' && reports.some((report) =>
-    report.helper_id !== userId || !['draft', 'remanded'].includes(report.status)
-  )) {
-    throw new Error('自分の下書きまたは差戻し記録だけ削除できます');
-  }
-
   const deletedAt = new Date();
   const policy = await getRetentionPolicy(organizationId, 'report');
   const retentionUntil = retentionDeadline(policy.years, deletedAt);
@@ -195,7 +206,8 @@ export async function restoreReports(organizationId: string, reportIds: string[]
   if (uniqueIds.length === 0 || uniqueIds.length > 100) {
     throw new Error('復元対象の件数が不正です');
   }
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  await assertOrgPermission(organizationId, 'reports');
+  const { userId } = await assertRecordPermission(organizationId, 'delete', { reportIds: uniqueIds, includeDeleted: true });
 
   const { data: clients, error: clientError } = await supabaseAdmin
     .from('clients')
@@ -237,8 +249,8 @@ export async function restoreReports(organizationId: string, reportIds: string[]
   return { success: true, restored: uniqueIds.length };
 }
 
-async function getAccessibleReport(organizationId: string, reportId: string) {
-  const { userId, role } = await assertOrgRole(organizationId);
+async function getAccessibleReport(organizationId: string, reportId: string, action: 'view' | 'edit' = 'view') {
+  const { userId } = await assertRecordPermission(organizationId, action, { reportId });
   const { data: clients, error: clientError } = await supabaseAdmin
     .from('clients').select('id').eq('organization_id', organizationId);
   if (clientError) throw new Error(clientError.message);
@@ -251,10 +263,7 @@ async function getAccessibleReport(organizationId: string, reportId: string) {
     .maybeSingle();
   if (error || !report) throw new Error('記録にアクセスできません');
 
-  if (role === 'staff' && report.helper_id !== userId) {
-    await assertStaffAssignment(userId, report.client_id);
-  }
-  return { userId, role, report };
+  return { userId, report };
 }
 
 export async function uploadReportImage(formData: FormData) {
@@ -263,11 +272,8 @@ export async function uploadReportImage(formData: FormData) {
   const file = formData.get('file');
   if (!(file instanceof File)) throw new Error('画像ファイルがありません');
 
-  const { userId, role, report } = await getAccessibleReport(organizationId, reportId);
+  const { userId, report } = await getAccessibleReport(organizationId, reportId, 'edit');
   if (report.status === 'approved') throw new Error('承認済み記録へ画像を追加できません');
-  if (role === 'staff' && report.helper_id !== userId) {
-    throw new Error('他の職員が作成した記録へ画像を追加できません');
-  }
 
   const sanitized = await sanitizeUploadedImage(file);
 
@@ -304,7 +310,7 @@ export async function uploadReportImage(formData: FormData) {
 }
 
 export async function getReportImages(organizationId: string, reportId: string) {
-  const { userId } = await getAccessibleReport(organizationId, reportId);
+  const { userId } = await getAccessibleReport(organizationId, reportId, 'view');
   const { data: images, error } = await supabaseAdmin
     .from('report_images')
     .select('id, storage_path')
@@ -331,7 +337,7 @@ export async function getReportImages(organizationId: string, reportId: string) 
 }
 
 export async function auditReportView(organizationId: string, reportId: string) {
-  const { userId } = await getAccessibleReport(organizationId, reportId);
+  const { userId } = await getAccessibleReport(organizationId, reportId, 'view');
   await recordAuditEvent({
     organizationId,
     actorId: userId,
@@ -348,7 +354,7 @@ export async function auditReportExport(
 ) {
   const ids = Array.from(new Set(reportIds.filter(Boolean)));
   if (ids.length === 0 || ids.length > 1000) throw new Error('出力対象件数が不正です');
-  const { userId } = await assertOrgRole(organizationId, ['owner', 'manager']);
+  const { userId } = await assertOrgPermission(organizationId, 'reports');
   await recordAuditEvent({
     organizationId,
     actorId: userId,
@@ -356,4 +362,44 @@ export async function auditReportExport(
     resourceType: 'report',
     details: { reportIds: ids, count: ids.length, format },
   });
+}
+
+export type ReportWithSegment = {
+  id: string;
+  status: string;
+  start_at: string;
+  end_at: string;
+  helper_id: string | null;
+  segment_id: string | null;
+  segment: {
+    id: string;
+    service_type_id: string | null;
+    start_at: string;
+    end_at: string;
+    service_type: { id: string; name: string } | null;
+  } | null;
+  profiles: { name: string } | null;
+};
+
+export async function getReportsByShift(
+  organizationId: string,
+  shiftId: string
+): Promise<ReportWithSegment[]> {
+  await assertOrgPermission(organizationId, 'reports');
+  const { data, error } = await supabaseAdmin
+    .from('report_shifts')
+    .select(`
+      report:reports(
+        id, status, start_at, end_at, helper_id, segment_id,
+        profiles(name),
+        segment:shift_segments(
+          id, service_type_id, start_at, end_at,
+          service_type:service_types(id, name)
+        )
+      )
+    `)
+    .eq('shift_id', shiftId)
+    .is('reports.deleted_at', null);
+  if (error) throw new Error('記録を取得できませんでした');
+  return ((data ?? []).map(row => row.report).filter(Boolean)) as unknown as ReportWithSegment[];
 }

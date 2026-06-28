@@ -79,7 +79,7 @@ export default function ClientsPage() {
       setOpenAdd(false);
       setNewName('');
       showToast('登録しました');
-      fetchClients(); // リフレッシュ
+      router.push(`/app/clients/${data.id}?setup=1`);
     } catch (error) { 
         console.error(error); 
         showToast('登録に失敗しました', 'error'); 
@@ -149,6 +149,37 @@ export default function ClientsPage() {
           getRowKey={(client) => client.id}
           getRowSx={(client) => ({ opacity: client.archived_at ? 0.6 : 1, bgcolor: client.archived_at ? 'background.subtle' : 'inherit' })}
           emptyTitle="利用者が登録されていません"
+          mobileCardRender={(client) => (
+            <Paper variant="outlined" sx={{ p: 1.5, opacity: client.archived_at ? 0.6 : 1, bgcolor: client.archived_at ? 'background.subtle' : 'background.paper' }}>
+              <Stack spacing={1.25}>
+                <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={1}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Stack direction="row" alignItems="center" gap={1}>
+                      <PeopleIcon color="action" fontSize="small" />
+                      <Box sx={{ fontWeight: 700, overflowWrap: 'anywhere' }}>{client.name}</Box>
+                    </Stack>
+                  </Box>
+                  {client.archived_at ? <StatusChip label="アーカイブ" /> : <StatusChip label="有効" tone="success" />}
+                </Box>
+                <Stack direction="row" justifyContent="flex-end" spacing={0.5} useFlexGap flexWrap="wrap">
+                  {!client.archived_at && (
+                    <>
+                      <Tooltip title="氏名を編集"><IconButton size="small" onClick={() => handleOpenEdit(client)}><EditIcon fontSize="small" /></IconButton></Tooltip>
+                      <Tooltip title="詳細設定"><IconButton size="small" color="primary" onClick={() => handleGoSettings(client.id)}><SettingsIcon fontSize="small" /></IconButton></Tooltip>
+                    </>
+                  )}
+                  {client.archived_at ? (
+                    <>
+                      <Tooltip title="復元"><IconButton size="small" onClick={() => handleArchive(client.id, false)}><UnarchiveIcon /></IconButton></Tooltip>
+                      <Tooltip title="完全削除"><IconButton size="small" color="error" onClick={() => handleDelete(client.id)}><DeleteIcon /></IconButton></Tooltip>
+                    </>
+                  ) : (
+                    <Tooltip title="アーカイブ"><IconButton size="small" onClick={() => handleArchive(client.id, true)}><ArchiveIcon /></IconButton></Tooltip>
+                  )}
+                </Stack>
+              </Stack>
+            </Paper>
+          )}
           columns={[
             { key: 'name', header: '利用者氏名', render: (client) => client.name },
             { key: 'status', header: '状態', render: (client) => client.archived_at ? <StatusChip label="アーカイブ" /> : <StatusChip label="有効" tone="success" /> },

@@ -10,11 +10,15 @@ import {
   FormHelperText,
   Radio,
   RadioGroup,
+  Switch,
   TextField,
   Typography,
+  type FormControlLabelProps,
+  type SwitchProps,
 } from '@mui/material';
 import CheckBoxIcon from '@mui/icons-material/CheckBox';
 import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
+import type { ReactNode } from 'react';
 
 export interface MultiSelectFieldProps<T> {
   label: string;
@@ -171,6 +175,26 @@ export function RadioGroupField<T>({ label, options, value, onChange, getOptionL
       <RadioGroup row={row} value={value} onChange={(event) => onChange(event.target.value)}>
         {options.map((option) => <FormControlLabel key={getOptionValue(option)} value={getOptionValue(option)} control={<Radio />} label={getOptionLabel(option)} />)}
       </RadioGroup>
+      {helperText && <FormHelperText>{helperText}</FormHelperText>}
+    </FormControl>
+  );
+}
+
+export interface SwitchFieldProps extends SwitchProps {
+  label?: ReactNode;
+  labelPlacement?: FormControlLabelProps['labelPlacement'];
+  helperText?: string;
+  error?: boolean;
+}
+
+export function SwitchField({ label, labelPlacement, helperText, error, sx, ...props }: SwitchFieldProps) {
+  const control = <Switch {...props} sx={!label ? sx : undefined} />;
+
+  if (!label) return control;
+
+  return (
+    <FormControl error={error}>
+      <FormControlLabel control={control} label={label} labelPlacement={labelPlacement} sx={sx} />
       {helperText && <FormHelperText>{helperText}</FormHelperText>}
     </FormControl>
   );

@@ -167,7 +167,7 @@ export default function ProfilePage() {
                                 <IconButton 
                                     color="primary" 
                                     component="label" 
-                                    sx={{ position: 'absolute', bottom: 0, right: -10, bgcolor: 'white', boxShadow: 2, '&:hover': {bgcolor: '#f0f0f0'} }}
+                                    sx={{ position: 'absolute', bottom: 0, right: -10, bgcolor: 'background.paper', boxShadow: 2, '&:hover': { bgcolor: 'background.muted' } }}
                                 >
                                     <input hidden accept="image/*" type="file" onChange={handleAvatarUpload} />
                                     {uploading ? <CircularProgress size={24} /> : <PhotoCamera />}

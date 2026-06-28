@@ -16,10 +16,13 @@ import ArticleIcon from '@mui/icons-material/Article';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RestoreIcon from '@mui/icons-material/Restore';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'; // ★追加: 警告アイコン
+import { useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { supabase } from '@/lib/supabase';
 import { pdf } from '@react-pdf/renderer';
 import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRecordDocument';
+import { downloadReportZip, buildReportFileName } from '@/utils/reportZipExport';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
@@ -28,12 +31,16 @@ import { updateClientGoogleLink } from '@/app/actions/clients';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { InnerPageHeader } from '@/components/ui';
+import { checkRecordPermission } from '@/utils/permissions';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 type ReportValuesData = Record<string, FormValue>;
 
 type Report = {
   id: string; start_at: string; end_at: string; created_at: string; updated_at: string; status: ReportStatus; approved_at: string | null;
+  segment_id: string | null;
+  segment?: { service_type: { name: string } | null } | null;
   clients: { id: string; name: string; organization_id: string };
   helper: { name: string };
   approved_by_user?: { name: string };
@@ -48,6 +55,8 @@ export default function ReportsPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const confirm = useConfirm();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
   const [reports, setReports] = useState<Report[]>([]);
   const [clients, setClients] = useState<ClientData[]>([]);
@@ -58,6 +67,7 @@ export default function ReportsPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [onlyPending, setOnlyPending] = useState(false);
+  const [filterShiftId, setFilterShiftId] = useState<string | null>(null);
   
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const [orderBy, setOrderBy] = useState<string>('start_at');
@@ -69,6 +79,7 @@ export default function ReportsPage() {
   useEffect(() => {
       const statusParam = searchParams.get('status');
       const periodParam = searchParams.get('period');
+      const shiftParam = searchParams.get('shiftId');
       if (statusParam === 'unapproved') setOnlyPending(true); else setOnlyPending(false);
       if (periodParam === 'current_month') {
           const now = new Date();
@@ -77,6 +88,7 @@ export default function ReportsPage() {
           const formatDate = (d: Date) => d.toISOString().split('T')[0];
           setStartDate(formatDate(firstDay)); setEndDate(formatDate(lastDay));
       }
+      setFilterShiftId(shiftParam || null);
   }, [searchParams]);
 
   const fetchClients = useCallback(async () => {
@@ -87,15 +99,26 @@ export default function ReportsPage() {
 
   const fetchReports = useCallback(async () => {
     if (!currentOrg) return;
-    setLoading(true); setSelected([]); 
+    setLoading(true); setSelected([]);
     try {
+      let reportIdsFromShift: string[] | null = null;
+      if (filterShiftId) {
+        const { data: shiftLinks } = await supabase
+          .from('report_shifts')
+          .select('report_id')
+          .eq('shift_id', filterShiftId);
+        reportIdsFromShift = (shiftLinks ?? []).map(r => r.report_id);
+      }
+
       let query = supabase.from('reports').select(`
           *, clients!inner ( id, name, organization_id ),
           helper:profiles!reports_helper_id_fkey ( name ),
           approved_by_user:profiles!reports_approved_by_fkey ( name ),
-          report_values ( data )
+          report_values ( data ),
+          segment:shift_segments ( service_type:service_types ( name ) )
         `).eq('clients.organization_id', currentOrg.id).is('deleted_at', null).neq('status', 'draft');
 
+      if (reportIdsFromShift !== null) query = query.in('id', reportIdsFromShift.length > 0 ? reportIdsFromShift : ['']);
       if (filterClientId !== 'all') query = query.eq('client_id', filterClientId);
       if (startDate) query = query.gte('start_at', `${startDate}T00:00:00`);
       if (endDate) query = query.lte('end_at', `${endDate}T23:59:59`);
@@ -114,7 +137,7 @@ export default function ReportsPage() {
       });
       setReports(sortedData);
     } catch (e) { console.error(e); } finally { setLoading(false); }
-  }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order]);
+  }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order, filterShiftId]);
 
   useEffect(() => { if (!wsLoading && currentOrg) { fetchClients(); fetchReports(); } }, [wsLoading, currentOrg, fetchClients, fetchReports]);
 
@@ -197,6 +220,21 @@ export default function ReportsPage() {
 
   const getTargetReports = () => selected.length > 0 ? reports.filter(r => selected.includes(r.id)) : reports;
 
+  const formatReportDateTime = (d: Date) => {
+      return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const getReportStatusLabel = (status: ReportStatus) => status === 'approved' ? '承認済' : status === 'remanded' ? '差戻し' : '未承認';
+
+  const getReportStatusColor = (status: ReportStatus) => status === 'approved' ? 'success' : status === 'remanded' ? 'error' : 'warning';
+
+  const isAbnormalReport = (report: Report) => {
+      const start = new Date(report.start_at);
+      const end = new Date(report.end_at);
+      const durationHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+      return durationHours > 24 || durationHours < 0;
+  };
+
   const handleExportCSV = async () => {
       const targetReports = getTargetReports();
       if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
@@ -236,7 +274,7 @@ export default function ReportsPage() {
             });
         });
 
-        const fixedHeader = ['記録ID', 'ステータス', '利用者ID', '利用者名', '実施ヘルパー', '入力者名', '開始日付', '開始時刻', '終了日付', '終了時刻', 'サービス時間(h)', '移動時間(h)', '承認者名', '承認日時', '作成日時', '更新日時'];
+        const fixedHeader = ['記録ID', 'ステータス', '利用者ID', '利用者名', '実施ヘルパー', '入力者名', '開始日付', '開始時刻', '終了日付', '終了時刻', 'サービス時間(h)', '移動時間(h)', '往復距離(km)', '交通費(円)', '承認者名', '承認日時', '作成日時', '更新日時'];
         const headerRow = [...fixedHeader, ...dynamicColumns.map(c => c.header)];
         
         const rows = targetReports.map(r => {
@@ -254,6 +292,7 @@ export default function ReportsPage() {
                 r.id, statusText, r.clients.id, r.clients.name, getHelperNames(r), fbInputter || '不明',
                 formatDate(start), formatTime(start), formatDate(end), formatTime(end),
                 data.service_time || '0', data.travel_time || '0',
+                data.round_trip_distance_km || '0', data.travel_cost_yen || '0',
                 r.approved_by_user?.name || '', r.approved_at ? new Date(r.approved_at).toLocaleString() : '',
                 new Date(r.created_at).toLocaleString(), new Date(r.updated_at).toLocaleString()
             ];
@@ -313,11 +352,28 @@ export default function ReportsPage() {
         }));
         
         const validReports = pdfReports.filter((r): r is PdfReportData => r !== null);
-        const blob = await pdf(<ServiceRecordDocument reports={validReports} />).toBlob();
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
-        link.click();
+
+        if (filterShiftId) {
+          const entries = targetReports
+            .map((report, i) => {
+              const pdfData = validReports[i];
+              if (!pdfData) return null;
+              const serviceTypeName = report.segment?.service_type?.name ?? null;
+              return {
+                data: pdfData,
+                fileName: buildReportFileName(report.clients.name, serviceTypeName, report.start_at, report.end_at),
+              };
+            })
+            .filter((e): e is NonNullable<typeof e> => e !== null);
+          const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+          await downloadReportZip(entries, `サービス提供記録_${dateStr}`);
+        } else {
+          const blob = await pdf(<ServiceRecordDocument reports={validReports} />).toBlob();
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
+          link.click();
+        }
       } catch (e) { console.error(e); showToast('PDF作成中にエラーが発生しました', 'error'); }
   };
 
@@ -483,49 +539,49 @@ export default function ReportsPage() {
   let headerTitle = "全件表示";
   if (onlyPending) headerTitle = "未承認・差戻し";
   if (searchParams.get('period') === 'current_month') headerTitle = "今月の記録";
+  if (filterShiftId) headerTitle = "シフト内の記録";
 
   if (wsLoading || !currentOrg) return null;
+  const canApproveRecords = checkRecordPermission(currentOrg.effectivePermissions, 'approve', true);
+  const canDeleteRecords = checkRecordPermission(currentOrg.effectivePermissions, 'delete', true);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Box sx={{ height: 64, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', px: 3, flexShrink: 0, bgcolor: 'background.paper' }}>
-            <TagIcon sx={{ color: 'action.active', mr: 2 }} />
-            <Typography variant="h6" fontWeight="bold" color="text.primary">{headerTitle}</Typography>
-        </Box>
+        <InnerPageHeader icon={<TagIcon />} title={headerTitle} />
 
-       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
+       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
            <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.muted', boxShadow: 'none' }}>
               <Stack spacing={2}>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-                    <Box display="flex" alignItems="center" gap={1} color="text.secondary">
+                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} flexWrap="wrap" useFlexGap>
+                    <Box display="flex" alignItems="center" gap={1} color="text.secondary" sx={{ minWidth: 0 }}>
                         <FilterListIcon fontSize="small" />
                         <Typography variant="subtitle2" fontWeight="bold">絞り込み:</Typography>
                     </Box>
-                    <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: 150, bgcolor: 'background.paper' }}>
+                    <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: { xs: 0, md: 150 }, bgcolor: 'background.paper', width: { xs: '100%', md: 'auto' } }}>
                         <MenuItem value="all">全員</MenuItem>
                         {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                     </TextField>
-                    <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 120, bgcolor: 'background.paper' }}>
+                    <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: { xs: 0, md: 120 }, bgcolor: 'background.paper', width: { xs: '100%', md: 'auto' } }}>
                         <MenuItem value="all">全て</MenuItem><MenuItem value="pending">未承認</MenuItem><MenuItem value="approved">承認済</MenuItem>
                     </TextField>
-                    <Box display="flex" alignItems="center" gap={1}>
-                        <TextField type="date" label="開始日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
-                        <Typography>～</Typography>
-                        <TextField type="date" label="終了日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
+                    <Box display="flex" alignItems="center" gap={1} sx={{ flexDirection: { xs: 'column', sm: 'row' }, width: { xs: '100%', md: 'auto' } }}>
+                        <TextField type="date" label="開始日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'background.paper', width: { xs: '100%', sm: 'auto' } }} />
+                        <Typography sx={{ display: { xs: 'none', sm: 'block' } }}>～</Typography>
+                        <TextField type="date" label="終了日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'background.paper', width: { xs: '100%', sm: 'auto' } }} />
                     </Box>
                     <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />
-                    <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none' }}>検索</Button>
+                    <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none', width: { xs: '100%', md: 'auto' } }}>検索</Button>
                 </Stack>
               </Stack>
            </Paper>
            
-           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? 'background.tint' : 'background.paper', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
+           <Paper sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? 'background.tint' : 'background.paper', display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, border: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
                <Box>
                    <Typography variant="body1" fontWeight="bold">
                        {selected.length > 0 ? `${selected.length} 件選択中` : `検索結果: ${reports.length} 件`}
                    </Typography>
                </Box>
-               <Stack direction="row" spacing={1}>
+               <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}>
                  <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing}>CSV</Button>
                  <Button variant="outlined" size="small" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF}>PDF</Button>
                  {selected.length > 0 ? (
@@ -534,9 +590,9 @@ export default function ReportsPage() {
                         <Button variant="contained" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
                             {gasProgress ? '作成中...' : '帳票作成(GAS)'}
                         </Button>
-                        <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>
-                        <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</Button>
-                        <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</Button>
+                        {canApproveRecords && <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>}
+                        {canApproveRecords && <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</Button>}
+                        {canDeleteRecords && <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</Button>}
                     </>
                  ) : (
                      <Button variant="outlined" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
@@ -550,13 +606,58 @@ export default function ReportsPage() {
                <Box sx={{ position: 'fixed', bottom: 20, right: 20, bgcolor: 'background.paper', p: 2, borderRadius: 2, boxShadow: 3, zIndex: 9999 }}>
                    <Typography variant="body2" fontWeight="bold">帳票作成中...</Typography>
                    <Typography variant="caption" display="block" sx={{ mb: 1 }}>{gasProgress.currentName}</Typography>
-                   <LinearProgress variant="determinate" value={(gasProgress.current / gasProgress.total) * 100} sx={{ width: 250 }} />
+                   <LinearProgress variant="determinate" value={(gasProgress.current / gasProgress.total) * 100} sx={{ width: { xs: 'calc(100vw - 72px)', sm: 250 } }} />
                    <Typography variant="caption" sx={{ mt: 0.5, display: 'block', textAlign: 'right' }}>{gasProgress.current} / {gasProgress.total}</Typography>
                </Box>
            )}
 
            {loading ? <CircularProgress /> : (
-             <TableContainer component={Paper} sx={{ boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
+             <>
+             {isMobile && (
+               <Stack spacing={1.5}>
+                 {reports.map((row) => {
+                   const start = new Date(row.start_at);
+                   const end = new Date(row.end_at);
+                   const isAbnormal = isAbnormalReport(row);
+                   const checked = selected.includes(row.id);
+
+                   return (
+                     <Paper key={row.id} variant="outlined" sx={{ p: 1.5, bgcolor: isAbnormal ? 'background.danger' : 'background.paper' }}>
+                       <Stack spacing={1.25}>
+                         <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
+                           <Box display="flex" alignItems="center" gap={1} minWidth={0}>
+                             <Checkbox checked={checked} onClick={(e) => handleClick(e, row.id)} sx={{ p: 0.5 }} />
+                             <Box minWidth={0}>
+                               <Typography variant="subtitle2" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{row.clients.name}</Typography>
+                               <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{getHelperNames(row)}</Typography>
+                             </Box>
+                           </Box>
+                           <Chip label={getReportStatusLabel(row.status)} color={getReportStatusColor(row.status)} size="small" variant="outlined" />
+                         </Box>
+                         <Box display="flex" alignItems="flex-start" gap={1}>
+                           <Box flexGrow={1} minWidth={0}>
+                             <Typography variant="body2" color={isAbnormal ? 'error' : 'inherit'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
+                               {formatReportDateTime(start)} 〜
+                             </Typography>
+                             <Typography variant="body2" color={isAbnormal ? 'error' : 'text.secondary'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
+                               {formatReportDateTime(end)}
+                             </Typography>
+                           </Box>
+                           {isAbnormal && <ErrorOutlineIcon color="error" fontSize="small" />}
+                         </Box>
+                         <Box display="flex" justifyContent="flex-end">
+                           <Button size="small" variant={isAbnormal ? "contained" : "outlined"} color={isAbnormal ? "error" : "primary"} onClick={() => handleOpenDetail(row)} sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                             {isAbnormal ? "確認・修正" : "詳細"}
+                           </Button>
+                         </Box>
+                       </Stack>
+                     </Paper>
+                   );
+                 })}
+                 {reports.length === 0 && <Paper variant="outlined" sx={{ py: 5, px: 2, textAlign: 'center', color: 'text.disabled' }}>該当する記録がありません</Paper>}
+               </Stack>
+             )}
+             <TableContainer component={Paper} sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
                <Table>
                  <TableHead sx={{ bgcolor: 'background.muted' }}>
                    <TableRow>
@@ -576,28 +677,22 @@ export default function ReportsPage() {
                    {reports.map((row) => {
                      const start = new Date(row.start_at);
                      const end = new Date(row.end_at);
-                     const durationHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-                     // ★異常検知: 24時間を超える、または終了が開始より前の場合
-                     const isAbnormal = durationHours > 24 || durationHours < 0;
-
-                     const formatDateTime = (d: Date) => {
-                         return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-                     };
+                     const isAbnormal = isAbnormalReport(row);
 
                      return (
                          <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 }, bgcolor: isAbnormal ? 'background.danger' : 'inherit' }}>
                            <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
-                           <TableCell><Chip label={row.status === 'approved' ? '承認済' : row.status === 'remanded' ? '差戻し' : '未承認'} color={row.status === 'approved' ? 'success' : row.status === 'remanded' ? 'error' : 'warning'} size="small" variant="outlined" /></TableCell>
+                           <TableCell><Chip label={getReportStatusLabel(row.status)} color={getReportStatusColor(row.status)} size="small" variant="outlined" /></TableCell>
                            
                            {/* ★修正: 開始から終了までの日時を表示し、異常があればアイコンを出す */}
                            <TableCell>
                                <Box display="flex" alignItems="center" gap={1}>
                                    <Box>
                                        <Typography variant="body2" color={isAbnormal ? 'error' : 'inherit'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
-                                           {formatDateTime(start)} 〜
+                                           {formatReportDateTime(start)} 〜
                                        </Typography>
                                        <Typography variant="body2" color={isAbnormal ? 'error' : 'text.secondary'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
-                                           {formatDateTime(end)}
+                                           {formatReportDateTime(end)}
                                        </Typography>
                                    </Box>
                                    {isAbnormal && (
@@ -622,6 +717,7 @@ export default function ReportsPage() {
                  </TableBody>
                </Table>
              </TableContainer>
+             </>
            )}
        </Box>
     </Box>

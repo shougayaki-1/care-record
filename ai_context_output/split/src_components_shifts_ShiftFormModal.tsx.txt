@@ -7,6 +7,7 @@ import {
     IconButton, Tooltip, Divider
 } from '@/components/ui/mui';
 import DeleteIcon from '@mui/icons-material/Delete';
+import ShiftSegmentEditor from './ShiftSegmentEditor';
 import { ShiftPayload } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -217,6 +218,23 @@ export const ShiftFormModal = ({
 
                     {initialData && (
                         <>
+                            <Divider sx={{ my: 1 }} />
+                            <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
+                                <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                                    サービス区間（任意）
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+                                    時間帯ごとにサービス種別・スタッフ役割を設定できます。設定した区間ごとにサービス提供記録が作成されます。
+                                </Typography>
+                                <ShiftSegmentEditor
+                                    orgId={organizationId}
+                                    shiftId={initialData.id}
+                                    shiftStartAt={initialData.start_at}
+                                    shiftEndAt={initialData.end_at}
+                                    allStaffs={staffs}
+                                />
+                            </Box>
+
                             <Divider sx={{ my: 1 }} />
                             <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
                                 <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>

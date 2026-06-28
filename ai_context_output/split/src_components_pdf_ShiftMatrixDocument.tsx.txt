@@ -51,7 +51,7 @@ const styles = StyleSheet.create({
         marginBottom: 2,
     },
     staffChipName: { fontSize: 7.5, fontWeight: 'bold', color: '#333' },
-    staffChipPosition: { fontSize: 7, color: '#2255CC', marginLeft: 2 },
+    staffChipDetail: { fontSize: 7, color: '#2255CC', marginLeft: 2 },
     table: { width: '100%', borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#ccc' },
     row: { flexDirection: 'row' },
     headerRow: { backgroundColor: '#F0F5FF' },
@@ -129,12 +129,23 @@ export const ShiftMatrixDocument = ({ title, monthStr, daysInMonth, staffData, o
                 {staffMembers.length > 0 && (
                     <View style={styles.staffSection}>
                         <Text style={styles.staffSectionLabel}>スタッフ：</Text>
-                        {staffMembers.map((s, i) => (
-                            <View key={i} style={styles.staffChip}>
-                                <Text style={styles.staffChipName}>{s.name}</Text>
-                                {s.positions && s.positions.length > 0 ? <Text style={styles.staffChipPosition}>{s.positions.join('・')}</Text> : null}
-                            </View>
-                        ))}
+                        {staffMembers.map((s, i) => {
+                            const details = [
+                                s.employmentType,
+                                s.workStyle,
+                                ...(s.positions && s.positions.length > 0 ? [s.positions.join('/')] : []),
+                            ].filter(Boolean);
+                            return (
+                                <View key={i} style={styles.staffChip}>
+                                    <Text style={styles.staffChipName}>{s.name}</Text>
+                                    {details.length > 0 ? (
+                                        <Text style={styles.staffChipDetail}>
+                                            {details.join('・')}
+                                        </Text>
+                                    ) : null}
+                                </View>
+                            );
+                        })}
                     </View>
                 )}
 

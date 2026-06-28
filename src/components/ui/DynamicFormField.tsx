@@ -1,8 +1,8 @@
 'use client';
 
-import { Box, FormControlLabel, FormHelperText, Stack, Switch, Typography } from '@mui/material';
+import { Box, FormHelperText, Stack, Typography } from '@mui/material';
 import { AppTextField, NumberField } from './Fields';
-import { CheckboxGroupField, RadioGroupField } from './SelectionFields';
+import { CheckboxGroupField, RadioGroupField, SwitchField } from './SelectionFields';
 
 export type DynamicFormItem = {
   id: string;
@@ -44,11 +44,13 @@ export function DynamicFormField({ item, value, detailValue = '', error, disable
   if (item.type === 'checkbox') {
     return (
       <Stack spacing={1.5}>
-        <FormControlLabel
+        <SwitchField
           label={<Typography fontWeight={value ? 700 : 400}>{item.label}</Typography>}
           labelPlacement="start"
           sx={{ justifyContent: 'space-between', m: 0 }}
-          control={<Switch checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} disabled={disabled} />}
+          checked={Boolean(value)}
+          onChange={(event) => onChange(event.target.checked)}
+          disabled={disabled}
         />
         {error && <FormHelperText error>{error}</FormHelperText>}
         {detailField}

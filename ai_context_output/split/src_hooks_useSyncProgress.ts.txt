@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { getSyncStatus, syncUnsyncedBatch, forceSyncBatch } from '@/app/actions/shift';
+import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift';
 
 type UseSyncProgressParams = {
     currentOrg: { id: string } | null;
@@ -29,6 +29,18 @@ export const useSyncProgress = ({
             showToast(`同期が一部失敗しました（成功 ${done} 件 / 失敗 ${failed} 件）。通信状況を確認し、しばらくしてから再同期してください。`, 'warning');
         } else {
             showToast(`Googleカレンダーへの同期が完了しました（${done} 件）。`, 'success');
+        }
+    }, [showToast]);
+
+    const reportRepairResult = useCallback((res: Awaited<ReturnType<typeof repairGoogleCalendarSync>>) => {
+        if (!res.connected) {
+            showToast('Googleカレンダーが連携されていません。設定画面から接続してください。', 'warning');
+        } else if (res.errorKind === 'auth') {
+            showToast('Googleカレンダーの認証が切れています。設定画面から連携を再接続してください。', 'error');
+        } else if (res.failed > 0) {
+            showToast(`同期修復が一部失敗しました（成功 ${res.succeeded} 件 / 失敗 ${res.failed} 件）。`, 'warning');
+        } else {
+            showToast(`同期修復が完了しました（作成 ${res.created} / 更新 ${res.updated} / 再リンク ${res.linked} / 重複削除 ${res.deduped} / Google削除 ${res.deletedRemote}）。`, 'success');
         }
     }, [showToast]);
 
@@ -75,30 +87,17 @@ export const useSyncProgress = ({
             showToast('Googleカレンダーが連携されていません。設定画面から接続してください。', 'warning');
             return false;
         }
-        const total = status.total;
-        if (total === 0) return true;
-
-        setSyncProgress({ total, current: 0, currentName: '全件再同期の準備中...' });
-        let cursor: string | null = null;
-        let done = 0, failed = 0;
-        let errorKind: string | undefined;
+        setSyncProgress({ total: 1, current: 0, currentName: 'Googleカレンダーの同期状態を修復中...' });
         try {
-            for (;;) {
-                const res = await forceSyncBatch(currentOrg.id, cursor, 20);
-                done += res.processed;
-                failed += res.failed;
-                cursor = res.nextCursor;
-                if (res.errorKind) errorKind = res.errorKind;
-                setSyncProgress({ total, current: Math.min(total, done), currentName: `${Math.min(total, done)} / ${total} 件 再同期済み` });
-                if (errorKind === 'auth' || res.remaining <= 0 || res.processed === 0) break;
-            }
+            const res = await repairGoogleCalendarSync(currentOrg.id);
+            setSyncProgress({ total: 1, current: 1, currentName: '同期修復が完了しました' });
+            reportRepairResult(res);
+            return res.connected && res.failed === 0 && res.errorKind !== 'auth';
         } finally {
             setSyncProgress(null);
             await refreshUnsyncedCount();
         }
-        reportSyncResult(done, failed, errorKind);
-        return failed === 0 && errorKind !== 'auth';
-    }, [currentOrg, showToast, refreshUnsyncedCount, reportSyncResult]);
+    }, [currentOrg, showToast, refreshUnsyncedCount, reportRepairResult]);
 
     const handleRepairFromBanner = useCallback(async () => {
         if (!currentOrg) return;
@@ -113,7 +112,7 @@ export const useSyncProgress = ({
 
     const handleForceResyncCalendar = useCallback(async () => {
         if (!currentOrg) return;
-        if (!(await confirm({ message: 'カレンダーに登録されているすべての予定をGoogleカレンダーへ強制的に再同期します。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。' }))) return;
+        if (!(await confirm({ message: 'Googleカレンダーの同期状態を修復します。既存予定の再リンク、重複削除、削除済みシフトのGoogle側削除を行います。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。' }))) return;
 
         setResyncingCal(true);
         try {

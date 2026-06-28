@@ -6,7 +6,7 @@ import {
     FormControlLabel, Radio, RadioGroup, LinearProgress,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem, Alert
 } from '@/components/ui/mui';
-import { AppButton, AppDialog } from '@/components/ui';
+import { AppButton, AppDialog, MonthField } from '@/components/ui';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -32,9 +32,12 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { ShiftFormModal, ShiftData } from '@/components/shifts/ShiftFormModal';
 import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
 import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
-import { useShiftData } from '@/hooks/useShiftData';
+import { useShiftData, type ShiftDateRange } from '@/hooks/useShiftData';
 import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
+import type { DatesSetArg } from '@fullcalendar/core';
+import { checkShiftPermission } from '@/utils/permissions';
+import { useSearchParams } from 'next/navigation';
 
 import type { FetchedPatternData } from '@/hooks/useShiftData';
 
@@ -44,7 +47,9 @@ export default function ShiftManagePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
     const confirm = useConfirm();
+    const searchParams = useSearchParams();
     const calendarRef = useRef<FullCalendar>(null);
+    const handledShiftParamRef = useRef<string | null>(null);
 
     const [generating, setGenerating] = useState(false);
     const [pdfGenerating, setPdfGenerating] = useState(false);
@@ -54,6 +59,8 @@ export default function ShiftManagePage() {
     const [selectedClientId, setSelectedClientId] = useState('all');
 
     const [targetMonth, setTargetMonth] = useState<string>(() => {
+        const monthParam = searchParams.get('month');
+        if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) return monthParam;
         const d = new Date();
         d.setMonth(d.getMonth() + 1);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -76,6 +83,30 @@ export default function ShiftManagePage() {
         fetchData, fetchMasterData,
     } = useShiftData({ currentOrg, showToast, calendarRef, activeTab, selectedStaffId, selectedClientId });
 
+    useEffect(() => {
+        const shiftIdParam = searchParams.get('shiftId');
+        const startParam = searchParams.get('start');
+        if (!shiftIdParam || handledShiftParamRef.current === shiftIdParam) return;
+        if (activeTab !== 'fullCalendar') {
+            setActiveTab('fullCalendar');
+            return;
+        }
+        if (initialLoading) return;
+        if (startParam && calendarRef.current) {
+            calendarRef.current.getApi().gotoDate(new Date(startParam));
+        }
+    }, [activeTab, initialLoading, searchParams]);
+
+    useEffect(() => {
+        const shiftIdParam = searchParams.get('shiftId');
+        if (!shiftIdParam || handledShiftParamRef.current === shiftIdParam) return;
+        const targetShift = rawShifts.find((shift) => shift.id === shiftIdParam);
+        if (!targetShift) return;
+        setSelectedShift(targetShift);
+        setShiftModalOpen(true);
+        handledShiftParamRef.current = shiftIdParam;
+    }, [rawShifts, searchParams]);
+
     const {
         syncProgress, setSyncProgress,
         repairingFromBanner, resyncingCal,
@@ -92,15 +123,27 @@ export default function ShiftManagePage() {
     useEffect(() => {
         if (!wsLoading && currentOrg) {
             fetchMasterData();
-            fetchData();
-            const isAdminRole = ['owner', 'manager'].includes(currentOrg.role);
-            if (!isAdminRole && (activeTab === 'fullCalendar' || activeTab === 'patterns')) {
+            const canUseOrgWideTabs = currentOrg.effectivePermissions.shifts.view === 'all';
+            if (!canUseOrgWideTabs && (activeTab === 'fullCalendar' || activeTab === 'patterns')) {
                 setActiveTab('myShift');
             }
         }
     // activeTab を依存配列に入れない（初期補正のみ行う）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [wsLoading, currentOrg, fetchMasterData, fetchData]);
+    }, [wsLoading, currentOrg, fetchMasterData]);
+
+    useEffect(() => {
+        if (wsLoading || !currentOrg) return;
+        const canUseOrgWideTabs = currentOrg.effectivePermissions.shifts.view === 'all';
+        if (!canUseOrgWideTabs && (activeTab === 'fullCalendar' || activeTab === 'patterns')) return;
+        fetchData(!initialLoading);
+    }, [wsLoading, currentOrg, activeTab, selectedStaffId, selectedClientId, currentStaffId, fetchData, initialLoading]);
+
+    const handleCalendarDatesSet = useCallback((info: DatesSetArg) => {
+        if (activeTab === 'patterns') return;
+        const range: ShiftDateRange = { start: info.start, end: info.end };
+        fetchData(true, range);
+    }, [activeTab, fetchData]);
 
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
         setSyncProgress({ total: 1, current: 0, currentName: shiftId ? 'Googleカレンダーの予定を更新中...' : 'Googleカレンダーへ新規登録中...' });
@@ -356,30 +399,33 @@ export default function ShiftManagePage() {
 
     if (wsLoading || !currentOrg) return null;
 
-    const isAdmin = ['owner', 'manager'].includes(currentOrg.role);
+    const canUseOrgWideTabs = currentOrg.effectivePermissions.shifts.view === 'all';
+    const canCreateShift = checkShiftPermission(currentOrg.effectivePermissions, 'create', true);
+    const canEditShift = checkShiftPermission(currentOrg.effectivePermissions, 'edit', true);
+    const canDeleteShift = checkShiftPermission(currentOrg.effectivePermissions, 'delete', true);
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 3, pt: 2, flexShrink: 0 }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 2, sm: 3 }, pt: 2, flexShrink: 0 }}>
+                <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} flexDirection={{ xs: 'column', sm: 'row' }} gap={1} mb={1}>
                     <Typography variant="h6" fontWeight="bold">全体シフト管理</Typography>
-                    {isAdmin && activeTab === 'fullCalendar' && (
-                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setShiftModalOpen(true); }} sx={{ boxShadow: 'none' }}>単発シフトを追加</Button>
+                    {canCreateShift && activeTab === 'fullCalendar' && (
+                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setShiftModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>単発シフトを追加</Button>
                     )}
-                    {isAdmin && activeTab === 'patterns' && (
-                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none' }}>ひな形を追加</Button>
+                    {canCreateShift && activeTab === 'patterns' && (
+                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>ひな形を追加</Button>
                     )}
                 </Box>
-                <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as TabId)}>
-                    {isAdmin && <Tab label="基本パターン(ひな形)" value="patterns" />}
-                    {isAdmin && <Tab label="全体カレンダー" value="fullCalendar" />}
+                <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as TabId)} variant="scrollable" allowScrollButtonsMobile>
+                    {canUseOrgWideTabs && <Tab label="基本パターン(ひな形)" value="patterns" />}
+                    {canUseOrgWideTabs && <Tab label="全体カレンダー" value="fullCalendar" />}
                     <Tab label="自分のシフト" value="myShift" />
                     <Tab label="スタッフ別" value="byStaff" />
                     <Tab label="利用者別" value="byClient" />
                 </Tabs>
             </Box>
 
-            <Box sx={{ position: 'relative', flexGrow: 1, p: 3, bgcolor: 'background.default', overflowY: 'auto' }}>
+            <Box sx={{ position: 'relative', flexGrow: 1, p: { xs: 2, sm: 3 }, bgcolor: 'background.default', overflowY: 'auto' }}>
                 {isFetching && !initialLoading && (
                     <Box sx={{ position: 'absolute', top: 16, right: 30, zIndex: 10 }}>
                         <CircularProgress size={24} />
@@ -390,7 +436,7 @@ export default function ShiftManagePage() {
                     <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>
                 ) : (
                     <>
-                        {unsyncedCount > 0 && isAdmin && (
+                        {unsyncedCount > 0 && canEditShift && currentOrg.effectivePermissions.shifts.edit === 'all' && (
                             <Alert
                                 severity="warning"
                                 action={
@@ -411,23 +457,23 @@ export default function ShiftManagePage() {
                         )}
 
                         {activeTab !== 'patterns' && (
-                            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems="center" mb={2} spacing={2}>
+                            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} mb={2} spacing={2}>
                                 <Box flexGrow={1} width="100%">
                                     {activeTab === 'byStaff' && (
-                                        <TextField select size="small" label="スタッフを選択" value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} sx={{ minWidth: 200, bgcolor: 'background.paper' }}>
+                                        <TextField select size="small" label="スタッフを選択" value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} sx={{ minWidth: { xs: 0, sm: 200 }, width: { xs: '100%', sm: 'auto' }, bgcolor: 'background.paper' }}>
                                             <MenuItem value="all">全員を表示</MenuItem>
                                             {staffs.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
                                         </TextField>
                                     )}
                                     {activeTab === 'byClient' && (
-                                        <TextField select size="small" label="利用者を選択" value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} sx={{ minWidth: 200, bgcolor: 'background.paper' }}>
+                                        <TextField select size="small" label="利用者を選択" value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} sx={{ minWidth: { xs: 0, sm: 200 }, width: { xs: '100%', sm: 'auto' }, bgcolor: 'background.paper' }}>
                                             <MenuItem value="all">全員を表示</MenuItem>
                                             {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                                         </TextField>
                                     )}
                                 </Box>
-                                <Stack direction="row" spacing={1} sx={{ ml: 'auto' }}>
-                                    {isAdmin && (
+                                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent={{ xs: 'stretch', sm: 'flex-end' }} sx={{ ml: { sm: 'auto' }, width: { xs: '100%', sm: 'auto' }, '& > *': { flex: { xs: '1 1 100%', sm: '0 0 auto' } } }}>
+                                    {canEditShift && currentOrg.effectivePermissions.shifts.edit === 'all' && (
                                         <Button
                                             variant="outlined"
                                             color="primary"
@@ -451,16 +497,16 @@ export default function ShiftManagePage() {
                             </Stack>
                         )}
 
-                        {isAdmin && (
+                        {canUseOrgWideTabs && (
                             <Box sx={{ display: activeTab === 'patterns' ? 'block' : 'none' }}>
                                 <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: 'background.tint', borderColor: 'divider' }}>
                                     <Typography variant="body2" sx={{ fontWeight: '500' }}>登録したひな形をベースに、指定月のカレンダーへシフトを一括展開・同期します。</Typography>
                                     <Stack direction="row" spacing={1.5} alignItems="center">
-                                        <TextField type="month" size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
-                                        <Button variant="contained" color="secondary" startIcon={<PlayArrowIcon />} onClick={handleCalculatePreview} disabled={generating || patterns.length === 0} sx={{ boxShadow: 'none' }}>
+                                        <MonthField size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} />
+                                        <Button variant="contained" color="secondary" startIcon={<PlayArrowIcon />} onClick={handleCalculatePreview} disabled={!canCreateShift || currentOrg.effectivePermissions.shifts.create !== 'all' || generating || patterns.length === 0} sx={{ boxShadow: 'none' }}>
                                             一括自動展開する
                                         </Button>
-                                        <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => { setClearMode('unmodified'); setClearDialogOpen(true); }} disabled={generating || patterns.length === 0}>
+                                        <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => { setClearMode('unmodified'); setClearDialogOpen(true); }} disabled={!canDeleteShift || currentOrg.effectivePermissions.shifts.delete !== 'all' || generating || patterns.length === 0}>
                                             一括消去する
                                         </Button>
                                     </Stack>
@@ -489,8 +535,8 @@ export default function ShiftManagePage() {
                                                         <TableCell>{p.start_time.slice(0, 5)} 〜 {p.end_time.slice(0, 5)}</TableCell>
                                                         <TableCell><Chip label={formatRule(p.rrule)} size="small" color="primary" variant="outlined" /></TableCell>
                                                         <TableCell align="center">
-                                                            <Tooltip title="ひな形を編集"><IconButton size="small" color="primary" onClick={() => { setSelectedPattern(p); setPatternModalOpen(true); }} sx={{ mr: 1 }}><EditIcon fontSize="small" /></IconButton></Tooltip>
-                                                            <Tooltip title="ひな形を削除"><IconButton size="small" color="error" onClick={() => handleDeletePattern(p.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
+                                                            {canEditShift && <Tooltip title="ひな形を編集"><IconButton size="small" color="primary" onClick={() => { setSelectedPattern(p); setPatternModalOpen(true); }} sx={{ mr: 1 }}><EditIcon fontSize="small" /></IconButton></Tooltip>}
+                                                            {canDeleteShift && <Tooltip title="ひな形を削除"><IconButton size="small" color="error" onClick={() => handleDeletePattern(p.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>}
                                                         </TableCell>
                                                     </TableRow>
                                                 ))
@@ -509,12 +555,13 @@ export default function ShiftManagePage() {
                                     initialView={activeTab === 'myShift' ? 'listMonth' : 'dayGridMonth'}
                                     headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' }}
                                     buttonText={{ listMonth: 'リスト', dayGridMonth: '月間', timeGridWeek: '週間' }}
-                                    selectable={activeTab === 'fullCalendar' && isAdmin}
-                                    editable={activeTab === 'fullCalendar' && isAdmin}
+                                    selectable={activeTab === 'fullCalendar' && canCreateShift}
+                                    editable={activeTab === 'fullCalendar' && canEditShift}
                                     onEventDrop={handleEventChange}
                                     onEventResize={handleEventChange}
+                                    onDatesSet={handleCalendarDatesSet}
                                     onDateSelect={(info) => {
-                                        if (activeTab !== 'fullCalendar' || !isAdmin) return;
+                                        if (activeTab !== 'fullCalendar' || !canCreateShift) return;
                                         setSelectedShift({
                                             id: '', client_id: '', title: '', start_at: info.startStr, end_at: info.endStr,
                                             status: 'published', cancel_reason: '', shift_staffs: []
@@ -523,7 +570,7 @@ export default function ShiftManagePage() {
                                     }}
                                     onEventClick={(info) => {
                                         const { clientId, shiftId, isCancelled, shiftData } = info.event.extendedProps;
-                                        if (activeTab === 'fullCalendar' && isAdmin) {
+                                        if (activeTab === 'fullCalendar' && canEditShift) {
                                             setSelectedShift(shiftData);
                                             setShiftModalOpen(true);
                                         } else {
@@ -564,8 +611,8 @@ export default function ShiftManagePage() {
                 open={shiftModalOpen}
                 onClose={() => setShiftModalOpen(false)}
                 onSave={handleSaveShift}
-                onToggleCancel={handleToggleCancel}
-                onDelete={handleDeleteShift}
+                onToggleCancel={canEditShift ? handleToggleCancel : undefined}
+                onDelete={canDeleteShift ? handleDeleteShift : undefined}
                 clients={clients}
                 staffs={staffs}
                 organizationId={currentOrg.id}
