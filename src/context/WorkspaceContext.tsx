@@ -118,8 +118,16 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       if (memberError || profileError) {
         if (!isCurrent()) return;
         console.error('Workspace lookup failed', { memberError, profileError });
-        setStatus('error');
-        setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
+        const authErr = memberError || profileError;
+        if (authErr?.code === '401' || authErr?.message?.toLowerCase().includes('jwt')) {
+          setOrgList([]);
+          setCurrentOrg(null);
+          setStatus('session_expired');
+          setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
+        } else {
+          setStatus('error');
+          setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
+        }
         return;
       }
 
@@ -141,12 +149,6 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
 
       const list: Workspace[] = [];
       for (const { organization, role, memberRoles } of parsedMembers) {
-        if (!organization || !['owner', 'member'].includes(role)) {
-          setStatus('forbidden');
-          setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
-          return;
-        }
-
         const rolePerms: RolePermissions[] = memberRoles.flatMap((omr: { organization_roles: { permissions: RolePermissions } | { permissions: RolePermissions }[] | null }) => {
           const orgRole = Array.isArray(omr.organization_roles) ? omr.organization_roles[0] : omr.organization_roles;
           if (!orgRole?.permissions) return [];
