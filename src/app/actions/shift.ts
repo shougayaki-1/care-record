@@ -793,7 +793,8 @@ export async function getShifts(organizationId: string, startDate: string, endDa
             status,
             cancel_reason,
             clients (id, name),
-            ${staffRelation}
+            ${staffRelation},
+            report_shifts (shift_id, is_primary, reports (id, status, deleted_at))
         `).eq('organization_id', organizationId)
             .is('deleted_at', null)
             .gte('start_at', startDate).lte('start_at', endDate)
@@ -803,7 +804,17 @@ export async function getShifts(organizationId: string, startDate: string, endDa
 
         const { data, error } = await query;
         if (error) throw error;
-        const withReportStatuses = await attachReportStatuses(data ?? []);
+        const withReportStatuses = (data ?? []).map(shift => {
+            const reportShifts = Array.isArray(shift.report_shifts) ? shift.report_shifts : [];
+            return {
+                ...shift,
+                report_statuses: reportShifts.flatMap((rs: { shift_id: string; is_primary: boolean; reports: { id: string; status: string; deleted_at: string | null } | { id: string; status: string; deleted_at: string | null }[] | null }) => {
+                    const r = Array.isArray(rs.reports) ? rs.reports[0] : rs.reports;
+                    if (!r || r.deleted_at) return [];
+                    return [{ id: r.id, status: r.status, is_primary: rs.is_primary }];
+                }),
+            };
+        });
         if (actor.isOwner) return withReportStatuses;
         const { permissions } = await getEffectivePermissions(organizationId, actor.userId);
         if (permissions.shifts.view === 'all') return withReportStatuses;
@@ -817,29 +828,6 @@ export async function getShifts(organizationId: string, startDate: string, endDa
     } catch (error) { console.error(error); throw error; }
 }
 
-async function attachReportStatuses<T extends { id: string }>(shifts: T[]): Promise<Array<T & { report_statuses: Array<{ id: string; status: string; is_primary: boolean }> }>> {
-    if (shifts.length === 0) return [];
-    const { data, error } = await supabaseAdmin
-        .from('report_shifts')
-        .select('shift_id, is_primary, report:reports(id, status, deleted_at)')
-        .in('shift_id', shifts.map((shift) => shift.id))
-        .is('reports.deleted_at', null);
-    if (error) throw error;
-
-    const byShiftId = new Map<string, Array<{ id: string; status: string; is_primary: boolean }>>();
-    (data ?? []).forEach((row) => {
-        const report = Array.isArray(row.report) ? row.report[0] : row.report;
-        if (!report?.id) return;
-        const current = byShiftId.get(row.shift_id) ?? [];
-        current.push({ id: report.id, status: report.status, is_primary: row.is_primary });
-        byShiftId.set(row.shift_id, current);
-    });
-
-    return shifts.map((shift) => ({
-        ...shift,
-        report_statuses: byShiftId.get(shift.id) ?? [],
-    }));
-}
 
 export async function getShiftPatterns(organizationId: string) {
     await assertShiftPermission(organizationId, 'view', { requireAllScope: true });
