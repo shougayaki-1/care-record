@@ -28,6 +28,7 @@ function parseServiceAccountCredentials(): ServiceAccountCredentials | undefined
 }
 
 const project = process.env.GCP_PROJECT_ID;
+if (!project) throw new Error('GCP_PROJECT_ID is required');
 const location = process.env.VERTEX_AI_LOCATION ?? 'asia-northeast1';
 
 const credentials = parseServiceAccountCredentials();
