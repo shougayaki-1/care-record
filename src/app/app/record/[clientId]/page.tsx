@@ -41,7 +41,7 @@ type FormItem = {
   options?: string; required: boolean; hasDetail?: boolean;
 };
 
-const DEFAULT_TEMPLATE: FormItem[] = [
+export const DEFAULT_TEMPLATE: FormItem[] = [
     { id: 'sec_medical', label: '【医療的ケア・身体介護】', type: 'section', required: false },
     { id: 'sputum_suction', label: '痰等の吸引（気管・口腔）', type: 'checkbox', required: false },
     { id: 'sputum_cleaning', label: '痰等の吸引に関わる物品の清掃等', type: 'checkbox', required: false },
