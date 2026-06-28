@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import {
     Box, Typography, Paper, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
     FormControlLabel, Radio, RadioGroup, LinearProgress,
@@ -15,9 +16,9 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import BuildIcon from '@mui/icons-material/Build';
 import SyncIcon from '@mui/icons-material/Sync';
-import FullCalendar from '@fullcalendar/react';
-import { EventDropArg } from '@fullcalendar/core';
-import { EventResizeDoneArg } from '@fullcalendar/interaction';
+import type FullCalendar from '@fullcalendar/react';
+import type { EventDropArg } from '@fullcalendar/core';
+import type { EventResizeDoneArg } from '@fullcalendar/interaction';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
@@ -31,25 +32,34 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { ShiftFormModal, ShiftData } from '@/components/shifts/ShiftFormModal';
 import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
-import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 import { useShiftData, type ShiftDateRange } from '@/hooks/useShiftData';
 import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
 import type { DatesSetArg } from '@fullcalendar/core';
 import { checkShiftPermission } from '@/utils/permissions';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { FetchedPatternData } from '@/hooks/useShiftData';
 
 type TabId = 'patterns' | 'fullCalendar' | 'myShift' | 'byStaff' | 'byClient';
 
+const ShiftCalendarViewer = dynamic(
+    () => import('@/components/shifts/ShiftCalendarViewer').then((mod) => mod.ShiftCalendarViewer),
+    {
+        ssr: false,
+        loading: () => <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>,
+    }
+);
+
 export default function ShiftManagePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
     const confirm = useConfirm();
+    const router = useRouter();
     const searchParams = useSearchParams();
     const calendarRef = useRef<FullCalendar>(null);
     const handledShiftParamRef = useRef<string | null>(null);
+    const calendarInitializedRef = useRef(false);
 
     const [generating, setGenerating] = useState(false);
     const [pdfGenerating, setPdfGenerating] = useState(false);
@@ -141,6 +151,10 @@ export default function ShiftManagePage() {
 
     const handleCalendarDatesSet = useCallback((info: DatesSetArg) => {
         if (activeTab === 'patterns') return;
+        if (!calendarInitializedRef.current) {
+            calendarInitializedRef.current = true;
+            return; // Initial calendar render triggers this — let useEffect handle it
+        }
         const range: ShiftDateRange = { start: info.start, end: info.end };
         fetchData(true, range);
     }, [activeTab, fetchData]);
@@ -205,6 +219,15 @@ export default function ShiftManagePage() {
         } finally {
             setSyncProgress(null);
         }
+    };
+
+    const handleCreateRecord = (shift: ShiftData) => {
+        if (shift.status === 'cancelled') {
+            showToast('このシフトは現在キャンセル（お休み）されています。', 'info');
+            return;
+        }
+        setShiftModalOpen(false);
+        router.push(`/app/record/${shift.client_id}?shiftId=${shift.id}`);
     };
 
     const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {
@@ -416,7 +439,14 @@ export default function ShiftManagePage() {
                         <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>ひな形を追加</Button>
                     )}
                 </Box>
-                <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as TabId)} variant="scrollable" allowScrollButtonsMobile>
+                <Tabs value={activeTab} onChange={(_, v) => {
+                    const nextTab = v as TabId;
+                    // Reset calendar init guard when calendar may remount (e.g. from patterns tab)
+                    if (nextTab !== 'patterns' && activeTab === 'patterns') {
+                        calendarInitializedRef.current = false;
+                    }
+                    setActiveTab(nextTab);
+                }} variant="scrollable" allowScrollButtonsMobile>
                     {canUseOrgWideTabs && <Tab label="基本パターン(ひな形)" value="patterns" />}
                     {canUseOrgWideTabs && <Tab label="全体カレンダー" value="fullCalendar" />}
                     <Tab label="自分のシフト" value="myShift" />
@@ -550,7 +580,7 @@ export default function ShiftManagePage() {
                         {activeTab !== 'patterns' && (
                             <Box sx={{ height: '100%' }}>
                                 <ShiftCalendarViewer
-                                    ref={calendarRef}
+                                    calendarRef={calendarRef}
                                     events={events}
                                     initialView={activeTab === 'myShift' ? 'listMonth' : 'dayGridMonth'}
                                     headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' }}
@@ -569,17 +599,10 @@ export default function ShiftManagePage() {
                                         setShiftModalOpen(true);
                                     }}
                                     onEventClick={(info) => {
-                                        const { clientId, shiftId, isCancelled, shiftData } = info.event.extendedProps;
-                                        if (activeTab === 'fullCalendar' && canEditShift) {
-                                            setSelectedShift(shiftData);
-                                            setShiftModalOpen(true);
-                                        } else {
-                                            if (isCancelled) {
-                                                showToast('このシフトは現在キャンセル（お休み）されています。', 'info');
-                                                return;
-                                            }
-                                            window.location.href = `/app/record/${clientId}?shiftId=${shiftId}`;
-                                        }
+                                        const { shiftData } = info.event.extendedProps;
+                                        if (!shiftData) return;
+                                        setSelectedShift(shiftData);
+                                        setShiftModalOpen(true);
                                     }}
                                 />
                             </Box>
@@ -613,10 +636,12 @@ export default function ShiftManagePage() {
                 onSave={handleSaveShift}
                 onToggleCancel={canEditShift ? handleToggleCancel : undefined}
                 onDelete={canDeleteShift ? handleDeleteShift : undefined}
+                onCreateRecord={handleCreateRecord}
                 clients={clients}
                 staffs={staffs}
                 organizationId={currentOrg.id}
                 initialData={selectedShift}
+                canSave={selectedShift?.id ? canEditShift : canCreateShift}
             />
 
             <ShiftPatternModal

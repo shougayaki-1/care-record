@@ -797,7 +797,8 @@ export async function getShifts(organizationId: string, startDate: string, endDa
             report_shifts (shift_id, is_primary, reports (id, status, deleted_at))
         `).eq('organization_id', organizationId)
             .is('deleted_at', null)
-            .gte('start_at', startDate).lte('start_at', endDate)
+            .lt('start_at', endDate)
+            .gt('end_at', startDate)
             .order('start_at', { ascending: false });
         if (filter.staffId) query = query.eq('shift_staffs.staff_id', filter.staffId);
         if (filter.clientId) query = query.eq('client_id', filter.clientId);
@@ -1217,8 +1218,8 @@ export async function getMyShiftsWithStatus(
         .eq('organization_id', organizationId)
         .eq('shift_staffs.staff_id', staffRow.id)
         .is('deleted_at', null)
-        .gte('start_at', startDate)
-        .lte('start_at', endDate)
+        .lt('start_at', endDate)
+        .gt('end_at', startDate)
         .order('start_at', { ascending: true });
 
     if (error) throw error;

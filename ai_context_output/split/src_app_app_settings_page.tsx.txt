@@ -3,10 +3,10 @@
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
 import { 
-  Box, Typography, Paper, TextField, Button, Alert, CircularProgress, LinearProgress, Stack, Divider,
+  Box, Typography, Paper, Alert, CircularProgress, LinearProgress, Stack, Divider,
   Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow
 } from '@/components/ui/mui';
-import { AppButton, AppDialog, AppTextField } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, DateTimeField, NumberField } from '@/components/ui';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
@@ -420,14 +420,14 @@ function SettingsContent() {
                                 <Stack spacing={4}>
                                     <Box>
                                         <Typography variant="subtitle2" fontWeight="bold" gutterBottom>事業所名</Typography>
-                                        <TextField fullWidth value={orgName} onChange={(e) => setOrgName(e.target.value)} disabled={!canEditOrganization} />
+                                        <AppTextField value={orgName} onChange={(e) => setOrgName(e.target.value)} disabled={!canEditOrganization} />
                                     </Box>
                                     <Divider />
                                     {canEditOrganization && (
                                         <Box sx={{ display: 'flex', justifyContent: { xs: 'stretch', sm: 'flex-end' } }}>
-                                            <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                                            <AppButton size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                 {saving ? '保存中...' : '変更を保存'}
-                                            </Button>
+                                            </AppButton>
                                         </Box>
                                     )}
                                 </Stack>
@@ -441,18 +441,16 @@ function SettingsContent() {
                                         記録画面の交通費は、往復距離 × 1kmあたり単価で算出します。
                                     </Typography>
                                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                                        <TextField
+                                        <NumberField
                                             label="1kmあたり単価"
-                                            type="number"
                                             value={travelCostRate}
                                             onChange={(e) => setTravelCostRate(e.target.value)}
-                                            onWheel={e => (e.target as HTMLElement).blur()}
                                             sx={{ maxWidth: { sm: 240 } }}
                                             slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">円/km</Typography> }, htmlInput: { inputMode: 'decimal', step: '1', min: 0 } }}
                                         />
-                                        <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSaveTravelCost} disabled={saving}>
+                                        <AppButton startIcon={<SaveIcon />} onClick={handleSaveTravelCost} disabled={saving}>
                                             保存
-                                        </Button>
+                                        </AppButton>
                                     </Stack>
                                 </Paper>
                             )}
@@ -479,15 +477,15 @@ function SettingsContent() {
                                                     </Box>
                                                 </Typography>
                                                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" sx={{ '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
-                                                    <Button variant="outlined" href={driveUrl} target="_blank" startIcon={<LinkIcon />}>
+                                                    <AppButton variant="outlined" intent="secondary" href={driveUrl} target="_blank" rel="noreferrer" startIcon={<LinkIcon />}>
                                                         フォルダを開く
-                                                    </Button>
-                                                    <Button color="error" startIcon={<LinkOffIcon />} onClick={handleDisconnectDrive}>
+                                                    </AppButton>
+                                                    <AppButton variant="text" intent="danger" startIcon={<LinkOffIcon />} onClick={handleDisconnectDrive}>
                                                         連携を解除
-                                                    </Button>
-                                                    <Button color="warning" onClick={handleConnectDrive} disabled={connecting}>
+                                                    </AppButton>
+                                                    <AppButton variant="text" intent="warning" onClick={handleConnectDrive} disabled={connecting}>
                                                         フォルダを再作成/修復
-                                                    </Button>
+                                                    </AppButton>
                                                 </Stack>
                                             </Stack>
                                         ) : (
@@ -495,9 +493,9 @@ function SettingsContent() {
                                                 <Alert severity="info">
                                                     まだ連携フォルダがありません。ボタンを押すと、管理者のGoogleドライブ内にこの事業所用のフォルダが自動作成されます。
                                                 </Alert>
-                                                <Button variant="contained" onClick={handleConnectDrive} disabled={connecting} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                                                <AppButton onClick={handleConnectDrive} disabled={connecting} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                     {connecting ? '作成中...' : '連携フォルダを作成する'}
-                                                </Button>
+                                                </AppButton>
                                             </Stack>
                                         )
                                     ) : (
@@ -554,35 +552,33 @@ function SettingsContent() {
                                                 )}
 
                                                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mt: 1, '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
-                                                    {canRepairCalendarSync && <Button
-                                                        variant="contained"
-                                                        color="warning"
+                                                    {canRepairCalendarSync && <AppButton
+                                                        intent="warning"
                                                         startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />}
                                                         onClick={handleRepairCalendar}
                                                         disabled={repairingCal || resyncingCal || (syncStatus?.unsynced === 0)}
                                                     >
                                                         {repairingCal ? '同期中...' : `未同期を同期${syncStatus && syncStatus.unsynced > 0 ? `（${syncStatus.unsynced}件）` : ''}`}
-                                                    </Button>}
+                                                    </AppButton>}
                                                     {/* 全件強制再同期（通常は未同期同期で十分。Google側で予定がずれた場合の最終手段） */}
-                                                    {canRepairCalendarSync && <Button
+                                                    {canRepairCalendarSync && <AppButton
                                                         variant="outlined"
-                                                        color="primary"
                                                         startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
                                                         onClick={handleForceResyncCalendar}
                                                         disabled={repairingCal || resyncingCal}
                                                         sx={{ boxShadow: 'none' }}
                                                     >
                                                         {resyncingCal ? '修復中...' : '同期を修復'}
-                                                    </Button>}
-                                                    <Button 
+                                                    </AppButton>}
+                                                    <AppButton
                                                         variant="outlined"
-                                                        color="error" 
+                                                        intent="danger"
                                                         startIcon={<LinkOffIcon />} 
                                                         onClick={handleDisconnectCalendar} 
                                                         disabled={repairingCal || resyncingCal}
                                                     >
                                                         連携を解除
-                                                    </Button>
+                                                    </AppButton>
                                                 </Stack>
                                             </Stack>
                                         ) : (
@@ -590,9 +586,9 @@ function SettingsContent() {
                                                 <Alert severity="info">
                                                     ボタンを押すとGoogleの認証画面へ移動します。許可すると、あなたのアカウントに事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
                                                 </Alert>
-                                                <Button variant="contained" color="success" onClick={handleConnectCalendar} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                                                <AppButton intent="success" onClick={handleConnectCalendar} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                     {connectingCal ? 'Googleへ移動中...' : 'シフト用カレンダーを作成・連携する'}
-                                                </Button>
+                                                </AppButton>
                                             </Stack>
                                         )
                                     ) : (
@@ -648,9 +644,9 @@ function SettingsContent() {
                                             <Typography fontWeight="bold">事業所から脱退</Typography>
                                             <Typography variant="caption" color="text.secondary">この事業所のメンバーから外れます</Typography>
                                         </Box>
-                                        <Button variant="outlined" color="warning" startIcon={<ExitToAppIcon />} onClick={() => setOpenLeaveDialog(true)}>
+                                        <AppButton variant="outlined" intent="warning" startIcon={<ExitToAppIcon />} onClick={() => setOpenLeaveDialog(true)}>
                                             脱退する
-                                        </Button>
+                                        </AppButton>
                                     </Box>
                                     {canDeleteOrganization && (
                                         <>
@@ -663,9 +659,9 @@ function SettingsContent() {
                                                         この操作は取り消せません。
                                                     </Typography>
                                                 </Box>
-                                                <Button variant="contained" color="error" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
+                                                <AppButton intent="danger" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
                                                     削除する
-                                                </Button>
+                                                </AppButton>
                                             </Box>
                                         </>
                                     )}
@@ -677,11 +673,11 @@ function SettingsContent() {
                     {tabIndex === 1 && (
                         <Paper variant="outlined">
                             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} sx={{ p: 2 }}>
-                                <TextField label="開始日" type="date" size="small" value={logFrom} onChange={(e) => setLogFrom(e.target.value)} InputLabelProps={{ shrink: true }} />
-                                <TextField label="終了日" type="date" size="small" value={logTo} onChange={(e) => setLogTo(e.target.value)} InputLabelProps={{ shrink: true }} />
-                                <Button variant="outlined" onClick={fetchLogs}>絞り込み</Button>
+                                <DateTimeField kind="date" label="開始日" size="small" value={logFrom} onChange={(e) => setLogFrom(e.target.value)} />
+                                <DateTimeField kind="date" label="終了日" size="small" value={logTo} onChange={(e) => setLogTo(e.target.value)} />
+                                <AppButton variant="outlined" intent="secondary" onClick={fetchLogs}>絞り込み</AppButton>
                                 <Box sx={{ flexGrow: 1 }} />
-                                <Button variant="contained" onClick={handleExportLogs}>CSVエクスポート</Button>
+                                <AppButton onClick={handleExportLogs}>CSVエクスポート</AppButton>
                             </Stack>
                             <Divider />
                             <Table>

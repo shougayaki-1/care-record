@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import {
   Box, Typography, CircularProgress, Stack, Chip, Paper,
   IconButton, ToggleButton, ToggleButtonGroup, Tooltip
@@ -11,15 +12,22 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import ArticleIcon from '@mui/icons-material/Article';
-import FullCalendar from '@fullcalendar/react';
+import type FullCalendar from '@fullcalendar/react';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
-import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 import { convertToCalendarEvents } from '@/utils/shiftHelper';
 
 type ViewMode = 'list' | 'calendar';
+
+const ShiftCalendarViewer = dynamic(
+  () => import('@/components/shifts/ShiftCalendarViewer').then((mod) => mod.ShiftCalendarViewer),
+  {
+    ssr: false,
+    loading: () => <Box display="flex" justifyContent="center" pt={8}><CircularProgress /></Box>,
+  }
+);
 
 const REPORT_STATUS_LABELS: Record<string, { label: string; color: 'default' | 'primary' | 'warning' | 'success' | 'error' }> = {
   draft:    { label: '下書き',   color: 'primary' },
@@ -223,7 +231,7 @@ export default function MyShiftsPage() {
           </Stack>
         ) : (
           <ShiftCalendarViewer
-            ref={calendarRef}
+            calendarRef={calendarRef}
             events={calendarEvents}
             initialView="listMonth"
             headerToolbar={{ left: 'prev,next today', center: 'title', right: 'listMonth,dayGridMonth' }}

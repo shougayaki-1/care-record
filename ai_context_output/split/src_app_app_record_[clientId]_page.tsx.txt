@@ -700,7 +700,7 @@ export default function RecordPage() {
             <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, bgcolor: 'background.paper' }}>
                 <Stack spacing={3}>
 
-                <Box sx={{ bgcolor: aiFilledFields.has('_helpers') ? '#fffde7' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
+                <Box sx={{ bgcolor: aiFilledFields.has('_helpers') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
                     </Typography>
@@ -718,7 +718,7 @@ export default function RecordPage() {
                     />
                 </Box>
 
-                <Box sx={{ bgcolor: aiFilledFields.has('startDateTime') || aiFilledFields.has('endDateTime') ? '#fffde7' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
+                <Box sx={{ bgcolor: aiFilledFields.has('startDateTime') || aiFilledFields.has('endDateTime') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <CalendarTodayIcon fontSize="small" /> サービス日時
                     </Typography>
@@ -729,7 +729,7 @@ export default function RecordPage() {
                     </Stack>
                 </Box>
 
-                <Box sx={{ bgcolor: aiFilledFields.has('serviceTime') ? '#fffde7' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
+                <Box sx={{ bgcolor: aiFilledFields.has('serviceTime') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <AccessTimeIcon fontSize="small" /> 提供時間 <Typography component="span" color="error">*</Typography>
                     </Typography>
@@ -769,7 +769,7 @@ export default function RecordPage() {
                     const hasError = !!errors[item.id];
                     const isAiFilled = aiFilledFields.has(item.id);
                     return (
-                        <Box key={item.id} sx={{ p: { xs: 2, sm: 3 }, bgcolor: hasError ? 'background.danger' : isAiFilled ? '#fffde7' : 'transparent' }}>
+                        <Box key={item.id} sx={{ p: { xs: 2, sm: 3 }, bgcolor: hasError ? 'background.danger' : isAiFilled ? 'background.aiHighlight' : 'transparent' }}>
                           <DynamicFormField
                             item={item}
                             value={answers[item.id]}

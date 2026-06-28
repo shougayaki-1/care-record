@@ -149,28 +149,35 @@ const TopAppBar = ({
   const [notifAnchor, setNotifAnchor] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
+    let cleanup: (() => void) | undefined;
     const fetchUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).maybeSingle();
-        if (profile) {
-          setUserName(profile.name);
-          setAvatarUrl(profile.avatar_url);
-        }
+      if (!user) return;
 
-        const { count } = await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_read', false);
-        setUnreadCount(count || 0);
+      const [{ data: profile }, { count }] = await Promise.all([
+        supabase.from('profiles').select('name, avatar_url').eq('id', user.id).maybeSingle(),
+        supabase.from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('is_read', false),
+      ]);
 
-        const channel = supabase.channel('notifications')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
-            setUnreadCount(prev => prev + 1);
-          })
-          .subscribe();
-
-        return () => { supabase.removeChannel(channel); };
+      if (profile) {
+        setUserName(profile.name);
+        setAvatarUrl(profile.avatar_url ?? undefined);
       }
+      setUnreadCount(count || 0);
+
+      const channel = supabase.channel('notifications')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
+          setUnreadCount(prev => prev + 1);
+        })
+        .subscribe();
+
+      cleanup = () => { supabase.removeChannel(channel); };
     };
-    fetchUser();
+    void fetchUser();
+    return () => { cleanup?.(); };
   }, []);
 
   const handleSwitchOrg = (id: string) => {
@@ -262,6 +269,22 @@ const TopAppBar = ({
           </IconButton>
         </Tooltip>
         <NotificationsPopover anchorEl={notifAnchor} onClose={() => setNotifAnchor(null)} />
+
+        {userName && (
+          <Typography
+            variant="body2"
+            noWrap
+            sx={{
+              display: { xs: 'none', sm: 'block' },
+              maxWidth: { sm: 120, md: 180 },
+              fontWeight: 700,
+              color: 'text.primary',
+              ml: 0.5,
+            }}
+          >
+            {userName}
+          </Typography>
+        )}
 
         {/* アカウントメニュー */}
         <Tooltip title="アカウント">

@@ -102,10 +102,11 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       }
 
       // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
+      // organization_member_roles を JOIN することで 3RTT → 2RTT に削減。
       const [{ data: members, error: memberError }, { data: profile, error: profileError }] = await Promise.all([
         supabase
           .from('organization_members')
-          .select('organization_id, role, organizations!inner(id, name)')
+          .select('organization_id, role, organizations!inner(id, name), organization_member_roles(organization_roles(permissions))')
           .eq('user_id', session.user.id),
         supabase
           .from('profiles')
@@ -117,49 +118,42 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       if (memberError || profileError) {
         if (!isCurrent()) return;
         console.error('Workspace lookup failed', { memberError, profileError });
-        setStatus('error');
-        setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
+        const authErr = memberError || profileError;
+        if (authErr?.code === '401' || authErr?.message?.toLowerCase().includes('jwt')) {
+          setOrgList([]);
+          setCurrentOrg(null);
+          setStatus('session_expired');
+          setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
+        } else {
+          setStatus('error');
+          setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
+        }
         return;
       }
 
-      const list: Workspace[] = [];
-      for (const member of members ?? []) {
+      const parsedMembers = (members ?? []).map((member) => {
         const organization = Array.isArray(member.organizations)
           ? member.organizations[0]
           : member.organizations;
         const role = member.role as string;
-        if (!organization || !['owner', 'member'].includes(role)) {
-          setStatus('forbidden');
-          setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
-          return;
-        }
+        const memberRoles = member.organization_member_roles ?? [];
+        return { organization, role, memberRoles };
+      });
 
-        const { data: roleLinks, error: roleLinksError } = await supabase
-          .from('organization_member_roles')
-          .select('organization_roles(permissions)')
-          .eq('organization_id', organization.id)
-          .eq('user_id', session.user.id);
+      if (parsedMembers.some(({ organization, role }) => !organization || !['owner', 'member'].includes(role))) {
         if (!isCurrent()) return;
-        if (roleLinksError) {
-          console.error('Workspace role lookup failed', roleLinksError);
-          if (roleLinksError.code === '401' || roleLinksError.message.toLowerCase().includes('jwt')) {
-            setOrgList([]);
-            setCurrentOrg(null);
-            setStatus('session_expired');
-            setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
-          } else {
-            setStatus('error');
-            setErrorMessage('権限情報を取得できませんでした。時間をおいて再試行してください。');
-          }
-          return;
-        }
-        const rolePerms: RolePermissions[] = (roleLinks ?? [])
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .map((r: any) => {
-            const org = Array.isArray(r.organization_roles) ? r.organization_roles[0] : r.organization_roles;
-            return org?.permissions as RolePermissions | undefined;
-          })
-          .filter((p): p is RolePermissions => p != null);
+        setStatus('forbidden');
+        setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
+        return;
+      }
+
+      const list: Workspace[] = [];
+      for (const { organization, role, memberRoles } of parsedMembers) {
+        const rolePerms: RolePermissions[] = memberRoles.flatMap((omr: { organization_roles: { permissions: RolePermissions } | { permissions: RolePermissions }[] | null }) => {
+          const orgRole = Array.isArray(omr.organization_roles) ? omr.organization_roles[0] : omr.organization_roles;
+          if (!orgRole?.permissions) return [];
+          return [orgRole.permissions as RolePermissions];
+        });
         const effectivePermissions = role === 'owner' ? FULL_PERMISSIONS : mergePermissions(rolePerms);
 
         list.push({ id: organization.id, name: organization.name, role: role as OrganizationRole, effectivePermissions });

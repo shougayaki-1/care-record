@@ -10,6 +10,7 @@ declare module '@mui/material/styles' {
     danger: string;
     warning: string;
     success: string;
+    aiHighlight: string;
   }
 }
 
@@ -30,6 +31,7 @@ export const designTokens = {
     danger: '#FFF5F5',
     warning: '#FFF8E1',
     success: '#F1F8E9',
+    aiHighlight: '#FFFDE7',
   },
   border: {
     default: '#E3E5E8',
@@ -63,6 +65,7 @@ const theme = createTheme({
       danger: designTokens.status.danger,
       warning: designTokens.status.warning,
       success: designTokens.status.success,
+      aiHighlight: designTokens.status.aiHighlight,
     },
     divider: designTokens.border.default,
     text: { primary: '#2C3E50', secondary: '#636E72' },

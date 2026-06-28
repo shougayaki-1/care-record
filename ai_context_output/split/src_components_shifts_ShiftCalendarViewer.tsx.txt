@@ -1,6 +1,7 @@
 'use client';
 
 import React, { forwardRef } from 'react';
+import { alpha } from '@mui/material/styles';
 import { Box, Chip, Paper } from '@/components/ui/mui';
 import FullCalendar from '@fullcalendar/react';
 import { EventInput, EventClickArg, DateSelectArg, EventDropArg, DatesSetArg, EventContentArg } from '@fullcalendar/core';
@@ -17,6 +18,7 @@ type HeaderToolbarConfig = {
 } | false;
 
 type Props = {
+    calendarRef?: React.Ref<FullCalendar>;
     events: EventInput[];
     initialView: string;
     headerToolbar: HeaderToolbarConfig;
@@ -54,12 +56,33 @@ const reportStatusColor = (status: string): 'default' | 'warning' | 'success' | 
 };
 
 export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
-    events, initialView, headerToolbar, buttonText, selectable = false, editable = false,
+    calendarRef, events, initialView, headerToolbar, buttonText, selectable = false, editable = false,
     onEventClick, onDateSelect, onEventDrop, onEventResize, onDatesSet, noEventsText
 }, ref) => {
     const renderEventContent = (arg: EventContentArg) => {
-        if (!arg.view.type.startsWith('list')) return undefined;
         const statuses = (arg.event.extendedProps.reportStatuses ?? []) as ReportStatus[];
+        const staffNames = (arg.event.extendedProps.staffNames ?? '') as string;
+
+        if (!arg.view.type.startsWith('list')) {
+            return (
+                <Box component="span" className="shift-calendar-event-content">
+                    {arg.timeText && (
+                        <Box component="span" className="shift-calendar-event-time">
+                            {arg.timeText}
+                        </Box>
+                    )}
+                    <Box component="span" className="shift-calendar-event-title">
+                        {arg.event.title}
+                    </Box>
+                    {staffNames && (
+                        <Box component="span" className="shift-calendar-event-staff">
+                            {staffNames}
+                        </Box>
+                    )}
+                </Box>
+            );
+        }
+
         return (
             <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', minWidth: 0 }}>
                 <Box component="span" sx={{ overflowWrap: 'anywhere' }}>{arg.event.title}</Box>
@@ -86,8 +109,16 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
 
     return (
         <Paper sx={(theme) => ({
-            display: 'flex', flexDirection: 'column', height: 'calc(100vh - 180px)',
-            borderRadius: 3, p: 2, boxShadow: 'none', border: '1px solid', borderColor: 'divider',
+            display: 'flex',
+            flexDirection: 'column',
+            height: { xs: '72vh', md: 'calc(100vh - 252px)' },
+            minHeight: { xs: 540, md: 620 },
+            borderRadius: 2,
+            p: { xs: 1, sm: 1.5 },
+            boxShadow: 'none',
+            border: '1px solid',
+            borderColor: 'divider',
+            bgcolor: 'background.paper',
             '& .fc': {
                 height: '100%',
                 bgcolor: theme.palette.background.paper,
@@ -102,18 +133,114 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                 '--fc-event-text-color': '#fff',
                 fontFamily: 'inherit',
             },
-            '& .fc-button': { textTransform: 'capitalize', borderRadius: '6px', fontWeight: 'bold', boxShadow: 'none !important' },
-            '& .fc-toolbar-title': { fontSize: '1.25rem', fontWeight: 'bold', color: '#060607' },
-            '& .fc-col-header-cell-cushion': { color: '#6D6F78', padding: '8px 0' },
-            '& .fc-event-time': { fontWeight: 'bold', marginRight: '4px' },
-            '& .fc-list-day-cushion': { backgroundColor: `${theme.palette.background.tint} !important`, color: theme.palette.primary.main, fontWeight: 'bold' },
-            '& .fc-list-event:hover td': { backgroundColor: '#F8F9FA', cursor: 'pointer' },
-            // ★ドラッグ＆ドロップ時のUI調整
+            '& .fc-header-toolbar': {
+                alignItems: 'center',
+                gap: 1,
+                marginBottom: '12px !important',
+                flexWrap: 'wrap',
+            },
+            '& .fc-toolbar-chunk': {
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+            },
+            '& .fc-button': {
+                minHeight: 36,
+                borderRadius: `${theme.shape.borderRadius}px !important`,
+                px: '12px !important',
+                textTransform: 'none',
+                fontWeight: 700,
+                boxShadow: 'none !important',
+            },
+            '& .fc-button-primary:not(:disabled).fc-button-active': {
+                bgcolor: `${theme.palette.primary.dark} !important`,
+                borderColor: `${theme.palette.primary.dark} !important`,
+            },
+            '& .fc-toolbar-title': { fontSize: '1.05rem', fontWeight: 700, color: theme.palette.text.primary },
+            '& .fc-view-harness': {
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                overflow: 'hidden',
+                bgcolor: 'background.paper',
+            },
+            '& .fc-scrollgrid': { border: '0 !important' },
+            '& .fc-col-header-cell': { bgcolor: 'background.subtle' },
+            '& .fc-col-header-cell-cushion': {
+                color: theme.palette.text.secondary,
+                padding: '9px 0',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+            },
+            '& .fc-daygrid-day-number': {
+                color: theme.palette.text.primary,
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                padding: '7px 8px',
+            },
+            '& .fc-day-other .fc-daygrid-day-number': { color: theme.palette.text.disabled },
+            '& .fc-daygrid-day.fc-day-today': { bgcolor: alpha(theme.palette.primary.main, 0.08) },
+            '& .fc-daygrid-day-frame': { minHeight: 96 },
+            '& .fc-daygrid-event-harness': { marginInline: '5px' },
+            '& .fc-daygrid-event.shift-calendar-event': {
+                display: 'block',
+                borderRadius: '6px',
+                border: '1px solid transparent',
+                padding: '3px 6px',
+                marginTop: '3px',
+                cursor: 'pointer',
+                boxShadow: 'none',
+                overflow: 'hidden',
+            },
+            '& .fc-daygrid-event.shift-calendar-event:hover': {
+                filter: 'brightness(0.96)',
+            },
+            '& .fc-daygrid-event.shift-calendar-event.is-cancelled': {
+                color: `${theme.palette.text.secondary} !important`,
+                textDecoration: 'line-through',
+            },
+            '& .shift-calendar-event-content': {
+                display: 'grid',
+                gap: '1px',
+                minWidth: 0,
+                lineHeight: 1.25,
+            },
+            '& .shift-calendar-event-time': {
+                fontSize: '0.68rem',
+                fontWeight: 800,
+                opacity: 0.92,
+                whiteSpace: 'nowrap',
+            },
+            '& .shift-calendar-event-title': {
+                fontSize: '0.76rem',
+                fontWeight: 800,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+            },
+            '& .shift-calendar-event-staff': {
+                fontSize: '0.67rem',
+                fontWeight: 600,
+                opacity: 0.82,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+            },
+            '& .fc-timegrid-event.shift-calendar-event': {
+                borderRadius: '6px',
+                padding: '4px 6px',
+                boxShadow: 'none',
+            },
+            '& .fc-timegrid-slot': { height: 34 },
+            '& .fc-list': { border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' },
+            '& .fc-list-day-cushion': { backgroundColor: `${theme.palette.background.tint} !important`, color: theme.palette.primary.main, fontWeight: 700 },
+            '& .fc-list-event:hover td': { backgroundColor: theme.palette.background.subtle, cursor: 'pointer' },
+            '& .fc-list-event-title': { overflowWrap: 'anywhere' },
             '& .fc-event-dragging': { opacity: 0.8 },
             '& .fc-event-resizing': { opacity: 0.8 },
         })}>
             <FullCalendar
-                ref={ref}
+                ref={calendarRef ?? ref}
                 // rrulePlugin を削除（実体化方式になったため不要）
                 plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
                 initialView={initialView}
@@ -131,7 +258,15 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                 select={onDateSelect}
                 eventClick={onEventClick}
                 eventContent={renderEventContent}
+                eventClassNames={(arg) => [
+                    'shift-calendar-event',
+                    arg.event.extendedProps.isCancelled ? 'is-cancelled' : '',
+                ].filter(Boolean)}
+                eventDisplay="block"
                 dayMaxEvents={true}
+                expandRows={true}
+                handleWindowResize={true}
+                height="100%"
                 noEventsText={noEventsText}
             />
         </Paper>

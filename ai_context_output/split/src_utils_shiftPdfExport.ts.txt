@@ -1,12 +1,12 @@
 import React from 'react';
-import { pdf } from '@react-pdf/renderer';
+import type { DocumentProps } from '@react-pdf/renderer';
 import type { CalendarApi } from '@fullcalendar/core';
 import { supabase } from '@/lib/supabase';
 import { FetchedShiftData } from './shiftHelper';
 import { ClientData, StaffData } from '@/components/shifts/ShiftFormModal';
-import { ShiftScheduleDocument, PdfShiftData } from '@/components/pdf/ShiftScheduleDocument';
-import { ShiftCalendarDocument, PdfCalendarEvent, PdfCalendarDay } from '@/components/pdf/ShiftCalendarDocument';
-import { ShiftMatrixDocument, MatrixStaffData } from '@/components/pdf/ShiftMatrixDocument';
+import type { PdfShiftData } from '@/components/pdf/ShiftScheduleDocument';
+import type { PdfCalendarEvent, PdfCalendarDay } from '@/components/pdf/ShiftCalendarDocument';
+import type { MatrixStaffData } from '@/components/pdf/ShiftMatrixDocument';
 
 type TabId = 'patterns' | 'fullCalendar' | 'myShift' | 'byStaff' | 'byClient';
 
@@ -59,6 +59,10 @@ export const downloadShiftPdf = async ({
     const days = ['日', '月', '火', '水', '木', '金', '土'];
 
     if (viewType.includes('list')) {
+        const [{ pdf }, { ShiftScheduleDocument }] = await Promise.all([
+            import('@react-pdf/renderer'),
+            import('@/components/pdf/ShiftScheduleDocument'),
+        ]);
         const pdfShifts: PdfShiftData[] = [];
         renderedEvents.forEach(ev => {
             const start = ev.start!;
@@ -99,8 +103,13 @@ export const downloadShiftPdf = async ({
             }
         });
         pdfShifts.sort((a, b) => a.timestamp - b.timestamp);
-        blob = await pdf(React.createElement(ShiftScheduleDocument, { title: docTitle, monthStr, shifts: pdfShifts, orgName: currentOrg.name, staffMembers })).toBlob();
+        const document = React.createElement(ShiftScheduleDocument, { title: docTitle, monthStr, shifts: pdfShifts, orgName: currentOrg.name, staffMembers }) as React.ReactElement<DocumentProps>;
+        blob = await pdf(document).toBlob();
     } else {
+        const [{ pdf }, { ShiftCalendarDocument }] = await Promise.all([
+            import('@react-pdf/renderer'),
+            import('@/components/pdf/ShiftCalendarDocument'),
+        ]);
         const activeStart = calendarApi.view.activeStart;
         const activeEnd = calendarApi.view.activeEnd;
         const dayMap = new Map<string, PdfCalendarEvent[]>();
@@ -161,7 +170,8 @@ export const downloadShiftPdf = async ({
         }
         if (currentWeek.length > 0) weeks.push(currentWeek);
 
-        blob = await pdf(React.createElement(ShiftCalendarDocument, { title: docTitle, monthStr, weeks, orgName: currentOrg.name, staffMembers })).toBlob();
+        const document = React.createElement(ShiftCalendarDocument, { title: docTitle, monthStr, weeks, orgName: currentOrg.name, staffMembers }) as React.ReactElement<DocumentProps>;
+        blob = await pdf(document).toBlob();
     }
 
     triggerDownload(blob, fileName);
@@ -228,14 +238,19 @@ export const downloadShiftMatrixPdf = async ({
         positions: s.positions as string[] | null,
     }));
 
-    const blob = await pdf(React.createElement(ShiftMatrixDocument, {
+    const [{ pdf }, { ShiftMatrixDocument }] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('@/components/pdf/ShiftMatrixDocument'),
+    ]);
+    const document = React.createElement(ShiftMatrixDocument, {
         title: docTitle,
         monthStr,
         daysInMonth,
         staffData: staffDataArray,
         orgName: currentOrg.name,
         staffMembers,
-    })).toBlob();
+    }) as React.ReactElement<DocumentProps>;
+    const blob = await pdf(document).toBlob();
 
     triggerDownload(blob, fileName);
 };

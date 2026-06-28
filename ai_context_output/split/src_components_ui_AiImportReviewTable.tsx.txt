@@ -268,7 +268,7 @@ export function AiImportReviewTable({
                         renderValue={(val) =>
                           val
                             ? (clients.find((c) => c.id === val)?.name ?? val)
-                            : <span style={{ color: '#999' }}>未選択</span>
+                            : <Typography component="span" color="text.disabled">未選択</Typography>
                         }
                       >
                         <MenuItem value=""><em>未選択</em></MenuItem>
@@ -294,7 +294,7 @@ export function AiImportReviewTable({
                         renderValue={(val) =>
                           val
                             ? (helpers.find((h) => h.id === val)?.name ?? val)
-                            : <span style={{ color: '#999' }}>未選択</span>
+                            : <Typography component="span" color="text.disabled">未選択</Typography>
                         }
                       >
                         <MenuItem value=""><em>未選択</em></MenuItem>

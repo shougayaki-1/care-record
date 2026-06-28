@@ -274,11 +274,13 @@ export default function BackupPage() {
                       setHelperFilter('');
                       setStatusFilter('');
                     }}
-                    inputProps={{
-                      min: availableDates.at(-1),
-                      max: availableDates[0],
+                    slotProps={{
+                      htmlInput: {
+                        min: availableDates.at(-1),
+                        max: availableDates[0],
+                      },
+                      inputLabel: { shrink: true },
                     }}
-                    InputLabelProps={{ shrink: true }}
                     fullWidth
                   />
                   <TextField
@@ -321,7 +323,7 @@ export default function BackupPage() {
                   placeholder="キーワード検索"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+                  slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
                   fullWidth
                 />
                 <TextField

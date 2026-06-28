@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Box, Stack, Switch, Button, CircularProgress, Alert,
-  Table, TableBody, TableCell, TableHead, TableRow, TextField,
+  Box, Stack, CircularProgress, Alert,
+  Table, TableBody, TableCell, TableHead, TableRow,
 } from '@/components/ui/mui';
-import { AppDialog } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, SwitchField } from '@/components/ui';
 import {
   getServiceTypes, createServiceType, updateServiceType, deleteServiceType,
   type ServiceType,
@@ -122,12 +122,12 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
                 <TableRow key={row.id}>
                   <TableCell sx={{ minWidth: 160 }}>{row.name}</TableCell>
                   <TableCell>
-                    <Switch checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
+                    <SwitchField checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
                   </TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={1}>
-                      <Button size="small" onClick={() => handleEditOpen(row)}>編集</Button>
-                      <Button size="small" color="error" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }}>削除</Button>
+                      <AppButton variant="text" intent="secondary" size="small" onClick={() => handleEditOpen(row)}>編集</AppButton>
+                      <AppButton variant="text" intent="danger" size="small" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }}>削除</AppButton>
                     </Stack>
                   </TableCell>
                 </TableRow>
@@ -148,11 +148,11 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
             >
               <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
                 <Box sx={{ fontWeight: 'bold', overflowWrap: 'anywhere' }}>{row.name}</Box>
-                <Switch checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
+                <SwitchField checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
               </Stack>
               <Stack direction="row" spacing={1} mt={1}>
-                <Button size="small" variant="outlined" onClick={() => handleEditOpen(row)} sx={{ flex: 1 }}>編集</Button>
-                <Button size="small" variant="outlined" color="error" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }} sx={{ flex: 1 }}>削除</Button>
+                <AppButton size="small" variant="outlined" intent="secondary" onClick={() => handleEditOpen(row)} sx={{ flex: 1 }}>編集</AppButton>
+                <AppButton size="small" variant="outlined" intent="danger" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }} sx={{ flex: 1 }}>削除</AppButton>
               </Stack>
             </Box>
           ))
@@ -160,9 +160,9 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
       </Stack>
 
       <Box mt={2}>
-        <Button variant="outlined" size="small" onClick={() => { setAddName(''); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+        <AppButton variant="outlined" intent="secondary" size="small" onClick={() => { setAddName(''); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
           種別を追加
-        </Button>
+        </AppButton>
       </Box>
 
       <AppDialog
@@ -172,15 +172,15 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
         title="サービス種別を編集"
         actions={(
           <>
-            <Button onClick={() => setEditOpen(false)}>キャンセル</Button>
-            <Button variant="contained" onClick={handleEditSave} disabled={saving || !editName.trim()}>
+            <AppButton variant="text" intent="secondary" onClick={() => setEditOpen(false)}>キャンセル</AppButton>
+            <AppButton onClick={handleEditSave} disabled={saving || !editName.trim()}>
               {saving ? '保存中...' : '保存'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
         <Stack spacing={2} mt={1}>
-          <TextField
+          <AppTextField
             label="種別名"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
@@ -196,15 +196,15 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
         title="サービス種別を追加"
         actions={(
           <>
-            <Button onClick={() => setAddOpen(false)}>キャンセル</Button>
-            <Button variant="contained" onClick={handleAddSave} disabled={saving || !addName.trim()}>
+            <AppButton variant="text" intent="secondary" onClick={() => setAddOpen(false)}>キャンセル</AppButton>
+            <AppButton onClick={handleAddSave} disabled={saving || !addName.trim()}>
               {saving ? '追加中...' : '追加'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
         <Stack spacing={2} mt={1}>
-          <TextField
+          <AppTextField
             label="種別名（例：重度訪問介護、移動支援）"
             value={addName}
             onChange={(e) => setAddName(e.target.value)}
@@ -220,10 +220,10 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
         title="サービス種別を削除"
         actions={(
           <>
-            <Button onClick={() => setDeleteOpen(false)}>キャンセル</Button>
-            <Button variant="contained" color="error" onClick={handleDeleteConfirm} disabled={saving}>
+            <AppButton variant="text" intent="secondary" onClick={() => setDeleteOpen(false)}>キャンセル</AppButton>
+            <AppButton intent="danger" onClick={handleDeleteConfirm} disabled={saving}>
               {saving ? '削除中...' : '削除'}
-            </Button>
+            </AppButton>
           </>
         )}
       >

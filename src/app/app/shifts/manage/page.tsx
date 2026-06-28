@@ -37,7 +37,7 @@ import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
 import type { DatesSetArg } from '@fullcalendar/core';
 import { checkShiftPermission } from '@/utils/permissions';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { FetchedPatternData } from '@/hooks/useShiftData';
 
@@ -55,6 +55,7 @@ export default function ShiftManagePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
     const confirm = useConfirm();
+    const router = useRouter();
     const searchParams = useSearchParams();
     const calendarRef = useRef<FullCalendar>(null);
     const handledShiftParamRef = useRef<string | null>(null);
@@ -218,6 +219,15 @@ export default function ShiftManagePage() {
         } finally {
             setSyncProgress(null);
         }
+    };
+
+    const handleCreateRecord = (shift: ShiftData) => {
+        if (shift.status === 'cancelled') {
+            showToast('このシフトは現在キャンセル（お休み）されています。', 'info');
+            return;
+        }
+        setShiftModalOpen(false);
+        router.push(`/app/record/${shift.client_id}?shiftId=${shift.id}`);
     };
 
     const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {
@@ -589,17 +599,10 @@ export default function ShiftManagePage() {
                                         setShiftModalOpen(true);
                                     }}
                                     onEventClick={(info) => {
-                                        const { clientId, shiftId, isCancelled, shiftData } = info.event.extendedProps;
-                                        if (activeTab === 'fullCalendar' && canEditShift) {
-                                            setSelectedShift(shiftData);
-                                            setShiftModalOpen(true);
-                                        } else {
-                                            if (isCancelled) {
-                                                showToast('このシフトは現在キャンセル（お休み）されています。', 'info');
-                                                return;
-                                            }
-                                            window.location.href = `/app/record/${clientId}?shiftId=${shiftId}`;
-                                        }
+                                        const { shiftData } = info.event.extendedProps;
+                                        if (!shiftData) return;
+                                        setSelectedShift(shiftData);
+                                        setShiftModalOpen(true);
                                     }}
                                 />
                             </Box>
@@ -633,10 +636,12 @@ export default function ShiftManagePage() {
                 onSave={handleSaveShift}
                 onToggleCancel={canEditShift ? handleToggleCancel : undefined}
                 onDelete={canDeleteShift ? handleDeleteShift : undefined}
+                onCreateRecord={handleCreateRecord}
                 clients={clients}
                 staffs={staffs}
                 organizationId={currentOrg.id}
                 initialData={selectedShift}
+                canSave={selectedShift?.id ? canEditShift : canCreateShift}
             />
 
             <ShiftPatternModal

@@ -67,6 +67,7 @@ export type ShiftPayload = {
     cancelReason?: string;
     patternId?: string;
     isModified?: boolean;
+    autoAssign?: boolean;
 };
 
 export type ShiftPatternPayload = {
@@ -77,7 +78,29 @@ export type ShiftPatternPayload = {
     endTime: string;
     rrule: string;
     staffIds: string[];
+    autoAssign?: boolean;
 };
+
+/** 指定スタッフを利用者の担当者として upsert する（既存エントリは変更しない） */
+async function upsertAssignmentsForStaffs(organizationId: string, clientId: string, staffIds: string[]) {
+    const { data: staffRows, error: staffError } = await supabaseAdmin
+        .from('staffs')
+        .select('id, user_id')
+        .eq('organization_id', organizationId)
+        .in('id', staffIds)
+        .is('deleted_at', null);
+    if (staffError) throw staffError;
+    if (!staffRows || staffRows.length === 0) return;
+    const { error: upsertError } = await supabaseAdmin.from('assignments').upsert(
+        staffRows.map(s => ({
+            client_id: clientId,
+            staff_id: s.id,
+            helper_id: s.user_id ?? null,
+        })),
+        { onConflict: 'client_id,staff_id', ignoreDuplicates: true }
+    );
+    if (upsertError) throw upsertError;
+}
 
 type ShiftStaffInsert = { shift_id: string; staff_id: string; };
 type PatternStaffInsert = { pattern_id: string; staff_id: string; };
@@ -598,6 +621,12 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean | 's
     const actor = await assertShiftPermission(payload.organizationId, 'create', { clientId: payload.clientId });
     const result = await createShiftInternal(payload, awaitSync);
     await recordAuditEvent({ organizationId: payload.organizationId, actorId: actor.userId, action: 'shift.create', resourceType: 'shift', resourceId: result.shiftId });
+
+    // 自動アサイン: シフト作成時に選択スタッフを assignments に登録（チェックボックス ON 時のみ）
+    if (payload.autoAssign && payload.staffIds.length > 0) {
+        await upsertAssignmentsForStaffs(payload.organizationId, payload.clientId, payload.staffIds);
+    }
+
     return result;
 }
 
@@ -764,17 +793,29 @@ export async function getShifts(organizationId: string, startDate: string, endDa
             status,
             cancel_reason,
             clients (id, name),
-            ${staffRelation}
+            ${staffRelation},
+            report_shifts (shift_id, is_primary, reports (id, status, deleted_at))
         `).eq('organization_id', organizationId)
             .is('deleted_at', null)
-            .gte('start_at', startDate).lte('start_at', endDate)
+            .lt('start_at', endDate)
+            .gt('end_at', startDate)
             .order('start_at', { ascending: false });
         if (filter.staffId) query = query.eq('shift_staffs.staff_id', filter.staffId);
         if (filter.clientId) query = query.eq('client_id', filter.clientId);
 
         const { data, error } = await query;
         if (error) throw error;
-        const withReportStatuses = await attachReportStatuses(data ?? []);
+        const withReportStatuses = (data ?? []).map(shift => {
+            const reportShifts = Array.isArray(shift.report_shifts) ? shift.report_shifts : [];
+            return {
+                ...shift,
+                report_statuses: reportShifts.flatMap((rs: { shift_id: string; is_primary: boolean; reports: { id: string; status: string; deleted_at: string | null } | { id: string; status: string; deleted_at: string | null }[] | null }) => {
+                    const r = Array.isArray(rs.reports) ? rs.reports[0] : rs.reports;
+                    if (!r || r.deleted_at) return [];
+                    return [{ id: r.id, status: r.status, is_primary: rs.is_primary }];
+                }),
+            };
+        });
         if (actor.isOwner) return withReportStatuses;
         const { permissions } = await getEffectivePermissions(organizationId, actor.userId);
         if (permissions.shifts.view === 'all') return withReportStatuses;
@@ -788,29 +829,6 @@ export async function getShifts(organizationId: string, startDate: string, endDa
     } catch (error) { console.error(error); throw error; }
 }
 
-async function attachReportStatuses<T extends { id: string }>(shifts: T[]): Promise<Array<T & { report_statuses: Array<{ id: string; status: string; is_primary: boolean }> }>> {
-    if (shifts.length === 0) return [];
-    const { data, error } = await supabaseAdmin
-        .from('report_shifts')
-        .select('shift_id, is_primary, report:reports(id, status, deleted_at)')
-        .in('shift_id', shifts.map((shift) => shift.id))
-        .is('reports.deleted_at', null);
-    if (error) throw error;
-
-    const byShiftId = new Map<string, Array<{ id: string; status: string; is_primary: boolean }>>();
-    (data ?? []).forEach((row) => {
-        const report = Array.isArray(row.report) ? row.report[0] : row.report;
-        if (!report?.id) return;
-        const current = byShiftId.get(row.shift_id) ?? [];
-        current.push({ id: report.id, status: report.status, is_primary: row.is_primary });
-        byShiftId.set(row.shift_id, current);
-    });
-
-    return shifts.map((shift) => ({
-        ...shift,
-        report_statuses: byShiftId.get(shift.id) ?? [],
-    }));
-}
 
 export async function getShiftPatterns(organizationId: string) {
     await assertShiftPermission(organizationId, 'view', { requireAllScope: true });
@@ -840,6 +858,12 @@ export async function createShiftPattern(payload: ShiftPatternPayload) {
         const inserts: PatternStaffInsert[] = payload.staffIds.map(sid => ({ pattern_id: pattern.id, staff_id: sid }));
         await supabaseAdmin.from('shift_pattern_staffs').insert(inserts);
     }
+
+    // 自動アサイン: ひな形作成時に選択スタッフを assignments に登録（チェックボックス ON 時のみ）
+    if (payload.autoAssign && payload.staffIds.length > 0) {
+        await upsertAssignmentsForStaffs(payload.organizationId, payload.clientId, payload.staffIds);
+    }
+
     await recordAuditEvent({ organizationId: payload.organizationId, actorId: actor.userId, action: 'shift_pattern.create', resourceType: 'shift_pattern', resourceId: pattern.id });
     return { success: true };
 }
@@ -1007,7 +1031,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         let createdCount = 0;
         let skippedCount = 0;
         let updatedCount = 0;
-        const promises: Promise<unknown>[] = [];
+        const tasks: Array<() => Promise<unknown>> = [];
 
         for (const p of patterns) {
             const ruleStr = buildPatternRuleString(year, month, p.start_time, p.rrule);
@@ -1040,20 +1064,25 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 if (existNormal) {
                     if (!existNormal.is_modified) {
                         // org は冒頭で検証済みのため内部実装を直接呼ぶ（多数回の getUser を回避）
-                        promises.push(updateShiftInternal(existNormal.id, payload, 'skip'));
+                        tasks.push(() => updateShiftInternal(existNormal.id, payload, 'skip'));
                         updatedCount++;
                     } else {
                         skippedCount++;
                     }
                 } else {
-                    promises.push(createShiftInternal({ ...payload, patternId: p.id }, 'skip'));
+                    tasks.push(() => createShiftInternal({ ...payload, patternId: p.id }, 'skip'));
                     createdCount++;
                 }
             }
         }
 
         // 部分失敗を握りつぶさず集計する（DB挿入のみ。Google同期は後続のバッチ処理に委ねる）
-        const results = await Promise.allSettled(promises);
+        const results: PromiseSettledResult<unknown>[] = [];
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
+            const chunk = tasks.slice(i, i + CHUNK_SIZE).map((task) => task());
+            results.push(...await Promise.allSettled(chunk));
+        }
         const failedCount = results.filter(r => r.status === 'rejected').length;
         if (failedCount > 0) {
             results.forEach(r => { if (r.status === 'rejected') console.error('Generate Shift DB Error:', r.reason); });
@@ -1189,8 +1218,8 @@ export async function getMyShiftsWithStatus(
         .eq('organization_id', organizationId)
         .eq('shift_staffs.staff_id', staffRow.id)
         .is('deleted_at', null)
-        .gte('start_at', startDate)
-        .lte('start_at', endDate)
+        .lt('start_at', endDate)
+        .gt('end_at', startDate)
         .order('start_at', { ascending: true });
 
     if (error) throw error;

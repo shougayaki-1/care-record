@@ -29,6 +29,7 @@ import { supabase } from '@/lib/supabase';
 import { saveReport } from '@/app/actions/reports';
 import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
 import { AiImportReviewTable, type ReviewRow } from '@/components/ui/AiImportReviewTable';
+import { AiInfoPanel } from '@/components/ui/AiInfoPanel';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -514,6 +515,8 @@ export default function AiImportPage() {
       <Typography variant="h5" fontWeight="bold" mb={3}>
         AI一括取込
       </Typography>
+
+      <AiInfoPanel variant="page" />
 
       {/* アップロードエリア */}
       <Paper

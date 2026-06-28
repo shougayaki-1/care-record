@@ -8,6 +8,7 @@ import {
     FormControlLabel, Checkbox
 } from '@/components/ui/mui';
 import DeleteIcon from '@mui/icons-material/Delete';
+import EditNoteIcon from '@mui/icons-material/EditNote';
 import ShiftSegmentEditor from './ShiftSegmentEditor';
 import { ShiftPayload } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
@@ -34,14 +35,16 @@ type Props = {
     onSave: (payload: ShiftPayload, shiftId?: string) => Promise<void>;
     onToggleCancel?: (shiftId: string, isCancel: boolean, reason: string) => Promise<void>;
     onDelete?: (shiftId: string) => Promise<void>;
+    onCreateRecord?: (shift: ShiftData) => void;
     clients: ClientData[];
     staffs: StaffData[];
     organizationId: string;
     initialData?: ShiftData | null;
+    canSave?: boolean;
 };
 
 export const ShiftFormModal = ({
-    open, onClose, onSave, onToggleCancel, onDelete, clients, staffs, organizationId, initialData
+    open, onClose, onSave, onToggleCancel, onDelete, onCreateRecord, clients, staffs, organizationId, initialData, canSave = true
 }: Props) => {
     const { showToast } = useToast();
     const confirm = useConfirm();
@@ -167,7 +170,23 @@ export const ShiftFormModal = ({
                     </Tooltip>
                 )}
             contentSx={{ py: 3 }}
-            actions={<><AppButton variant="text" intent="secondary" onClick={onClose} disabled={loading}>閉じる</AppButton><AppButton onClick={handleSave} loading={loading}>変更を保存</AppButton></>}
+            actions={<>
+                {initialData && onCreateRecord && (
+                    <AppButton
+                        variant="outlined"
+                        intent="secondary"
+                        startIcon={<EditNoteIcon />}
+                        onClick={() => onCreateRecord(initialData)}
+                        disabled={loading || initialData.status === 'cancelled'}
+                    >
+                        記録作成
+                    </AppButton>
+                )}
+                <Box sx={{ flexGrow: 1 }} />
+                <AppButton variant="text" intent="secondary" onClick={onClose} disabled={loading}>閉じる</AppButton>
+                {canSave && <AppButton onClick={handleSave} loading={loading}>変更を保存</AppButton>}
+            </>}
+            actionsSx={{ flexWrap: 'wrap', gap: 1 }}
         >
                 <Stack spacing={3}>
                     {initialData?.status === 'cancelled' && (

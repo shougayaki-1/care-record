@@ -2795,6 +2795,7 @@ export type ShiftPayload = {
     cancelReason?: string;
     patternId?: string;
     isModified?: boolean;
+    autoAssign?: boolean;
 };
 
 export type ShiftPatternPayload = {
@@ -2805,7 +2806,29 @@ export type ShiftPatternPayload = {
     endTime: string;
     rrule: string;
     staffIds: string[];
+    autoAssign?: boolean;
 };
+
+/** 指定スタッフを利用者の担当者として upsert する（既存エントリは変更しない） */
+async function upsertAssignmentsForStaffs(organizationId: string, clientId: string, staffIds: string[]) {
+    const { data: staffRows, error: staffError } = await supabaseAdmin
+        .from('staffs')
+        .select('id, user_id')
+        .eq('organization_id', organizationId)
+        .in('id', staffIds)
+        .is('deleted_at', null);
+    if (staffError) throw staffError;
+    if (!staffRows || staffRows.length === 0) return;
+    const { error: upsertError } = await supabaseAdmin.from('assignments').upsert(
+        staffRows.map(s => ({
+            client_id: clientId,
+            staff_id: s.id,
+            helper_id: s.user_id ?? null,
+        })),
+        { onConflict: 'client_id,staff_id', ignoreDuplicates: true }
+    );
+    if (upsertError) throw upsertError;
+}
 
 type ShiftStaffInsert = { shift_id: string; staff_id: string; };
 type PatternStaffInsert = { pattern_id: string; staff_id: string; };
@@ -3326,6 +3349,12 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean | 's
     const actor = await assertShiftPermission(payload.organizationId, 'create', { clientId: payload.clientId });
     const result = await createShiftInternal(payload, awaitSync);
     await recordAuditEvent({ organizationId: payload.organizationId, actorId: actor.userId, action: 'shift.create', resourceType: 'shift', resourceId: result.shiftId });
+
+    // 自動アサイン: シフト作成時に選択スタッフを assignments に登録（チェックボックス ON 時のみ）
+    if (payload.autoAssign && payload.staffIds.length > 0) {
+        await upsertAssignmentsForStaffs(payload.organizationId, payload.clientId, payload.staffIds);
+    }
+
     return result;
 }
 
@@ -3492,17 +3521,29 @@ export async function getShifts(organizationId: string, startDate: string, endDa
             status,
             cancel_reason,
             clients (id, name),
-            ${staffRelation}
+            ${staffRelation},
+            report_shifts (shift_id, is_primary, reports (id, status, deleted_at))
         `).eq('organization_id', organizationId)
             .is('deleted_at', null)
-            .gte('start_at', startDate).lte('start_at', endDate)
+            .lt('start_at', endDate)
+            .gt('end_at', startDate)
             .order('start_at', { ascending: false });
         if (filter.staffId) query = query.eq('shift_staffs.staff_id', filter.staffId);
         if (filter.clientId) query = query.eq('client_id', filter.clientId);
 
         const { data, error } = await query;
         if (error) throw error;
-        const withReportStatuses = await attachReportStatuses(data ?? []);
+        const withReportStatuses = (data ?? []).map(shift => {
+            const reportShifts = Array.isArray(shift.report_shifts) ? shift.report_shifts : [];
+            return {
+                ...shift,
+                report_statuses: reportShifts.flatMap((rs: { shift_id: string; is_primary: boolean; reports: { id: string; status: string; deleted_at: string | null } | { id: string; status: string; deleted_at: string | null }[] | null }) => {
+                    const r = Array.isArray(rs.reports) ? rs.reports[0] : rs.reports;
+                    if (!r || r.deleted_at) return [];
+                    return [{ id: r.id, status: r.status, is_primary: rs.is_primary }];
+                }),
+            };
+        });
         if (actor.isOwner) return withReportStatuses;
         const { permissions } = await getEffectivePermissions(organizationId, actor.userId);
         if (permissions.shifts.view === 'all') return withReportStatuses;
@@ -3516,29 +3557,6 @@ export async function getShifts(organizationId: string, startDate: string, endDa
     } catch (error) { console.error(error); throw error; }
 }
 
-async function attachReportStatuses<T extends { id: string }>(shifts: T[]): Promise<Array<T & { report_statuses: Array<{ id: string; status: string; is_primary: boolean }> }>> {
-    if (shifts.length === 0) return [];
-    const { data, error } = await supabaseAdmin
-        .from('report_shifts')
-        .select('shift_id, is_primary, report:reports(id, status, deleted_at)')
-        .in('shift_id', shifts.map((shift) => shift.id))
-        .is('reports.deleted_at', null);
-    if (error) throw error;
-
-    const byShiftId = new Map<string, Array<{ id: string; status: string; is_primary: boolean }>>();
-    (data ?? []).forEach((row) => {
-        const report = Array.isArray(row.report) ? row.report[0] : row.report;
-        if (!report?.id) return;
-        const current = byShiftId.get(row.shift_id) ?? [];
-        current.push({ id: report.id, status: report.status, is_primary: row.is_primary });
-        byShiftId.set(row.shift_id, current);
-    });
-
-    return shifts.map((shift) => ({
-        ...shift,
-        report_statuses: byShiftId.get(shift.id) ?? [],
-    }));
-}
 
 export async function getShiftPatterns(organizationId: string) {
     await assertShiftPermission(organizationId, 'view', { requireAllScope: true });
@@ -3568,6 +3586,12 @@ export async function createShiftPattern(payload: ShiftPatternPayload) {
         const inserts: PatternStaffInsert[] = payload.staffIds.map(sid => ({ pattern_id: pattern.id, staff_id: sid }));
         await supabaseAdmin.from('shift_pattern_staffs').insert(inserts);
     }
+
+    // 自動アサイン: ひな形作成時に選択スタッフを assignments に登録（チェックボックス ON 時のみ）
+    if (payload.autoAssign && payload.staffIds.length > 0) {
+        await upsertAssignmentsForStaffs(payload.organizationId, payload.clientId, payload.staffIds);
+    }
+
     await recordAuditEvent({ organizationId: payload.organizationId, actorId: actor.userId, action: 'shift_pattern.create', resourceType: 'shift_pattern', resourceId: pattern.id });
     return { success: true };
 }
@@ -3735,7 +3759,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         let createdCount = 0;
         let skippedCount = 0;
         let updatedCount = 0;
-        const promises: Promise<unknown>[] = [];
+        const tasks: Array<() => Promise<unknown>> = [];
 
         for (const p of patterns) {
             const ruleStr = buildPatternRuleString(year, month, p.start_time, p.rrule);
@@ -3768,20 +3792,25 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 if (existNormal) {
                     if (!existNormal.is_modified) {
                         // org は冒頭で検証済みのため内部実装を直接呼ぶ（多数回の getUser を回避）
-                        promises.push(updateShiftInternal(existNormal.id, payload, 'skip'));
+                        tasks.push(() => updateShiftInternal(existNormal.id, payload, 'skip'));
                         updatedCount++;
                     } else {
                         skippedCount++;
                     }
                 } else {
-                    promises.push(createShiftInternal({ ...payload, patternId: p.id }, 'skip'));
+                    tasks.push(() => createShiftInternal({ ...payload, patternId: p.id }, 'skip'));
                     createdCount++;
                 }
             }
         }
 
         // 部分失敗を握りつぶさず集計する（DB挿入のみ。Google同期は後続のバッチ処理に委ねる）
-        const results = await Promise.allSettled(promises);
+        const results: PromiseSettledResult<unknown>[] = [];
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
+            const chunk = tasks.slice(i, i + CHUNK_SIZE).map((task) => task());
+            results.push(...await Promise.allSettled(chunk));
+        }
         const failedCount = results.filter(r => r.status === 'rejected').length;
         if (failedCount > 0) {
             results.forEach(r => { if (r.status === 'rejected') console.error('Generate Shift DB Error:', r.reason); });
@@ -3917,8 +3946,8 @@ export async function getMyShiftsWithStatus(
         .eq('organization_id', organizationId)
         .eq('shift_staffs.staff_id', staffRow.id)
         .is('deleted_at', null)
-        .gte('start_at', startDate)
-        .lte('start_at', endDate)
+        .lt('start_at', endDate)
+        .gt('end_at', startDate)
         .order('start_at', { ascending: true });
 
     if (error) throw error;
@@ -4425,16 +4454,18 @@ export async function getStatisticsData(
 ): Promise<StatisticsData> {
   await assertOrgPermission(organizationId, 'reports');
 
-  const [{ data: shifts, error: shiftsError }, { data: reports, error: reportsError }, { data: shiftsWithLinks, error: shiftsWithLinksError }, { data: premiumTypes, error: premiumTypesError }, internalWorkRecords] = await Promise.all([
+  const [{ data: shiftsWithLinks, error: shiftsError }, { data: reports, error: reportsError }, { data: premiumTypes, error: premiumTypesError }, internalWorkRecords] = await Promise.all([
     supabaseAdmin
       .from('shifts')
       .select(`
         id, start_at, end_at, status, client_id,
         clients (name),
-        shift_staffs (staff_id, staffs(name))
+        shift_staffs (staff_id, staffs(name)),
+        report_shifts (is_primary, reports(id, start_at, end_at, status, report_values(data)))
       `)
       .eq('organization_id', organizationId)
       .neq('status', 'cancelled')
+      .is('deleted_at', null)
       .gte('end_at', startAt)
       .lte('start_at', endAt),
     supabaseAdmin
@@ -4452,19 +4483,6 @@ export async function getStatisticsData(
       .gte('end_at', startAt)
       .lte('start_at', endAt),
     supabaseAdmin
-      .from('shifts')
-      .select(`
-        id, start_at, end_at, client_id,
-        clients (name),
-        shift_staffs (staffs(name)),
-        report_shifts (is_primary, reports(id, start_at, end_at, status, report_values(data)))
-      `)
-      .eq('organization_id', organizationId)
-      .neq('status', 'cancelled')
-      .is('deleted_at', null)
-      .gte('end_at', startAt)
-      .lte('start_at', endAt),
-    supabaseAdmin
       .from('labor_premium_types')
       .select('*')
       .eq('organization_id', organizationId)
@@ -4475,11 +4493,10 @@ export async function getStatisticsData(
 
   if (shiftsError) throw sanitizeDbError(shiftsError, 'action.statistics.shifts');
   if (reportsError) throw sanitizeDbError(reportsError, 'action.statistics.reports');
-  if (shiftsWithLinksError) throw sanitizeDbError(shiftsWithLinksError, 'action.statistics.shiftLinks');
   if (premiumTypesError) throw sanitizeDbError(premiumTypesError, 'action.statistics.premiumTypes');
 
   return {
-    shifts: shifts ?? [],
+    shifts: (shiftsWithLinks ?? []).map(({ report_shifts: _rs, ...s }) => s),
     reports: reports ?? [],
     shiftsWithLinks: shiftsWithLinks ?? [],
     internalWorkRecords,
@@ -6341,6 +6358,7 @@ import { supabase } from '@/lib/supabase';
 import { saveReport } from '@/app/actions/reports';
 import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
 import { AiImportReviewTable, type ReviewRow } from '@/components/ui/AiImportReviewTable';
+import { AiInfoPanel } from '@/components/ui/AiInfoPanel';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -6827,6 +6845,8 @@ export default function AiImportPage() {
         AI一括取込
       </Typography>
 
+      <AiInfoPanel variant="page" />
+
       {/* アップロードエリア */}
       <Paper
         ref={dropRef}
@@ -7227,11 +7247,13 @@ export default function BackupPage() {
                       setHelperFilter('');
                       setStatusFilter('');
                     }}
-                    inputProps={{
-                      min: availableDates.at(-1),
-                      max: availableDates[0],
+                    slotProps={{
+                      htmlInput: {
+                        min: availableDates.at(-1),
+                        max: availableDates[0],
+                      },
+                      inputLabel: { shrink: true },
                     }}
-                    InputLabelProps={{ shrink: true }}
                     fullWidth
                   />
                   <TextField
@@ -7274,7 +7296,7 @@ export default function BackupPage() {
                   placeholder="キーワード検索"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+                  slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
                   fullWidth
                 />
                 <TextField
@@ -8212,7 +8234,7 @@ export default function ClientSettingsPage() {
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Box, IconButton, Paper, Stack, Tooltip, Switch, FormControlLabel } from '@/components/ui/mui';
+import { Box, IconButton, Paper, Stack, Tooltip } from '@/components/ui/mui';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -8225,14 +8247,15 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { AppButton, AppDialog, AppTextField, DataTable, PageHeader, StatusChip } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, DataTable, PageHeader, StatusChip, SwitchField } from '@/components/ui';
 import { createClient, setClientArchived, softDeleteClient, updateClientName } from '@/app/actions/clients';
 
-type Client = { 
-    id: string; 
-    name: string; 
-    created_at: string; 
-    archived_at: string | null; 
+type Client = {
+    id: string;
+    name: string;
+    created_at: string;
+    archived_at: string | null;
+    assignments: { staff_id: string }[];
 };
 
 export default function ClientsPage() {
@@ -8259,7 +8282,7 @@ export default function ClientsPage() {
     try {
       let query = supabase
         .from('clients')
-        .select('*')
+        .select('id, name, created_at, archived_at, assignments(staff_id)')
         .eq('organization_id', currentOrg.id)
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
@@ -8286,7 +8309,7 @@ export default function ClientsPage() {
     setIsSubmitting(true);
     try {
       const data = await createClient(currentOrg.id, newName);
-      setClients([data, ...clients]);
+      setClients([{ ...data, assignments: [] }, ...clients]);
       setOpenAdd(false);
       setNewName('');
       showToast('登録しました');
@@ -8350,7 +8373,7 @@ export default function ClientsPage() {
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, md: 3 }, bgcolor: 'background.default' }}>
         <PageHeader
           title={<Stack direction="row" alignItems="center" gap={1}><PeopleIcon color="action" />利用者管理</Stack>}
-          actions={<><FormControlLabel control={<Switch checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />} label="アーカイブを表示" /><AppButton startIcon={<AddIcon />} onClick={() => setOpenAdd(true)}>新規登録</AppButton></>}
+          actions={<><SwitchField checked={showArchived} onChange={e => setShowArchived(e.target.checked)} label="アーカイブを表示" /><AppButton startIcon={<AddIcon />} onClick={() => setOpenAdd(true)}>新規登録</AppButton></>}
         />
 
         <DataTable
@@ -8371,6 +8394,12 @@ export default function ClientsPage() {
                     </Stack>
                   </Box>
                   {client.archived_at ? <StatusChip label="アーカイブ" /> : <StatusChip label="有効" tone="success" />}
+                </Box>
+                <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>
+                  {client.assignments.length === 0
+                    ? <StatusChip label="⚠️ 担当未設定" tone="warning" />
+                    : <Box sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>担当者 {client.assignments.length}名</Box>
+                  }
                 </Box>
                 <Stack direction="row" justifyContent="flex-end" spacing={0.5} useFlexGap flexWrap="wrap">
                   {!client.archived_at && (
@@ -8394,6 +8423,11 @@ export default function ClientsPage() {
           columns={[
             { key: 'name', header: '利用者氏名', render: (client) => client.name },
             { key: 'status', header: '状態', render: (client) => client.archived_at ? <StatusChip label="アーカイブ" /> : <StatusChip label="有効" tone="success" /> },
+            { key: 'assignments', header: '担当者数', render: (client) =>
+                client.assignments.length === 0
+                  ? <StatusChip label="⚠️ 担当未設定" tone="warning" />
+                  : <>{client.assignments.length}名</>
+            },
             { key: 'actions', header: '操作', align: 'right', render: (client) => (
                         <Stack direction="row" justifyContent="flex-end" spacing={1}>
                             {!client.archived_at && (
@@ -9200,7 +9234,7 @@ export default function ProfilePage() {
                                 <IconButton 
                                     color="primary" 
                                     component="label" 
-                                    sx={{ position: 'absolute', bottom: 0, right: -10, bgcolor: 'white', boxShadow: 2, '&:hover': {bgcolor: '#f0f0f0'} }}
+                                    sx={{ position: 'absolute', bottom: 0, right: -10, bgcolor: 'background.paper', boxShadow: 2, '&:hover': { bgcolor: 'background.muted' } }}
                                 >
                                     <input hidden accept="image/*" type="file" onChange={handleAvatarUpload} />
                                     {uploading ? <CircularProgress size={24} /> : <PhotoCamera />}
@@ -9993,7 +10027,7 @@ export default function RecordPage() {
             <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, bgcolor: 'background.paper' }}>
                 <Stack spacing={3}>
 
-                <Box sx={{ bgcolor: aiFilledFields.has('_helpers') ? '#fffde7' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
+                <Box sx={{ bgcolor: aiFilledFields.has('_helpers') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
                     </Typography>
@@ -10011,7 +10045,7 @@ export default function RecordPage() {
                     />
                 </Box>
 
-                <Box sx={{ bgcolor: aiFilledFields.has('startDateTime') || aiFilledFields.has('endDateTime') ? '#fffde7' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
+                <Box sx={{ bgcolor: aiFilledFields.has('startDateTime') || aiFilledFields.has('endDateTime') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <CalendarTodayIcon fontSize="small" /> サービス日時
                     </Typography>
@@ -10022,7 +10056,7 @@ export default function RecordPage() {
                     </Stack>
                 </Box>
 
-                <Box sx={{ bgcolor: aiFilledFields.has('serviceTime') ? '#fffde7' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
+                <Box sx={{ bgcolor: aiFilledFields.has('serviceTime') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <AccessTimeIcon fontSize="small" /> 提供時間 <Typography component="span" color="error">*</Typography>
                     </Typography>
@@ -10062,7 +10096,7 @@ export default function RecordPage() {
                     const hasError = !!errors[item.id];
                     const isAiFilled = aiFilledFields.has(item.id);
                     return (
-                        <Box key={item.id} sx={{ p: { xs: 2, sm: 3 }, bgcolor: hasError ? 'background.danger' : isAiFilled ? '#fffde7' : 'transparent' }}>
+                        <Box key={item.id} sx={{ p: { xs: 2, sm: 3 }, bgcolor: hasError ? 'background.danger' : isAiFilled ? 'background.aiHighlight' : 'transparent' }}>
                           <DynamicFormField
                             item={item}
                             value={answers[item.id]}
@@ -10149,36 +10183,55 @@ export default function RecordSelectPage() {
         if (!currentOrg) return;
         try {
             const { data: { user } } = await supabase.auth.getUser();
-            let targetClients: Client[] = [];
+            if (!user) return;
 
             const canCreateAll = currentOrg.effectivePermissions.records.create === 'all';
             const canCreateAssigned = currentOrg.effectivePermissions.records.create === 'assigned';
-            if (canCreateAll) {
-                const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
-                if (data) targetClients = data as Client[];
-            } else if (canCreateAssigned) {
-                const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', user?.id);
-                if (data) {
-                    const assignments = data as unknown as { clients: Client | null }[];
-                    targetClients = assignments.map(d => d.clients).filter((c): c is Client => c !== null);
-                }
-            }
+            const canViewShifts = checkShiftPermission(currentOrg.effectivePermissions, 'view', true);
+
+            // Step 1: clients and shifts in parallel (both need user but not each other)
+            const start = new Date();
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(start);
+            end.setDate(end.getDate() + 1);
+            end.setMilliseconds(end.getMilliseconds() - 1);
+
+            const [targetClients, shiftsResult] = await Promise.all([
+                // Clients fetch
+                (async (): Promise<Client[]> => {
+                    if (canCreateAll) {
+                        const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
+                        return (data ?? []) as Client[];
+                    } else if (canCreateAssigned) {
+                        const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', user.id);
+                        return ((data ?? []) as unknown as { clients: Client | null }[])
+                            .map(d => d.clients).filter((c): c is Client => c !== null);
+                    }
+                    return [];
+                })(),
+                // Shifts fetch (if permission exists)
+                canViewShifts
+                    ? getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString())
+                    : Promise.resolve([] as MyShiftItem[]),
+            ]);
+
             setClients(targetClients);
+            setTodayShifts(shiftsResult.filter(s => s.status !== 'cancelled'));
 
-            if (user && checkShiftPermission(currentOrg.effectivePermissions, 'view', true)) {
-                const start = new Date();
-                start.setHours(0, 0, 0, 0);
-                const end = new Date(start);
-                end.setDate(end.getDate() + 1);
-                end.setMilliseconds(end.getMilliseconds() - 1);
-                const shifts = await getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString());
-                setTodayShifts(shifts.filter((shift) => shift.status !== 'cancelled'));
-            }
-
-            if (user && targetClients.length > 0) {
-                const { data: drafts } = await supabase.from('reports').select('id, client_id, created_at').eq('helper_id', user.id).eq('status', 'draft').is('deleted_at', null).in('client_id', targetClients.map(c => c.id)).order('created_at', { ascending: false });
+            // Step 2: drafts (needs client IDs from step 1)
+            if (targetClients.length > 0) {
+                const { data: drafts } = await supabase.from('reports')
+                    .select('id, client_id, created_at')
+                    .eq('helper_id', user.id)
+                    .eq('status', 'draft')
+                    .is('deleted_at', null)
+                    .in('client_id', targetClients.map(c => c.id))
+                    .order('created_at', { ascending: false });
                 const draftsMap: Record<string, DraftReport[]> = {};
-                if (drafts) drafts.forEach((d) => { if (!draftsMap[d.client_id]) draftsMap[d.client_id] = []; draftsMap[d.client_id].push({ id: d.id, created_at: d.created_at }); });
+                if (drafts) drafts.forEach((d) => {
+                    if (!draftsMap[d.client_id]) draftsMap[d.client_id] = [];
+                    draftsMap[d.client_id].push({ id: d.id, created_at: d.created_at });
+                });
                 setClientDrafts(draftsMap);
             }
         } catch (e) { console.error(e); } finally { setLoading(false); }
@@ -10308,10 +10361,12 @@ export default function RecordSelectPage() {
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import type { ReactElement } from 'react';
+import type { DocumentProps } from '@react-pdf/renderer';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Button,
   CircularProgress, Stack, TextField, MenuItem, Checkbox, TableSortLabel, Switch, FormControlLabel, Divider,
-  LinearProgress, Tooltip
+  LinearProgress, Tooltip, Alert
 } from '@/components/ui/mui';
 import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
@@ -10327,9 +10382,7 @@ import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { supabase } from '@/lib/supabase';
-import { pdf } from '@react-pdf/renderer';
-import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRecordDocument';
-import { downloadReportZip, buildReportFileName } from '@/utils/reportZipExport';
+import type { PdfReportData } from '@/components/pdf/ServiceRecordDocument';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
@@ -10371,7 +10424,10 @@ export default function ReportsPage() {
 
   const [filterClientId, setFilterClientId] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [startDate, setStartDate] = useState('');
+  const [startDate, setStartDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  });
   const [endDate, setEndDate] = useState('');
   const [onlyPending, setOnlyPending] = useState(false);
   const [filterShiftId, setFilterShiftId] = useState<string | null>(null);
@@ -10432,6 +10488,7 @@ export default function ReportsPage() {
       if (onlyPending) query = query.in('status', ['pending', 'remanded']);
       else if (filterStatus !== 'all') query = query.eq('status', filterStatus);
 
+      query = query.limit(500);
       const { data, error } = await query;
       if (error) throw error;
       const sortedData = (data as unknown) as Report[] || [];
@@ -10661,6 +10718,7 @@ export default function ReportsPage() {
         const validReports = pdfReports.filter((r): r is PdfReportData => r !== null);
 
         if (filterShiftId) {
+          const { downloadReportZip, buildReportFileName } = await import('@/utils/reportZipExport');
           const entries = targetReports
             .map((report, i) => {
               const pdfData = validReports[i];
@@ -10675,7 +10733,12 @@ export default function ReportsPage() {
           const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
           await downloadReportZip(entries, `サービス提供記録_${dateStr}`);
         } else {
-          const blob = await pdf(<ServiceRecordDocument reports={validReports} />).toBlob();
+          const [{ pdf }, { ServiceRecordDocument }] = await Promise.all([
+            import('@react-pdf/renderer'),
+            import('@/components/pdf/ServiceRecordDocument'),
+          ]);
+          const pdfDocument = <ServiceRecordDocument reports={validReports} /> as ReactElement<DocumentProps>;
+          const blob = await pdf(pdfDocument).toBlob();
           const link = document.createElement('a');
           link.href = URL.createObjectURL(blob);
           link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
@@ -10857,6 +10920,12 @@ export default function ReportsPage() {
         <InnerPageHeader icon={<TagIcon />} title={headerTitle} />
 
        <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
+           {reports.length >= 500 && (
+             <Alert severity="info" sx={{ mb: 2 }}>
+               最初の500件を表示しています。日付や利用者で絞り込んでください。
+             </Alert>
+           )}
+
            <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.muted', boxShadow: 'none' }}>
               <Stack spacing={2}>
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} flexWrap="wrap" useFlexGap>
@@ -11040,10 +11109,10 @@ export default function ReportsPage() {
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
 import { 
-  Box, Typography, Paper, TextField, Button, Alert, CircularProgress, LinearProgress, Stack, Divider,
+  Box, Typography, Paper, Alert, CircularProgress, LinearProgress, Stack, Divider,
   Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow
 } from '@/components/ui/mui';
-import { AppButton, AppDialog, AppTextField } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, DateTimeField, NumberField } from '@/components/ui';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
@@ -11457,14 +11526,14 @@ function SettingsContent() {
                                 <Stack spacing={4}>
                                     <Box>
                                         <Typography variant="subtitle2" fontWeight="bold" gutterBottom>事業所名</Typography>
-                                        <TextField fullWidth value={orgName} onChange={(e) => setOrgName(e.target.value)} disabled={!canEditOrganization} />
+                                        <AppTextField value={orgName} onChange={(e) => setOrgName(e.target.value)} disabled={!canEditOrganization} />
                                     </Box>
                                     <Divider />
                                     {canEditOrganization && (
                                         <Box sx={{ display: 'flex', justifyContent: { xs: 'stretch', sm: 'flex-end' } }}>
-                                            <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                                            <AppButton size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                 {saving ? '保存中...' : '変更を保存'}
-                                            </Button>
+                                            </AppButton>
                                         </Box>
                                     )}
                                 </Stack>
@@ -11478,18 +11547,16 @@ function SettingsContent() {
                                         記録画面の交通費は、往復距離 × 1kmあたり単価で算出します。
                                     </Typography>
                                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                                        <TextField
+                                        <NumberField
                                             label="1kmあたり単価"
-                                            type="number"
                                             value={travelCostRate}
                                             onChange={(e) => setTravelCostRate(e.target.value)}
-                                            onWheel={e => (e.target as HTMLElement).blur()}
                                             sx={{ maxWidth: { sm: 240 } }}
                                             slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">円/km</Typography> }, htmlInput: { inputMode: 'decimal', step: '1', min: 0 } }}
                                         />
-                                        <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSaveTravelCost} disabled={saving}>
+                                        <AppButton startIcon={<SaveIcon />} onClick={handleSaveTravelCost} disabled={saving}>
                                             保存
-                                        </Button>
+                                        </AppButton>
                                     </Stack>
                                 </Paper>
                             )}
@@ -11516,15 +11583,15 @@ function SettingsContent() {
                                                     </Box>
                                                 </Typography>
                                                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" sx={{ '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
-                                                    <Button variant="outlined" href={driveUrl} target="_blank" startIcon={<LinkIcon />}>
+                                                    <AppButton variant="outlined" intent="secondary" href={driveUrl} target="_blank" rel="noreferrer" startIcon={<LinkIcon />}>
                                                         フォルダを開く
-                                                    </Button>
-                                                    <Button color="error" startIcon={<LinkOffIcon />} onClick={handleDisconnectDrive}>
+                                                    </AppButton>
+                                                    <AppButton variant="text" intent="danger" startIcon={<LinkOffIcon />} onClick={handleDisconnectDrive}>
                                                         連携を解除
-                                                    </Button>
-                                                    <Button color="warning" onClick={handleConnectDrive} disabled={connecting}>
+                                                    </AppButton>
+                                                    <AppButton variant="text" intent="warning" onClick={handleConnectDrive} disabled={connecting}>
                                                         フォルダを再作成/修復
-                                                    </Button>
+                                                    </AppButton>
                                                 </Stack>
                                             </Stack>
                                         ) : (
@@ -11532,9 +11599,9 @@ function SettingsContent() {
                                                 <Alert severity="info">
                                                     まだ連携フォルダがありません。ボタンを押すと、管理者のGoogleドライブ内にこの事業所用のフォルダが自動作成されます。
                                                 </Alert>
-                                                <Button variant="contained" onClick={handleConnectDrive} disabled={connecting} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                                                <AppButton onClick={handleConnectDrive} disabled={connecting} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                     {connecting ? '作成中...' : '連携フォルダを作成する'}
-                                                </Button>
+                                                </AppButton>
                                             </Stack>
                                         )
                                     ) : (
@@ -11591,35 +11658,33 @@ function SettingsContent() {
                                                 )}
 
                                                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mt: 1, '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
-                                                    {canRepairCalendarSync && <Button
-                                                        variant="contained"
-                                                        color="warning"
+                                                    {canRepairCalendarSync && <AppButton
+                                                        intent="warning"
                                                         startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />}
                                                         onClick={handleRepairCalendar}
                                                         disabled={repairingCal || resyncingCal || (syncStatus?.unsynced === 0)}
                                                     >
                                                         {repairingCal ? '同期中...' : `未同期を同期${syncStatus && syncStatus.unsynced > 0 ? `（${syncStatus.unsynced}件）` : ''}`}
-                                                    </Button>}
+                                                    </AppButton>}
                                                     {/* 全件強制再同期（通常は未同期同期で十分。Google側で予定がずれた場合の最終手段） */}
-                                                    {canRepairCalendarSync && <Button
+                                                    {canRepairCalendarSync && <AppButton
                                                         variant="outlined"
-                                                        color="primary"
                                                         startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
                                                         onClick={handleForceResyncCalendar}
                                                         disabled={repairingCal || resyncingCal}
                                                         sx={{ boxShadow: 'none' }}
                                                     >
                                                         {resyncingCal ? '修復中...' : '同期を修復'}
-                                                    </Button>}
-                                                    <Button 
+                                                    </AppButton>}
+                                                    <AppButton
                                                         variant="outlined"
-                                                        color="error" 
+                                                        intent="danger"
                                                         startIcon={<LinkOffIcon />} 
                                                         onClick={handleDisconnectCalendar} 
                                                         disabled={repairingCal || resyncingCal}
                                                     >
                                                         連携を解除
-                                                    </Button>
+                                                    </AppButton>
                                                 </Stack>
                                             </Stack>
                                         ) : (
@@ -11627,9 +11692,9 @@ function SettingsContent() {
                                                 <Alert severity="info">
                                                     ボタンを押すとGoogleの認証画面へ移動します。許可すると、あなたのアカウントに事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
                                                 </Alert>
-                                                <Button variant="contained" color="success" onClick={handleConnectCalendar} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                                                <AppButton intent="success" onClick={handleConnectCalendar} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                     {connectingCal ? 'Googleへ移動中...' : 'シフト用カレンダーを作成・連携する'}
-                                                </Button>
+                                                </AppButton>
                                             </Stack>
                                         )
                                     ) : (
@@ -11685,9 +11750,9 @@ function SettingsContent() {
                                             <Typography fontWeight="bold">事業所から脱退</Typography>
                                             <Typography variant="caption" color="text.secondary">この事業所のメンバーから外れます</Typography>
                                         </Box>
-                                        <Button variant="outlined" color="warning" startIcon={<ExitToAppIcon />} onClick={() => setOpenLeaveDialog(true)}>
+                                        <AppButton variant="outlined" intent="warning" startIcon={<ExitToAppIcon />} onClick={() => setOpenLeaveDialog(true)}>
                                             脱退する
-                                        </Button>
+                                        </AppButton>
                                     </Box>
                                     {canDeleteOrganization && (
                                         <>
@@ -11700,9 +11765,9 @@ function SettingsContent() {
                                                         この操作は取り消せません。
                                                     </Typography>
                                                 </Box>
-                                                <Button variant="contained" color="error" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
+                                                <AppButton intent="danger" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
                                                     削除する
-                                                </Button>
+                                                </AppButton>
                                             </Box>
                                         </>
                                     )}
@@ -11714,11 +11779,11 @@ function SettingsContent() {
                     {tabIndex === 1 && (
                         <Paper variant="outlined">
                             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} sx={{ p: 2 }}>
-                                <TextField label="開始日" type="date" size="small" value={logFrom} onChange={(e) => setLogFrom(e.target.value)} InputLabelProps={{ shrink: true }} />
-                                <TextField label="終了日" type="date" size="small" value={logTo} onChange={(e) => setLogTo(e.target.value)} InputLabelProps={{ shrink: true }} />
-                                <Button variant="outlined" onClick={fetchLogs}>絞り込み</Button>
+                                <DateTimeField kind="date" label="開始日" size="small" value={logFrom} onChange={(e) => setLogFrom(e.target.value)} />
+                                <DateTimeField kind="date" label="終了日" size="small" value={logTo} onChange={(e) => setLogTo(e.target.value)} />
+                                <AppButton variant="outlined" intent="secondary" onClick={fetchLogs}>絞り込み</AppButton>
                                 <Box sx={{ flexGrow: 1 }} />
-                                <Button variant="contained" onClick={handleExportLogs}>CSVエクスポート</Button>
+                                <AppButton onClick={handleExportLogs}>CSVエクスポート</AppButton>
                             </Stack>
                             <Divider />
                             <Table>
@@ -11802,6 +11867,7 @@ export default function RolesPage() {
 'use client';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import {
     Box, Typography, Paper, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
     FormControlLabel, Radio, RadioGroup, LinearProgress,
@@ -11816,9 +11882,9 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import BuildIcon from '@mui/icons-material/Build';
 import SyncIcon from '@mui/icons-material/Sync';
-import FullCalendar from '@fullcalendar/react';
-import { EventDropArg } from '@fullcalendar/core';
-import { EventResizeDoneArg } from '@fullcalendar/interaction';
+import type FullCalendar from '@fullcalendar/react';
+import type { EventDropArg } from '@fullcalendar/core';
+import type { EventResizeDoneArg } from '@fullcalendar/interaction';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
@@ -11832,25 +11898,34 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { ShiftFormModal, ShiftData } from '@/components/shifts/ShiftFormModal';
 import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
-import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 import { useShiftData, type ShiftDateRange } from '@/hooks/useShiftData';
 import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
 import type { DatesSetArg } from '@fullcalendar/core';
 import { checkShiftPermission } from '@/utils/permissions';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { FetchedPatternData } from '@/hooks/useShiftData';
 
 type TabId = 'patterns' | 'fullCalendar' | 'myShift' | 'byStaff' | 'byClient';
 
+const ShiftCalendarViewer = dynamic(
+    () => import('@/components/shifts/ShiftCalendarViewer').then((mod) => mod.ShiftCalendarViewer),
+    {
+        ssr: false,
+        loading: () => <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>,
+    }
+);
+
 export default function ShiftManagePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
     const confirm = useConfirm();
+    const router = useRouter();
     const searchParams = useSearchParams();
     const calendarRef = useRef<FullCalendar>(null);
     const handledShiftParamRef = useRef<string | null>(null);
+    const calendarInitializedRef = useRef(false);
 
     const [generating, setGenerating] = useState(false);
     const [pdfGenerating, setPdfGenerating] = useState(false);
@@ -11942,6 +12017,10 @@ export default function ShiftManagePage() {
 
     const handleCalendarDatesSet = useCallback((info: DatesSetArg) => {
         if (activeTab === 'patterns') return;
+        if (!calendarInitializedRef.current) {
+            calendarInitializedRef.current = true;
+            return; // Initial calendar render triggers this — let useEffect handle it
+        }
         const range: ShiftDateRange = { start: info.start, end: info.end };
         fetchData(true, range);
     }, [activeTab, fetchData]);
@@ -12006,6 +12085,15 @@ export default function ShiftManagePage() {
         } finally {
             setSyncProgress(null);
         }
+    };
+
+    const handleCreateRecord = (shift: ShiftData) => {
+        if (shift.status === 'cancelled') {
+            showToast('このシフトは現在キャンセル（お休み）されています。', 'info');
+            return;
+        }
+        setShiftModalOpen(false);
+        router.push(`/app/record/${shift.client_id}?shiftId=${shift.id}`);
     };
 
     const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {
@@ -12217,7 +12305,14 @@ export default function ShiftManagePage() {
                         <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>ひな形を追加</Button>
                     )}
                 </Box>
-                <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v as TabId)} variant="scrollable" allowScrollButtonsMobile>
+                <Tabs value={activeTab} onChange={(_, v) => {
+                    const nextTab = v as TabId;
+                    // Reset calendar init guard when calendar may remount (e.g. from patterns tab)
+                    if (nextTab !== 'patterns' && activeTab === 'patterns') {
+                        calendarInitializedRef.current = false;
+                    }
+                    setActiveTab(nextTab);
+                }} variant="scrollable" allowScrollButtonsMobile>
                     {canUseOrgWideTabs && <Tab label="基本パターン(ひな形)" value="patterns" />}
                     {canUseOrgWideTabs && <Tab label="全体カレンダー" value="fullCalendar" />}
                     <Tab label="自分のシフト" value="myShift" />
@@ -12351,7 +12446,7 @@ export default function ShiftManagePage() {
                         {activeTab !== 'patterns' && (
                             <Box sx={{ height: '100%' }}>
                                 <ShiftCalendarViewer
-                                    ref={calendarRef}
+                                    calendarRef={calendarRef}
                                     events={events}
                                     initialView={activeTab === 'myShift' ? 'listMonth' : 'dayGridMonth'}
                                     headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' }}
@@ -12370,17 +12465,10 @@ export default function ShiftManagePage() {
                                         setShiftModalOpen(true);
                                     }}
                                     onEventClick={(info) => {
-                                        const { clientId, shiftId, isCancelled, shiftData } = info.event.extendedProps;
-                                        if (activeTab === 'fullCalendar' && canEditShift) {
-                                            setSelectedShift(shiftData);
-                                            setShiftModalOpen(true);
-                                        } else {
-                                            if (isCancelled) {
-                                                showToast('このシフトは現在キャンセル（お休み）されています。', 'info');
-                                                return;
-                                            }
-                                            window.location.href = `/app/record/${clientId}?shiftId=${shiftId}`;
-                                        }
+                                        const { shiftData } = info.event.extendedProps;
+                                        if (!shiftData) return;
+                                        setSelectedShift(shiftData);
+                                        setShiftModalOpen(true);
                                     }}
                                 />
                             </Box>
@@ -12414,10 +12502,12 @@ export default function ShiftManagePage() {
                 onSave={handleSaveShift}
                 onToggleCancel={canEditShift ? handleToggleCancel : undefined}
                 onDelete={canDeleteShift ? handleDeleteShift : undefined}
+                onCreateRecord={handleCreateRecord}
                 clients={clients}
                 staffs={staffs}
                 organizationId={currentOrg.id}
                 initialData={selectedShift}
+                canSave={selectedShift?.id ? canEditShift : canCreateShift}
             />
 
             <ShiftPatternModal
@@ -12496,6 +12586,7 @@ export default function ShiftManagePage() {
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import {
   Box, Typography, CircularProgress, Stack, Chip, Paper,
   IconButton, ToggleButton, ToggleButtonGroup, Tooltip
@@ -12506,15 +12597,22 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import ArticleIcon from '@mui/icons-material/Article';
-import FullCalendar from '@fullcalendar/react';
+import type FullCalendar from '@fullcalendar/react';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
-import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 import { convertToCalendarEvents } from '@/utils/shiftHelper';
 
 type ViewMode = 'list' | 'calendar';
+
+const ShiftCalendarViewer = dynamic(
+  () => import('@/components/shifts/ShiftCalendarViewer').then((mod) => mod.ShiftCalendarViewer),
+  {
+    ssr: false,
+    loading: () => <Box display="flex" justifyContent="center" pt={8}><CircularProgress /></Box>,
+  }
+);
 
 const REPORT_STATUS_LABELS: Record<string, { label: string; color: 'default' | 'primary' | 'warning' | 'success' | 'error' }> = {
   draft:    { label: '下書き',   color: 'primary' },
@@ -12718,7 +12816,7 @@ export default function MyShiftsPage() {
           </Stack>
         ) : (
           <ShiftCalendarViewer
-            ref={calendarRef}
+            calendarRef={calendarRef}
             events={calendarEvents}
             initialView="listMonth"
             headerToolbar={{ left: 'prev,next today', center: 'title', right: 'listMonth,dayGridMonth' }}
@@ -16319,28 +16417,35 @@ const TopAppBar = ({
   const [notifAnchor, setNotifAnchor] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
+    let cleanup: (() => void) | undefined;
     const fetchUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profile } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).maybeSingle();
-        if (profile) {
-          setUserName(profile.name);
-          setAvatarUrl(profile.avatar_url);
-        }
+      if (!user) return;
 
-        const { count } = await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_read', false);
-        setUnreadCount(count || 0);
+      const [{ data: profile }, { count }] = await Promise.all([
+        supabase.from('profiles').select('name, avatar_url').eq('id', user.id).maybeSingle(),
+        supabase.from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('is_read', false),
+      ]);
 
-        const channel = supabase.channel('notifications')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
-            setUnreadCount(prev => prev + 1);
-          })
-          .subscribe();
-
-        return () => { supabase.removeChannel(channel); };
+      if (profile) {
+        setUserName(profile.name);
+        setAvatarUrl(profile.avatar_url ?? undefined);
       }
+      setUnreadCount(count || 0);
+
+      const channel = supabase.channel('notifications')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
+          setUnreadCount(prev => prev + 1);
+        })
+        .subscribe();
+
+      cleanup = () => { supabase.removeChannel(channel); };
     };
-    fetchUser();
+    void fetchUser();
+    return () => { cleanup?.(); };
   }, []);
 
   const handleSwitchOrg = (id: string) => {
@@ -16432,6 +16537,22 @@ const TopAppBar = ({
           </IconButton>
         </Tooltip>
         <NotificationsPopover anchorEl={notifAnchor} onClose={() => setNotifAnchor(null)} />
+
+        {userName && (
+          <Typography
+            variant="body2"
+            noWrap
+            sx={{
+              display: { xs: 'none', sm: 'block' },
+              maxWidth: { sm: 120, md: 180 },
+              fontWeight: 700,
+              color: 'text.primary',
+              ml: 0.5,
+            }}
+          >
+            {userName}
+          </Typography>
+        )}
 
         {/* アカウントメニュー */}
         <Tooltip title="アカウント">
@@ -19116,12 +19237,10 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
 
 import { useEffect, useState } from 'react';
 import {
-  Box, Stack, Chip, Switch, Button, CircularProgress, Alert,
+  Box, Stack, Chip, CircularProgress, Alert,
   Table, TableBody, TableCell, TableHead, TableRow,
-  TextField, Select, MenuItem, FormControl,
-  InputLabel, FormControlLabel,
 } from '@/components/ui/mui';
-import { AppDialog } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, NumberField, SelectField, SwitchField } from '@/components/ui';
 import { getLaborPremiumTypes, updateLaborPremiumType, createLaborPremiumType, disableLaborPremiumType } from '@/app/actions/laborPremium';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 
@@ -19316,14 +19435,14 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
                     ) : null}
                   </TableCell>
                   <TableCell>
-                    <Switch
+                    <SwitchField
                       checked={row.is_enabled}
                       onChange={() => handleToggleEnabled(row)}
                       size="small"
                     />
                   </TableCell>
                   <TableCell>
-                    <Button size="small" onClick={() => handleEditOpen(row)}>編集</Button>
+                    <AppButton variant="text" intent="secondary" size="small" onClick={() => handleEditOpen(row)}>編集</AppButton>
                   </TableCell>
                 </TableRow>
               ))
@@ -19357,15 +19476,15 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
                       {overtimeRuleLabel(row) && <Chip size="small" label={overtimeRuleLabel(row)} variant="outlined" />}
                     </Stack>
                   </Box>
-                  <Switch
+                  <SwitchField
                     checked={row.is_enabled}
                     onChange={() => handleToggleEnabled(row)}
                     size="small"
                   />
                 </Stack>
-                <Button size="small" variant="outlined" onClick={() => handleEditOpen(row)} sx={{ alignSelf: 'stretch' }}>
+                <AppButton size="small" variant="outlined" intent="secondary" onClick={() => handleEditOpen(row)} sx={{ alignSelf: 'stretch' }}>
                   編集
-                </Button>
+                </AppButton>
               </Stack>
             </Box>
           ))
@@ -19373,9 +19492,9 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
       </Stack>
 
       <Box mt={2}>
-        <Button variant="outlined" size="small" onClick={() => { setAddState(defaultEditState()); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+        <AppButton variant="outlined" intent="secondary" size="small" onClick={() => { setAddState(defaultEditState()); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
           種別を追加
-        </Button>
+        </AppButton>
       </Box>
 
       {/* Edit Dialog */}
@@ -19386,109 +19505,95 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
         title="割り増し種別を編集"
         actions={(
           <>
-            <Button onClick={() => setEditOpen(false)}>キャンセル</Button>
-            <Button variant="contained" onClick={handleEditSave} disabled={saving || !editState.name}>
+            <AppButton variant="text" intent="secondary" onClick={() => setEditOpen(false)}>キャンセル</AppButton>
+            <AppButton onClick={handleEditSave} disabled={saving || !editState.name}>
               {saving ? '保存中...' : '保存'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
           <Stack spacing={2} mt={1}>
-            <TextField
+            <AppTextField
               label="種別名"
               value={editState.name}
               onChange={(e) => setEditState(s => ({ ...s, name: e.target.value }))}
               fullWidth size="small"
             />
-            <TextField
+            <NumberField
               label="割り増し率 (%)"
-              type="number"
               value={editState.ratePercent}
               onChange={(e) => setEditState(s => ({ ...s, ratePercent: e.target.value }))}
               fullWidth size="small"
-              inputProps={{ min: 0, step: 1 }}
+              slotProps={{ htmlInput: { min: 0, step: 1 } }}
             />
-            <FormControl fullWidth size="small">
-              <InputLabel>計算方法</InputLabel>
-              <Select
-                label="計算方法"
-                value={editState.calc_method}
-                onChange={(e) => setEditState(s => ({ ...s, calc_method: e.target.value as 'additive' | 'multiplicative' }))}
-              >
-                <MenuItem value="additive">加算 (additive)</MenuItem>
-                <MenuItem value="multiplicative">乗算 (multiplicative)</MenuItem>
-              </Select>
-            </FormControl>
+            <SelectField
+              label="計算方法"
+              value={editState.calc_method}
+              onChange={(value) => setEditState(s => ({ ...s, calc_method: value as 'additive' | 'multiplicative' }))}
+              options={[
+                { value: 'additive', label: '加算 (additive)' },
+                { value: 'multiplicative', label: '乗算 (multiplicative)' },
+              ]}
+            />
             {(editTarget?.builtin_type === 'night' || editTarget?.builtin_type === 'custom') && (
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                <TextField
+                <NumberField
                   label="深夜開始 (時)"
-                  type="number"
                   value={editState.night_start_hour}
                   onChange={(e) => setEditState(s => ({ ...s, night_start_hour: e.target.value }))}
                   size="small"
-                  inputProps={{ min: 0, max: 23 }}
+                  slotProps={{ htmlInput: { min: 0, max: 23 } }}
                 />
-                <TextField
+                <NumberField
                   label="深夜終了 (時)"
-                  type="number"
                   value={editState.night_end_hour}
                   onChange={(e) => setEditState(s => ({ ...s, night_end_hour: e.target.value }))}
                   size="small"
-                  inputProps={{ min: 0, max: 23 }}
+                  slotProps={{ htmlInput: { min: 0, max: 23 } }}
                 />
               </Stack>
             )}
             {editTarget?.builtin_type === 'overtime' && (
               <Stack spacing={1.5}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={editState.variable_working_hours_enabled}
-                      onChange={(e) => setEditState(s => ({ ...s, variable_working_hours_enabled: e.target.checked }))}
-                    />
-                  }
+                <SwitchField
+                  checked={editState.variable_working_hours_enabled}
+                  onChange={(e) => setEditState(s => ({ ...s, variable_working_hours_enabled: e.target.checked }))}
                   label="変形労働時間制を適用"
                 />
                 {editState.variable_working_hours_enabled ? (
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>集計期間</InputLabel>
-                      <Select
-                        label="集計期間"
-                        value={editState.variable_overtime_period}
-                        onChange={(e) => setEditState(s => ({ ...s, variable_overtime_period: e.target.value as 'week' | 'month' }))}
-                      >
-                        <MenuItem value="week">週単位</MenuItem>
-                        <MenuItem value="month">月単位</MenuItem>
-                      </Select>
-                    </FormControl>
-                    <TextField
+                    <SelectField
+                      label="集計期間"
+                      value={editState.variable_overtime_period}
+                      onChange={(value) => setEditState(s => ({ ...s, variable_overtime_period: value as 'week' | 'month' }))}
+                      options={[
+                        { value: 'week', label: '週単位' },
+                        { value: 'month', label: '月単位' },
+                      ]}
+                    />
+                    <NumberField
                       label="期間内の加算対象 (h超)"
-                      type="number"
                       value={editState.variable_overtime_threshold_hours}
                       onChange={(e) => setEditState(s => ({ ...s, variable_overtime_threshold_hours: e.target.value }))}
                       size="small"
-                      inputProps={{ min: 0, step: 0.5 }}
+                      slotProps={{ htmlInput: { min: 0, step: 0.5 } }}
                     />
                   </Stack>
                 ) : (
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                    <TextField
+                    <NumberField
                       label="日次閾値 (h)"
-                      type="number"
                       value={editState.overtime_daily_threshold_hours}
                       onChange={(e) => setEditState(s => ({ ...s, overtime_daily_threshold_hours: e.target.value }))}
                       size="small"
-                      inputProps={{ min: 0, step: 0.5 }}
+                      slotProps={{ htmlInput: { min: 0, step: 0.5 } }}
                     />
-                    <TextField
+                    <NumberField
                       label="週次閾値 (h)"
-                      type="number"
                       value={editState.overtime_weekly_threshold_hours}
                       onChange={(e) => setEditState(s => ({ ...s, overtime_weekly_threshold_hours: e.target.value }))}
                       size="small"
-                      inputProps={{ min: 0, step: 1 }}
+                      slotProps={{ htmlInput: { min: 0, step: 1 } }}
                     />
                   </Stack>
                 )}
@@ -19505,55 +19610,50 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
         title="割り増し種別を追加"
         actions={(
           <>
-            <Button onClick={() => setAddOpen(false)}>キャンセル</Button>
-            <Button variant="contained" onClick={handleAddSave} disabled={saving || !addState.name}>
+            <AppButton variant="text" intent="secondary" onClick={() => setAddOpen(false)}>キャンセル</AppButton>
+            <AppButton onClick={handleAddSave} disabled={saving || !addState.name}>
               {saving ? '追加中...' : '追加'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
           <Stack spacing={2} mt={1}>
-            <TextField
+            <AppTextField
               label="種別名"
               value={addState.name}
               onChange={(e) => setAddState(s => ({ ...s, name: e.target.value }))}
               fullWidth size="small"
             />
-            <TextField
+            <NumberField
               label="割り増し率 (%)"
-              type="number"
               value={addState.ratePercent}
               onChange={(e) => setAddState(s => ({ ...s, ratePercent: e.target.value }))}
               fullWidth size="small"
-              inputProps={{ min: 0, step: 1 }}
+              slotProps={{ htmlInput: { min: 0, step: 1 } }}
             />
-            <FormControl fullWidth size="small">
-              <InputLabel>計算方法</InputLabel>
-              <Select
-                label="計算方法"
-                value={addState.calc_method}
-                onChange={(e) => setAddState(s => ({ ...s, calc_method: e.target.value as 'additive' | 'multiplicative' }))}
-              >
-                <MenuItem value="additive">加算 (additive)</MenuItem>
-                <MenuItem value="multiplicative">乗算 (multiplicative)</MenuItem>
-              </Select>
-            </FormControl>
+            <SelectField
+              label="計算方法"
+              value={addState.calc_method}
+              onChange={(value) => setAddState(s => ({ ...s, calc_method: value as 'additive' | 'multiplicative' }))}
+              options={[
+                { value: 'additive', label: '加算 (additive)' },
+                { value: 'multiplicative', label: '乗算 (multiplicative)' },
+              ]}
+            />
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <TextField
+              <NumberField
                 label="深夜開始 (時)"
-                type="number"
                 value={addState.night_start_hour}
                 onChange={(e) => setAddState(s => ({ ...s, night_start_hour: e.target.value }))}
                 size="small"
-                inputProps={{ min: 0, max: 23 }}
+                slotProps={{ htmlInput: { min: 0, max: 23 } }}
               />
-              <TextField
+              <NumberField
                 label="深夜終了 (時)"
-                type="number"
                 value={addState.night_end_hour}
                 onChange={(e) => setAddState(s => ({ ...s, night_end_hour: e.target.value }))}
                 size="small"
-                inputProps={{ min: 0, max: 23 }}
+                slotProps={{ htmlInput: { min: 0, max: 23 } }}
               />
             </Stack>
           </Stack>
@@ -19570,10 +19670,10 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
 
 import { useEffect, useState } from 'react';
 import {
-  Box, Stack, Switch, Button, CircularProgress, Alert,
-  Table, TableBody, TableCell, TableHead, TableRow, TextField,
+  Box, Stack, CircularProgress, Alert,
+  Table, TableBody, TableCell, TableHead, TableRow,
 } from '@/components/ui/mui';
-import { AppDialog } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, SwitchField } from '@/components/ui';
 import {
   getServiceTypes, createServiceType, updateServiceType, deleteServiceType,
   type ServiceType,
@@ -19690,12 +19790,12 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
                 <TableRow key={row.id}>
                   <TableCell sx={{ minWidth: 160 }}>{row.name}</TableCell>
                   <TableCell>
-                    <Switch checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
+                    <SwitchField checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
                   </TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={1}>
-                      <Button size="small" onClick={() => handleEditOpen(row)}>編集</Button>
-                      <Button size="small" color="error" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }}>削除</Button>
+                      <AppButton variant="text" intent="secondary" size="small" onClick={() => handleEditOpen(row)}>編集</AppButton>
+                      <AppButton variant="text" intent="danger" size="small" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }}>削除</AppButton>
                     </Stack>
                   </TableCell>
                 </TableRow>
@@ -19716,11 +19816,11 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
             >
               <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
                 <Box sx={{ fontWeight: 'bold', overflowWrap: 'anywhere' }}>{row.name}</Box>
-                <Switch checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
+                <SwitchField checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
               </Stack>
               <Stack direction="row" spacing={1} mt={1}>
-                <Button size="small" variant="outlined" onClick={() => handleEditOpen(row)} sx={{ flex: 1 }}>編集</Button>
-                <Button size="small" variant="outlined" color="error" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }} sx={{ flex: 1 }}>削除</Button>
+                <AppButton size="small" variant="outlined" intent="secondary" onClick={() => handleEditOpen(row)} sx={{ flex: 1 }}>編集</AppButton>
+                <AppButton size="small" variant="outlined" intent="danger" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }} sx={{ flex: 1 }}>削除</AppButton>
               </Stack>
             </Box>
           ))
@@ -19728,9 +19828,9 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
       </Stack>
 
       <Box mt={2}>
-        <Button variant="outlined" size="small" onClick={() => { setAddName(''); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+        <AppButton variant="outlined" intent="secondary" size="small" onClick={() => { setAddName(''); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
           種別を追加
-        </Button>
+        </AppButton>
       </Box>
 
       <AppDialog
@@ -19740,15 +19840,15 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
         title="サービス種別を編集"
         actions={(
           <>
-            <Button onClick={() => setEditOpen(false)}>キャンセル</Button>
-            <Button variant="contained" onClick={handleEditSave} disabled={saving || !editName.trim()}>
+            <AppButton variant="text" intent="secondary" onClick={() => setEditOpen(false)}>キャンセル</AppButton>
+            <AppButton onClick={handleEditSave} disabled={saving || !editName.trim()}>
               {saving ? '保存中...' : '保存'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
         <Stack spacing={2} mt={1}>
-          <TextField
+          <AppTextField
             label="種別名"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
@@ -19764,15 +19864,15 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
         title="サービス種別を追加"
         actions={(
           <>
-            <Button onClick={() => setAddOpen(false)}>キャンセル</Button>
-            <Button variant="contained" onClick={handleAddSave} disabled={saving || !addName.trim()}>
+            <AppButton variant="text" intent="secondary" onClick={() => setAddOpen(false)}>キャンセル</AppButton>
+            <AppButton onClick={handleAddSave} disabled={saving || !addName.trim()}>
               {saving ? '追加中...' : '追加'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
         <Stack spacing={2} mt={1}>
-          <TextField
+          <AppTextField
             label="種別名（例：重度訪問介護、移動支援）"
             value={addName}
             onChange={(e) => setAddName(e.target.value)}
@@ -19788,10 +19888,10 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
         title="サービス種別を削除"
         actions={(
           <>
-            <Button onClick={() => setDeleteOpen(false)}>キャンセル</Button>
-            <Button variant="contained" color="error" onClick={handleDeleteConfirm} disabled={saving}>
+            <AppButton variant="text" intent="secondary" onClick={() => setDeleteOpen(false)}>キャンセル</AppButton>
+            <AppButton intent="danger" onClick={handleDeleteConfirm} disabled={saving}>
               {saving ? '削除中...' : '削除'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
@@ -19809,10 +19909,10 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
 
 import { useEffect, useState } from 'react';
 import {
-  Box, Stack, Switch, Button, CircularProgress, Alert, Chip,
-  Table, TableBody, TableCell, TableHead, TableRow, TextField, FormControlLabel,
+  Box, Stack, CircularProgress, Alert, Chip,
+  Table, TableBody, TableCell, TableHead, TableRow,
 } from '@/components/ui/mui';
-import { AppDialog } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, SwitchField } from '@/components/ui';
 import {
   getStaffRoles, createStaffRole, updateStaffRole, deleteStaffRole,
   type StaffRole,
@@ -19937,12 +20037,12 @@ export default function StaffRoleSettings({ orgId }: { orgId: string }) {
                     {row.is_unpaid && <Chip size="small" label="無給" color="warning" variant="outlined" />}
                   </TableCell>
                   <TableCell>
-                    <Switch checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
+                    <SwitchField checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
                   </TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={1}>
-                      <Button size="small" onClick={() => handleEditOpen(row)}>編集</Button>
-                      <Button size="small" color="error" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }}>削除</Button>
+                      <AppButton variant="text" intent="secondary" size="small" onClick={() => handleEditOpen(row)}>編集</AppButton>
+                      <AppButton variant="text" intent="danger" size="small" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }}>削除</AppButton>
                     </Stack>
                   </TableCell>
                 </TableRow>
@@ -19966,11 +20066,11 @@ export default function StaffRoleSettings({ orgId }: { orgId: string }) {
                   <Box sx={{ fontWeight: 'bold' }}>{row.name}</Box>
                   {row.is_unpaid && <Chip size="small" label="無給" color="warning" variant="outlined" />}
                 </Stack>
-                <Switch checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
+                <SwitchField checked={row.is_active} onChange={() => handleToggleActive(row)} size="small" />
               </Stack>
               <Stack direction="row" spacing={1} mt={1}>
-                <Button size="small" variant="outlined" onClick={() => handleEditOpen(row)} sx={{ flex: 1 }}>編集</Button>
-                <Button size="small" variant="outlined" color="error" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }} sx={{ flex: 1 }}>削除</Button>
+                <AppButton size="small" variant="outlined" intent="secondary" onClick={() => handleEditOpen(row)} sx={{ flex: 1 }}>編集</AppButton>
+                <AppButton size="small" variant="outlined" intent="danger" onClick={() => { setDeleteTarget(row); setDeleteOpen(true); }} sx={{ flex: 1 }}>削除</AppButton>
               </Stack>
             </Box>
           ))
@@ -19978,9 +20078,9 @@ export default function StaffRoleSettings({ orgId }: { orgId: string }) {
       </Stack>
 
       <Box mt={2}>
-        <Button variant="outlined" size="small" onClick={() => { setAddName(''); setAddUnpaid(false); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+        <AppButton variant="outlined" intent="secondary" size="small" onClick={() => { setAddName(''); setAddUnpaid(false); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
           役割を追加
-        </Button>
+        </AppButton>
       </Box>
 
       <AppDialog
@@ -19990,22 +20090,23 @@ export default function StaffRoleSettings({ orgId }: { orgId: string }) {
         title="スタッフ役割を編集"
         actions={(
           <>
-            <Button onClick={() => setEditOpen(false)}>キャンセル</Button>
-            <Button variant="contained" onClick={handleEditSave} disabled={saving || !editName.trim()}>
+            <AppButton variant="text" intent="secondary" onClick={() => setEditOpen(false)}>キャンセル</AppButton>
+            <AppButton onClick={handleEditSave} disabled={saving || !editName.trim()}>
               {saving ? '保存中...' : '保存'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
         <Stack spacing={2} mt={1}>
-          <TextField
+          <AppTextField
             label="役割名"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
             fullWidth size="small" autoFocus
           />
-          <FormControlLabel
-            control={<Switch checked={editUnpaid} onChange={(e) => setEditUnpaid(e.target.checked)} />}
+          <SwitchField
+            checked={editUnpaid}
+            onChange={(e) => setEditUnpaid(e.target.checked)}
             label="無給（ボランティア・訓練中など）"
           />
         </Stack>
@@ -20018,22 +20119,23 @@ export default function StaffRoleSettings({ orgId }: { orgId: string }) {
         title="スタッフ役割を追加"
         actions={(
           <>
-            <Button onClick={() => setAddOpen(false)}>キャンセル</Button>
-            <Button variant="contained" onClick={handleAddSave} disabled={saving || !addName.trim()}>
+            <AppButton variant="text" intent="secondary" onClick={() => setAddOpen(false)}>キャンセル</AppButton>
+            <AppButton onClick={handleAddSave} disabled={saving || !addName.trim()}>
               {saving ? '追加中...' : '追加'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
         <Stack spacing={2} mt={1}>
-          <TextField
+          <AppTextField
             label="役割名（例：正職員、パート、ボランティア）"
             value={addName}
             onChange={(e) => setAddName(e.target.value)}
             fullWidth size="small" autoFocus
           />
-          <FormControlLabel
-            control={<Switch checked={addUnpaid} onChange={(e) => setAddUnpaid(e.target.checked)} />}
+          <SwitchField
+            checked={addUnpaid}
+            onChange={(e) => setAddUnpaid(e.target.checked)}
             label="無給（ボランティア・訓練中など）"
           />
         </Stack>
@@ -20046,10 +20148,10 @@ export default function StaffRoleSettings({ orgId }: { orgId: string }) {
         title="スタッフ役割を削除"
         actions={(
           <>
-            <Button onClick={() => setDeleteOpen(false)}>キャンセル</Button>
-            <Button variant="contained" color="error" onClick={handleDeleteConfirm} disabled={saving}>
+            <AppButton variant="text" intent="secondary" onClick={() => setDeleteOpen(false)}>キャンセル</AppButton>
+            <AppButton intent="danger" onClick={handleDeleteConfirm} disabled={saving}>
               {saving ? '削除中...' : '削除'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
@@ -20066,6 +20168,7 @@ export default function StaffRoleSettings({ orgId }: { orgId: string }) {
 'use client';
 
 import React, { forwardRef } from 'react';
+import { alpha } from '@mui/material/styles';
 import { Box, Chip, Paper } from '@/components/ui/mui';
 import FullCalendar from '@fullcalendar/react';
 import { EventInput, EventClickArg, DateSelectArg, EventDropArg, DatesSetArg, EventContentArg } from '@fullcalendar/core';
@@ -20082,6 +20185,7 @@ type HeaderToolbarConfig = {
 } | false;
 
 type Props = {
+    calendarRef?: React.Ref<FullCalendar>;
     events: EventInput[];
     initialView: string;
     headerToolbar: HeaderToolbarConfig;
@@ -20119,12 +20223,33 @@ const reportStatusColor = (status: string): 'default' | 'warning' | 'success' | 
 };
 
 export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
-    events, initialView, headerToolbar, buttonText, selectable = false, editable = false,
+    calendarRef, events, initialView, headerToolbar, buttonText, selectable = false, editable = false,
     onEventClick, onDateSelect, onEventDrop, onEventResize, onDatesSet, noEventsText
 }, ref) => {
     const renderEventContent = (arg: EventContentArg) => {
-        if (!arg.view.type.startsWith('list')) return undefined;
         const statuses = (arg.event.extendedProps.reportStatuses ?? []) as ReportStatus[];
+        const staffNames = (arg.event.extendedProps.staffNames ?? '') as string;
+
+        if (!arg.view.type.startsWith('list')) {
+            return (
+                <Box component="span" className="shift-calendar-event-content">
+                    {arg.timeText && (
+                        <Box component="span" className="shift-calendar-event-time">
+                            {arg.timeText}
+                        </Box>
+                    )}
+                    <Box component="span" className="shift-calendar-event-title">
+                        {arg.event.title}
+                    </Box>
+                    {staffNames && (
+                        <Box component="span" className="shift-calendar-event-staff">
+                            {staffNames}
+                        </Box>
+                    )}
+                </Box>
+            );
+        }
+
         return (
             <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', minWidth: 0 }}>
                 <Box component="span" sx={{ overflowWrap: 'anywhere' }}>{arg.event.title}</Box>
@@ -20151,8 +20276,16 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
 
     return (
         <Paper sx={(theme) => ({
-            display: 'flex', flexDirection: 'column', height: 'calc(100vh - 180px)',
-            borderRadius: 3, p: 2, boxShadow: 'none', border: '1px solid', borderColor: 'divider',
+            display: 'flex',
+            flexDirection: 'column',
+            height: { xs: '72vh', md: 'calc(100vh - 252px)' },
+            minHeight: { xs: 540, md: 620 },
+            borderRadius: 2,
+            p: { xs: 1, sm: 1.5 },
+            boxShadow: 'none',
+            border: '1px solid',
+            borderColor: 'divider',
+            bgcolor: 'background.paper',
             '& .fc': {
                 height: '100%',
                 bgcolor: theme.palette.background.paper,
@@ -20167,18 +20300,114 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                 '--fc-event-text-color': '#fff',
                 fontFamily: 'inherit',
             },
-            '& .fc-button': { textTransform: 'capitalize', borderRadius: '6px', fontWeight: 'bold', boxShadow: 'none !important' },
-            '& .fc-toolbar-title': { fontSize: '1.25rem', fontWeight: 'bold', color: '#060607' },
-            '& .fc-col-header-cell-cushion': { color: '#6D6F78', padding: '8px 0' },
-            '& .fc-event-time': { fontWeight: 'bold', marginRight: '4px' },
-            '& .fc-list-day-cushion': { backgroundColor: `${theme.palette.background.tint} !important`, color: theme.palette.primary.main, fontWeight: 'bold' },
-            '& .fc-list-event:hover td': { backgroundColor: '#F8F9FA', cursor: 'pointer' },
-            // ★ドラッグ＆ドロップ時のUI調整
+            '& .fc-header-toolbar': {
+                alignItems: 'center',
+                gap: 1,
+                marginBottom: '12px !important',
+                flexWrap: 'wrap',
+            },
+            '& .fc-toolbar-chunk': {
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+            },
+            '& .fc-button': {
+                minHeight: 36,
+                borderRadius: `${theme.shape.borderRadius}px !important`,
+                px: '12px !important',
+                textTransform: 'none',
+                fontWeight: 700,
+                boxShadow: 'none !important',
+            },
+            '& .fc-button-primary:not(:disabled).fc-button-active': {
+                bgcolor: `${theme.palette.primary.dark} !important`,
+                borderColor: `${theme.palette.primary.dark} !important`,
+            },
+            '& .fc-toolbar-title': { fontSize: '1.05rem', fontWeight: 700, color: theme.palette.text.primary },
+            '& .fc-view-harness': {
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                overflow: 'hidden',
+                bgcolor: 'background.paper',
+            },
+            '& .fc-scrollgrid': { border: '0 !important' },
+            '& .fc-col-header-cell': { bgcolor: 'background.subtle' },
+            '& .fc-col-header-cell-cushion': {
+                color: theme.palette.text.secondary,
+                padding: '9px 0',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+            },
+            '& .fc-daygrid-day-number': {
+                color: theme.palette.text.primary,
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                padding: '7px 8px',
+            },
+            '& .fc-day-other .fc-daygrid-day-number': { color: theme.palette.text.disabled },
+            '& .fc-daygrid-day.fc-day-today': { bgcolor: alpha(theme.palette.primary.main, 0.08) },
+            '& .fc-daygrid-day-frame': { minHeight: 96 },
+            '& .fc-daygrid-event-harness': { marginInline: '5px' },
+            '& .fc-daygrid-event.shift-calendar-event': {
+                display: 'block',
+                borderRadius: '6px',
+                border: '1px solid transparent',
+                padding: '3px 6px',
+                marginTop: '3px',
+                cursor: 'pointer',
+                boxShadow: 'none',
+                overflow: 'hidden',
+            },
+            '& .fc-daygrid-event.shift-calendar-event:hover': {
+                filter: 'brightness(0.96)',
+            },
+            '& .fc-daygrid-event.shift-calendar-event.is-cancelled': {
+                color: `${theme.palette.text.secondary} !important`,
+                textDecoration: 'line-through',
+            },
+            '& .shift-calendar-event-content': {
+                display: 'grid',
+                gap: '1px',
+                minWidth: 0,
+                lineHeight: 1.25,
+            },
+            '& .shift-calendar-event-time': {
+                fontSize: '0.68rem',
+                fontWeight: 800,
+                opacity: 0.92,
+                whiteSpace: 'nowrap',
+            },
+            '& .shift-calendar-event-title': {
+                fontSize: '0.76rem',
+                fontWeight: 800,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+            },
+            '& .shift-calendar-event-staff': {
+                fontSize: '0.67rem',
+                fontWeight: 600,
+                opacity: 0.82,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+            },
+            '& .fc-timegrid-event.shift-calendar-event': {
+                borderRadius: '6px',
+                padding: '4px 6px',
+                boxShadow: 'none',
+            },
+            '& .fc-timegrid-slot': { height: 34 },
+            '& .fc-list': { border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' },
+            '& .fc-list-day-cushion': { backgroundColor: `${theme.palette.background.tint} !important`, color: theme.palette.primary.main, fontWeight: 700 },
+            '& .fc-list-event:hover td': { backgroundColor: theme.palette.background.subtle, cursor: 'pointer' },
+            '& .fc-list-event-title': { overflowWrap: 'anywhere' },
             '& .fc-event-dragging': { opacity: 0.8 },
             '& .fc-event-resizing': { opacity: 0.8 },
         })}>
             <FullCalendar
-                ref={ref}
+                ref={calendarRef ?? ref}
                 // rrulePlugin を削除（実体化方式になったため不要）
                 plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
                 initialView={initialView}
@@ -20196,7 +20425,15 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                 select={onDateSelect}
                 eventClick={onEventClick}
                 eventContent={renderEventContent}
+                eventClassNames={(arg) => [
+                    'shift-calendar-event',
+                    arg.event.extendedProps.isCancelled ? 'is-cancelled' : '',
+                ].filter(Boolean)}
+                eventDisplay="block"
                 dayMaxEvents={true}
+                expandRows={true}
+                handleWindowResize={true}
+                height="100%"
                 noEventsText={noEventsText}
             />
         </Paper>
@@ -20215,9 +20452,11 @@ import React, { useState, useEffect } from 'react';
 import {
     Button, Stack,
     Box, Typography,
-    IconButton, Tooltip, Divider
+    IconButton, Tooltip, Divider,
+    FormControlLabel, Checkbox
 } from '@/components/ui/mui';
 import DeleteIcon from '@mui/icons-material/Delete';
+import EditNoteIcon from '@mui/icons-material/EditNote';
 import ShiftSegmentEditor from './ShiftSegmentEditor';
 import { ShiftPayload } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
@@ -20244,14 +20483,16 @@ type Props = {
     onSave: (payload: ShiftPayload, shiftId?: string) => Promise<void>;
     onToggleCancel?: (shiftId: string, isCancel: boolean, reason: string) => Promise<void>;
     onDelete?: (shiftId: string) => Promise<void>;
+    onCreateRecord?: (shift: ShiftData) => void;
     clients: ClientData[];
     staffs: StaffData[];
     organizationId: string;
     initialData?: ShiftData | null;
+    canSave?: boolean;
 };
 
 export const ShiftFormModal = ({
-    open, onClose, onSave, onToggleCancel, onDelete, clients, staffs, organizationId, initialData
+    open, onClose, onSave, onToggleCancel, onDelete, onCreateRecord, clients, staffs, organizationId, initialData, canSave = true
 }: Props) => {
     const { showToast } = useToast();
     const confirm = useConfirm();
@@ -20262,6 +20503,7 @@ export const ShiftFormModal = ({
     const [startAt, setStartAt] = useState('');
     const [endAt, setEndAt] = useState('');
     const [cancelReason, setCancelReason] = useState('');
+    const [autoAssign, setAutoAssign] = useState(true);
 
     useEffect(() => {
         if (open) {
@@ -20284,6 +20526,7 @@ export const ShiftFormModal = ({
                 setStartAt('');
                 setEndAt('');
                 setCancelReason('');
+                setAutoAssign(true);
             }
         }
     }, [open, initialData]);
@@ -20305,7 +20548,8 @@ export const ShiftFormModal = ({
                 startAt: new Date(startAt).toISOString(),
                 endAt: new Date(endAt).toISOString(),
                 staffIds: selectedStaffIds,
-                isModified: true // 手動で保存したため「個別調整済み」フラグを立てる
+                isModified: true, // 手動で保存したため「個別調整済み」フラグを立てる
+                autoAssign: !initialData ? autoAssign : false,
             };
 
             await onSave(payload, initialData?.id);
@@ -20374,7 +20618,23 @@ export const ShiftFormModal = ({
                     </Tooltip>
                 )}
             contentSx={{ py: 3 }}
-            actions={<><AppButton variant="text" intent="secondary" onClick={onClose} disabled={loading}>閉じる</AppButton><AppButton onClick={handleSave} loading={loading}>変更を保存</AppButton></>}
+            actions={<>
+                {initialData && onCreateRecord && (
+                    <AppButton
+                        variant="outlined"
+                        intent="secondary"
+                        startIcon={<EditNoteIcon />}
+                        onClick={() => onCreateRecord(initialData)}
+                        disabled={loading || initialData.status === 'cancelled'}
+                    >
+                        記録作成
+                    </AppButton>
+                )}
+                <Box sx={{ flexGrow: 1 }} />
+                <AppButton variant="text" intent="secondary" onClick={onClose} disabled={loading}>閉じる</AppButton>
+                {canSave && <AppButton onClick={handleSave} loading={loading}>変更を保存</AppButton>}
+            </>}
+            actionsSx={{ flexWrap: 'wrap', gap: 1 }}
         >
                 <Stack spacing={3}>
                     {initialData?.status === 'cancelled' && (
@@ -20426,6 +20686,24 @@ export const ShiftFormModal = ({
                             onChange={(e) => setEndAt(e.target.value)}
                         />
                     </Stack>
+
+                    {/* 新規作成時のみ: 自動アサインチェックボックス */}
+                    {!initialData && (
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={autoAssign}
+                                    onChange={(e) => setAutoAssign(e.target.checked)}
+                                    size="small"
+                                />
+                            }
+                            label={
+                                <Typography variant="body2" color="text.secondary">
+                                    選択したスタッフを基本担当（担当スタッフ設定）にも登録する
+                                </Typography>
+                            }
+                        />
+                    )}
 
                     {initialData && (
                         <>
@@ -20588,6 +20866,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
     const [interval, setIntervalCount] = useState<number>(1);
     const [selectedDays, setSelectedDays] = useState<string[]>([]);
     const [selectedWeeks, setSelectedWeeks] = useState<string[]>([]);
+    const [autoAssign, setAutoAssign] = useState(true);
 
     useEffect(() => {
         if (open) {
@@ -20611,6 +20890,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 setIntervalCount(1);
                 setSelectedDays([]);
                 setSelectedWeeks([]);
+                setAutoAssign(true);
             }
         }
     }, [open, initialData]);
@@ -20645,7 +20925,8 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 startTime: startTime.length === 5 ? `${startTime}:00` : startTime,
                 endTime: endTime.length === 5 ? `${endTime}:00` : endTime,
                 rrule: rruleStr,
-                staffIds: selectedStaffIds
+                staffIds: selectedStaffIds,
+                autoAssign: !initialData ? autoAssign : false,
             }, initialData?.id);
             onClose();
         } catch (e) {
@@ -20688,6 +20969,24 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                         getOptionLabel={(staff) => staff.name}
                         getOptionValue={(staff) => staff.id}
                     />
+
+                    {/* 新規作成時のみ: 自動アサインチェックボックス */}
+                    {!initialData && (
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={autoAssign}
+                                    onChange={(e) => setAutoAssign(e.target.checked)}
+                                    size="small"
+                                />
+                            }
+                            label={
+                                <Typography variant="body2" color="text.secondary">
+                                    選択したスタッフを基本担当（担当スタッフ設定）にも登録する
+                                </Typography>
+                            }
+                        />
+                    )}
 
                     <Stack direction="row" spacing={2}>
                         <DateTimeField
@@ -21071,20 +21370,26 @@ export default function ShiftSegmentEditor({ orgId, shiftId, shiftStartAt, shift
 
 import { useRef, useState } from 'react';
 import {
+  Alert,
+  Box,
   Button,
   CircularProgress,
   Dialog,
-  DialogTitle,
+  DialogActions,
   DialogContent,
   DialogContentText,
-  DialogActions,
-  Snackbar,
-  Alert,
+  DialogTitle,
+  Divider,
+  Paper,
+  Typography,
 } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import type { FormItem, PromptCandidate } from '@/lib/ai/extractPrompt';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { readAiExtractSse } from '@/lib/ai/sseClient';
+import { AiInfoPanel } from '@/components/ui/AiInfoPanel';
 
 export type AiImportButtonProps = {
   organizationId: string;
@@ -21106,40 +21411,57 @@ export function AiImportButton({
   disabled = false,
 }: AiImportButtonProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
 
-  const handleButtonClick = () => {
-    fileInputRef.current?.click();
+  const openWizard = () => {
+    setSelectedFile(null);
+    setErrorMessage(null);
+    setWizardOpen(true);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // Reset input so the same file can be selected again if needed
-    e.target.value = '';
+  const closeWizard = () => {
+    if (loading) return;
+    setWizardOpen(false);
+    setSelectedFile(null);
+    setErrorMessage(null);
+    setConfirmOpen(false);
+  };
 
+  const handleFileSelect = (file: File) => {
+    setSelectedFile(file);
+    setErrorMessage(null);
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleFileSelect(file);
+    e.target.value = '';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileSelect(file);
+  };
+
+  const handleProcess = () => {
+    if (!selectedFile) return;
     if (hasExistingValues) {
-      setPendingFile(file);
       setConfirmOpen(true);
     } else {
-      void processFile(file);
+      void processFile(selectedFile);
     }
   };
 
   const handleConfirmContinue = () => {
     setConfirmOpen(false);
-    if (pendingFile) {
-      void processFile(pendingFile);
-      setPendingFile(null);
-    }
-  };
-
-  const handleConfirmCancel = () => {
-    setConfirmOpen(false);
-    setPendingFile(null);
+    if (selectedFile) void processFile(selectedFile);
   };
 
   const processFile = async (file: File) => {
@@ -21164,7 +21486,6 @@ export function AiImportButton({
       }
 
       let extracted = false;
-
       await readAiExtractSse(response.body, (event) => {
         if (event.type === 'record' && !extracted) {
           extracted = true;
@@ -21177,6 +21498,8 @@ export function AiImportButton({
       if (!extracted) {
         throw new Error('AIから結果を受信できませんでした');
       }
+
+      setWizardOpen(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'AIの読み取りに失敗しました';
       setErrorMessage(message);
@@ -21187,27 +21510,110 @@ export function AiImportButton({
 
   return (
     <>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*,application/pdf"
-        style={{ display: 'none' }}
-        onChange={handleFileChange}
-      />
-
       <Button
         variant="outlined"
         size="small"
-        startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <AutoFixHighIcon />}
-        onClick={handleButtonClick}
-        disabled={disabled || loading}
-        aria-busy={loading || undefined}
+        startIcon={<AutoFixHighIcon />}
+        onClick={openWizard}
+        disabled={disabled}
       >
-        {loading ? 'AIが記録を読み取っています...' : hasExistingValues ? '紙で上書き補完' : '紙から入力'}
+        {hasExistingValues ? '紙で上書き補完' : '紙から入力'}
       </Button>
 
+      {/* ウィザードダイアログ */}
+      <Dialog open={wizardOpen} onClose={closeWizard} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <AutoFixHighIcon color="primary" fontSize="small" />
+          AIで記録を読み取る
+        </DialogTitle>
+
+        <DialogContent dividers sx={{ p: 2 }}>
+          <AiInfoPanel variant="dialog" />
+
+          <Divider sx={{ my: 1.5 }} />
+
+          {/* ファイル選択エリア */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            style={{ display: 'none' }}
+            onChange={handleFileInputChange}
+          />
+
+          {selectedFile ? (
+            <Paper
+              variant="outlined"
+              sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, bgcolor: 'action.hover' }}
+            >
+              <InsertDriveFileIcon color="action" />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography fontSize="0.875rem" noWrap>
+                  {selectedFile.name}
+                </Typography>
+                <Typography fontSize="0.75rem" color="text.secondary">
+                  {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                </Typography>
+              </Box>
+              <Button
+                size="small"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading}
+              >
+                変更
+              </Button>
+            </Paper>
+          ) : (
+            <Paper
+              variant="outlined"
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              sx={{
+                p: 3,
+                textAlign: 'center',
+                border: '2px dashed',
+                borderColor: dragOver ? 'primary.main' : 'primary.light',
+                bgcolor: dragOver ? 'primary.50' : 'background.default',
+                cursor: 'pointer',
+                transition: 'border-color 0.15s, background-color 0.15s',
+              }}
+            >
+              <CloudUploadIcon color="primary" sx={{ fontSize: 36, mb: 0.5 }} />
+              <Typography fontSize="0.875rem" color="text.secondary">
+                クリックまたはドラッグ&ドロップでファイルを選択
+              </Typography>
+              <Typography fontSize="0.75rem" color="text.disabled" mt={0.5}>
+                PDF・JPEG・PNG・WebP（最大10MB）
+              </Typography>
+            </Paper>
+          )}
+
+          {errorMessage && (
+            <Alert severity="error" sx={{ mt: 1.5 }} onClose={() => setErrorMessage(null)}>
+              {errorMessage}
+            </Alert>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ px: 2, py: 1.5 }}>
+          <Button onClick={closeWizard} disabled={loading}>
+            キャンセル
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <AutoFixHighIcon />}
+            onClick={handleProcess}
+            disabled={!selectedFile || loading}
+          >
+            {loading ? '読み取り中...' : '処理開始'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* 上書き確認ダイアログ */}
-      <Dialog open={confirmOpen} onClose={handleConfirmCancel}>
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
         <DialogTitle>確認</DialogTitle>
         <DialogContent>
           <DialogContentText>
@@ -21215,24 +21621,12 @@ export function AiImportButton({
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleConfirmCancel}>キャンセル</Button>
+          <Button onClick={() => setConfirmOpen(false)}>キャンセル</Button>
           <Button onClick={handleConfirmContinue} variant="contained">
             続ける
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* エラー通知 */}
-      <Snackbar
-        open={!!errorMessage}
-        autoHideDuration={6000}
-        onClose={() => setErrorMessage(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity="error" onClose={() => setErrorMessage(null)} variant="filled">
-          {errorMessage}
-        </Alert>
-      </Snackbar>
     </>
   );
 }
@@ -21511,7 +21905,7 @@ export function AiImportReviewTable({
                         renderValue={(val) =>
                           val
                             ? (clients.find((c) => c.id === val)?.name ?? val)
-                            : <span style={{ color: '#999' }}>未選択</span>
+                            : <Typography component="span" color="text.disabled">未選択</Typography>
                         }
                       >
                         <MenuItem value=""><em>未選択</em></MenuItem>
@@ -21537,7 +21931,7 @@ export function AiImportReviewTable({
                         renderValue={(val) =>
                           val
                             ? (helpers.find((h) => h.id === val)?.name ?? val)
-                            : <span style={{ color: '#999' }}>未選択</span>
+                            : <Typography component="span" color="text.disabled">未選択</Typography>
                         }
                       >
                         <MenuItem value=""><em>未選択</em></MenuItem>
@@ -21619,6 +22013,188 @@ export function AiImportReviewTable({
 
 
 
+--- START OF FILE src/components/ui/AiInfoPanel.tsx ---
+
+'use client';
+
+import { useState } from 'react';
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Box,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Typography,
+} from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import SecurityIcon from '@mui/icons-material/Security';
+import ListAltIcon from '@mui/icons-material/ListAlt';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+
+type Props = {
+  variant?: 'page' | 'dialog';
+};
+
+type SectionKey = 'about' | 'security' | 'steps' | 'cautions';
+
+export function AiInfoPanel({ variant = 'page' }: Props) {
+  const [expanded, setExpanded] = useState<SectionKey | false>(false);
+
+  const toggle = (key: SectionKey) =>
+    setExpanded((prev) => (prev === key ? false : key));
+
+  const bodyTypo = variant === 'dialog' ? '0.82rem' : '0.875rem';
+
+  return (
+    <Box sx={{ mb: variant === 'page' ? 3 : 1.5 }}>
+      {/* 機能説明 */}
+      <Accordion
+        expanded={expanded === 'about'}
+        onChange={() => toggle('about')}
+        disableGutters
+        elevation={0}
+        sx={{ border: 1, borderColor: 'divider', '&:not(:last-child)': { borderBottom: 0 } }}
+      >
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <AutoFixHighIcon color="primary" sx={{ mr: 1, fontSize: '1.1rem' }} />
+          <Typography fontWeight={600} fontSize={variant === 'dialog' ? '0.875rem' : '0.9rem'}>
+            この機能について
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <Typography fontSize={bodyTypo} color="text.secondary">
+            紙の提供記録（手書き・印刷）の写真やPDFをアップロードするだけで、AIが自動的に記録の下書きを作成します。手入力の手間を大幅に削減できます。
+          </Typography>
+          <List dense disablePadding sx={{ mt: 1 }}>
+            {[
+              '対応形式: PDF・JPEG・PNG・WebP（1ファイル最大10MB）',
+              'PDFは複数記録を自動検出して個別に取り込めます',
+              '複数枚にまたがる記録は画像をグループ化して処理できます',
+            ].map((text) => (
+              <ListItem key={text} sx={{ py: 0.25, px: 0 }}>
+                <ListItemIcon sx={{ minWidth: 24 }}>
+                  <CheckCircleOutlineIcon fontSize="small" color="primary" />
+                </ListItemIcon>
+                <ListItemText primaryTypographyProps={{ fontSize: bodyTypo }} primary={text} />
+              </ListItem>
+            ))}
+          </List>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* 安全性 */}
+      <Accordion
+        expanded={expanded === 'security'}
+        onChange={() => toggle('security')}
+        disableGutters
+        elevation={0}
+        sx={{ border: 1, borderColor: 'divider', '&:not(:last-child)': { borderBottom: 0 } }}
+      >
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <SecurityIcon color="success" sx={{ mr: 1, fontSize: '1.1rem' }} />
+          <Typography fontWeight={600} fontSize={variant === 'dialog' ? '0.875rem' : '0.9rem'}>
+            安全性・プライバシー
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <List dense disablePadding>
+            {[
+              'Google Vertex AI（Gemini）を使用。データ処理追加契約（DPA）の適用により、送信した記録情報がAIのトレーニングに使用されることはありません。',
+              'アップロードされたファイルはAI処理後に保持されません。サーバーやクラウドストレージには保存されません。',
+              'AI取込操作はすべて監査ログに記録されます（誰が・いつ・何件処理したか）。',
+            ].map((text) => (
+              <ListItem key={text} sx={{ py: 0.25, px: 0 }}>
+                <ListItemIcon sx={{ minWidth: 24 }}>
+                  <CheckCircleOutlineIcon fontSize="small" color="success" />
+                </ListItemIcon>
+                <ListItemText primaryTypographyProps={{ fontSize: bodyTypo }} primary={text} />
+              </ListItem>
+            ))}
+          </List>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* 実行手順 */}
+      <Accordion
+        expanded={expanded === 'steps'}
+        onChange={() => toggle('steps')}
+        disableGutters
+        elevation={0}
+        sx={{ border: 1, borderColor: 'divider', '&:not(:last-child)': { borderBottom: 0 } }}
+      >
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <ListAltIcon color="action" sx={{ mr: 1, fontSize: '1.1rem' }} />
+          <Typography fontWeight={600} fontSize={variant === 'dialog' ? '0.875rem' : '0.9rem'}>
+            使い方
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <List dense disablePadding>
+            {(variant === 'dialog'
+              ? [
+                  '① ファイルを選択（PDF・画像）',
+                  '② 「処理開始」をクリック',
+                  '③ AIの結果を確認・修正してから保存',
+                ]
+              : [
+                  '① ファイルを選択またはドラッグ&ドロップ（PDF・JPEG・PNG・WebP）',
+                  '② 複数画像が1件の記録の場合は「1記録としてまとめる」で結合',
+                  '③ 「処理開始」をクリック — 結果がリアルタイムで追加されます',
+                  '④ 各行の日付・スタッフ・利用者を確認・修正',
+                  '⑤ 「下書き保存」で記録として保存',
+                ]
+            ).map((text) => (
+              <ListItem key={text} sx={{ py: 0.25, px: 0 }}>
+                <ListItemText primaryTypographyProps={{ fontSize: bodyTypo }} primary={text} />
+              </ListItem>
+            ))}
+          </List>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* 注意点 */}
+      <Accordion
+        expanded={expanded === 'cautions'}
+        onChange={() => toggle('cautions')}
+        disableGutters
+        elevation={0}
+        sx={{ border: 1, borderColor: 'divider' }}
+      >
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <WarningAmberIcon color="warning" sx={{ mr: 1, fontSize: '1.1rem' }} />
+          <Typography fontWeight={600} fontSize={variant === 'dialog' ? '0.875rem' : '0.9rem'}>
+            注意点
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <List dense disablePadding>
+            {[
+              'AIの読み取り結果は必ず目視で確認してください。特に氏名・日付・時刻はミスが起きやすい箇所です。',
+              '信頼度が「低」（赤）のフィールドは特に注意が必要です。',
+              '手書きが薄い・汚れがある・傾きが大きいと読み取り精度が下がります。できるだけ明るく正面から撮影してください。',
+              '記録の最終的な正確性を確認する責任はスタッフにあります。AIによる下書きはあくまで補助です。',
+            ].map((text) => (
+              <ListItem key={text} sx={{ py: 0.25, px: 0 }}>
+                <ListItemIcon sx={{ minWidth: 24 }}>
+                  <WarningAmberIcon fontSize="small" color="warning" />
+                </ListItemIcon>
+                <ListItemText primaryTypographyProps={{ fontSize: bodyTypo }} primary={text} />
+              </ListItem>
+            ))}
+          </List>
+        </AccordionDetails>
+      </Accordion>
+    </Box>
+  );
+}
+
+
+
 --- START OF FILE src/components/ui/AppButton.stories.tsx ---
 
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
@@ -21652,6 +22228,8 @@ export type ButtonIntent = 'primary' | 'secondary' | 'danger' | 'warning' | 'suc
 export interface AppButtonProps extends Omit<ButtonProps, 'color'> {
   intent?: ButtonIntent;
   loading?: boolean;
+  target?: string;
+  rel?: string;
 }
 
 const colorByIntent: Record<ButtonIntent, ButtonProps['color']> = {
@@ -22063,9 +22641,9 @@ export const Disabled: Story = { args: { item: { id: 'done', label: '実施済�
 
 'use client';
 
-import { Box, FormControlLabel, FormHelperText, Stack, Switch, Typography } from '@mui/material';
+import { Box, FormHelperText, Stack, Typography } from '@mui/material';
 import { AppTextField, NumberField } from './Fields';
-import { CheckboxGroupField, RadioGroupField } from './SelectionFields';
+import { CheckboxGroupField, RadioGroupField, SwitchField } from './SelectionFields';
 
 export type DynamicFormItem = {
   id: string;
@@ -22107,11 +22685,13 @@ export function DynamicFormField({ item, value, detailValue = '', error, disable
   if (item.type === 'checkbox') {
     return (
       <Stack spacing={1.5}>
-        <FormControlLabel
+        <SwitchField
           label={<Typography fontWeight={value ? 700 : 400}>{item.label}</Typography>}
           labelPlacement="start"
           sx={{ justifyContent: 'space-between', m: 0 }}
-          control={<Switch checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} disabled={disabled} />}
+          checked={Boolean(value)}
+          onChange={(event) => onChange(event.target.checked)}
+          disabled={disabled}
         />
         {error && <FormHelperText error>{error}</FormHelperText>}
         {detailField}
@@ -22521,11 +23101,15 @@ import {
   FormHelperText,
   Radio,
   RadioGroup,
+  Switch,
   TextField,
   Typography,
+  type FormControlLabelProps,
+  type SwitchProps,
 } from '@mui/material';
 import CheckBoxIcon from '@mui/icons-material/CheckBox';
 import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
+import type { ReactNode } from 'react';
 
 export interface MultiSelectFieldProps<T> {
   label: string;
@@ -22682,6 +23266,26 @@ export function RadioGroupField<T>({ label, options, value, onChange, getOptionL
       <RadioGroup row={row} value={value} onChange={(event) => onChange(event.target.value)}>
         {options.map((option) => <FormControlLabel key={getOptionValue(option)} value={getOptionValue(option)} control={<Radio />} label={getOptionLabel(option)} />)}
       </RadioGroup>
+      {helperText && <FormHelperText>{helperText}</FormHelperText>}
+    </FormControl>
+  );
+}
+
+export interface SwitchFieldProps extends SwitchProps {
+  label?: ReactNode;
+  labelPlacement?: FormControlLabelProps['labelPlacement'];
+  helperText?: string;
+  error?: boolean;
+}
+
+export function SwitchField({ label, labelPlacement, helperText, error, sx, ...props }: SwitchFieldProps) {
+  const control = <Switch {...props} sx={!label ? sx : undefined} />;
+
+  if (!label) return control;
+
+  return (
+    <FormControl error={error}>
+      <FormControlLabel control={control} label={label} labelPlacement={labelPlacement} sx={sx} />
       {helperText && <FormHelperText>{helperText}</FormHelperText>}
     </FormControl>
   );
@@ -23002,10 +23606,11 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       }
 
       // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
+      // organization_member_roles を JOIN することで 3RTT → 2RTT に削減。
       const [{ data: members, error: memberError }, { data: profile, error: profileError }] = await Promise.all([
         supabase
           .from('organization_members')
-          .select('organization_id, role, organizations!inner(id, name)')
+          .select('organization_id, role, organizations!inner(id, name), organization_member_roles(organization_roles(permissions))')
           .eq('user_id', session.user.id),
         supabase
           .from('profiles')
@@ -23017,49 +23622,42 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       if (memberError || profileError) {
         if (!isCurrent()) return;
         console.error('Workspace lookup failed', { memberError, profileError });
-        setStatus('error');
-        setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
+        const authErr = memberError || profileError;
+        if (authErr?.code === '401' || authErr?.message?.toLowerCase().includes('jwt')) {
+          setOrgList([]);
+          setCurrentOrg(null);
+          setStatus('session_expired');
+          setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
+        } else {
+          setStatus('error');
+          setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
+        }
         return;
       }
 
-      const list: Workspace[] = [];
-      for (const member of members ?? []) {
+      const parsedMembers = (members ?? []).map((member) => {
         const organization = Array.isArray(member.organizations)
           ? member.organizations[0]
           : member.organizations;
         const role = member.role as string;
-        if (!organization || !['owner', 'member'].includes(role)) {
-          setStatus('forbidden');
-          setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
-          return;
-        }
+        const memberRoles = member.organization_member_roles ?? [];
+        return { organization, role, memberRoles };
+      });
 
-        const { data: roleLinks, error: roleLinksError } = await supabase
-          .from('organization_member_roles')
-          .select('organization_roles(permissions)')
-          .eq('organization_id', organization.id)
-          .eq('user_id', session.user.id);
+      if (parsedMembers.some(({ organization, role }) => !organization || !['owner', 'member'].includes(role))) {
         if (!isCurrent()) return;
-        if (roleLinksError) {
-          console.error('Workspace role lookup failed', roleLinksError);
-          if (roleLinksError.code === '401' || roleLinksError.message.toLowerCase().includes('jwt')) {
-            setOrgList([]);
-            setCurrentOrg(null);
-            setStatus('session_expired');
-            setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
-          } else {
-            setStatus('error');
-            setErrorMessage('権限情報を取得できませんでした。時間をおいて再試行してください。');
-          }
-          return;
-        }
-        const rolePerms: RolePermissions[] = (roleLinks ?? [])
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .map((r: any) => {
-            const org = Array.isArray(r.organization_roles) ? r.organization_roles[0] : r.organization_roles;
-            return org?.permissions as RolePermissions | undefined;
-          })
-          .filter((p): p is RolePermissions => p != null);
+        setStatus('forbidden');
+        setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
+        return;
+      }
+
+      const list: Workspace[] = [];
+      for (const { organization, role, memberRoles } of parsedMembers) {
+        const rolePerms: RolePermissions[] = memberRoles.flatMap((omr: { organization_roles: { permissions: RolePermissions } | { permissions: RolePermissions }[] | null }) => {
+          const orgRole = Array.isArray(omr.organization_roles) ? omr.organization_roles[0] : omr.organization_roles;
+          if (!orgRole?.permissions) return [];
+          return [orgRole.permissions as RolePermissions];
+        });
         const effectivePermissions = role === 'owner' ? FULL_PERMISSIONS : mergePermissions(rolePerms);
 
         list.push({ id: organization.id, name: organization.name, role: role as OrganizationRole, effectivePermissions });
@@ -23125,8 +23723,8 @@ export const useWorkspace = () => {
 'use client';
 
 import { useState, useEffect, useCallback, useRef, RefObject } from 'react';
-import { EventInput } from '@fullcalendar/core';
-import FullCalendar from '@fullcalendar/react';
+import type { EventInput } from '@fullcalendar/core';
+import type FullCalendar from '@fullcalendar/react';
 import { supabase } from '@/lib/supabase';
 import { getShifts, getShiftPatterns, type ShiftQueryFilter } from '@/app/actions/shift';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
@@ -23190,6 +23788,12 @@ export const useShiftData = ({
     const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
     const [unsyncedCount, setUnsyncedCount] = useState(0);
 
+    const masterDataReadyRef = useRef(false);
+
+    useEffect(() => {
+        masterDataReadyRef.current = false;
+    }, [currentOrg]);
+
     useEffect(() => {
         supabase.auth.getUser().then(({ data: { user } }) => {
             if (user) setCurrentUserId(user.id);
@@ -23227,6 +23831,8 @@ export const useShiftData = ({
             }
         } catch (error) {
             console.error(error);
+        } finally {
+            masterDataReadyRef.current = true;
         }
     }, [currentOrg, currentUserId]);
 
@@ -23264,6 +23870,12 @@ export const useShiftData = ({
 
     const fetchData = useCallback(async (isBackground = false, range?: ShiftDateRange) => {
         if (!currentOrg) return;
+        // myShift tab requires knowing the current staff — skip until master data is ready
+        if (activeTab === 'myShift' && !masterDataReadyRef.current) {
+            setInitialLoading(false);
+            setIsFetching(false);
+            return;
+        }
         if (!isBackground) setInitialLoading(true);
         setIsFetching(true);
 
@@ -24352,6 +24964,7 @@ declare module '@mui/material/styles' {
     danger: string;
     warning: string;
     success: string;
+    aiHighlight: string;
   }
 }
 
@@ -24372,6 +24985,7 @@ export const designTokens = {
     danger: '#FFF5F5',
     warning: '#FFF8E1',
     success: '#F1F8E9',
+    aiHighlight: '#FFFDE7',
   },
   border: {
     default: '#E3E5E8',
@@ -24405,6 +25019,7 @@ const theme = createTheme({
       danger: designTokens.status.danger,
       warning: designTokens.status.warning,
       success: designTokens.status.success,
+      aiHighlight: designTokens.status.aiHighlight,
     },
     divider: designTokens.border.default,
     text: { primary: '#2C3E50', secondary: '#636E72' },
@@ -26253,9 +26868,10 @@ export function checkManagementPermission(
 
 --- START OF FILE src/utils/reportZipExport.tsx ---
 
-import { pdf } from '@react-pdf/renderer';
+import React from 'react';
+import type { DocumentProps } from '@react-pdf/renderer';
 import JSZip from 'jszip';
-import { ServiceRecordDocument, type PdfReportData } from '@/components/pdf/ServiceRecordDocument';
+import type { PdfReportData } from '@/components/pdf/ServiceRecordDocument';
 
 type PdfEntry = {
   data: PdfReportData;
@@ -26274,15 +26890,22 @@ const triggerDownload = (blob: Blob, fileName: string) => {
 export async function downloadReportZip(entries: PdfEntry[], zipBaseName: string): Promise<void> {
   if (entries.length === 0) return;
 
+  const [{ pdf }, { ServiceRecordDocument }] = await Promise.all([
+    import('@react-pdf/renderer'),
+    import('@/components/pdf/ServiceRecordDocument'),
+  ]);
+
   if (entries.length === 1) {
-    const blob = await pdf(<ServiceRecordDocument reports={[entries[0].data]} />).toBlob();
+    const document = React.createElement(ServiceRecordDocument, { reports: [entries[0].data] }) as React.ReactElement<DocumentProps>;
+    const blob = await pdf(document).toBlob();
     triggerDownload(blob, entries[0].fileName);
     return;
   }
 
   const zip = new JSZip();
   for (const entry of entries) {
-    const blob = await pdf(<ServiceRecordDocument reports={[entry.data]} />).toBlob();
+    const document = React.createElement(ServiceRecordDocument, { reports: [entry.data] }) as React.ReactElement<DocumentProps>;
+    const blob = await pdf(document).toBlob();
     zip.file(entry.fileName, blob);
   }
   const zipBlob = await zip.generateAsync({ type: 'blob' });
@@ -26378,14 +27001,14 @@ export const convertToCalendarEvents = (shifts: FetchedShiftData[], isListView: 
 --- START OF FILE src/utils/shiftPdfExport.ts ---
 
 import React from 'react';
-import { pdf } from '@react-pdf/renderer';
+import type { DocumentProps } from '@react-pdf/renderer';
 import type { CalendarApi } from '@fullcalendar/core';
 import { supabase } from '@/lib/supabase';
 import { FetchedShiftData } from './shiftHelper';
 import { ClientData, StaffData } from '@/components/shifts/ShiftFormModal';
-import { ShiftScheduleDocument, PdfShiftData } from '@/components/pdf/ShiftScheduleDocument';
-import { ShiftCalendarDocument, PdfCalendarEvent, PdfCalendarDay } from '@/components/pdf/ShiftCalendarDocument';
-import { ShiftMatrixDocument, MatrixStaffData } from '@/components/pdf/ShiftMatrixDocument';
+import type { PdfShiftData } from '@/components/pdf/ShiftScheduleDocument';
+import type { PdfCalendarEvent, PdfCalendarDay } from '@/components/pdf/ShiftCalendarDocument';
+import type { MatrixStaffData } from '@/components/pdf/ShiftMatrixDocument';
 
 type TabId = 'patterns' | 'fullCalendar' | 'myShift' | 'byStaff' | 'byClient';
 
@@ -26438,6 +27061,10 @@ export const downloadShiftPdf = async ({
     const days = ['日', '月', '火', '水', '木', '金', '土'];
 
     if (viewType.includes('list')) {
+        const [{ pdf }, { ShiftScheduleDocument }] = await Promise.all([
+            import('@react-pdf/renderer'),
+            import('@/components/pdf/ShiftScheduleDocument'),
+        ]);
         const pdfShifts: PdfShiftData[] = [];
         renderedEvents.forEach(ev => {
             const start = ev.start!;
@@ -26478,8 +27105,13 @@ export const downloadShiftPdf = async ({
             }
         });
         pdfShifts.sort((a, b) => a.timestamp - b.timestamp);
-        blob = await pdf(React.createElement(ShiftScheduleDocument, { title: docTitle, monthStr, shifts: pdfShifts, orgName: currentOrg.name, staffMembers })).toBlob();
+        const document = React.createElement(ShiftScheduleDocument, { title: docTitle, monthStr, shifts: pdfShifts, orgName: currentOrg.name, staffMembers }) as React.ReactElement<DocumentProps>;
+        blob = await pdf(document).toBlob();
     } else {
+        const [{ pdf }, { ShiftCalendarDocument }] = await Promise.all([
+            import('@react-pdf/renderer'),
+            import('@/components/pdf/ShiftCalendarDocument'),
+        ]);
         const activeStart = calendarApi.view.activeStart;
         const activeEnd = calendarApi.view.activeEnd;
         const dayMap = new Map<string, PdfCalendarEvent[]>();
@@ -26540,7 +27172,8 @@ export const downloadShiftPdf = async ({
         }
         if (currentWeek.length > 0) weeks.push(currentWeek);
 
-        blob = await pdf(React.createElement(ShiftCalendarDocument, { title: docTitle, monthStr, weeks, orgName: currentOrg.name, staffMembers })).toBlob();
+        const document = React.createElement(ShiftCalendarDocument, { title: docTitle, monthStr, weeks, orgName: currentOrg.name, staffMembers }) as React.ReactElement<DocumentProps>;
+        blob = await pdf(document).toBlob();
     }
 
     triggerDownload(blob, fileName);
@@ -26607,14 +27240,19 @@ export const downloadShiftMatrixPdf = async ({
         positions: s.positions as string[] | null,
     }));
 
-    const blob = await pdf(React.createElement(ShiftMatrixDocument, {
+    const [{ pdf }, { ShiftMatrixDocument }] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('@/components/pdf/ShiftMatrixDocument'),
+    ]);
+    const document = React.createElement(ShiftMatrixDocument, {
         title: docTitle,
         monthStr,
         daysInMonth,
         staffData: staffDataArray,
         orgName: currentOrg.name,
         staffMembers,
-    })).toBlob();
+    }) as React.ReactElement<DocumentProps>;
+    const blob = await pdf(document).toBlob();
 
     triggerDownload(blob, fileName);
 };
@@ -27548,6 +28186,50 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import { decodeJwtPayload, decodeJwtSessionId } from '@/utils/jwt';
 
+type MiddlewareDatabase = {
+    public: {
+        Tables: {
+            user_session_activity: {
+                Row: { session_hash: string };
+                Insert: {
+                    session_hash: string;
+                    auth_session_id: string;
+                    user_id: string;
+                    last_activity: string;
+                    absolute_expires_at: string;
+                    revoked_at: string | null;
+                };
+                Update: {
+                    session_hash?: string;
+                    auth_session_id?: string;
+                    user_id?: string;
+                    last_activity?: string;
+                    absolute_expires_at?: string;
+                    revoked_at?: string | null;
+                };
+                Relationships: [];
+            };
+        };
+        Views: Record<string, never>;
+        Functions: Record<string, never>;
+        Enums: Record<string, never>;
+        CompositeTypes: Record<string, never>;
+    };
+};
+
+type SupabaseAdminClient = ReturnType<typeof createClient<MiddlewareDatabase, 'public'>>;
+
+let supabaseAdmin: SupabaseAdminClient | null = null;
+
+function getSupabaseAdmin(supabaseUrl: string, serviceRoleKey: string): SupabaseAdminClient {
+    if (!supabaseAdmin) {
+        supabaseAdmin = createClient<MiddlewareDatabase, 'public'>(supabaseUrl, serviceRoleKey, {
+            auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+        });
+    }
+    return supabaseAdmin;
+}
+
 function authSessionId(accessToken: string): string | null {
     return decodeJwtSessionId(accessToken);
 }
@@ -27649,9 +28331,7 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
             url.search = 'error=session_validation_unavailable';
             return redirectWithSession(url);
         }
-        const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-            auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
-        });
+        const supabaseAdmin = getSupabaseAdmin(supabaseUrl, serviceRoleKey);
         if (!sessionId) {
             // JWT に session_id フィールドがない（古いトークン形式 or JWT テンプレートの設定問題）。
             // idle_timeout にリダイレクトすると page.tsx が signOut() を呼び出し新規セッションを
@@ -28070,12 +28750,7 @@ const MAX_PIXELS = 40_000_000;
 async function malwareScan(bytes: Buffer): Promise<void> {
   const url = process.env.MALWARE_SCAN_URL;
   const token = process.env.MALWARE_SCAN_TOKEN;
-  if (!url) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('ファイル検査サービスが設定されていません');
-    }
-    return;
-  }
+  if (!url) return;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
@@ -30733,6 +31408,340 @@ COMMENT ON COLUMN public.labor_premium_types.variable_overtime_period IS
   '変形労働時間制の集計期間。week または month';
 COMMENT ON COLUMN public.labor_premium_types.variable_overtime_threshold_hours IS
   '変形労働時間制で割り増し対象となる期間内の超過時間';
+
+
+
+--- START OF FILE supabase/migrations/202606280005_shift_based_record_access.sql ---
+
+-- 方針S: 「シフトに入っているスタッフは記録を読み書きできる」権限拡張
+--
+-- 変更点1: can_access_client — assignments OR shift_staffs の OR 条件に拡張
+-- 変更点2: save_report_atomic — 新規作成・編集両方で同じ OR 条件に拡張
+
+-- ──────────────────────────────────────────────────────────────────────────
+-- 1. can_access_client の更新
+-- ──────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION private.can_access_client(p_client_id uuid)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = private, public
+STABLE
+AS $$
+  WITH
+    client_org AS (
+      SELECT c.organization_id
+      FROM public.clients c
+      WHERE c.id = p_client_id
+        AND c.deleted_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM public.organization_members om
+          WHERE om.organization_id = c.organization_id
+            AND om.user_id = auth.uid()
+        )
+    ),
+    scope AS (
+      SELECT
+        private.get_member_record_view_scope(co.organization_id, auth.uid()) AS s,
+        co.organization_id
+      FROM client_org co
+    )
+  SELECT EXISTS (
+    SELECT 1 FROM scope
+    WHERE scope.s = 'all'
+      OR (
+        scope.s = 'assigned'
+        AND (
+          -- 従来条件: assignments テーブルに登録済み（helper_id or staff_id）
+          private.is_assigned_client_for_user(p_client_id, scope.organization_id, auth.uid())
+          -- 追加条件: 当該利用者の shift_staffs に自分の staff_id が入っている
+          -- シフトベースアクセスは時間無制限（過去のシフト含む）。
+          -- 訪問介護の記録は事後入力されるため、シフト日時後もアクセスが必要。
+          OR EXISTS (
+            SELECT 1
+            FROM public.shifts s
+            JOIN public.shift_staffs ss ON ss.shift_id = s.id
+            WHERE s.client_id = p_client_id
+              AND s.organization_id = scope.organization_id
+              AND s.deleted_at IS NULL
+              AND s.status <> 'cancelled'
+              AND ss.staff_id = private.get_actor_staff_id(scope.organization_id, auth.uid())
+          )
+        )
+      )
+  )
+$$;
+
+-- ──────────────────────────────────────────────────────────────────────────
+-- 2. save_report_atomic の更新
+--    変更箇所: 新規作成時の access_denied チェック（1 箇所）
+--             編集時の access_denied チェック（1 箇所）
+--    それ以外のロジックは 202606270004 から変更なし
+-- ──────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.save_report_atomic(
+  p_organization_id uuid,
+  p_report_id uuid,
+  p_client_id uuid,
+  p_shift_id uuid,
+  p_start_at timestamptz,
+  p_end_at timestamptz,
+  p_status text,
+  p_values jsonb,
+  p_session_id text DEFAULT NULL
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  actor uuid := auth.uid();
+  target uuid := p_report_id;
+  previous_status text;
+  existing_helper uuid;
+  existing_shift_id uuid;
+  effective_shift_id uuid := p_shift_id;
+  actor_staff_id uuid;
+  create_scope text;
+  edit_scope text;
+  approve_scope text;
+  required_scope text;
+BEGIN
+  IF actor IS NULL THEN RAISE EXCEPTION 'authentication_required'; END IF;
+  IF p_end_at <= p_start_at THEN RAISE EXCEPTION 'invalid_period'; END IF;
+  IF p_status NOT IN ('draft', 'pending', 'approved', 'remanded') THEN RAISE EXCEPTION 'invalid_status'; END IF;
+  IF octet_length(p_values::text) > 1000000 THEN RAISE EXCEPTION 'values_too_large'; END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.organization_members om
+     WHERE om.organization_id = p_organization_id
+       AND om.user_id = actor
+  ) THEN RAISE EXCEPTION 'access_denied'; END IF;
+
+  SELECT private.get_member_record_action_scope(p_organization_id, actor, 'create') INTO create_scope;
+  SELECT private.get_member_record_action_scope(p_organization_id, actor, 'edit') INTO edit_scope;
+  SELECT private.get_member_record_action_scope(p_organization_id, actor, 'approve') INTO approve_scope;
+
+  IF NOT EXISTS (SELECT 1 FROM public.clients c WHERE c.id = p_client_id AND c.organization_id = p_organization_id AND c.deleted_at IS NULL)
+    THEN RAISE EXCEPTION 'client_not_found'; END IF;
+
+  SELECT st.id INTO actor_staff_id
+    FROM public.staffs st
+   WHERE st.organization_id = p_organization_id
+     AND st.user_id = actor
+     AND st.deleted_at IS NULL
+   ORDER BY st.sort_order NULLS LAST, st.name
+   LIMIT 1;
+
+  IF p_shift_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public.shifts s
+     WHERE s.id = p_shift_id
+       AND s.organization_id = p_organization_id
+       AND s.client_id = p_client_id
+       AND s.deleted_at IS NULL
+  ) THEN RAISE EXCEPTION 'shift_not_found'; END IF;
+
+  PERFORM set_config('care_record.skip_version', 'on', true);
+  IF target IS NULL THEN
+    -- ── 新規作成パス ────────────────────────────────────────────────────
+    IF p_status IN ('approved', 'remanded') THEN RAISE EXCEPTION 'invalid_initial_status'; END IF;
+    required_scope := create_scope;
+    IF required_scope = 'none' THEN RAISE EXCEPTION 'access_denied'; END IF;
+
+    -- 権限チェック: assignments に登録済み OR 当該利用者のシフト（shift_staffs）に自分が入っている
+    IF required_scope = 'assigned'
+       AND NOT EXISTS (
+         SELECT 1 FROM public.assignments a
+          WHERE a.client_id = p_client_id
+            AND (a.helper_id = actor OR (actor_staff_id IS NOT NULL AND a.staff_id = actor_staff_id))
+       )
+       AND NOT (
+         actor_staff_id IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM public.shifts s
+           JOIN public.shift_staffs ss ON ss.shift_id = s.id
+            WHERE s.client_id = p_client_id
+              AND s.organization_id = p_organization_id
+              AND s.deleted_at IS NULL
+              AND s.status <> 'cancelled'
+              AND ss.staff_id = actor_staff_id
+         )
+       )
+    THEN RAISE EXCEPTION 'access_denied'; END IF;
+
+    IF effective_shift_id IS NULL AND actor_staff_id IS NOT NULL THEN
+      SELECT s.id INTO effective_shift_id
+        FROM public.shifts s
+       WHERE s.organization_id = p_organization_id
+         AND s.client_id = p_client_id
+         AND s.status <> 'cancelled'
+         AND s.deleted_at IS NULL
+         AND s.start_at < p_end_at
+         AND s.end_at > p_start_at
+         AND EXISTS (
+           SELECT 1 FROM public.shift_staffs ss
+            WHERE ss.shift_id = s.id
+              AND ss.staff_id = actor_staff_id
+         )
+       ORDER BY
+         abs(extract(epoch FROM (s.start_at - p_start_at))) + abs(extract(epoch FROM (s.end_at - p_end_at))),
+         s.start_at
+       LIMIT 1;
+    END IF;
+
+    IF effective_shift_id IS NULL THEN
+      WITH candidates AS (
+        SELECT s.id
+          FROM public.shifts s
+         WHERE s.organization_id = p_organization_id
+           AND s.client_id = p_client_id
+           AND s.status <> 'cancelled'
+           AND s.deleted_at IS NULL
+           AND s.start_at < p_end_at
+           AND s.end_at > p_start_at
+      )
+      SELECT CASE WHEN count(*) = 1 THEN min(id) ELSE NULL END
+        INTO effective_shift_id
+        FROM candidates;
+    END IF;
+
+    INSERT INTO public.reports(client_id, helper_id, start_at, end_at, status, shift_id, updated_at)
+    VALUES (p_client_id, actor, p_start_at, p_end_at, p_status, effective_shift_id, now()) RETURNING id INTO target;
+    INSERT INTO public.report_values(report_id, data) VALUES(target, p_values);
+  ELSE
+    -- ── 編集パス ────────────────────────────────────────────────────────
+    SELECT r.status, r.helper_id, r.shift_id INTO previous_status, existing_helper, existing_shift_id
+      FROM public.reports r JOIN public.clients c ON c.id = r.client_id
+     WHERE r.id = target AND r.client_id = p_client_id AND c.organization_id = p_organization_id
+       AND r.deleted_at IS NULL FOR UPDATE;
+    IF previous_status IS NULL THEN RAISE EXCEPTION 'report_not_found'; END IF;
+    IF previous_status = 'approved' AND p_status <> 'remanded' THEN RAISE EXCEPTION 'approved_report_locked'; END IF;
+
+    required_scope := CASE WHEN p_status IN ('approved', 'remanded') THEN approve_scope ELSE edit_scope END;
+    IF required_scope = 'none' THEN RAISE EXCEPTION 'access_denied'; END IF;
+
+    -- 権限チェック: 自分が作成者 OR assignments に登録済み OR シフト（shift_staffs）に自分が入っている
+    IF required_scope = 'assigned'
+       AND existing_helper IS DISTINCT FROM actor
+       AND NOT EXISTS (
+         SELECT 1 FROM public.assignments a
+          WHERE a.client_id = p_client_id
+            AND (a.helper_id = actor OR (actor_staff_id IS NOT NULL AND a.staff_id = actor_staff_id))
+       )
+       AND NOT (
+         actor_staff_id IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM public.shifts s
+           JOIN public.shift_staffs ss ON ss.shift_id = s.id
+            WHERE s.client_id = p_client_id
+              AND s.organization_id = p_organization_id
+              AND s.deleted_at IS NULL
+              AND s.status <> 'cancelled'
+              AND ss.staff_id = actor_staff_id
+         )
+       )
+    THEN RAISE EXCEPTION 'access_denied'; END IF;
+
+    effective_shift_id := COALESCE(p_shift_id, existing_shift_id);
+    IF effective_shift_id IS NULL THEN
+      SELECT rs.shift_id INTO effective_shift_id
+        FROM public.report_shifts rs
+       WHERE rs.report_id = target
+         AND rs.is_primary = true
+       ORDER BY rs.created_at
+       LIMIT 1;
+    END IF;
+
+    UPDATE public.reports SET start_at=p_start_at, end_at=p_end_at, status=p_status,
+      shift_id=effective_shift_id, updated_at=now(),
+      approved_by=CASE WHEN p_status='approved' THEN actor WHEN p_status='remanded' THEN NULL ELSE approved_by END,
+      approved_at=CASE WHEN p_status='approved' THEN now() WHEN p_status='remanded' THEN NULL ELSE approved_at END
+     WHERE id=target;
+    IF EXISTS (SELECT 1 FROM public.report_values rv WHERE rv.report_id=target) THEN
+      UPDATE public.report_values SET data=p_values WHERE report_id=target;
+    ELSE
+      INSERT INTO public.report_values(report_id,data) VALUES(target,p_values);
+    END IF;
+  END IF;
+
+  IF effective_shift_id IS NOT NULL THEN
+    UPDATE public.report_shifts
+       SET is_primary = false
+     WHERE report_id = target
+       AND is_primary = true
+       AND shift_id <> effective_shift_id;
+
+    INSERT INTO public.report_shifts(report_id, shift_id, is_primary)
+    VALUES (target, effective_shift_id, true)
+    ON CONFLICT (report_id, shift_id)
+    DO UPDATE SET is_primary = true;
+  END IF;
+
+  PERFORM private.capture_complete_report_version(target, actor, CASE WHEN p_report_id IS NULL THEN 'create' ELSE 'update:'||p_status END, p_session_id);
+  INSERT INTO public.audit_events(organization_id,actor_id,action_type,resource_type,resource_id,outcome,session_id,details)
+  VALUES(p_organization_id,actor,CASE WHEN p_report_id IS NULL THEN 'report.create' ELSE 'report.'||p_status END,
+    'report',target::text,'success',p_session_id,jsonb_build_object('previousStatus',previous_status,'newStatus',p_status,'shiftId',effective_shift_id));
+  RETURN target;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.save_report_atomic(uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.save_report_atomic(uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text) TO authenticated;
+
+
+
+--- START OF FILE supabase/migrations/202606280006_report_query_indexes.sql ---
+
+-- Accelerate reports date range and organization filtering via clients join
+CREATE INDEX IF NOT EXISTS reports_active_date_range_idx
+  ON public.reports (start_at, end_at)
+  WHERE deleted_at IS NULL;
+
+-- Accelerate status filtering combined with date ordering
+CREATE INDEX IF NOT EXISTS reports_active_status_idx
+  ON public.reports (status, start_at)
+  WHERE deleted_at IS NULL;
+
+
+
+
+--- START OF FILE supabase/migrations/202606280007_avatar_storage.sql ---
+
+-- アカウントアイコン用のプロフィール列と Storage bucket を明示的に用意する。
+-- アップロードは Server Action の service role 経由に限定し、表示は公開 URL で行う。
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS avatar_url text;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'avatars',
+  'avatars',
+  true,
+  10485760,
+  ARRAY['image/webp']
+)
+ON CONFLICT (id) DO UPDATE
+SET
+  public = EXCLUDED.public,
+  file_size_limit = EXCLUDED.file_size_limit,
+  allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+DROP POLICY IF EXISTS "Deny direct avatar changes" ON storage.objects;
+CREATE POLICY "Deny direct avatar changes"
+  ON storage.objects AS RESTRICTIVE FOR INSERT TO authenticated
+  WITH CHECK (bucket_id <> 'avatars');
+
+DROP POLICY IF EXISTS "Deny direct avatar updates" ON storage.objects;
+CREATE POLICY "Deny direct avatar updates"
+  ON storage.objects AS RESTRICTIVE FOR UPDATE TO authenticated
+  USING (bucket_id <> 'avatars')
+  WITH CHECK (bucket_id <> 'avatars');
+
+DROP POLICY IF EXISTS "Deny direct avatar deletes" ON storage.objects;
+CREATE POLICY "Deny direct avatar deletes"
+  ON storage.objects AS RESTRICTIVE FOR DELETE TO authenticated
+  USING (bucket_id <> 'avatars');
 
 
 

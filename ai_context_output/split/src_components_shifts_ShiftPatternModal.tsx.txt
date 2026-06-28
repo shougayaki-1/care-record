@@ -89,6 +89,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
     const [interval, setIntervalCount] = useState<number>(1);
     const [selectedDays, setSelectedDays] = useState<string[]>([]);
     const [selectedWeeks, setSelectedWeeks] = useState<string[]>([]);
+    const [autoAssign, setAutoAssign] = useState(true);
 
     useEffect(() => {
         if (open) {
@@ -112,6 +113,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 setIntervalCount(1);
                 setSelectedDays([]);
                 setSelectedWeeks([]);
+                setAutoAssign(true);
             }
         }
     }, [open, initialData]);
@@ -146,7 +148,8 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 startTime: startTime.length === 5 ? `${startTime}:00` : startTime,
                 endTime: endTime.length === 5 ? `${endTime}:00` : endTime,
                 rrule: rruleStr,
-                staffIds: selectedStaffIds
+                staffIds: selectedStaffIds,
+                autoAssign: !initialData ? autoAssign : false,
             }, initialData?.id);
             onClose();
         } catch (e) {
@@ -189,6 +192,24 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                         getOptionLabel={(staff) => staff.name}
                         getOptionValue={(staff) => staff.id}
                     />
+
+                    {/* 新規作成時のみ: 自動アサインチェックボックス */}
+                    {!initialData && (
+                        <FormControlLabel
+                            control={
+                                <Checkbox
+                                    checked={autoAssign}
+                                    onChange={(e) => setAutoAssign(e.target.checked)}
+                                    size="small"
+                                />
+                            }
+                            label={
+                                <Typography variant="body2" color="text.secondary">
+                                    選択したスタッフを基本担当（担当スタッフ設定）にも登録する
+                                </Typography>
+                            }
+                        />
+                    )}
 
                     <Stack direction="row" spacing={2}>
                         <DateTimeField

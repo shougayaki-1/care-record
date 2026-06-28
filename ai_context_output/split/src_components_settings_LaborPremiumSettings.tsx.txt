@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Box, Stack, Chip, Switch, Button, CircularProgress, Alert,
+  Box, Stack, Chip, CircularProgress, Alert,
   Table, TableBody, TableCell, TableHead, TableRow,
-  TextField, Select, MenuItem, FormControl,
-  InputLabel, FormControlLabel,
 } from '@/components/ui/mui';
-import { AppDialog } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, NumberField, SelectField, SwitchField } from '@/components/ui';
 import { getLaborPremiumTypes, updateLaborPremiumType, createLaborPremiumType, disableLaborPremiumType } from '@/app/actions/laborPremium';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 
@@ -202,14 +200,14 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
                     ) : null}
                   </TableCell>
                   <TableCell>
-                    <Switch
+                    <SwitchField
                       checked={row.is_enabled}
                       onChange={() => handleToggleEnabled(row)}
                       size="small"
                     />
                   </TableCell>
                   <TableCell>
-                    <Button size="small" onClick={() => handleEditOpen(row)}>編集</Button>
+                    <AppButton variant="text" intent="secondary" size="small" onClick={() => handleEditOpen(row)}>編集</AppButton>
                   </TableCell>
                 </TableRow>
               ))
@@ -243,15 +241,15 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
                       {overtimeRuleLabel(row) && <Chip size="small" label={overtimeRuleLabel(row)} variant="outlined" />}
                     </Stack>
                   </Box>
-                  <Switch
+                  <SwitchField
                     checked={row.is_enabled}
                     onChange={() => handleToggleEnabled(row)}
                     size="small"
                   />
                 </Stack>
-                <Button size="small" variant="outlined" onClick={() => handleEditOpen(row)} sx={{ alignSelf: 'stretch' }}>
+                <AppButton size="small" variant="outlined" intent="secondary" onClick={() => handleEditOpen(row)} sx={{ alignSelf: 'stretch' }}>
                   編集
-                </Button>
+                </AppButton>
               </Stack>
             </Box>
           ))
@@ -259,9 +257,9 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
       </Stack>
 
       <Box mt={2}>
-        <Button variant="outlined" size="small" onClick={() => { setAddState(defaultEditState()); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+        <AppButton variant="outlined" intent="secondary" size="small" onClick={() => { setAddState(defaultEditState()); setAddOpen(true); }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
           種別を追加
-        </Button>
+        </AppButton>
       </Box>
 
       {/* Edit Dialog */}
@@ -272,109 +270,95 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
         title="割り増し種別を編集"
         actions={(
           <>
-            <Button onClick={() => setEditOpen(false)}>キャンセル</Button>
-            <Button variant="contained" onClick={handleEditSave} disabled={saving || !editState.name}>
+            <AppButton variant="text" intent="secondary" onClick={() => setEditOpen(false)}>キャンセル</AppButton>
+            <AppButton onClick={handleEditSave} disabled={saving || !editState.name}>
               {saving ? '保存中...' : '保存'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
           <Stack spacing={2} mt={1}>
-            <TextField
+            <AppTextField
               label="種別名"
               value={editState.name}
               onChange={(e) => setEditState(s => ({ ...s, name: e.target.value }))}
               fullWidth size="small"
             />
-            <TextField
+            <NumberField
               label="割り増し率 (%)"
-              type="number"
               value={editState.ratePercent}
               onChange={(e) => setEditState(s => ({ ...s, ratePercent: e.target.value }))}
               fullWidth size="small"
-              inputProps={{ min: 0, step: 1 }}
+              slotProps={{ htmlInput: { min: 0, step: 1 } }}
             />
-            <FormControl fullWidth size="small">
-              <InputLabel>計算方法</InputLabel>
-              <Select
-                label="計算方法"
-                value={editState.calc_method}
-                onChange={(e) => setEditState(s => ({ ...s, calc_method: e.target.value as 'additive' | 'multiplicative' }))}
-              >
-                <MenuItem value="additive">加算 (additive)</MenuItem>
-                <MenuItem value="multiplicative">乗算 (multiplicative)</MenuItem>
-              </Select>
-            </FormControl>
+            <SelectField
+              label="計算方法"
+              value={editState.calc_method}
+              onChange={(value) => setEditState(s => ({ ...s, calc_method: value as 'additive' | 'multiplicative' }))}
+              options={[
+                { value: 'additive', label: '加算 (additive)' },
+                { value: 'multiplicative', label: '乗算 (multiplicative)' },
+              ]}
+            />
             {(editTarget?.builtin_type === 'night' || editTarget?.builtin_type === 'custom') && (
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                <TextField
+                <NumberField
                   label="深夜開始 (時)"
-                  type="number"
                   value={editState.night_start_hour}
                   onChange={(e) => setEditState(s => ({ ...s, night_start_hour: e.target.value }))}
                   size="small"
-                  inputProps={{ min: 0, max: 23 }}
+                  slotProps={{ htmlInput: { min: 0, max: 23 } }}
                 />
-                <TextField
+                <NumberField
                   label="深夜終了 (時)"
-                  type="number"
                   value={editState.night_end_hour}
                   onChange={(e) => setEditState(s => ({ ...s, night_end_hour: e.target.value }))}
                   size="small"
-                  inputProps={{ min: 0, max: 23 }}
+                  slotProps={{ htmlInput: { min: 0, max: 23 } }}
                 />
               </Stack>
             )}
             {editTarget?.builtin_type === 'overtime' && (
               <Stack spacing={1.5}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={editState.variable_working_hours_enabled}
-                      onChange={(e) => setEditState(s => ({ ...s, variable_working_hours_enabled: e.target.checked }))}
-                    />
-                  }
+                <SwitchField
+                  checked={editState.variable_working_hours_enabled}
+                  onChange={(e) => setEditState(s => ({ ...s, variable_working_hours_enabled: e.target.checked }))}
                   label="変形労働時間制を適用"
                 />
                 {editState.variable_working_hours_enabled ? (
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>集計期間</InputLabel>
-                      <Select
-                        label="集計期間"
-                        value={editState.variable_overtime_period}
-                        onChange={(e) => setEditState(s => ({ ...s, variable_overtime_period: e.target.value as 'week' | 'month' }))}
-                      >
-                        <MenuItem value="week">週単位</MenuItem>
-                        <MenuItem value="month">月単位</MenuItem>
-                      </Select>
-                    </FormControl>
-                    <TextField
+                    <SelectField
+                      label="集計期間"
+                      value={editState.variable_overtime_period}
+                      onChange={(value) => setEditState(s => ({ ...s, variable_overtime_period: value as 'week' | 'month' }))}
+                      options={[
+                        { value: 'week', label: '週単位' },
+                        { value: 'month', label: '月単位' },
+                      ]}
+                    />
+                    <NumberField
                       label="期間内の加算対象 (h超)"
-                      type="number"
                       value={editState.variable_overtime_threshold_hours}
                       onChange={(e) => setEditState(s => ({ ...s, variable_overtime_threshold_hours: e.target.value }))}
                       size="small"
-                      inputProps={{ min: 0, step: 0.5 }}
+                      slotProps={{ htmlInput: { min: 0, step: 0.5 } }}
                     />
                   </Stack>
                 ) : (
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                    <TextField
+                    <NumberField
                       label="日次閾値 (h)"
-                      type="number"
                       value={editState.overtime_daily_threshold_hours}
                       onChange={(e) => setEditState(s => ({ ...s, overtime_daily_threshold_hours: e.target.value }))}
                       size="small"
-                      inputProps={{ min: 0, step: 0.5 }}
+                      slotProps={{ htmlInput: { min: 0, step: 0.5 } }}
                     />
-                    <TextField
+                    <NumberField
                       label="週次閾値 (h)"
-                      type="number"
                       value={editState.overtime_weekly_threshold_hours}
                       onChange={(e) => setEditState(s => ({ ...s, overtime_weekly_threshold_hours: e.target.value }))}
                       size="small"
-                      inputProps={{ min: 0, step: 1 }}
+                      slotProps={{ htmlInput: { min: 0, step: 1 } }}
                     />
                   </Stack>
                 )}
@@ -391,55 +375,50 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
         title="割り増し種別を追加"
         actions={(
           <>
-            <Button onClick={() => setAddOpen(false)}>キャンセル</Button>
-            <Button variant="contained" onClick={handleAddSave} disabled={saving || !addState.name}>
+            <AppButton variant="text" intent="secondary" onClick={() => setAddOpen(false)}>キャンセル</AppButton>
+            <AppButton onClick={handleAddSave} disabled={saving || !addState.name}>
               {saving ? '追加中...' : '追加'}
-            </Button>
+            </AppButton>
           </>
         )}
       >
           <Stack spacing={2} mt={1}>
-            <TextField
+            <AppTextField
               label="種別名"
               value={addState.name}
               onChange={(e) => setAddState(s => ({ ...s, name: e.target.value }))}
               fullWidth size="small"
             />
-            <TextField
+            <NumberField
               label="割り増し率 (%)"
-              type="number"
               value={addState.ratePercent}
               onChange={(e) => setAddState(s => ({ ...s, ratePercent: e.target.value }))}
               fullWidth size="small"
-              inputProps={{ min: 0, step: 1 }}
+              slotProps={{ htmlInput: { min: 0, step: 1 } }}
             />
-            <FormControl fullWidth size="small">
-              <InputLabel>計算方法</InputLabel>
-              <Select
-                label="計算方法"
-                value={addState.calc_method}
-                onChange={(e) => setAddState(s => ({ ...s, calc_method: e.target.value as 'additive' | 'multiplicative' }))}
-              >
-                <MenuItem value="additive">加算 (additive)</MenuItem>
-                <MenuItem value="multiplicative">乗算 (multiplicative)</MenuItem>
-              </Select>
-            </FormControl>
+            <SelectField
+              label="計算方法"
+              value={addState.calc_method}
+              onChange={(value) => setAddState(s => ({ ...s, calc_method: value as 'additive' | 'multiplicative' }))}
+              options={[
+                { value: 'additive', label: '加算 (additive)' },
+                { value: 'multiplicative', label: '乗算 (multiplicative)' },
+              ]}
+            />
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <TextField
+              <NumberField
                 label="深夜開始 (時)"
-                type="number"
                 value={addState.night_start_hour}
                 onChange={(e) => setAddState(s => ({ ...s, night_start_hour: e.target.value }))}
                 size="small"
-                inputProps={{ min: 0, max: 23 }}
+                slotProps={{ htmlInput: { min: 0, max: 23 } }}
               />
-              <TextField
+              <NumberField
                 label="深夜終了 (時)"
-                type="number"
                 value={addState.night_end_hour}
                 onChange={(e) => setAddState(s => ({ ...s, night_end_hour: e.target.value }))}
                 size="small"
-                inputProps={{ min: 0, max: 23 }}
+                slotProps={{ htmlInput: { min: 0, max: 23 } }}
               />
             </Stack>
           </Stack>

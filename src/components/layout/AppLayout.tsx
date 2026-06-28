@@ -270,6 +270,22 @@ const TopAppBar = ({
         </Tooltip>
         <NotificationsPopover anchorEl={notifAnchor} onClose={() => setNotifAnchor(null)} />
 
+        {userName && (
+          <Typography
+            variant="body2"
+            noWrap
+            sx={{
+              display: { xs: 'none', sm: 'block' },
+              maxWidth: { sm: 120, md: 180 },
+              fontWeight: 700,
+              color: 'text.primary',
+              ml: 0.5,
+            }}
+          >
+            {userName}
+          </Typography>
+        )}
+
         {/* アカウントメニュー */}
         <Tooltip title="アカウント">
           <IconButton onClick={(e) => setAccountAnchor(e.currentTarget)} sx={{ ml: 0.5 }}>

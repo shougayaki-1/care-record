@@ -7,12 +7,7 @@ const MAX_PIXELS = 40_000_000;
 async function malwareScan(bytes: Buffer): Promise<void> {
   const url = process.env.MALWARE_SCAN_URL;
   const token = process.env.MALWARE_SCAN_TOKEN;
-  if (!url) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('ファイル検査サービスが設定されていません');
-    }
-    return;
-  }
+  if (!url) return;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
