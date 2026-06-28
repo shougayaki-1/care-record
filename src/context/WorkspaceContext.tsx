@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { usePathname } from 'next/navigation';
 import { CircularProgress, Box } from '@mui/material';
 import { setLastOrganization } from '@/app/actions/user';
+import { ensureSessionActivity } from '@/app/actions/auth';
 import { FULL_PERMISSIONS, mergePermissions, type RolePermissions } from '@/utils/permissions';
 
 export type OrganizationRole = 'owner' | 'member';
@@ -100,6 +101,10 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
         return;
       }
+
+      // デプロイ前ログインのセッションが user_session_activity に未登録の場合に備えて登録する。
+      // getAuthedUser が呼ばれる前に完了させる必要があるため await する。
+      await ensureSessionActivity(session.access_token);
 
       // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
       // organization_member_roles を JOIN することで 3RTT → 2RTT に削減。
