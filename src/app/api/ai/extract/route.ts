@@ -72,6 +72,7 @@ export async function POST(request: NextRequest) {
         controller.enqueue(encoder.encode(formatSseEvent(event, data)));
       }
 
+      try {
       let recordIndex = 0;
 
       // 4. グループ単位でファイルを処理
@@ -133,7 +134,7 @@ export async function POST(request: NextRequest) {
         } catch (err) {
           // e. エラーは error イベントとして送信、処理を継続
           const message = err instanceof Error ? err.message : String(err);
-          console.error(`[ai/extract] Error processing file group [${group.join(',')}]:`, err);
+          console.error(`[ai/extract] Error processing file group [${group.join(',')}]: ${message}`);
           sendEvent('error', {
             type: 'error',
             fileIndex,
@@ -145,6 +146,9 @@ export async function POST(request: NextRequest) {
       // 5. 完了イベント
       sendEvent('done', { type: 'done', total: recordIndex });
       controller.close();
+      } catch (err) {
+        controller.error(err);
+      }
     },
   });
 
