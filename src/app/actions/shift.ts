@@ -811,10 +811,21 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
 // 認可チェックを伴う公開アクション
 export async function createShift(payload: ShiftPayload, awaitSync: boolean | 'skip' = true) {
     const actor = await assertShiftPermission(payload.organizationId, 'create', { clientId: payload.clientId });
-    const result = await createShiftInternal(payload, awaitSync);
+
+    // セグメントがある場合は shift_staffs が揃う前に同期が走らないよう、内部呼び出しでは同期をスキップする
+    const internalSyncMode = (payload.segments && payload.segments.length > 0) ? 'skip' : awaitSync;
+    const result = await createShiftInternal(payload, internalSyncMode);
 
     if (payload.segments && payload.segments.length > 0) {
         await saveShiftSegments(payload.organizationId, result.shiftId, payload.segments);
+        // shift_staffs が揃った後で同期を実行する
+        if (awaitSync !== 'skip') {
+            if (awaitSync) {
+                await trySyncSilently(payload.organizationId, result.shiftId, 'sync');
+            } else {
+                trySyncSilently(payload.organizationId, result.shiftId, 'sync');
+            }
+        }
     }
 
     // 自動アサイン: シフト作成時に選択スタッフを assignments に登録（チェックボックス ON 時のみ）

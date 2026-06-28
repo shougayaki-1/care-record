@@ -126,4 +126,27 @@ export async function deleteShiftSegment(orgId: string, segmentId: string): Prom
     .delete()
     .eq('id', segmentId);
   if (error) throw new Error('区間の削除に失敗しました');
+
+  // 削除後に残るセグメントから shift_staffs を再導出する
+  const shiftId = seg.shift_id;
+  const { data: remainingSegments } = await supabaseAdmin
+    .from('shift_segments')
+    .select('id')
+    .eq('shift_id', shiftId);
+
+  const remainingSegmentIds = (remainingSegments ?? []).map((s) => s.id);
+  let uniqueStaffIds: string[] = [];
+  if (remainingSegmentIds.length > 0) {
+    const { data: segStaffs } = await supabaseAdmin
+      .from('shift_segment_staffs')
+      .select('staff_id')
+      .in('segment_id', remainingSegmentIds);
+    uniqueStaffIds = [...new Set((segStaffs ?? []).map((r) => r.staff_id))];
+  }
+  await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
+  if (uniqueStaffIds.length > 0) {
+    await supabaseAdmin.from('shift_staffs').insert(
+      uniqueStaffIds.map((staff_id) => ({ shift_id: shiftId, staff_id }))
+    );
+  }
 }
