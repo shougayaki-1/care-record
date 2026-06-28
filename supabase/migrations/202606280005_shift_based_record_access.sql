@@ -148,6 +148,7 @@ BEGIN
             WHERE s.client_id = p_client_id
               AND s.organization_id = p_organization_id
               AND s.deleted_at IS NULL
+              AND s.status <> 'cancelled'
               AND ss.staff_id = actor_staff_id
          )
        )
@@ -220,6 +221,7 @@ BEGIN
             WHERE s.client_id = p_client_id
               AND s.organization_id = p_organization_id
               AND s.deleted_at IS NULL
+              AND s.status <> 'cancelled'
               AND ss.staff_id = actor_staff_id
          )
        )
