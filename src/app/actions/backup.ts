@@ -102,11 +102,6 @@ export async function triggerDailyBackup(orgId: string): Promise<{ date: string;
   const htmlPath = `daily/${orgId}/${date}/${version}.html`;
   const csv = await exportReportsAsCsv(orgId);
 
-  if (!csv) {
-    await uploadToGCS(DAILY_BUCKET, csvPath, '');
-    return { date, path: csvPath, records: 0 };
-  }
-
   const rows = csv.split('\n').slice(1).flatMap((line) => {
     if (!line.trim()) return [];
     const cols = parseCsvLine(line);

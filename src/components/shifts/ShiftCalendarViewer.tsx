@@ -1,9 +1,9 @@
 'use client';
 
 import React, { forwardRef } from 'react';
-import { Paper } from '@/components/ui/mui';
+import { Box, Chip, Paper } from '@/components/ui/mui';
 import FullCalendar from '@fullcalendar/react';
-import { EventInput, EventClickArg, DateSelectArg, EventDropArg, DatesSetArg } from '@fullcalendar/core';
+import { EventInput, EventClickArg, DateSelectArg, EventDropArg, DatesSetArg, EventContentArg } from '@fullcalendar/core';
 import { EventResizeDoneArg } from '@fullcalendar/interaction';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -31,10 +31,59 @@ type Props = {
     noEventsText?: string;
 };
 
+type ReportStatus = {
+    id: string;
+    status: string;
+    is_primary: boolean;
+};
+
+const reportStatusLabel = (status: string): string => {
+    if (status === 'draft') return '作成中';
+    if (status === 'approved') return '承認済';
+    if (status === 'remanded') return '差戻し';
+    if (status === 'pending') return '提出済';
+    return '記録あり';
+};
+
+const reportStatusColor = (status: string): 'default' | 'warning' | 'success' | 'error' | 'info' => {
+    if (status === 'approved') return 'success';
+    if (status === 'remanded') return 'error';
+    if (status === 'pending') return 'info';
+    if (status === 'draft') return 'warning';
+    return 'default';
+};
+
 export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
     events, initialView, headerToolbar, buttonText, selectable = false, editable = false,
     onEventClick, onDateSelect, onEventDrop, onEventResize, onDatesSet, noEventsText
 }, ref) => {
+    const renderEventContent = (arg: EventContentArg) => {
+        if (!arg.view.type.startsWith('list')) return undefined;
+        const statuses = (arg.event.extendedProps.reportStatuses ?? []) as ReportStatus[];
+        return (
+            <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', minWidth: 0 }}>
+                <Box component="span" sx={{ overflowWrap: 'anywhere' }}>{arg.event.title}</Box>
+                {statuses.length > 0 ? (
+                    statuses.slice(0, 2).map((report) => (
+                        <Chip
+                            key={report.id}
+                            label={reportStatusLabel(report.status)}
+                            color={reportStatusColor(report.status)}
+                            size="small"
+                            variant={report.is_primary ? 'filled' : 'outlined'}
+                            sx={{ height: 20, fontSize: '0.7rem' }}
+                        />
+                    ))
+                ) : (
+                    <Chip label="未作成" color="default" size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+                )}
+                {statuses.length > 2 && (
+                    <Chip label={`+${statuses.length - 2}`} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+                )}
+            </Box>
+        );
+    };
+
     return (
         <Paper sx={(theme) => ({
             display: 'flex', flexDirection: 'column', height: 'calc(100vh - 180px)',
@@ -81,6 +130,7 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                 eventTimeFormat={{ hour: 'numeric', minute: '2-digit', meridiem: false, hour12: false }}
                 select={onDateSelect}
                 eventClick={onEventClick}
+                eventContent={renderEventContent}
                 dayMaxEvents={true}
                 noEventsText={noEventsText}
             />

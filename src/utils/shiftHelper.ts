@@ -14,6 +14,11 @@ export type FetchedShiftData = {
         staff_id: string;
         staffs: { name: string } | null;
     }[];
+    report_statuses?: {
+        id: string;
+        status: string;
+        is_primary: boolean;
+    }[];
 };
 
 export const convertToCalendarEvents = (shifts: FetchedShiftData[], isListView: boolean = false): EventInput[] => {
@@ -48,7 +53,8 @@ export const convertToCalendarEvents = (shifts: FetchedShiftData[], isListView: 
                 clientId: shift.client_id,
                 clientName: shift.clients?.name || '', // 内部データとしてはそのまま保持
                 staffNames: staffNames,
-                isCancelled: isCancelled
+                isCancelled: isCancelled,
+                reportStatuses: shift.report_statuses ?? [],
             }
         };
     });

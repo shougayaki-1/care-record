@@ -5,7 +5,7 @@ import {
   Box, Stack, Chip, Switch, Button, CircularProgress, Alert,
   Table, TableBody, TableCell, TableHead, TableRow,
   TextField, Select, MenuItem, FormControl,
-  InputLabel,
+  InputLabel, FormControlLabel,
 } from '@/components/ui/mui';
 import { AppDialog } from '@/components/ui';
 import { getLaborPremiumTypes, updateLaborPremiumType, createLaborPremiumType, disableLaborPremiumType } from '@/app/actions/laborPremium';
@@ -21,6 +21,9 @@ interface EditState {
   night_end_hour: string;
   overtime_daily_threshold_hours: string;
   overtime_weekly_threshold_hours: string;
+  variable_working_hours_enabled: boolean;
+  variable_overtime_period: 'week' | 'month';
+  variable_overtime_threshold_hours: string;
 }
 
 const defaultEditState = (): EditState => ({
@@ -31,6 +34,9 @@ const defaultEditState = (): EditState => ({
   night_end_hour: '5',
   overtime_daily_threshold_hours: '8',
   overtime_weekly_threshold_hours: '40',
+  variable_working_hours_enabled: false,
+  variable_overtime_period: 'month',
+  variable_overtime_threshold_hours: '160',
 });
 
 function rowToEditState(row: PremiumRow): EditState {
@@ -42,6 +48,9 @@ function rowToEditState(row: PremiumRow): EditState {
     night_end_hour: row.night_end_hour != null ? String(row.night_end_hour) : '5',
     overtime_daily_threshold_hours: row.overtime_daily_threshold_hours != null ? String(row.overtime_daily_threshold_hours) : '8',
     overtime_weekly_threshold_hours: row.overtime_weekly_threshold_hours != null ? String(row.overtime_weekly_threshold_hours) : '40',
+    variable_working_hours_enabled: Boolean(row.variable_working_hours_enabled),
+    variable_overtime_period: row.variable_overtime_period === 'week' ? 'week' : 'month',
+    variable_overtime_threshold_hours: row.variable_overtime_threshold_hours != null ? String(row.variable_overtime_threshold_hours) : '160',
   };
 }
 
@@ -110,6 +119,11 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
       if (editTarget.builtin_type === 'overtime') {
         patch.overtime_daily_threshold_hours = parseFloat(editState.overtime_daily_threshold_hours);
         patch.overtime_weekly_threshold_hours = parseFloat(editState.overtime_weekly_threshold_hours);
+        patch.variable_working_hours_enabled = editState.variable_working_hours_enabled;
+        patch.variable_overtime_period = editState.variable_working_hours_enabled ? editState.variable_overtime_period : null;
+        patch.variable_overtime_threshold_hours = editState.variable_working_hours_enabled
+          ? parseFloat(editState.variable_overtime_threshold_hours)
+          : null;
       }
       await updateLaborPremiumType(orgId, editTarget.id, patch);
       setEditOpen(false);
@@ -142,6 +156,16 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
   };
 
   const calcMethodLabel = (m: string) => m === 'additive' ? '加算' : '乗算';
+  const overtimeRuleLabel = (row: PremiumRow) => {
+    if (row.builtin_type !== 'overtime') return null;
+    if (row.variable_working_hours_enabled && row.variable_overtime_threshold_hours != null) {
+      const period = row.variable_overtime_period === 'week' ? '週' : '月';
+      return `変形労働: ${period}${row.variable_overtime_threshold_hours}h超`;
+    }
+    const daily = row.overtime_daily_threshold_hours != null ? `日${row.overtime_daily_threshold_hours}h超` : null;
+    const weekly = row.overtime_weekly_threshold_hours != null ? `週${row.overtime_weekly_threshold_hours}h超` : null;
+    return [daily, weekly].filter(Boolean).join(' / ') || null;
+  };
 
   if (loading) return <Box py={3} textAlign="center"><CircularProgress size={24} /></Box>;
 
@@ -156,13 +180,14 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
               <TableCell>種別名</TableCell>
               <TableCell align="right">率</TableCell>
               <TableCell>計算方法</TableCell>
+              <TableCell>加算対象</TableCell>
               <TableCell>有効</TableCell>
               <TableCell />
             </TableRow>
           </TableHead>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow><TableCell colSpan={5} align="center">設定なし</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} align="center">設定なし</TableCell></TableRow>
             ) : (
               rows.map((row) => (
                 <TableRow key={row.id}>
@@ -170,6 +195,11 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
                   <TableCell align="right">{Math.round(row.rate * 100)}%</TableCell>
                   <TableCell>
                     <Chip size="small" label={calcMethodLabel(row.calc_method)} />
+                  </TableCell>
+                  <TableCell>
+                    {overtimeRuleLabel(row) ? (
+                      <Chip size="small" label={overtimeRuleLabel(row)} variant="outlined" />
+                    ) : null}
                   </TableCell>
                   <TableCell>
                     <Switch
@@ -210,6 +240,7 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
                     <Stack direction="row" spacing={1} alignItems="center" mt={0.75}>
                       <Chip size="small" label={`${Math.round(row.rate * 100)}%`} color="primary" variant="outlined" />
                       <Chip size="small" label={calcMethodLabel(row.calc_method)} />
+                      {overtimeRuleLabel(row) && <Chip size="small" label={overtimeRuleLabel(row)} variant="outlined" />}
                     </Stack>
                   </Box>
                   <Switch
@@ -295,23 +326,58 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
               </Stack>
             )}
             {editTarget?.builtin_type === 'overtime' && (
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                <TextField
-                  label="日次閾値 (h)"
-                  type="number"
-                  value={editState.overtime_daily_threshold_hours}
-                  onChange={(e) => setEditState(s => ({ ...s, overtime_daily_threshold_hours: e.target.value }))}
-                  size="small"
-                  inputProps={{ min: 0, step: 0.5 }}
+              <Stack spacing={1.5}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={editState.variable_working_hours_enabled}
+                      onChange={(e) => setEditState(s => ({ ...s, variable_working_hours_enabled: e.target.checked }))}
+                    />
+                  }
+                  label="変形労働時間制を適用"
                 />
-                <TextField
-                  label="週次閾値 (h)"
-                  type="number"
-                  value={editState.overtime_weekly_threshold_hours}
-                  onChange={(e) => setEditState(s => ({ ...s, overtime_weekly_threshold_hours: e.target.value }))}
-                  size="small"
-                  inputProps={{ min: 0, step: 1 }}
-                />
+                {editState.variable_working_hours_enabled ? (
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>集計期間</InputLabel>
+                      <Select
+                        label="集計期間"
+                        value={editState.variable_overtime_period}
+                        onChange={(e) => setEditState(s => ({ ...s, variable_overtime_period: e.target.value as 'week' | 'month' }))}
+                      >
+                        <MenuItem value="week">週単位</MenuItem>
+                        <MenuItem value="month">月単位</MenuItem>
+                      </Select>
+                    </FormControl>
+                    <TextField
+                      label="期間内の加算対象 (h超)"
+                      type="number"
+                      value={editState.variable_overtime_threshold_hours}
+                      onChange={(e) => setEditState(s => ({ ...s, variable_overtime_threshold_hours: e.target.value }))}
+                      size="small"
+                      inputProps={{ min: 0, step: 0.5 }}
+                    />
+                  </Stack>
+                ) : (
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                    <TextField
+                      label="日次閾値 (h)"
+                      type="number"
+                      value={editState.overtime_daily_threshold_hours}
+                      onChange={(e) => setEditState(s => ({ ...s, overtime_daily_threshold_hours: e.target.value }))}
+                      size="small"
+                      inputProps={{ min: 0, step: 0.5 }}
+                    />
+                    <TextField
+                      label="週次閾値 (h)"
+                      type="number"
+                      value={editState.overtime_weekly_threshold_hours}
+                      onChange={(e) => setEditState(s => ({ ...s, overtime_weekly_threshold_hours: e.target.value }))}
+                      size="small"
+                      inputProps={{ min: 0, step: 1 }}
+                    />
+                  </Stack>
+                )}
               </Stack>
             )}
           </Stack>

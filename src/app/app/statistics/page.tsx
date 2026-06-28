@@ -2,16 +2,20 @@
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
-    Box, Typography, Paper, CircularProgress, Tabs, Tab, Stack, TextField, Button,
+    Box, Typography, Paper, CircularProgress, Tabs, Tab, Stack, Button,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, IconButton, Collapse, Divider
 } from '@/components/ui/mui';
 import DownloadIcon from '@mui/icons-material/Download';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import EditNoteIcon from '@mui/icons-material/EditNote';
+import EventNoteIcon from '@mui/icons-material/EventNote';
+import { useRouter } from 'next/navigation';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
+import { MonthField } from '@/components/ui';
 import { aggregatePremiumMinutes, type LaborPremiumType } from '@/utils/laborPremium';
 import { type InternalWorkRecord } from '@/app/actions/internalWork';
 import { getStatisticsData } from '@/app/actions/statistics';
@@ -38,10 +42,14 @@ type StaffDetailItem = {
     id: string;
     kind: 'planned' | 'actual' | 'internal';
     clientName: string;
+    clientId?: string;
+    shiftId?: string | null;
+    reportId?: string | null;
     startAt: string;
     endAt: string;
     hours: number;
     status?: string;
+    isMonthClipped?: boolean;
 };
 
 type ShiftWithLinks = {
@@ -53,15 +61,18 @@ type ShiftWithLinks = {
 
 type ShiftVarianceRow = {
     id: string;
+    shiftId: string | null;
     clientId: string;
     clientName: string;
     staffNames: string;
     startAt: string;
+    endAt: string | null;
     plannedH: number | null;
     actualH: number | null;
     diffH: number | null;
     reportId: string | null;
     isUnplanned: boolean;
+    isMonthClipped: boolean;
 };
 
 function getOverlappingHours(start: Date, end: Date, monthStart: Date, monthEnd: Date): number {
@@ -78,6 +89,11 @@ function clipSlotToMonth(startAt: string, endAt: string, monthStart: Date, month
     const overlapEnd = end < monthEnd ? end : monthEnd;
     if (overlapStart >= overlapEnd) return null;
     return { start_at: overlapStart.toISOString(), end_at: overlapEnd.toISOString() };
+}
+
+function isSlotClipped(startAt: string, endAt: string, clipped: { start_at: string; end_at: string } | null): boolean {
+    if (!clipped) return false;
+    return clipped.start_at !== new Date(startAt).toISOString() || clipped.end_at !== new Date(endAt).toISOString();
 }
 
 function formatDetailDateTime(value: string): string {
@@ -103,6 +119,7 @@ function getReportHours(dataObj: ReportValuesData | null, startAt: string, endAt
 }
 
 export default function StatisticsPage() {
+    const router = useRouter();
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
 
@@ -207,6 +224,7 @@ export default function StatisticsPage() {
             const shiftEnd = new Date(shift.end_at);
             const hours = getOverlappingHours(shiftStart, shiftEnd, monthStart, monthEnd);
             const clipped = clipSlotToMonth(shift.start_at, shift.end_at, monthStart, monthEnd);
+            const isClipped = isSlotClipped(shift.start_at, shift.end_at, clipped);
                 
             if (hours > 0) {
                 if (tabIndex === 1 && shift.clients?.name) {
@@ -225,10 +243,13 @@ export default function StatisticsPage() {
                                 id: `planned-${shift.id}-${targetName}`,
                                 kind: 'planned',
                                 clientName: clientName ?? '—',
-                                startAt: shift.start_at,
-                                endAt: shift.end_at,
+                                clientId: shift.client_id,
+                                shiftId: shift.id,
+                                startAt: clipped?.start_at ?? shift.start_at,
+                                endAt: clipped?.end_at ?? shift.end_at,
                                 hours,
                                 status: shift.status,
+                                isMonthClipped: isClipped,
                             });
                         });
                     } else {
@@ -238,10 +259,13 @@ export default function StatisticsPage() {
                             id: `planned-${shift.id}-unassigned`,
                             kind: 'planned',
                             clientName: clientName ?? '—',
-                            startAt: shift.start_at,
-                            endAt: shift.end_at,
+                            clientId: shift.client_id,
+                            shiftId: shift.id,
+                            startAt: clipped?.start_at ?? shift.start_at,
+                            endAt: clipped?.end_at ?? shift.end_at,
                             hours,
                             status: shift.status,
+                            isMonthClipped: isClipped,
                         });
                     }
                 }
@@ -262,6 +286,7 @@ export default function StatisticsPage() {
                 if (tabIndex === 0) {
                     const actualHelpers = dataObj?._helpers || [];
                     const clipped = clipSlotToMonth(report.start_at, report.end_at, monthStart, monthEnd);
+                    const linkedShiftId = report.report_shifts?.[0]?.shift_id ?? null;
                     const clientName = Array.isArray(report.clients) ? report.clients[0]?.name : report.clients?.name;
                     const addActualForStaff = (helperName: string) => {
                         addHours(helperName, 'actual', actualHours, { serviceHours, travelHours });
@@ -271,10 +296,14 @@ export default function StatisticsPage() {
                             id: `actual-${report.id}-${helperName}`,
                             kind: 'actual',
                             clientName: clientName ?? '—',
-                            startAt: report.start_at,
-                            endAt: report.end_at,
+                            clientId: report.client_id,
+                            shiftId: linkedShiftId,
+                            reportId: report.id,
+                            startAt: clipped?.start_at ?? report.start_at,
+                            endAt: clipped?.end_at ?? report.end_at,
                             hours: actualHours,
                             status: report.status,
+                            isMonthClipped: isSlotClipped(report.start_at, report.end_at, clipped),
                         });
                     };
 
@@ -298,10 +327,14 @@ export default function StatisticsPage() {
                             id: `actual-${report.id}-unknown`,
                             kind: 'actual',
                             clientName: clientName ?? '—',
-                            startAt: report.start_at,
-                            endAt: report.end_at,
+                            clientId: report.client_id,
+                            shiftId: linkedShiftId,
+                            reportId: report.id,
+                            startAt: clipped?.start_at ?? report.start_at,
+                            endAt: clipped?.end_at ?? report.end_at,
                             hours: actualHours,
                             status: report.status,
+                            isMonthClipped: isSlotClipped(report.start_at, report.end_at, clipped),
                         });
                     }
                 }
@@ -351,34 +384,43 @@ export default function StatisticsPage() {
     }, [rawShifts, rawReports, internalWorkRecords, targetMonth, tabIndex, premiumTypes]);
 
     const shiftVarianceRows = useMemo<ShiftVarianceRow[]>(() => {
+        if (!targetMonth) return [];
+        const [yearStr, monthStr] = targetMonth.split('-');
+        const monthStart = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, 1, 0, 0, 0);
+        const monthEnd = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10), 0, 23, 59, 59, 999);
         const linkedReportIds = new Set<string>();
-        const rows: ShiftVarianceRow[] = rawShiftsWithLinks.map(shift => {
-            const plannedH = (new Date(shift.end_at).getTime() - new Date(shift.start_at).getTime()) / 3600000;
+        const rows: ShiftVarianceRow[] = rawShiftsWithLinks.flatMap(shift => {
+            const clippedShift = clipSlotToMonth(shift.start_at, shift.end_at, monthStart, monthEnd);
+            if (!clippedShift) return [];
+            const plannedH = getOverlappingHours(new Date(shift.start_at), new Date(shift.end_at), monthStart, monthEnd);
             const linked = shift.report_shifts ?? [];
             const actualMs = linked.reduce((sum, rs) => {
                 const r = rs.reports;
                 if (!r || !['pending', 'approved', 'remanded'].includes(r.status)) return sum;
                 linkedReportIds.add(r.id);
                 const dataObj = r.report_values?.[0]?.data ?? null;
-                return sum + getReportHours(dataObj, r.start_at, r.end_at).totalHours * 3600000;
+                return sum + getReportHours(dataObj, r.start_at, r.end_at, monthStart, monthEnd).totalHours * 3600000;
             }, 0);
             const actualH = actualMs > 0 ? actualMs / 3600000 : null;
             const diffH = actualH != null ? actualH - plannedH : null;
             const staffNames = (shift.shift_staffs ?? []).map(s => s.staffs?.name).filter(Boolean).join('、');
             const firstReport = linked.find(rs => rs.reports != null);
 
-            return {
+            return [{
                 id: `shift-${shift.id}`,
+                shiftId: shift.id,
                 clientId: shift.client_id,
                 clientName: shift.clients?.name ?? '—',
                 staffNames: staffNames || '—',
-                startAt: shift.start_at,
+                startAt: clippedShift.start_at,
+                endAt: clippedShift.end_at,
                 plannedH,
                 actualH,
                 diffH,
                 reportId: firstReport?.reports?.id ?? null,
                 isUnplanned: false,
-            };
+                isMonthClipped: isSlotClipped(shift.start_at, shift.end_at, clippedShift),
+            }];
         });
 
         rawReports.forEach(report => {
@@ -386,7 +428,8 @@ export default function StatisticsPage() {
             if (hasLink) return;
 
             const dataObj = report.report_values?.[0]?.data;
-            const actualH = getReportHours(dataObj ?? null, report.start_at, report.end_at).totalHours;
+            const clippedReport = clipSlotToMonth(report.start_at, report.end_at, monthStart, monthEnd);
+            const actualH = getReportHours(dataObj ?? null, report.start_at, report.end_at, monthStart, monthEnd).totalHours;
             if (actualH <= 0) return;
 
             const helpers = Array.isArray(dataObj?._helpers)
@@ -396,20 +439,92 @@ export default function StatisticsPage() {
 
             rows.push({
                 id: `unplanned-report-${report.id}`,
+                shiftId: null,
                 clientId: report.client_id,
                 clientName: report.clients?.name ?? '—',
                 staffNames: helpers.length > 0 ? helpers.join('、') : fallbackHelper || '未設定(担当者不明)',
-                startAt: report.start_at,
+                startAt: clippedReport?.start_at ?? report.start_at,
+                endAt: clippedReport?.end_at ?? report.end_at,
                 plannedH: null,
                 actualH,
                 diffH: actualH,
                 reportId: report.id,
                 isUnplanned: true,
+                isMonthClipped: isSlotClipped(report.start_at, report.end_at, clippedReport),
             });
         });
 
         return rows.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
-    }, [rawShiftsWithLinks, rawReports]);
+    }, [rawShiftsWithLinks, rawReports, targetMonth]);
+
+    const aggregatedTotals = useMemo(() => {
+        return aggregatedData.rows.reduce(
+            (total, row) => ({
+                plannedHours: total.plannedHours + row.plannedHours,
+                actualHours: total.actualHours + row.actualHours,
+                serviceHours: total.serviceHours + row.serviceHours,
+                travelHours: total.travelHours + row.travelHours,
+                internalHours: total.internalHours + row.internalHours,
+                pending: total.pending + row.statusCounts.pending,
+                remanded: total.remanded + row.statusCounts.remanded,
+            }),
+            { plannedHours: 0, actualHours: 0, serviceHours: 0, travelHours: 0, internalHours: 0, pending: 0, remanded: 0 },
+        );
+    }, [aggregatedData.rows]);
+
+    const premiumTotals = useMemo(() => {
+        if (tabIndex !== 0) return {} as PremiumComparison;
+        return premiumTypes.reduce((totals, type) => {
+            const total = aggregatedData.rows.reduce((sum, row) => {
+                const premium = aggregatedData.premiumComparisonPerStaff[row.name]?.[type.id] ?? { planned: 0, actual: 0, diff: 0 };
+                return {
+                    planned: sum.planned + premium.planned,
+                    actual: sum.actual + premium.actual,
+                    diff: sum.diff + premium.diff,
+                };
+            }, { planned: 0, actual: 0, diff: 0 });
+            totals[type.id] = total;
+            return totals;
+        }, {} as PremiumComparison);
+    }, [aggregatedData.premiumComparisonPerStaff, aggregatedData.rows, premiumTypes, tabIndex]);
+
+    const shiftVarianceTotals = useMemo(() => {
+        return shiftVarianceRows.reduce(
+            (total, row) => ({
+                plannedH: total.plannedH + (row.plannedH ?? 0),
+                actualH: total.actualH + (row.actualH ?? 0),
+            }),
+            { plannedH: 0, actualH: 0 },
+        );
+    }, [shiftVarianceRows]);
+
+    const getRecordHref = (row: ShiftVarianceRow) => (
+        row.reportId
+            ? `/app/record/${row.clientId}?reportId=${row.reportId}`
+            : row.shiftId
+                ? `/app/record/${row.clientId}?shiftId=${row.shiftId}`
+                : null
+    );
+
+    const getShiftHref = (row: ShiftVarianceRow) => (
+        row.shiftId
+            ? `/app/shifts/manage?shiftId=${row.shiftId}&start=${encodeURIComponent(row.startAt)}&month=${targetMonth}`
+            : null
+    );
+
+    const getDetailRecordHref = (item: StaffDetailItem) => (
+        item.reportId && item.clientId
+            ? `/app/record/${item.clientId}?reportId=${item.reportId}`
+            : item.shiftId && item.clientId
+                ? `/app/record/${item.clientId}?shiftId=${item.shiftId}`
+                : null
+    );
+
+    const getDetailShiftHref = (item: StaffDetailItem) => (
+        item.shiftId
+            ? `/app/shifts/manage?shiftId=${item.shiftId}&start=${encodeURIComponent(item.startAt)}&month=${targetMonth}`
+            : null
+    );
 
     const handleExportCSV = () => {
         const { rows: aggRows, premiumComparisonPerStaff } = aggregatedData;
@@ -468,14 +583,55 @@ export default function StatisticsPage() {
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} mb={3} spacing={2}>
-                    <TextField type="month" label="対象月" size="small" slotProps={{ inputLabel: { shrink: true } }} value={targetMonth} onChange={(e) => setTargetMonth(e.target.value)} sx={{ bgcolor: 'background.paper', minWidth: { xs: 0, sm: 200 } }} />
+                    <MonthField label="対象月" size="small" value={targetMonth} onChange={(e) => setTargetMonth(e.target.value)} sx={{ minWidth: { xs: 0, sm: 200 } }} />
                     {tabIndex < 2 && <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || aggregatedData.rows.length === 0} sx={{ bgcolor: 'background.paper' }}>CSVダウンロード</Button>}
                 </Stack>
+
+                {tabIndex < 2 && !loading && (
+                    <Paper sx={{ p: { xs: 1.5, sm: 2 }, mb: 2, borderRadius: 2, boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
+                        <Stack direction={{ xs: 'column', md: 'row' }} spacing={{ xs: 1.5, md: 2 }} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between">
+                            <Box>
+                                <Typography variant="subtitle2" fontWeight="bold">{tabIndex === 0 ? '全職員合計' : '全利用者合計'}</Typography>
+                                <Typography variant="caption" color="text.secondary">選択月に重なる時間だけで集計しています</Typography>
+                            </Box>
+                            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                                <Chip size="small" color="default" variant="outlined" label={`予定 ${aggregatedTotals.plannedHours.toFixed(2)}h`} />
+                                <Chip size="small" color="primary" label={`実績 ${aggregatedTotals.actualHours.toFixed(2)}h`} />
+                                <Chip
+                                    size="small"
+                                    color={Math.abs(aggregatedTotals.actualHours - aggregatedTotals.plannedHours) >= 0.01 ? 'warning' : 'default'}
+                                    variant="outlined"
+                                    label={`差異 ${(aggregatedTotals.actualHours - aggregatedTotals.plannedHours) >= 0 ? '+' : ''}${(aggregatedTotals.actualHours - aggregatedTotals.plannedHours).toFixed(2)}h`}
+                                />
+                                <Chip size="small" variant="outlined" label={`サービス ${aggregatedTotals.serviceHours.toFixed(1)}h`} />
+                                <Chip size="small" variant="outlined" label={`移動 ${aggregatedTotals.travelHours.toFixed(1)}h`} />
+                                {tabIndex === 0 && aggregatedTotals.internalHours > 0 && <Chip size="small" variant="outlined" label={`内勤 ${aggregatedTotals.internalHours.toFixed(1)}h`} />}
+                                {tabIndex === 0 && premiumTypes.map((type) => {
+                                    const premium = premiumTotals[type.id] ?? { planned: 0, actual: 0, diff: 0 };
+                                    return (
+                                        <Chip
+                                            key={type.id}
+                                            size="small"
+                                            variant="outlined"
+                                            color={Math.abs(premium.diff / 60) >= 0.1 ? 'warning' : 'default'}
+                                            label={`${type.name} ${((premium.planned) / 60).toFixed(1)} / ${(premium.actual / 60).toFixed(1)} / ${(premium.diff / 60) >= 0 ? '+' : ''}${(premium.diff / 60).toFixed(1)}h`}
+                                        />
+                                    );
+                                })}
+                            </Stack>
+                        </Stack>
+                    </Paper>
+                )}
 
                 <Paper sx={{ p: 0, minHeight: 400, borderRadius: 3, overflow: 'hidden', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
                     {loading ? <Box display="flex" justifyContent="center" alignItems="center" height={300}><CircularProgress /></Box> : (
                         tabIndex < 2 ? (
                         <>
+                        <Box sx={{ px: { xs: 1.5, sm: 2 }, py: 1.5, bgcolor: 'background.tint', borderBottom: '1px solid', borderColor: 'divider' }}>
+                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 2 }} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
+                                <Typography variant="subtitle2" fontWeight="bold">{tabIndex === 0 ? 'スタッフ別明細' : '利用者別明細'}</Typography>
+                            </Stack>
+                        </Box>
                         <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
                             <Table>
                                 <TableHead sx={{ bgcolor: 'background.tint' }}>
@@ -548,15 +704,32 @@ export default function StatisticsPage() {
                                                                 <Box sx={{ px: 3, py: 2, bgcolor: 'background.tint' }}>
                                                                     <Typography variant="subtitle2" fontWeight="bold" mb={1}>差異対象シフト・実績</Typography>
                                                                     <Stack spacing={1}>
-                                                                        {(aggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => (
-                                                                            <Box key={item.id} sx={{ display: 'grid', gridTemplateColumns: '90px 1fr 110px', gap: 1, alignItems: 'center' }}>
-                                                                                <Chip size="small" label={item.kind === 'planned' ? '予定' : item.kind === 'internal' ? '内勤' : '実績'} color={item.kind === 'planned' ? 'default' : item.kind === 'internal' ? 'secondary' : 'primary'} variant={item.kind === 'planned' ? 'outlined' : 'filled'} />
-                                                                                <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
-                                                                                    {item.clientName} {formatDetailDateTime(item.startAt)} - {formatDetailDateTime(item.endAt)}
-                                                                                </Typography>
-                                                                                <Typography variant="body2" align="right">{item.hours.toFixed(2)}h</Typography>
-                                                                            </Box>
-                                                                        ))}
+                                                                        {(aggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => {
+                                                                            const recordHref = getDetailRecordHref(item);
+                                                                            const shiftHref = getDetailShiftHref(item);
+                                                                            return (
+                                                                                <Box key={item.id} sx={{ display: 'grid', gridTemplateColumns: '90px minmax(180px, 1fr) 110px minmax(180px, auto)', gap: 1, alignItems: 'center' }}>
+                                                                                    <Chip size="small" label={item.kind === 'planned' ? '予定' : item.kind === 'internal' ? '内勤' : '実績'} color={item.kind === 'planned' ? 'default' : item.kind === 'internal' ? 'default' : 'primary'} variant={item.kind === 'planned' ? 'outlined' : 'filled'} />
+                                                                                    <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
+                                                                                        {item.clientName} {formatDetailDateTime(item.startAt)} - {formatDetailDateTime(item.endAt)}
+                                                                                        {item.isMonthClipped && <Chip size="small" label="月内分" variant="outlined" sx={{ ml: 1 }} />}
+                                                                                    </Typography>
+                                                                                    <Typography variant="body2" align="right">{item.hours.toFixed(2)}h</Typography>
+                                                                                    <Stack direction="row" spacing={0.75} justifyContent="flex-end" useFlexGap flexWrap="wrap">
+                                                                                        {recordHref && (
+                                                                                            <Button size="small" variant={item.reportId ? 'outlined' : 'contained'} startIcon={<EditNoteIcon />} href={recordHref} component="a">
+                                                                                                {item.reportId ? '実績確認' : '実績作成'}
+                                                                                            </Button>
+                                                                                        )}
+                                                                                        {shiftHref && (
+                                                                                            <Button size="small" variant="outlined" color="inherit" startIcon={<EventNoteIcon />} href={shiftHref} component="a">
+                                                                                                シフト確認
+                                                                                            </Button>
+                                                                                        )}
+                                                                                    </Stack>
+                                                                                </Box>
+                                                                            );
+                                                                        })}
                                                                     </Stack>
                                                                 </Box>
                                                             </Collapse>
@@ -634,17 +807,38 @@ export default function StatisticsPage() {
                                         <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                                             <Divider sx={{ my: 1.5 }} />
                                             <Stack spacing={1}>
-                                                {(aggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => (
-                                                    <Box key={item.id}>
-                                                        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                                                            <Chip size="small" label={item.kind === 'planned' ? '予定' : item.kind === 'internal' ? '内勤' : '実績'} color={item.kind === 'planned' ? 'default' : item.kind === 'internal' ? 'secondary' : 'primary'} variant={item.kind === 'planned' ? 'outlined' : 'filled'} />
-                                                            <Typography variant="body2" fontWeight="bold">{item.hours.toFixed(2)}h</Typography>
-                                                        </Stack>
-                                                        <Typography variant="body2" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
-                                                            {item.clientName} {formatDetailDateTime(item.startAt)} - {formatDetailDateTime(item.endAt)}
-                                                        </Typography>
-                                                    </Box>
-                                                ))}
+                                                {(aggregatedData.detailItemsPerStaff[row.name] ?? []).map(item => {
+                                                    const recordHref = getDetailRecordHref(item);
+                                                    const shiftHref = getDetailShiftHref(item);
+                                                    return (
+                                                        <Box key={item.id}>
+                                                            <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                                                                <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
+                                                                    <Chip size="small" label={item.kind === 'planned' ? '予定' : item.kind === 'internal' ? '内勤' : '実績'} color={item.kind === 'planned' ? 'default' : item.kind === 'internal' ? 'default' : 'primary'} variant={item.kind === 'planned' ? 'outlined' : 'filled'} />
+                                                                    {item.isMonthClipped && <Chip size="small" label="月内分" variant="outlined" />}
+                                                                </Stack>
+                                                                <Typography variant="body2" fontWeight="bold">{item.hours.toFixed(2)}h</Typography>
+                                                            </Stack>
+                                                            <Typography variant="body2" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
+                                                                {item.clientName} {formatDetailDateTime(item.startAt)} - {formatDetailDateTime(item.endAt)}
+                                                            </Typography>
+                                                            {(recordHref || shiftHref) && (
+                                                                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" mt={1}>
+                                                                    {recordHref && (
+                                                                        <Button size="small" variant={item.reportId ? 'outlined' : 'contained'} startIcon={<EditNoteIcon />} href={recordHref} component="a">
+                                                                            {item.reportId ? '実績確認' : '実績作成'}
+                                                                        </Button>
+                                                                    )}
+                                                                    {shiftHref && (
+                                                                        <Button size="small" variant="outlined" color="inherit" startIcon={<EventNoteIcon />} href={shiftHref} component="a">
+                                                                            シフト確認
+                                                                        </Button>
+                                                                    )}
+                                                                </Stack>
+                                                            )}
+                                                        </Box>
+                                                    );
+                                                })}
                                             </Stack>
                                         </Collapse>
                                     </Box>
@@ -654,6 +848,21 @@ export default function StatisticsPage() {
                         </>
                         ) : (
                         <>
+                        <Box sx={{ px: { xs: 1.5, sm: 2 }, py: 1.5, bgcolor: 'background.tint', borderBottom: '1px solid', borderColor: 'divider' }}>
+                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1, sm: 2 }} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
+                                <Typography variant="subtitle2" fontWeight="bold">シフト差異合計</Typography>
+                                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                                    <Chip size="small" color="default" variant="outlined" label={`予定 ${shiftVarianceTotals.plannedH.toFixed(1)}h`} />
+                                    <Chip size="small" color="primary" label={`実績 ${shiftVarianceTotals.actualH.toFixed(1)}h`} />
+                                    <Chip
+                                        size="small"
+                                        color={Math.abs(shiftVarianceTotals.actualH - shiftVarianceTotals.plannedH) >= 0.1 ? 'warning' : 'default'}
+                                        variant="outlined"
+                                        label={`差異 ${(shiftVarianceTotals.actualH - shiftVarianceTotals.plannedH) >= 0 ? '+' : ''}${(shiftVarianceTotals.actualH - shiftVarianceTotals.plannedH).toFixed(1)}h`}
+                                    />
+                                </Stack>
+                            </Stack>
+                        </Box>
                         <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
                             <Table size="small">
                                 <TableHead sx={{ bgcolor: 'background.tint' }}>
@@ -664,7 +873,7 @@ export default function StatisticsPage() {
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>予定(h)</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>実績(h)</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>差異(h)</TableCell>
-                                        <TableCell sx={{ fontWeight: 'bold' }}>記録</TableCell>
+                                        <TableCell sx={{ fontWeight: 'bold' }}>操作</TableCell>
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
@@ -672,12 +881,23 @@ export default function StatisticsPage() {
                                         <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5, color: 'text.secondary' }}>データがありません</TableCell></TableRow>
                                     ) : shiftVarianceRows.map(row => {
                                         const startStr = new Date(row.startAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                                        const endStr = row.endAt ? new Date(row.endAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
+                                        const recordHref = getRecordHref(row);
+                                        const shiftHref = getShiftHref(row);
                                         return (
-                                            <TableRow key={row.id} hover>
+                                            <TableRow
+                                                key={row.id}
+                                                hover={Boolean(recordHref)}
+                                                onClick={() => {
+                                                    if (recordHref) router.push(recordHref);
+                                                }}
+                                                sx={{ cursor: recordHref ? 'pointer' : 'default' }}
+                                            >
                                                 <TableCell>
                                                     <Stack direction="row" spacing={1} alignItems="center">
-                                                        <Typography variant="body2">{startStr}</Typography>
-                                                        {row.isUnplanned && <Chip label="予定なし" size="small" color="info" variant="outlined" />}
+                                                        <Typography variant="body2">{endStr ? `${startStr} - ${endStr}` : startStr}</Typography>
+                                                        {row.isUnplanned && <Chip label="予定なし" size="small" color="default" variant="outlined" />}
+                                                        {row.isMonthClipped && <Chip label="月内分" size="small" variant="outlined" />}
                                                     </Stack>
                                                 </TableCell>
                                                 <TableCell>{row.clientName}</TableCell>
@@ -688,10 +908,35 @@ export default function StatisticsPage() {
                                                     {row.diffH != null ? (row.diffH >= 0 ? '+' : '') + row.diffH.toFixed(1) : '—'}
                                                 </TableCell>
                                                 <TableCell>
-                                                    {row.reportId
-                                                        ? <Button size="small" href={`/app/record/${row.clientId}?reportId=${row.reportId}`} component="a">記録を開く</Button>
-                                                        : <Chip label="記録なし" size="small" color="warning" variant="outlined" />
-                                                    }
+                                                    <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                                                        {recordHref ? (
+                                                            <Button
+                                                                size="small"
+                                                                variant={row.reportId ? 'outlined' : 'contained'}
+                                                                startIcon={<EditNoteIcon />}
+                                                                href={recordHref}
+                                                                component="a"
+                                                                onClick={(event) => event.stopPropagation()}
+                                                            >
+                                                                {row.reportId ? '実績確認' : '実績作成'}
+                                                            </Button>
+                                                        ) : (
+                                                            <Chip label="実績なし" size="small" color="warning" variant="outlined" />
+                                                        )}
+                                                        {shiftHref && (
+                                                            <Button
+                                                                size="small"
+                                                                variant="outlined"
+                                                                color="inherit"
+                                                                startIcon={<EventNoteIcon />}
+                                                                href={shiftHref}
+                                                                component="a"
+                                                                onClick={(event) => event.stopPropagation()}
+                                                            >
+                                                                シフト確認
+                                                            </Button>
+                                                        )}
+                                                    </Stack>
                                                 </TableCell>
                                             </TableRow>
                                         );
@@ -704,13 +949,23 @@ export default function StatisticsPage() {
                                 <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>データがありません</Box>
                             ) : shiftVarianceRows.map(row => {
                                 const startStr = new Date(row.startAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                                const endStr = row.endAt ? new Date(row.endAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
+                                const recordHref = getRecordHref(row);
+                                const shiftHref = getShiftHref(row);
                                 return (
-                                    <Box key={row.id} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+                                    <Box
+                                        key={row.id}
+                                        onClick={() => {
+                                            if (recordHref) router.push(recordHref);
+                                        }}
+                                        sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper', cursor: recordHref ? 'pointer' : 'default' }}
+                                    >
                                         <Stack spacing={1.25}>
                                             <Box>
                                                 <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                                                    <Typography variant="caption" color="text.secondary">{startStr}</Typography>
-                                                    {row.isUnplanned && <Chip label="予定なし" size="small" color="info" variant="outlined" />}
+                                                    <Typography variant="caption" color="text.secondary">{endStr ? `${startStr} - ${endStr}` : startStr}</Typography>
+                                                    {row.isUnplanned && <Chip label="予定なし" size="small" color="default" variant="outlined" />}
+                                                    {row.isMonthClipped && <Chip label="月内分" size="small" variant="outlined" />}
                                                 </Stack>
                                                 <Typography fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{row.clientName}</Typography>
                                                 <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{row.staffNames}</Typography>
@@ -731,10 +986,35 @@ export default function StatisticsPage() {
                                                     </Typography>
                                                 </Box>
                                             </Box>
-                                            {row.reportId
-                                                ? <Button size="small" variant="outlined" href={`/app/record/${row.clientId}?reportId=${row.reportId}`} component="a">記録を開く</Button>
-                                                : <Chip label="記録なし" size="small" color="warning" variant="outlined" sx={{ alignSelf: 'flex-start' }} />
-                                            }
+                                            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                                                {recordHref ? (
+                                                    <Button
+                                                        size="small"
+                                                        variant={row.reportId ? 'outlined' : 'contained'}
+                                                        startIcon={<EditNoteIcon />}
+                                                        href={recordHref}
+                                                        component="a"
+                                                        onClick={(event) => event.stopPropagation()}
+                                                    >
+                                                        {row.reportId ? '実績確認' : '実績作成'}
+                                                    </Button>
+                                                ) : (
+                                                    <Chip label="実績なし" size="small" color="warning" variant="outlined" sx={{ alignSelf: 'flex-start' }} />
+                                                )}
+                                                {shiftHref && (
+                                                    <Button
+                                                        size="small"
+                                                        variant="outlined"
+                                                        color="inherit"
+                                                        startIcon={<EventNoteIcon />}
+                                                        href={shiftHref}
+                                                        component="a"
+                                                        onClick={(event) => event.stopPropagation()}
+                                                    >
+                                                        シフト確認
+                                                    </Button>
+                                                )}
+                                            </Stack>
                                         </Stack>
                                     </Box>
                                 );

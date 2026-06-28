@@ -774,17 +774,42 @@ export async function getShifts(organizationId: string, startDate: string, endDa
 
         const { data, error } = await query;
         if (error) throw error;
-        if (actor.isOwner) return data;
+        const withReportStatuses = await attachReportStatuses(data ?? []);
+        if (actor.isOwner) return withReportStatuses;
         const { permissions } = await getEffectivePermissions(organizationId, actor.userId);
-        if (permissions.shifts.view === 'all') return data;
+        if (permissions.shifts.view === 'all') return withReportStatuses;
         const staffId = actor.staffId;
         const assignedClientIds = new Set(actor.clientIds);
-        return (data || []).filter((shift) => {
+        return (withReportStatuses || []).filter((shift) => {
             const clientId = shift.client_id as string;
             const shiftStaffs = (shift.shift_staffs || []) as Array<{ staff_id: string | null }>;
             return assignedClientIds.has(clientId) || Boolean(staffId && shiftStaffs.some((staff) => staff.staff_id === staffId));
         });
     } catch (error) { console.error(error); throw error; }
+}
+
+async function attachReportStatuses<T extends { id: string }>(shifts: T[]): Promise<Array<T & { report_statuses: Array<{ id: string; status: string; is_primary: boolean }> }>> {
+    if (shifts.length === 0) return [];
+    const { data, error } = await supabaseAdmin
+        .from('report_shifts')
+        .select('shift_id, is_primary, report:reports(id, status, deleted_at)')
+        .in('shift_id', shifts.map((shift) => shift.id))
+        .is('reports.deleted_at', null);
+    if (error) throw error;
+
+    const byShiftId = new Map<string, Array<{ id: string; status: string; is_primary: boolean }>>();
+    (data ?? []).forEach((row) => {
+        const report = Array.isArray(row.report) ? row.report[0] : row.report;
+        if (!report?.id) return;
+        const current = byShiftId.get(row.shift_id) ?? [];
+        current.push({ id: report.id, status: report.status, is_primary: row.is_primary });
+        byShiftId.set(row.shift_id, current);
+    });
+
+    return shifts.map((shift) => ({
+        ...shift,
+        report_statuses: byShiftId.get(shift.id) ?? [],
+    }));
 }
 
 export async function getShiftPatterns(organizationId: string) {

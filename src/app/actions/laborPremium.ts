@@ -24,6 +24,9 @@ export async function updateLaborPremiumType(
     night_end_hour?: number | null;
     overtime_daily_threshold_hours?: number | null;
     overtime_weekly_threshold_hours?: number | null;
+    variable_working_hours_enabled?: boolean;
+    variable_overtime_period?: 'week' | 'month' | null;
+    variable_overtime_threshold_hours?: number | null;
   }
 ): Promise<void> {
   await assertOrgPermission(orgId, 'organization');
@@ -43,6 +46,9 @@ export async function createLaborPremiumType(
     calc_method: 'additive' | 'multiplicative';
     night_start_hour: number;
     night_end_hour: number;
+    variable_working_hours_enabled?: boolean;
+    variable_overtime_period?: 'week' | 'month' | null;
+    variable_overtime_threshold_hours?: number | null;
   }
 ): Promise<void> {
   await assertOrgPermission(orgId, 'organization');

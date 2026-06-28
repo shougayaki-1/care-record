@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getActiveOrganizationIds, exportReportsAsCsv } from '@/utils/gcs/export';
-import { uploadToGCS } from '@/utils/gcs/upload';
+import { isGcsBackupConfigured, uploadToGCS } from '@/utils/gcs/upload';
 import { generateBackupHtml } from '@/utils/gcs/html';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +15,9 @@ function authorized(request: NextRequest): boolean {
 
 export async function GET(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!isGcsBackupConfigured()) {
+    return NextResponse.json({ ok: false, error: 'gcs_not_configured' }, { status: 500 });
+  }
 
   const bucket = 'care-record-search-daily';
   const now = new Date();
@@ -24,11 +27,10 @@ export async function GET(request: NextRequest) {
   try {
     const orgIds = await getActiveOrganizationIds();
     let succeeded = 0;
+    let empty = 0;
 
     for (const orgId of orgIds) {
       const csv = await exportReportsAsCsv(orgId);
-      if (!csv) continue;
-
       const rows = csvToHtmlRows(csv);
       const html = generateBackupHtml(today, rows);
 
@@ -37,9 +39,10 @@ export async function GET(request: NextRequest) {
         uploadToGCS(bucket, `daily/${orgId}/${today}/${version}.html`, html),
       ]);
       succeeded++;
+      if (rows.length === 0) empty++;
     }
 
-    return NextResponse.json({ ok: true, orgs: succeeded, date: today });
+    return NextResponse.json({ ok: true, orgs: succeeded, empty, date: today });
   } catch (err) {
     console.error('[cron:backup-daily]', err);
     return NextResponse.json({ ok: false, error: 'backup_failed' }, { status: 500 });

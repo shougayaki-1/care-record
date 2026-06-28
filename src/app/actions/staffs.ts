@@ -16,14 +16,38 @@ function normalizeChoice<T extends readonly string[]>(value: string, allowedValu
   return value as T[number];
 }
 
-function normalizeStaffInput(name: string, positions: string[], employmentType: string, workStyle: string) {
+async function normalizePositions(organizationId: string, positions: string[]): Promise<string[]> {
+  const uniquePositions = Array.from(new Set(positions.map((item) => item.trim()).filter(Boolean)));
+  if (uniquePositions.length > 20 || uniquePositions.some((item) => item.length > 50)) {
+    throw new Error('役職の入力が多すぎるか長すぎます');
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('staff_position_presets')
+    .select('name, sort_order')
+    .eq('organization_id', organizationId)
+    .order('sort_order', { ascending: true, nullsFirst: false })
+    .order('name', { ascending: true });
+  if (error) throw sanitizeDbError(error, 'action.staffs');
+
+  const selected = new Set(uniquePositions);
+  const orderedPresetPositions = (data ?? [])
+    .map((preset) => preset.name)
+    .filter((name) => selected.has(name));
+  const presetNames = new Set((data ?? []).map((preset) => preset.name));
+  const customPositions = uniquePositions
+    .filter((name) => !presetNames.has(name))
+    .sort((a, b) => a.localeCompare(b, 'ja'));
+
+  return [...orderedPresetPositions, ...customPositions];
+}
+
+async function normalizeStaffInput(organizationId: string, name: string, positions: string[], employmentType: string, workStyle: string) {
   const normalizedName = name.trim();
   if (normalizedName.length < 1 || normalizedName.length > 100) throw new Error('スタッフ名は1〜100文字で入力してください');
-  const normalizedPositions = Array.from(new Set(positions.map((item) => item.trim()).filter(Boolean)));
-  if (normalizedPositions.length > 20 || normalizedPositions.some((item) => item.length > 50)) throw new Error('役職の入力が多すぎるか長すぎます');
   return {
     name: normalizedName,
-    positions: normalizedPositions,
+    positions: await normalizePositions(organizationId, positions),
     employment_type: normalizeChoice(employmentType, EMPLOYMENT_TYPES, '雇用形態') as EmploymentType,
     work_style: normalizeChoice(workStyle, WORK_STYLES, '専従・兼務') as WorkStyle,
   };
@@ -58,7 +82,7 @@ export async function saveStaff(
   },
 ) {
   const { userId } = await assertOrgPermission(organizationId, 'staffs');
-  const normalized = normalizeStaffInput(values.name, values.positions, values.employmentType, values.workStyle);
+  const normalized = await normalizeStaffInput(organizationId, values.name, values.positions, values.employmentType, values.workStyle);
   const linkedUserId = values.linkedUserId || null;
   await validateLinkedUser(organizationId, linkedUserId, values.staffId);
 

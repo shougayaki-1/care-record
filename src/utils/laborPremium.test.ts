@@ -19,6 +19,19 @@ describe('getOvertimeMinutes', () => {
     const slots = [{ start: new Date('2026-01-01T08:00:00'), end: new Date('2026-01-01T18:00:00') }];
     expect(getOvertimeMinutes(slots, 8, null)).toBe(120);
   });
+  it('uses variable working hours threshold when enabled', () => {
+    const daySlots = [{ start: new Date('2026-01-03T09:00:00'), end: new Date('2026-01-03T17:00:00') }];
+    const weekSlots = [
+      { start: new Date('2026-01-01T09:00:00'), end: new Date('2026-01-01T19:00:00') },
+      { start: new Date('2026-01-02T09:00:00'), end: new Date('2026-01-02T19:00:00') },
+      ...daySlots,
+    ];
+    expect(getOvertimeMinutes(daySlots, 8, 40, weekSlots, {
+      variableWorkingHoursEnabled: true,
+      variablePeriod: 'week',
+      variableThresholdHours: 24,
+    })).toBe(240);
+  });
 });
 
 describe('aggregatePremiumMinutes', () => {

@@ -6,7 +6,7 @@ import {
     FormControlLabel, Radio, RadioGroup, LinearProgress,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem, Alert
 } from '@/components/ui/mui';
-import { AppButton, AppDialog } from '@/components/ui';
+import { AppButton, AppDialog, MonthField } from '@/components/ui';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -37,6 +37,7 @@ import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
 import type { DatesSetArg } from '@fullcalendar/core';
 import { checkShiftPermission } from '@/utils/permissions';
+import { useSearchParams } from 'next/navigation';
 
 import type { FetchedPatternData } from '@/hooks/useShiftData';
 
@@ -46,7 +47,9 @@ export default function ShiftManagePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
     const confirm = useConfirm();
+    const searchParams = useSearchParams();
     const calendarRef = useRef<FullCalendar>(null);
+    const handledShiftParamRef = useRef<string | null>(null);
 
     const [generating, setGenerating] = useState(false);
     const [pdfGenerating, setPdfGenerating] = useState(false);
@@ -56,6 +59,8 @@ export default function ShiftManagePage() {
     const [selectedClientId, setSelectedClientId] = useState('all');
 
     const [targetMonth, setTargetMonth] = useState<string>(() => {
+        const monthParam = searchParams.get('month');
+        if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) return monthParam;
         const d = new Date();
         d.setMonth(d.getMonth() + 1);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -77,6 +82,30 @@ export default function ShiftManagePage() {
         unsyncedCount, setUnsyncedCount,
         fetchData, fetchMasterData,
     } = useShiftData({ currentOrg, showToast, calendarRef, activeTab, selectedStaffId, selectedClientId });
+
+    useEffect(() => {
+        const shiftIdParam = searchParams.get('shiftId');
+        const startParam = searchParams.get('start');
+        if (!shiftIdParam || handledShiftParamRef.current === shiftIdParam) return;
+        if (activeTab !== 'fullCalendar') {
+            setActiveTab('fullCalendar');
+            return;
+        }
+        if (initialLoading) return;
+        if (startParam && calendarRef.current) {
+            calendarRef.current.getApi().gotoDate(new Date(startParam));
+        }
+    }, [activeTab, initialLoading, searchParams]);
+
+    useEffect(() => {
+        const shiftIdParam = searchParams.get('shiftId');
+        if (!shiftIdParam || handledShiftParamRef.current === shiftIdParam) return;
+        const targetShift = rawShifts.find((shift) => shift.id === shiftIdParam);
+        if (!targetShift) return;
+        setSelectedShift(targetShift);
+        setShiftModalOpen(true);
+        handledShiftParamRef.current = shiftIdParam;
+    }, [rawShifts, searchParams]);
 
     const {
         syncProgress, setSyncProgress,
@@ -473,7 +502,7 @@ export default function ShiftManagePage() {
                                 <Paper variant="outlined" sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: 'background.tint', borderColor: 'divider' }}>
                                     <Typography variant="body2" sx={{ fontWeight: '500' }}>登録したひな形をベースに、指定月のカレンダーへシフトを一括展開・同期します。</Typography>
                                     <Stack direction="row" spacing={1.5} alignItems="center">
-                                        <TextField type="month" size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} sx={{ bgcolor: 'background.paper' }} />
+                                        <MonthField size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} />
                                         <Button variant="contained" color="secondary" startIcon={<PlayArrowIcon />} onClick={handleCalculatePreview} disabled={!canCreateShift || currentOrg.effectivePermissions.shifts.create !== 'all' || generating || patterns.length === 0} sx={{ boxShadow: 'none' }}>
                                             一括自動展開する
                                         </Button>

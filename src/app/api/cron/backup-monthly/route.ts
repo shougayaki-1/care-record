@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getActiveOrganizationIds, exportReportsAsJson } from '@/utils/gcs/export';
-import { uploadToGCS } from '@/utils/gcs/upload';
+import { isGcsBackupConfigured, uploadToGCS } from '@/utils/gcs/upload';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -14,6 +14,9 @@ function authorized(request: NextRequest): boolean {
 
 export async function GET(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!isGcsBackupConfigured()) {
+    return NextResponse.json({ ok: false, error: 'gcs_not_configured' }, { status: 500 });
+  }
 
   const bucket = 'care-record-archive-7y';
 

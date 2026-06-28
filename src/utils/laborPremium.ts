@@ -9,6 +9,9 @@ export type LaborPremiumType = {
   night_end_hour: number | null;
   overtime_daily_threshold_hours: number | null;
   overtime_weekly_threshold_hours: number | null;
+  variable_working_hours_enabled?: boolean | null;
+  variable_overtime_period?: 'week' | 'month' | null;
+  variable_overtime_threshold_hours?: number | null;
 };
 
 /** Count minutes of [start, end) interval that fall inside a time window.
@@ -32,21 +35,47 @@ export function getNightMinutes(
 
 type Slot = { start: Date; end: Date };
 
+type OvertimeOptions = {
+  variableWorkingHoursEnabled?: boolean | null;
+  variablePeriod?: 'week' | 'month' | null;
+  variableThresholdHours?: number | null;
+  allMonthSlots?: Slot[];
+};
+
+function sumSlotMinutes(slots: Slot[]): number {
+  return slots.reduce((sum, slot) => sum + (slot.end.getTime() - slot.start.getTime()) / 60000, 0);
+}
+
 /** Returns total overtime minutes given all slots for the day (and optionally the week). */
 export function getOvertimeMinutes(
   slotsForDay: Slot[],
   dailyThresholdHours: number | null,
   weeklyThresholdHours: number | null,
-  allWeekSlots?: Slot[]
+  allWeekSlots?: Slot[],
+  options: OvertimeOptions = {}
 ): number {
   let overtimeMinutes = 0;
+  if (
+    options.variableWorkingHoursEnabled
+    && options.variableThresholdHours != null
+    && options.variablePeriod
+  ) {
+    const periodSlots = options.variablePeriod === 'month'
+      ? (options.allMonthSlots ?? [])
+      : (allWeekSlots ?? []);
+    const periodMin = sumSlotMinutes(periodSlots);
+    const thresh = options.variableThresholdHours * 60;
+    if (periodMin > thresh) overtimeMinutes = Math.max(overtimeMinutes, periodMin - thresh);
+    return Math.round(overtimeMinutes);
+  }
+
   if (dailyThresholdHours != null) {
-    const dailyMin = slotsForDay.reduce((s, sl) => s + (sl.end.getTime() - sl.start.getTime()) / 60000, 0);
+    const dailyMin = sumSlotMinutes(slotsForDay);
     const thresh = dailyThresholdHours * 60;
     if (dailyMin > thresh) overtimeMinutes = Math.max(overtimeMinutes, dailyMin - thresh);
   }
   if (weeklyThresholdHours != null && allWeekSlots) {
-    const weekMin = allWeekSlots.reduce((s, sl) => s + (sl.end.getTime() - sl.start.getTime()) / 60000, 0);
+    const weekMin = sumSlotMinutes(allWeekSlots);
     const thresh = weeklyThresholdHours * 60;
     if (weekMin > thresh) overtimeMinutes = Math.max(overtimeMinutes, weekMin - thresh);
   }
@@ -57,7 +86,8 @@ export function calcPremiumMinutesByType(
   type: LaborPremiumType,
   shiftStart: Date, shiftEnd: Date,
   slotsForDay: Slot[],
-  allWeekSlots?: Slot[]
+  allWeekSlots?: Slot[],
+  allMonthSlots?: Slot[]
 ): number {
   if (!type.is_enabled) return 0;
   if (type.builtin_type === 'night' || type.builtin_type === 'custom') {
@@ -65,7 +95,18 @@ export function calcPremiumMinutesByType(
     return getNightMinutes(shiftStart, shiftEnd, type.night_start_hour, type.night_end_hour);
   }
   if (type.builtin_type === 'overtime') {
-    return getOvertimeMinutes(slotsForDay, type.overtime_daily_threshold_hours, type.overtime_weekly_threshold_hours, allWeekSlots);
+    return getOvertimeMinutes(
+      slotsForDay,
+      type.overtime_daily_threshold_hours,
+      type.overtime_weekly_threshold_hours,
+      allWeekSlots,
+      {
+        variableWorkingHoursEnabled: type.variable_working_hours_enabled,
+        variablePeriod: type.variable_overtime_period,
+        variableThresholdHours: type.variable_overtime_threshold_hours,
+        allMonthSlots,
+      },
+    );
   }
   return 0;
 }
@@ -88,20 +129,24 @@ export function aggregatePremiumMinutes(
 
   const daySlots: Record<string, Slot[]> = {};
   const weekSlots: Record<string, Slot[]> = {};
+  const monthSlots: Record<string, Slot[]> = {};
   for (const s of shifts) {
     const start = new Date(s.start_at), end = new Date(s.end_at);
     const dk = start.toISOString().slice(0, 10);
     const wk = getISOWeekKey(start);
+    const mk = start.toISOString().slice(0, 7);
     (daySlots[dk] ??= []).push({ start, end });
     (weekSlots[wk] ??= []).push({ start, end });
+    (monthSlots[mk] ??= []).push({ start, end });
   }
 
   for (const s of shifts) {
     const start = new Date(s.start_at), end = new Date(s.end_at);
     const dk = start.toISOString().slice(0, 10);
     const wk = getISOWeekKey(start);
+    const mk = start.toISOString().slice(0, 7);
     for (const type of types) {
-      result[type.id] += calcPremiumMinutesByType(type, start, end, daySlots[dk] ?? [], weekSlots[wk]);
+      result[type.id] += calcPremiumMinutesByType(type, start, end, daySlots[dk] ?? [], weekSlots[wk], monthSlots[mk]);
     }
   }
   return result;
