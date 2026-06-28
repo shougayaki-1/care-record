@@ -32,7 +32,8 @@ import {
 } from '@/app/actions/reports';
 import { getShiftSuggestions, addShiftLink, removeShiftLink, getLinkedShifts } from '@/app/actions/reportShifts';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { AppButton, AppDialog, DateTimeField, DynamicFormField, InnerPageHeader, MultiSelectField } from '@/components/ui';
+import { AiImportButton, AppButton, AppDialog, DateTimeField, DynamicFormField, InnerPageHeader, MultiSelectField } from '@/components/ui';
+import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { checkRecordPermission } from '@/utils/permissions';
 
 type FormItem = {
@@ -136,6 +137,9 @@ export default function RecordPage() {
   const [shiftSuggestions, setShiftSuggestions] = useState<ShiftSuggestion[]>([]);
   const [linkedShifts, setLinkedShifts] = useState<LinkedShift[]>([]);
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
+
+  // AI入力されたフィールドのハイライト管理
+  const [aiFilledFields, setAiFilledFields] = useState<Set<string>>(new Set());
 
   // 月末跨ぎ夜勤管理ステート
   const [isSpanningMonth, setIsSpanningMonth] = useState(false);
@@ -536,6 +540,16 @@ export default function RecordPage() {
   const handleDialogDiscard = () => { setOpenCloseDialog(false); router.back(); };
   const handleDialogSaveDraft = async () => { if (await saveReport('draft', true)) { showToast('下書き保存しました'); router.back(); } setOpenCloseDialog(false); };
 
+  const handleAiExtracted = useCallback((result: ExtractionResult) => {
+    const filled = new Set<string>();
+    Object.entries(result.values).forEach(([key, value]) => {
+      setAnswers(prev => ({ ...prev, [key]: value }));
+      filled.add(key);
+    });
+    setAiFilledFields(filled);
+    setIsDirty(true);
+  }, []);
+
   const groupedSections = useMemo(() => {
     const sections: { title: string; items: FormItem[] }[] = [];
     let currentSection = { title: '基本項目', items: [] as FormItem[] };
@@ -676,6 +690,19 @@ export default function RecordPage() {
               </Box>
             )}
 
+            {currentStatus !== 'approved' && (
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <AiImportButton
+                  formTemplate={template}
+                  clients={[{ id: clientId as string, name: clientName }]}
+                  helpers={selectableStaffs.map(s => ({ id: s.id, name: s.name }))}
+                  onExtracted={handleAiExtracted}
+                  hasExistingValues={Object.keys(answers).length > 0}
+                  disabled={submitting || loading}
+                />
+              </Box>
+            )}
+
             <Paper variant="outlined" sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3, bgcolor: 'background.paper' }}>
                 <Stack spacing={3}>
 
@@ -746,8 +773,9 @@ export default function RecordPage() {
                 <Stack divider={<Divider />}>
                     {section.items.map((item) => {
                     const hasError = !!errors[item.id];
+                    const isAiFilled = aiFilledFields.has(item.id);
                     return (
-                        <Box key={item.id} sx={{ p: { xs: 2, sm: 3 }, bgcolor: hasError ? 'background.danger' : 'transparent' }}>
+                        <Box key={item.id} sx={{ p: { xs: 2, sm: 3 }, bgcolor: hasError ? 'background.danger' : isAiFilled ? '#fffde7' : 'transparent' }}>
                           <DynamicFormField
                             item={item}
                             value={answers[item.id]}
