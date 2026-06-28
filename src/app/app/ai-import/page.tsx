@@ -31,6 +31,7 @@ import { DEFAULT_TEMPLATE } from '@/app/app/record/[clientId]/page';
 import { AiImportReviewTable, type ReviewRow } from '@/components/ui/AiImportReviewTable';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 type FileEntry = {
   id: string;
@@ -138,6 +139,7 @@ async function streamExtract(
 export default function AiImportPage() {
   const { currentOrg } = useWorkspace();
   const { showToast } = useToast();
+  const confirm = useConfirm();
 
   const [clients, setClients] = useState<Candidate[]>([]);
   const [helpers, setHelpers] = useState<Candidate[]>([]);
@@ -271,6 +273,10 @@ export default function AiImportPage() {
   // 処理開始
   const handleProcess = async () => {
     if (!currentOrg || fileEntries.length === 0) return;
+    if (rows.length > 0) {
+      const ok = await confirm({ message: '現在の確認結果がクリアされます。続けますか？' });
+      if (!ok) return;
+    }
     setProcessing(true);
     setProcessedCount(0);
     setTotalCount(0);
@@ -348,7 +354,7 @@ export default function AiImportPage() {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...changes } : r)));
   };
 
-  const handleSaveSelected = async (ids: string[]) => {
+  const handleSaveSelected = useCallback(async (ids: string[]) => {
     if (!currentOrg) return;
     setSaving(true);
 
@@ -396,7 +402,7 @@ export default function AiImportPage() {
       showToast(`${errorCount} 件の保存に失敗しました`, 'error');
     }
     setSaving(false);
-  };
+  }, [rows, currentOrg, showToast]);
 
   const fileIcon = (file: File) => {
     if (file.type === 'application/pdf') return <PictureAsPdfIcon fontSize="small" color="error" />;
