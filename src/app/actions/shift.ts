@@ -1042,7 +1042,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         let createdCount = 0;
         let skippedCount = 0;
         let updatedCount = 0;
-        const promises: Promise<unknown>[] = [];
+        const tasks: Array<() => Promise<unknown>> = [];
 
         for (const p of patterns) {
             const ruleStr = buildPatternRuleString(year, month, p.start_time, p.rrule);
@@ -1075,20 +1075,25 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                 if (existNormal) {
                     if (!existNormal.is_modified) {
                         // org は冒頭で検証済みのため内部実装を直接呼ぶ（多数回の getUser を回避）
-                        promises.push(updateShiftInternal(existNormal.id, payload, 'skip'));
+                        tasks.push(() => updateShiftInternal(existNormal.id, payload, 'skip'));
                         updatedCount++;
                     } else {
                         skippedCount++;
                     }
                 } else {
-                    promises.push(createShiftInternal({ ...payload, patternId: p.id }, 'skip'));
+                    tasks.push(() => createShiftInternal({ ...payload, patternId: p.id }, 'skip'));
                     createdCount++;
                 }
             }
         }
 
         // 部分失敗を握りつぶさず集計する（DB挿入のみ。Google同期は後続のバッチ処理に委ねる）
-        const results = await Promise.allSettled(promises);
+        const results: PromiseSettledResult<unknown>[] = [];
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
+            const chunk = tasks.slice(i, i + CHUNK_SIZE).map((task) => task());
+            results.push(...await Promise.allSettled(chunk));
+        }
         const failedCount = results.filter(r => r.status === 'rejected').length;
         if (failedCount > 0) {
             results.forEach(r => { if (r.status === 'rejected') console.error('Generate Shift DB Error:', r.reason); });

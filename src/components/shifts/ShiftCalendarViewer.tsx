@@ -17,6 +17,7 @@ type HeaderToolbarConfig = {
 } | false;
 
 type Props = {
+    calendarRef?: React.Ref<FullCalendar>;
     events: EventInput[];
     initialView: string;
     headerToolbar: HeaderToolbarConfig;
@@ -54,7 +55,7 @@ const reportStatusColor = (status: string): 'default' | 'warning' | 'success' | 
 };
 
 export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
-    events, initialView, headerToolbar, buttonText, selectable = false, editable = false,
+    calendarRef, events, initialView, headerToolbar, buttonText, selectable = false, editable = false,
     onEventClick, onDateSelect, onEventDrop, onEventResize, onDatesSet, noEventsText
 }, ref) => {
     const renderEventContent = (arg: EventContentArg) => {
@@ -113,7 +114,7 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
             '& .fc-event-resizing': { opacity: 0.8 },
         })}>
             <FullCalendar
-                ref={ref}
+                ref={calendarRef ?? ref}
                 // rrulePlugin を削除（実体化方式になったため不要）
                 plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
                 initialView={initialView}

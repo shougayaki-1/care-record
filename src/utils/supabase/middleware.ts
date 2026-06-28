@@ -4,6 +4,50 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import { decodeJwtPayload, decodeJwtSessionId } from '@/utils/jwt';
 
+type MiddlewareDatabase = {
+    public: {
+        Tables: {
+            user_session_activity: {
+                Row: { session_hash: string };
+                Insert: {
+                    session_hash: string;
+                    auth_session_id: string;
+                    user_id: string;
+                    last_activity: string;
+                    absolute_expires_at: string;
+                    revoked_at: string | null;
+                };
+                Update: {
+                    session_hash?: string;
+                    auth_session_id?: string;
+                    user_id?: string;
+                    last_activity?: string;
+                    absolute_expires_at?: string;
+                    revoked_at?: string | null;
+                };
+                Relationships: [];
+            };
+        };
+        Views: Record<string, never>;
+        Functions: Record<string, never>;
+        Enums: Record<string, never>;
+        CompositeTypes: Record<string, never>;
+    };
+};
+
+type SupabaseAdminClient = ReturnType<typeof createClient<MiddlewareDatabase, 'public'>>;
+
+let supabaseAdmin: SupabaseAdminClient | null = null;
+
+function getSupabaseAdmin(supabaseUrl: string, serviceRoleKey: string): SupabaseAdminClient {
+    if (!supabaseAdmin) {
+        supabaseAdmin = createClient<MiddlewareDatabase, 'public'>(supabaseUrl, serviceRoleKey, {
+            auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+        });
+    }
+    return supabaseAdmin;
+}
+
 function authSessionId(accessToken: string): string | null {
     return decodeJwtSessionId(accessToken);
 }
@@ -105,9 +149,7 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
             url.search = 'error=session_validation_unavailable';
             return redirectWithSession(url);
         }
-        const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-            auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
-        });
+        const supabaseAdmin = getSupabaseAdmin(supabaseUrl, serviceRoleKey);
         if (!sessionId) {
             // JWT に session_id フィールドがない（古いトークン形式 or JWT テンプレートの設定問題）。
             // idle_timeout にリダイレクトすると page.tsx が signOut() を呼び出し新規セッションを

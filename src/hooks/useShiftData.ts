@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, RefObject } from 'react';
-import { EventInput } from '@fullcalendar/core';
-import FullCalendar from '@fullcalendar/react';
+import type { EventInput } from '@fullcalendar/core';
+import type FullCalendar from '@fullcalendar/react';
 import { supabase } from '@/lib/supabase';
 import { getShifts, getShiftPatterns, type ShiftQueryFilter } from '@/app/actions/shift';
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';

@@ -1,6 +1,7 @@
-import { pdf } from '@react-pdf/renderer';
+import React from 'react';
+import type { DocumentProps } from '@react-pdf/renderer';
 import JSZip from 'jszip';
-import { ServiceRecordDocument, type PdfReportData } from '@/components/pdf/ServiceRecordDocument';
+import type { PdfReportData } from '@/components/pdf/ServiceRecordDocument';
 
 type PdfEntry = {
   data: PdfReportData;
@@ -19,15 +20,22 @@ const triggerDownload = (blob: Blob, fileName: string) => {
 export async function downloadReportZip(entries: PdfEntry[], zipBaseName: string): Promise<void> {
   if (entries.length === 0) return;
 
+  const [{ pdf }, { ServiceRecordDocument }] = await Promise.all([
+    import('@react-pdf/renderer'),
+    import('@/components/pdf/ServiceRecordDocument'),
+  ]);
+
   if (entries.length === 1) {
-    const blob = await pdf(<ServiceRecordDocument reports={[entries[0].data]} />).toBlob();
+    const document = React.createElement(ServiceRecordDocument, { reports: [entries[0].data] }) as React.ReactElement<DocumentProps>;
+    const blob = await pdf(document).toBlob();
     triggerDownload(blob, entries[0].fileName);
     return;
   }
 
   const zip = new JSZip();
   for (const entry of entries) {
-    const blob = await pdf(<ServiceRecordDocument reports={[entry.data]} />).toBlob();
+    const document = React.createElement(ServiceRecordDocument, { reports: [entry.data] }) as React.ReactElement<DocumentProps>;
+    const blob = await pdf(document).toBlob();
     zip.file(entry.fileName, blob);
   }
   const zipBlob = await zip.generateAsync({ type: 'blob' });

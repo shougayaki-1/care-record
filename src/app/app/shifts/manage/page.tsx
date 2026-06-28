@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import {
     Box, Typography, Paper, CircularProgress, Tabs, Tab, Button, Chip, IconButton, Tooltip, Stack, TextField,
     FormControlLabel, Radio, RadioGroup, LinearProgress,
@@ -15,9 +16,9 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import BuildIcon from '@mui/icons-material/Build';
 import SyncIcon from '@mui/icons-material/Sync';
-import FullCalendar from '@fullcalendar/react';
-import { EventDropArg } from '@fullcalendar/core';
-import { EventResizeDoneArg } from '@fullcalendar/interaction';
+import type FullCalendar from '@fullcalendar/react';
+import type { EventDropArg } from '@fullcalendar/core';
+import type { EventResizeDoneArg } from '@fullcalendar/interaction';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
@@ -31,7 +32,6 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { ShiftFormModal, ShiftData } from '@/components/shifts/ShiftFormModal';
 import { ShiftPatternModal } from '@/components/shifts/ShiftPatternModal';
-import { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 import { useShiftData, type ShiftDateRange } from '@/hooks/useShiftData';
 import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
@@ -42,6 +42,14 @@ import { useSearchParams } from 'next/navigation';
 import type { FetchedPatternData } from '@/hooks/useShiftData';
 
 type TabId = 'patterns' | 'fullCalendar' | 'myShift' | 'byStaff' | 'byClient';
+
+const ShiftCalendarViewer = dynamic(
+    () => import('@/components/shifts/ShiftCalendarViewer').then((mod) => mod.ShiftCalendarViewer),
+    {
+        ssr: false,
+        loading: () => <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>,
+    }
+);
 
 export default function ShiftManagePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
@@ -550,7 +558,7 @@ export default function ShiftManagePage() {
                         {activeTab !== 'patterns' && (
                             <Box sx={{ height: '100%' }}>
                                 <ShiftCalendarViewer
-                                    ref={calendarRef}
+                                    calendarRef={calendarRef}
                                     events={events}
                                     initialView={activeTab === 'myShift' ? 'listMonth' : 'dayGridMonth'}
                                     headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' }}

@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import type { ReactElement } from 'react';
+import type { DocumentProps } from '@react-pdf/renderer';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Button,
   CircularProgress, Stack, TextField, MenuItem, Checkbox, TableSortLabel, Switch, FormControlLabel, Divider,
@@ -20,9 +22,7 @@ import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { supabase } from '@/lib/supabase';
-import { pdf } from '@react-pdf/renderer';
-import { ServiceRecordDocument, PdfReportData } from '@/components/pdf/ServiceRecordDocument';
-import { downloadReportZip, buildReportFileName } from '@/utils/reportZipExport';
+import type { PdfReportData } from '@/components/pdf/ServiceRecordDocument';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
@@ -354,6 +354,7 @@ export default function ReportsPage() {
         const validReports = pdfReports.filter((r): r is PdfReportData => r !== null);
 
         if (filterShiftId) {
+          const { downloadReportZip, buildReportFileName } = await import('@/utils/reportZipExport');
           const entries = targetReports
             .map((report, i) => {
               const pdfData = validReports[i];
@@ -368,7 +369,12 @@ export default function ReportsPage() {
           const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
           await downloadReportZip(entries, `サービス提供記録_${dateStr}`);
         } else {
-          const blob = await pdf(<ServiceRecordDocument reports={validReports} />).toBlob();
+          const [{ pdf }, { ServiceRecordDocument }] = await Promise.all([
+            import('@react-pdf/renderer'),
+            import('@/components/pdf/ServiceRecordDocument'),
+          ]);
+          const pdfDocument = <ServiceRecordDocument reports={validReports} /> as ReactElement<DocumentProps>;
+          const blob = await pdf(pdfDocument).toBlob();
           const link = document.createElement('a');
           link.href = URL.createObjectURL(blob);
           link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;

@@ -122,23 +122,32 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         return;
       }
 
-      const list: Workspace[] = [];
-      for (const member of members ?? []) {
+      const parsedMembers = (members ?? []).map((member) => {
         const organization = Array.isArray(member.organizations)
           ? member.organizations[0]
           : member.organizations;
         const role = member.role as string;
-        if (!organization || !['owner', 'member'].includes(role)) {
-          setStatus('forbidden');
-          setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
-          return;
-        }
+        return { organization, role };
+      });
 
+      if (parsedMembers.some(({ organization, role }) => !organization || !['owner', 'member'].includes(role))) {
+        if (!isCurrent()) return;
+        setStatus('forbidden');
+        setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
+        return;
+      }
+
+      const organizationIds = parsedMembers
+        .map(({ organization }) => organization?.id)
+        .filter((id): id is string => Boolean(id));
+      const roleLinksByOrg = new Map<string, RolePermissions[]>();
+
+      if (organizationIds.length > 0) {
         const { data: roleLinks, error: roleLinksError } = await supabase
           .from('organization_member_roles')
-          .select('organization_roles(permissions)')
-          .eq('organization_id', organization.id)
-          .eq('user_id', session.user.id);
+          .select('organization_id, organization_roles(permissions)')
+          .eq('user_id', session.user.id)
+          .in('organization_id', organizationIds);
         if (!isCurrent()) return;
         if (roleLinksError) {
           console.error('Workspace role lookup failed', roleLinksError);
@@ -153,13 +162,29 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
           }
           return;
         }
-        const rolePerms: RolePermissions[] = (roleLinks ?? [])
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .map((r: any) => {
-            const org = Array.isArray(r.organization_roles) ? r.organization_roles[0] : r.organization_roles;
-            return org?.permissions as RolePermissions | undefined;
-          })
-          .filter((p): p is RolePermissions => p != null);
+
+        (roleLinks ?? []).forEach((roleLink) => {
+          const orgId = roleLink.organization_id as string;
+          const orgRole = Array.isArray(roleLink.organization_roles)
+            ? roleLink.organization_roles[0]
+            : roleLink.organization_roles;
+          const permissions = orgRole?.permissions as RolePermissions | undefined;
+          if (!permissions) return;
+          const current = roleLinksByOrg.get(orgId) ?? [];
+          current.push(permissions);
+          roleLinksByOrg.set(orgId, current);
+        });
+      }
+
+      const list: Workspace[] = [];
+      for (const { organization, role } of parsedMembers) {
+        if (!organization || !['owner', 'member'].includes(role)) {
+          setStatus('forbidden');
+          setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
+          return;
+        }
+
+        const rolePerms = roleLinksByOrg.get(organization.id) ?? [];
         const effectivePermissions = role === 'owner' ? FULL_PERMISSIONS : mergePermissions(rolePerms);
 
         list.push({ id: organization.id, name: organization.name, role: role as OrganizationRole, effectivePermissions });
