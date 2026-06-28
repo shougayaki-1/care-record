@@ -8,7 +8,14 @@ type MiddlewareDatabase = {
     public: {
         Tables: {
             user_session_activity: {
-                Row: { session_hash: string };
+                Row: {
+                    session_hash: string;
+                    auth_session_id: string;
+                    user_id: string;
+                    last_activity: string;
+                    absolute_expires_at: string;
+                    revoked_at: string | null;
+                };
                 Insert: {
                     session_hash: string;
                     auth_session_id: string;
