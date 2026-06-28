@@ -8,6 +8,3 @@ CREATE INDEX IF NOT EXISTS reports_active_status_idx
   ON public.reports (status, start_at)
   WHERE deleted_at IS NULL;
 
--- Accelerate report_shifts joins from report side (shift_id indexed already)
-CREATE INDEX IF NOT EXISTS report_shifts_report_idx
-  ON public.report_shifts (report_id);
