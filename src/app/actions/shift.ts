@@ -67,6 +67,7 @@ export type ShiftPayload = {
     cancelReason?: string;
     patternId?: string;
     isModified?: boolean;
+    autoAssign?: boolean;
 };
 
 export type ShiftPatternPayload = {
@@ -77,7 +78,27 @@ export type ShiftPatternPayload = {
     endTime: string;
     rrule: string;
     staffIds: string[];
+    autoAssign?: boolean;
 };
+
+/** 指定スタッフを利用者の担当者として upsert する（既存エントリは変更しない） */
+async function upsertAssignmentsForStaffs(organizationId: string, clientId: string, staffIds: string[]) {
+    const { data: staffRows } = await supabaseAdmin
+        .from('staffs')
+        .select('id, user_id')
+        .eq('organization_id', organizationId)
+        .in('id', staffIds)
+        .is('deleted_at', null);
+    if (!staffRows || staffRows.length === 0) return;
+    await supabaseAdmin.from('assignments').upsert(
+        staffRows.map(s => ({
+            client_id: clientId,
+            staff_id: s.id,
+            helper_id: s.user_id ?? null,
+        })),
+        { onConflict: 'client_id,staff_id', ignoreDuplicates: true }
+    );
+}
 
 type ShiftStaffInsert = { shift_id: string; staff_id: string; };
 type PatternStaffInsert = { pattern_id: string; staff_id: string; };
@@ -598,6 +619,12 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean | 's
     const actor = await assertShiftPermission(payload.organizationId, 'create', { clientId: payload.clientId });
     const result = await createShiftInternal(payload, awaitSync);
     await recordAuditEvent({ organizationId: payload.organizationId, actorId: actor.userId, action: 'shift.create', resourceType: 'shift', resourceId: result.shiftId });
+
+    // 自動アサイン: シフト作成時に選択スタッフを assignments に登録（チェックボックス ON 時のみ）
+    if (payload.autoAssign && payload.staffIds.length > 0) {
+        await upsertAssignmentsForStaffs(payload.organizationId, payload.clientId, payload.staffIds);
+    }
+
     return result;
 }
 
@@ -840,6 +867,12 @@ export async function createShiftPattern(payload: ShiftPatternPayload) {
         const inserts: PatternStaffInsert[] = payload.staffIds.map(sid => ({ pattern_id: pattern.id, staff_id: sid }));
         await supabaseAdmin.from('shift_pattern_staffs').insert(inserts);
     }
+
+    // 自動アサイン: ひな形作成時に選択スタッフを assignments に登録（チェックボックス ON 時のみ）
+    if (payload.autoAssign && payload.staffIds.length > 0) {
+        await upsertAssignmentsForStaffs(payload.organizationId, payload.clientId, payload.staffIds);
+    }
+
     await recordAuditEvent({ organizationId: payload.organizationId, actorId: actor.userId, action: 'shift_pattern.create', resourceType: 'shift_pattern', resourceId: pattern.id });
     return { success: true };
 }
