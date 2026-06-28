@@ -51,6 +51,17 @@ type ShiftStaffData = {
     staffs: { name: string } | null;
 };
 
+type ShiftSegmentData = {
+    id: string;
+    start_at: string;
+    end_at: string;
+    service_type?: { name: string } | null;
+    shift_segment_staffs?: Array<{
+        staff_id: string;
+        staff?: { name: string } | null;
+    }>;
+};
+
 type ShiftSuggestion = { id: string; title: string | null; start_at: string; end_at: string; staffName: string | null };
 type LinkedShift = { shift_id: string; is_primary: boolean; shifts: { id: string; title: string | null; start_at: string; end_at: string; shift_staffs: Array<{ staffs: { name: string } | null }> } | null };
 
@@ -64,6 +75,7 @@ export default function RecordPage() {
   
   const paramReportId = searchParams.get('reportId');
   const shiftId = searchParams.get('shiftId');
+  const segmentId = searchParams.get('segmentId');
 
   const [currentReportId, setCurrentReportId] = useState<string | null>(paramReportId);
 
@@ -95,6 +107,8 @@ export default function RecordPage() {
   const [shiftSuggestions, setShiftSuggestions] = useState<ShiftSuggestion[]>([]);
   const [linkedShifts, setLinkedShifts] = useState<LinkedShift[]>([]);
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
+  const [shiftSegments, setShiftSegments] = useState<ShiftSegmentData[]>([]);
+  const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(segmentId);
 
   // AI入力されたフィールドのハイライト管理
   const [aiFilledFields, setAiFilledFields] = useState<Set<string>>(new Set());
@@ -115,6 +129,27 @@ export default function RecordPage() {
       const d = new Date(dateStr);
       return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
+
+  const formatSegmentLabel = (segment: ShiftSegmentData, index: number) => {
+      const serviceName = segment.service_type?.name || `区間 ${index + 1}`;
+      return `${serviceName} ${formatTimeForLabel(segment.start_at)}〜${formatTimeForLabel(segment.end_at)}`;
+  };
+
+  const applySegmentDefaults = useCallback((segment: ShiftSegmentData) => {
+      const s = new Date(segment.start_at);
+      const e = new Date(segment.end_at);
+      setIsSpanningMonth(false);
+      setOriginalShiftTimes({ start_at: segment.start_at, end_at: segment.end_at });
+      setStartDateTime(formatDatetimeLocal(s));
+      setEndDateTime(formatDatetimeLocal(e));
+      setServiceTime(((e.getTime() - s.getTime()) / (1000 * 60 * 60)).toString());
+      const staffNames = (segment.shift_segment_staffs ?? [])
+          .map((staff) => staff.staff?.name)
+          .filter((name): name is string => Boolean(name));
+      setSelectedHelpers(staffNames);
+      setSelectedSegmentId(segment.id);
+      setCurrentStatus('draft');
+  }, [formatDatetimeLocal]);
 
   const setupTimeForPart = useCallback((part: 'part1' | 'part2', startIso: string, endIso: string) => {
       const s = new Date(startIso);
@@ -235,9 +270,10 @@ export default function RecordPage() {
       setStartDateTime(formatDatetimeLocal(new Date(r.start_at)));
       setEndDateTime(formatDatetimeLocal(new Date(r.end_at)));
       setCurrentStatus(r.status);
+      setSelectedSegmentId(r.segment_id ?? null);
       setIsDirty(false);
 
-      if (r.shift_id) {
+      if (r.shift_id && !r.segment_id) {
           const { data: shift } = await supabase.from('shifts').select('start_at, end_at').eq('id', r.shift_id).maybeSingle();
           if (shift) {
               const s = new Date(shift.start_at);
@@ -281,38 +317,80 @@ export default function RecordPage() {
   useEffect(() => {
     const init = async () => {
       let targetId = paramReportId;
+      setSelectedSegmentId(segmentId);
 
       if (shiftId && !paramReportId) {
-          const { data: existingReport } = await supabase
-              .from('reports')
-              .select('id')
-              .eq('shift_id', shiftId)
-              .is('deleted_at', null)
-              .maybeSingle();
-          
-          if (existingReport) {
-              targetId = existingReport.id;
-              setCurrentReportId(targetId);
-              router.replace(`/app/record/${clientId}?reportId=${targetId}`);
-              showToast('このシフトにはすでに記録が存在します。該当する記録を開きました。', 'info');
-          } else {
-              const { data: shiftData } = await supabase
-                  .from('shifts')
-                  .select(`
-                      start_at, end_at, 
-                      shift_staffs (
-                          staff_id, 
-                          staffs (name)
+          const { data: shiftData } = await supabase
+              .from('shifts')
+              .select(`
+                  start_at, end_at,
+                  shift_staffs (
+                      staff_id,
+                      staffs (name)
+                  ),
+                  shift_segments (
+                      id,
+                      start_at,
+                      end_at,
+                      sort_order,
+                      service_type:service_types ( name ),
+                      shift_segment_staffs (
+                          staff_id,
+                          staff:staffs ( name )
                       )
-                  `)
-                  .eq('id', shiftId)
-                  .single();
-              
-              if (shiftData) {
+                  )
+              `)
+              .eq('id', shiftId)
+              .single();
+
+          const typedSegments = (((shiftData?.shift_segments as unknown as ShiftSegmentData[]) ?? [])
+              .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()));
+          setShiftSegments(typedSegments);
+
+          const effectiveSegmentId = segmentId || (typedSegments.length === 1 ? typedSegments[0].id : null);
+          if (typedSegments.length === 1 && !segmentId) {
+              router.replace(`/app/record/${clientId}?shiftId=${shiftId}&segmentId=${typedSegments[0].id}`);
+          }
+
+          if (effectiveSegmentId) {
+              const { data: existingReport } = await supabase
+                  .from('reports')
+                  .select('id')
+                  .eq('shift_id', shiftId)
+                  .eq('segment_id', effectiveSegmentId)
+                  .is('deleted_at', null)
+                  .maybeSingle();
+
+              if (existingReport) {
+                  targetId = existingReport.id;
+                  setCurrentReportId(targetId);
+                  router.replace(`/app/record/${clientId}?reportId=${targetId}&shiftId=${shiftId}&segmentId=${effectiveSegmentId}`);
+                  showToast('この区間にはすでに記録が存在します。該当する記録を開きました。', 'info');
+              } else {
+                  const targetSegment = typedSegments.find((segment) => segment.id === effectiveSegmentId);
+                  if (targetSegment) applySegmentDefaults(targetSegment);
+              }
+          } else if (typedSegments.length > 1) {
+              setCurrentStatus('draft');
+          } else {
+              const { data: existingReport } = await supabase
+                  .from('reports')
+                  .select('id')
+                  .eq('shift_id', shiftId)
+                  .is('segment_id', null)
+                  .is('deleted_at', null)
+                  .maybeSingle();
+
+              if (existingReport) {
+                  targetId = existingReport.id;
+                  setCurrentReportId(targetId);
+                  router.replace(`/app/record/${clientId}?reportId=${targetId}&shiftId=${shiftId}`);
+                  showToast('このシフトにはすでに記録が存在します。該当する記録を開きました。', 'info');
+              } else if (shiftData) {
                   const s = new Date(shiftData.start_at);
                   const e = new Date(shiftData.end_at);
                   const isCrossMonth = s.getMonth() !== e.getMonth();
-                  
+
                   setIsSpanningMonth(isCrossMonth);
                   setOriginalShiftTimes({ start_at: shiftData.start_at, end_at: shiftData.end_at });
 
@@ -327,7 +405,7 @@ export default function RecordPage() {
 
                   const staffNames: string[] = [];
                   const typedShiftStaffs = (shiftData.shift_staffs as unknown as ShiftStaffData[]) || [];
-                  
+
                   typedShiftStaffs.forEach(s => {
                       const name = Array.isArray(s.staffs) ? s.staffs[0]?.name : s.staffs?.name;
                       if (name) staffNames.push(name);
@@ -356,7 +434,7 @@ export default function RecordPage() {
     if (!wsLoading && currentOrg) {
       init();
     }
-  }, [wsLoading, currentOrg, paramReportId, shiftId, clientId, router, showToast, fetchBaseData, loadExistingData, formatDatetimeLocal, setupTimeForPart]);
+  }, [wsLoading, currentOrg, paramReportId, shiftId, segmentId, clientId, router, showToast, fetchBaseData, loadExistingData, formatDatetimeLocal, setupTimeForPart, applySegmentDefaults]);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -431,6 +509,10 @@ export default function RecordPage() {
   };
 
   const saveReport = async (status: ReportStatus, skipValidation = false) => {
+    if (shiftId && shiftSegments.length > 0 && !selectedSegmentId) {
+      showToast('記録を作成する前にサービス区間を選択してください', 'warning');
+      return false;
+    }
     if (!skipValidation && !validate()) { showToast('入力不備があります', 'error'); window.scrollTo({ top: 0, behavior: 'smooth' }); return false; }
     setSubmitting(true);
     try {
@@ -453,6 +535,7 @@ export default function RecordPage() {
         endAt: new Date(endDateTime).toISOString(),
         status,
         shiftId: shiftId || null,
+        segmentId: selectedSegmentId || segmentId || null,
         values: finalData,
         ...(status === 'draft' && hasAiDraftSource
           ? { auditSource: 'ai_import' as const, auditFileCount: 1 }
@@ -557,6 +640,7 @@ export default function RecordPage() {
   const isAdmin = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'approve', true));
   const canDeleteRecord = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'delete', true));
   const travelCostYen = Math.round((parseFloat(roundTripDistanceKm || '0') || 0) * travelCostRateYenPerKm);
+  const requiresSegmentSelection = Boolean(shiftId && shiftSegments.length > 1 && !selectedSegmentId && !currentReportId);
 
   const handleStaffChange = (value: string[]) => {
       setSelectedHelpers(value);
@@ -585,12 +669,12 @@ export default function RecordPage() {
                     <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
                 )}
                 
-                {isAdmin && currentStatus === 'pending' && <Button variant="contained" color="success" size="small" startIcon={<CheckCircleIcon />} onClick={handleApprove} disabled={submitting}>承認</Button>}
-                {isAdmin && currentStatus === 'approved' && <Button variant="contained" color="warning" size="small" startIcon={<AssignmentReturnIcon />} onClick={handleRemand} disabled={submitting}>承認取消</Button>}
+                {isAdmin && currentStatus === 'pending' && <Button variant="contained" color="success" size="small" startIcon={<CheckCircleIcon />} onClick={handleApprove} disabled={submitting || requiresSegmentSelection}>承認</Button>}
+                {isAdmin && currentStatus === 'approved' && <Button variant="contained" color="warning" size="small" startIcon={<AssignmentReturnIcon />} onClick={handleRemand} disabled={submitting || requiresSegmentSelection}>承認取消</Button>}
                 {(!isAdmin || currentStatus !== 'pending') && currentStatus !== 'approved' && (
                     <>
-                        <Button variant="outlined" size="small" startIcon={<SaveIcon />} onClick={handleDraftSave} disabled={submitting}>下書き</Button>
-                        <Button variant="contained" size="small" startIcon={<SendIcon />} onClick={handleSubmit} disabled={submitting} sx={{ fontWeight: 'bold' }}>送信</Button>
+                        <Button variant="outlined" size="small" startIcon={<SaveIcon />} onClick={handleDraftSave} disabled={submitting || requiresSegmentSelection}>下書き</Button>
+                        <Button variant="contained" size="small" startIcon={<SendIcon />} onClick={handleSubmit} disabled={submitting || requiresSegmentSelection} sx={{ fontWeight: 'bold' }}>送信</Button>
                     </>
                 )}
             </Stack>
@@ -618,6 +702,34 @@ export default function RecordPage() {
                         <Tab value="part2" label={`後半（翌月1日の00:00から: 00:00 〜 ${formatTimeForLabel(originalShiftTimes?.end_at)}）`} />
                     </Tabs>
                 </Box>
+            )}
+
+            {shiftId && shiftSegments.length > 1 && !selectedSegmentId && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                    このシフトには複数のサービス区間があります。以下から区間を選択して記録を作成してください。
+                </Alert>
+            )}
+
+            {shiftId && shiftSegments.length > 1 && !currentReportId && (
+                <Alert severity={requiresSegmentSelection ? 'info' : 'success'}>
+                    <Stack spacing={1}>
+                        <Typography variant="subtitle2" fontWeight="bold">
+                            記録を作成する区間を選択してください
+                        </Typography>
+                        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                            {shiftSegments.map((segment, index) => (
+                                <Button
+                                    key={segment.id}
+                                    size="small"
+                                    variant={(selectedSegmentId || segmentId) === segment.id ? 'contained' : 'outlined'}
+                                    onClick={() => router.replace(`/app/record/${clientId}?shiftId=${shiftId}&segmentId=${segment.id}`)}
+                                >
+                                    {formatSegmentLabel(segment, index)}
+                                </Button>
+                            ))}
+                        </Stack>
+                    </Stack>
+                </Alert>
             )}
 
             {shiftSuggestions
@@ -692,7 +804,7 @@ export default function RecordPage() {
                   helpers={selectableStaffs.map(s => ({ id: s.id, name: s.name }))}
                   onExtracted={handleAiExtracted}
                   hasExistingValues={Object.keys(answers).length > 0}
-                  disabled={submitting || loading || !currentOrg}
+                  disabled={submitting || loading || !currentOrg || requiresSegmentSelection}
                 />
               </Box>
             )}
