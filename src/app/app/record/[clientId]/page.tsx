@@ -541,11 +541,8 @@ export default function RecordPage() {
   const handleDialogSaveDraft = async () => { if (await saveReport('draft', true)) { showToast('下書き保存しました'); router.back(); } setOpenCloseDialog(false); };
 
   const handleAiExtracted = useCallback((result: ExtractionResult) => {
-    const filled = new Set<string>();
-    Object.entries(result.values).forEach(([key, value]) => {
-      setAnswers(prev => ({ ...prev, [key]: value }));
-      filled.add(key);
-    });
+    const filled = new Set(Object.keys(result.values));
+    setAnswers(prev => ({ ...prev, ...result.values }));
     setAiFilledFields(filled);
     setIsDirty(true);
   }, []);

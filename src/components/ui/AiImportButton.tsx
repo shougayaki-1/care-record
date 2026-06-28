@@ -134,14 +134,16 @@ export function AiImportButton({
                 // ignore parse errors on individual events
               }
             } else if (currentEvent === 'error' && currentData) {
+              let sseError: Error | null = null;
               try {
                 const parsed = JSON.parse(currentData) as { type: string; message: string };
                 if (parsed.type === 'error') {
-                  throw new Error(parsed.message || 'AIの読み取りに失敗しました');
+                  sseError = new Error(parsed.message || 'AIの読み取りに失敗しました');
                 }
-              } catch (err) {
-                if (err instanceof Error && err.message !== currentData) throw err;
+              } catch {
+                // ignore JSON parse errors on error events
               }
+              if (sseError) throw sseError;
             }
             currentEvent = '';
             currentData = '';
