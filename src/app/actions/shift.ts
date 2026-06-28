@@ -83,14 +83,15 @@ export type ShiftPatternPayload = {
 
 /** 指定スタッフを利用者の担当者として upsert する（既存エントリは変更しない） */
 async function upsertAssignmentsForStaffs(organizationId: string, clientId: string, staffIds: string[]) {
-    const { data: staffRows } = await supabaseAdmin
+    const { data: staffRows, error: staffError } = await supabaseAdmin
         .from('staffs')
         .select('id, user_id')
         .eq('organization_id', organizationId)
         .in('id', staffIds)
         .is('deleted_at', null);
+    if (staffError) throw staffError;
     if (!staffRows || staffRows.length === 0) return;
-    await supabaseAdmin.from('assignments').upsert(
+    const { error: upsertError } = await supabaseAdmin.from('assignments').upsert(
         staffRows.map(s => ({
             client_id: clientId,
             staff_id: s.id,
@@ -98,6 +99,7 @@ async function upsertAssignmentsForStaffs(organizationId: string, clientId: stri
         })),
         { onConflict: 'client_id,staff_id', ignoreDuplicates: true }
     );
+    if (upsertError) throw upsertError;
 }
 
 type ShiftStaffInsert = { shift_id: string; staff_id: string; };
