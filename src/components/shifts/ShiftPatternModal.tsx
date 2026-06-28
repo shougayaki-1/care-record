@@ -13,7 +13,7 @@ import { getServiceTypes, type ServiceType } from '@/app/actions/serviceTypes';
 import { getStaffRoles, type StaffRole } from '@/app/actions/staffRoles';
 import { ClientData, StaffData } from './ShiftFormModal';
 import { useToast } from '@/components/ui/ToastProvider';
-import { AppButton, AppDialog, DateTimeField, MultiSelectField, SelectField } from '@/components/ui';
+import { AppButton, AppDialog, DateTimeField, SelectField } from '@/components/ui';
 
 type Props = {
     open: boolean;
@@ -106,7 +106,6 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
     const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
     const [staffRoles, setStaffRoles] = useState<StaffRole[]>([]);
     const [clientId, setClientId] = useState('');
-    const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
     const [startTime, setStartTime] = useState('10:00');
     const [endTime, setEndTime] = useState('12:00');
     const [segments, setSegments] = useState<SegmentDraft[]>([]);
@@ -130,7 +129,6 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 });
             if (initialData) {
                 setClientId(initialData.client_id || '');
-                setSelectedStaffIds((initialData.shift_pattern_staffs || []).map((s) => s.staff_id));
                 setStartTime(initialData.start_time ? initialData.start_time.slice(0, 5) : '10:00');
                 setEndTime(initialData.end_time ? initialData.end_time.slice(0, 5) : '12:00');
                 const loadedSegments = (initialData.shift_pattern_segments ?? [])
@@ -145,12 +143,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                             staff_role_id: staff.staff_role_id ?? '',
                         })),
                     }));
-                setSegments(loadedSegments.length > 0 ? loadedSegments : [{
-                    service_type_id: '',
-                    start_time: initialData.start_time ? initialData.start_time.slice(0, 5) : '10:00',
-                    end_time: initialData.end_time ? initialData.end_time.slice(0, 5) : '12:00',
-                    staffs: (initialData.shift_pattern_staffs || []).map((s) => ({ staff_id: s.staff_id, staff_role_id: '' })),
-                }]);
+                setSegments(loadedSegments);
 
                 const parsed = parseRrule(initialData.rrule || '');
                 setFreq(parsed.freq);
@@ -159,7 +152,6 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 setSelectedWeeks(parsed.selectedWeeks);
             } else {
                 setClientId('');
-                setSelectedStaffIds([]);
                 setStartTime('10:00');
                 setEndTime('12:00');
                 setSegments([]);
@@ -172,33 +164,22 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
         }
     }, [open, initialData, organizationId, showToast]);
 
-    useEffect(() => {
-        if (segments.length > 0) return;
-        if (selectedStaffIds.length === 0) return;
-        setSegments([{
-            service_type_id: '',
-            start_time: startTime,
-            end_time: endTime,
-            staffs: selectedStaffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: '' })),
-        }]);
-    }, [segments.length, selectedStaffIds, startTime, endTime]);
-
     const handleSave = async () => {
-        const normalizedSegments = segments.length > 0 ? segments : [{
-            service_type_id: '',
-            start_time: startTime,
-            end_time: endTime,
-            staffs: selectedStaffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: '' })),
-        }];
-        const segmentStaffIds = Array.from(new Set(normalizedSegments.flatMap((segment) => segment.staffs.map((staff) => staff.staff_id).filter(Boolean))));
-        const effectiveStaffIds = segmentStaffIds.length > 0 ? segmentStaffIds : selectedStaffIds;
-
-        if (!clientId || !startTime || !endTime || effectiveStaffIds.length === 0 || selectedDays.length === 0) {
-            showToast('必須項目（利用者、担当スタッフ、時間、繰り返し条件）をすべて指定してください', 'warning');
+        if (segments.length === 0) {
+            showToast('サービス区間を1つ以上追加してください', 'warning');
             return;
         }
-        if (normalizedSegments.some((segment) => !segment.start_time || !segment.end_time || segment.staffs.filter((staff) => staff.staff_id).length === 0)) {
-            showToast('各区間の時間と担当スタッフを指定してください', 'warning');
+        if (segments.some(s => s.staffs.filter(st => st.staff_id).length === 0)) {
+            showToast('すべてのサービス区間に担当スタッフを設定してください', 'warning');
+            return;
+        }
+
+        if (!clientId || !startTime || !endTime || selectedDays.length === 0) {
+            showToast('必須項目（利用者、時間、繰り返し条件）をすべて指定してください', 'warning');
+            return;
+        }
+        if (segments.some((segment) => !segment.start_time || !segment.end_time)) {
+            showToast('各区間の時間を指定してください', 'warning');
             return;
         }
 
@@ -217,8 +198,9 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
         setLoading(true);
         try {
             const clientName = clients.find(c => c.id === clientId)?.name || '';
-            const staffNames = staffs.filter(s => effectiveStaffIds.includes(s.id)).map(s => s.name).join(', ');
-            const payloadSegments: ShiftPatternSegmentInput[] = normalizedSegments.map((segment, index) => ({
+            const segmentStaffIds = Array.from(new Set(segments.flatMap((segment) => segment.staffs.map((staff) => staff.staff_id).filter(Boolean))));
+            const staffNames = staffs.filter(s => segmentStaffIds.includes(s.id)).map(s => s.name).join(', ');
+            const payloadSegments: ShiftPatternSegmentInput[] = segments.map((segment, index) => ({
                 service_type_id: segment.service_type_id || null,
                 start_time: toPayloadTime(segment.start_time),
                 end_time: toPayloadTime(segment.end_time),
@@ -238,7 +220,6 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 startTime: startTime.length === 5 ? `${startTime}:00` : startTime,
                 endTime: endTime.length === 5 ? `${endTime}:00` : endTime,
                 rrule: rruleStr,
-                staffIds: effectiveStaffIds,
                 segments: payloadSegments,
                 autoAssign: !initialData ? autoAssign : false,
             }, initialData?.id);
@@ -256,22 +237,6 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
         else setArray([...array, item]);
     };
 
-    const handleDefaultStaffChange = (staffIds: string[]) => {
-        const previousStaffIds = selectedStaffIds;
-        setSelectedStaffIds(staffIds);
-        setSegments(prev => {
-            if (prev.length !== 1) return prev;
-            const currentIds = prev[0].staffs.map((staff) => staff.staff_id).filter(Boolean);
-            const isDefaultStaffs = currentIds.length === previousStaffIds.length
-                && currentIds.every((id) => previousStaffIds.includes(id));
-            if (!isDefaultStaffs) return prev;
-            return [{
-                ...prev[0],
-                staffs: staffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: '' })),
-            }];
-        });
-    };
-
     const updateSegment = (idx: number, patch: Partial<SegmentDraft>) => {
         setSegments(prev => prev.map((segment, index) => index === idx ? { ...segment, ...patch } : segment));
     };
@@ -283,7 +248,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 service_type_id: '',
                 start_time: prev.length > 0 ? prev[prev.length - 1].end_time : startTime,
                 end_time: endTime,
-                staffs: selectedStaffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: '' })),
+                staffs: [],
             },
         ]);
     };
@@ -310,16 +275,6 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                         onChange={setClientId}
                     />
 
-                    <MultiSelectField
-                        required
-                        label="担当スタッフ（複数選択可）"
-                        options={staffs}
-                        value={staffs.filter((staff) => selectedStaffIds.includes(staff.id))}
-                        onChange={(selected) => handleDefaultStaffChange(selected.map((staff) => staff.id))}
-                        getOptionLabel={(staff) => staff.name}
-                        getOptionValue={(staff) => staff.id}
-                    />
-
                     {/* 新規作成時のみ: 自動アサインチェックボックス */}
                     {!initialData && (
                         <FormControlLabel
@@ -332,7 +287,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                             }
                             label={
                                 <Typography variant="body2" color="text.secondary">
-                                    選択したスタッフを基本担当（担当スタッフ設定）にも登録する
+                                    区間スタッフを基本担当（担当スタッフ設定）にも登録する
                                 </Typography>
                             }
                         />
@@ -361,7 +316,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
 
                     <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
                         <Stack direction="row" alignItems="center" justifyContent="space-between" mb={2}>
-                            <Typography variant="subtitle2" fontWeight="bold">サービス区間</Typography>
+                            <Typography variant="subtitle2" fontWeight="bold">サービス区間 <Typography component="span" variant="caption" color="error">*</Typography></Typography>
                             <Button size="small" startIcon={<AddIcon />} onClick={addSegment}>
                                 区間を追加
                             </Button>
@@ -369,7 +324,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                         <Stack spacing={2}>
                             {segments.length === 0 ? (
                                 <Typography variant="body2" color="text.secondary">
-                                    保存時に基本時間と担当スタッフから1区間を作成します。
+                                    「区間を追加」ボタンでサービス区間とスタッフを設定してください。
                                 </Typography>
                             ) : segments.map((seg, idx) => (
                                 <Box key={idx} p={2} border="1px solid" borderColor="divider" borderRadius={1.5} bgcolor="background.paper">
