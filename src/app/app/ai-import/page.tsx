@@ -285,6 +285,7 @@ export default function AiImportPage() {
 
     try {
       const formData = new FormData();
+      formData.set('organizationId', currentOrg.id);
       formData.set('formTemplate', JSON.stringify(DEFAULT_TEMPLATE));
       formData.set('clients', JSON.stringify(clients));
       formData.set('helpers', JSON.stringify(helpers));

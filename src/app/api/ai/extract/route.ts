@@ -1,24 +1,19 @@
 import { NextRequest } from 'next/server';
 import type { Part } from '@google-cloud/vertexai';
-import { getAuthedUser } from '@/utils/supabase/auth';
+import { assertOrgRole } from '@/utils/supabase/auth';
+import { recordAuditEvent } from '@/utils/supabase/audit';
 import { getGenerativeModel } from '@/lib/ai/gemini';
 import { buildExtractionPrompt } from '@/lib/ai/extractPrompt';
 import { ExtractionResponseSchema } from '@/lib/ai/extractSchema';
 import type { FormItem, PromptCandidate } from '@/lib/ai/extractPrompt';
 import { formatSseEvent } from './sseUtils';
+import { validateFileCount, validateFile } from './validation';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
-  // 1. 認証チェック
-  try {
-    await getAuthedUser();
-  } catch {
-    return new Response('Unauthorized', { status: 401 });
-  }
-
-  // 2. FormData の取り出し
+  // 1. FormData の取り出し
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -26,11 +21,28 @@ export async function POST(request: NextRequest) {
     return new Response('Bad Request: invalid form data', { status: 400 });
   }
 
-  const files = formData.getAll('files[]') as File[];
-  if (files.length === 0) {
-    return new Response('Bad Request: no files provided', { status: 400 });
+  // 2. 組織境界チェック（認証 + 所属確認）
+  const organizationId = formData.get('organizationId') as string | null;
+  if (!organizationId) {
+    return new Response('Bad Request: organizationId is required', { status: 400 });
   }
 
+  let authedUserId: string;
+  try {
+    const { userId } = await assertOrgRole(organizationId);
+    authedUserId = userId;
+  } catch {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  // 3. ファイル取得とファイル数の検証
+  const files = formData.getAll('files[]') as File[];
+  const countResult = validateFileCount(files.length);
+  if (!countResult.ok) {
+    return new Response(`Bad Request: ${countResult.reason}`, { status: 400 });
+  }
+
+  // 4. JSON フィールドのパース
   let clients: PromptCandidate[] = [];
   let helpers: PromptCandidate[] = [];
   let formTemplate: FormItem[] = [];
@@ -52,11 +64,26 @@ export async function POST(request: NextRequest) {
     return new Response('Bad Request: invalid JSON in form fields', { status: 400 });
   }
 
+  // 5. AI一括取込の開始を監査ログに記録
+  try {
+    await recordAuditEvent({
+      organizationId,
+      actorId: authedUserId,
+      action: 'ai_import.started',
+      resourceType: 'ai_import',
+      outcome: 'success',
+      details: { file_count: files.length, organization_id: organizationId },
+    });
+  } catch (auditErr) {
+    // 監査ログの失敗はリクエストをブロックしない（ログだけ出す）
+    console.error('[ai/extract] Failed to write audit log:', auditErr);
+  }
+
   // グループリストを構築する (grouping 未指定の場合は1ファイル1グループ)
   const groups: number[][] =
     grouping ?? files.map((_, i) => [i]);
 
-  // 3. SSE ストリームを生成
+  // 6. SSE ストリームを生成
   const { systemPrompt, userPromptTemplate } = buildExtractionPrompt({
     formTemplate,
     clients,
@@ -75,18 +102,25 @@ export async function POST(request: NextRequest) {
       try {
       let recordIndex = 0;
 
-      // 4. グループ単位でファイルを処理
+      // 7. グループ単位でファイルを処理
       for (const group of groups) {
         // グループの代表 fileIndex (最初の要素)
         const fileIndex = group[0];
 
         try {
-          // a. 各ファイルを ArrayBuffer に読み込む
+          // a. 各ファイルのバリデーション + ArrayBuffer 読み込み
           const parts: Part[] = [{ text: userPromptTemplate }];
 
           for (const idx of group) {
             const file = files[idx];
             if (!file) continue;
+
+            // ファイルタイプ・サイズ検証
+            const fileResult = validateFile(file);
+            if (!fileResult.ok) {
+              throw new Error(fileResult.reason);
+            }
+
             const arrayBuffer = await file.arrayBuffer();
             parts.push({
               inlineData: {
@@ -143,7 +177,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // 5. 完了イベント
+      // 8. 完了イベント
       sendEvent('done', { type: 'done', total: recordIndex });
       controller.close();
       } catch (err) {
