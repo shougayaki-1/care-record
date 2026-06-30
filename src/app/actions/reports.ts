@@ -39,7 +39,7 @@ export async function saveReport(input: SaveReportInput) {
   }
   const user = await getAuthedUser();
   const supabase = await createSessionClient();
-  const { data: reportId, error } = await supabase.rpc('save_report_atomic', {
+  const { data: reportId, error } = await supabase.rpc('save_report_atomic_v2', {
     p_organization_id: input.organizationId,
     p_report_id: input.reportId || null,
     p_client_id: input.clientId,
