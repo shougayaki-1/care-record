@@ -9,9 +9,9 @@ SELECT ok(NOT has_table_privilege('authenticated','public.invitations','INSERT')
 SELECT ok(NOT has_table_privilege('authenticated','public.organization_members','INSERT'), 'clients cannot add organization members directly');
 SELECT ok(NOT has_table_privilege('authenticated','public.reports','UPDATE'), 'clients cannot update reports directly');
 SELECT ok(NOT has_table_privilege('authenticated','public.shifts','DELETE'), 'clients cannot hard-delete shifts');
-SELECT ok(has_function_privilege('authenticated','public.save_report_atomic(uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text)','EXECUTE'),
+SELECT ok(has_function_privilege('authenticated','public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text,uuid,jsonb)','EXECUTE'),
   'authenticated users may call the bounded report RPC');
-SELECT ok(NOT has_function_privilege('anon','public.save_report_atomic(uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text)','EXECUTE'),
+SELECT ok(NOT has_function_privilege('anon','public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text,uuid,jsonb)','EXECUTE'),
   'anonymous users cannot call the report RPC');
 SELECT has_trigger('public','audit_events','audit_events_chain_insert','audit events are hash chained');
 SELECT has_trigger('public','audit_events','audit_events_no_update','audit events are append only');

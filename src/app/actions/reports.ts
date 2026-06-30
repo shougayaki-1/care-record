@@ -50,6 +50,8 @@ export async function saveReport(input: SaveReportInput) {
     p_status: input.status,
     p_values: input.values,
     p_session_id: user.sessionId,
+    p_actual_service_type_id: input.actualServiceTypeId || null,
+    p_actual_staffs: input.actualStaffs ?? [],
   });
   if (error || !reportId) {
     await recordAuditEvent({ organizationId: input.organizationId, actorId: user.id, action: 'report.save',
@@ -59,66 +61,6 @@ export async function saveReport(input: SaveReportInput) {
     throw sanitizeDbError(error || new Error('記録を保存できませんでした'), 'action.reports');
   }
   const savedReportId = String(reportId);
-
-  if (input.actualServiceTypeId) {
-    const { data: serviceType, error: serviceTypeError } = await supabaseAdmin
-      .from('service_types')
-      .select('id')
-      .eq('id', input.actualServiceTypeId)
-      .eq('organization_id', input.organizationId)
-      .is('deleted_at', null)
-      .maybeSingle();
-    if (serviceTypeError || !serviceType) throw new Error('実績サービス種別が不正です');
-  }
-
-  const actualStaffs = input.actualStaffs ?? [];
-  if (actualStaffs.length > 0) {
-    const staffIds = Array.from(new Set(actualStaffs.map((staff) => staff.staff_id).filter(Boolean)));
-    const roleIds = Array.from(new Set(actualStaffs.map((staff) => staff.staff_role_id).filter(Boolean) as string[]));
-    if (staffIds.length !== actualStaffs.length) throw new Error('実績担当スタッフが重複しています');
-
-    const { data: validStaffs, error: staffError } = await supabaseAdmin
-      .from('staffs')
-      .select('id')
-      .eq('organization_id', input.organizationId)
-      .in('id', staffIds)
-      .is('deleted_at', null);
-    if (staffError || (validStaffs ?? []).length !== staffIds.length) throw new Error('実績担当スタッフが不正です');
-
-    if (roleIds.length > 0) {
-      const { data: validRoles, error: roleError } = await supabaseAdmin
-        .from('staff_roles')
-        .select('id')
-        .eq('organization_id', input.organizationId)
-        .in('id', roleIds)
-        .is('deleted_at', null);
-      if (roleError || (validRoles ?? []).length !== roleIds.length) throw new Error('実績担当役割が不正です');
-    }
-  }
-
-  const { error: actualServiceError } = await supabaseAdmin
-    .from('reports')
-    .update({ actual_service_type_id: input.actualServiceTypeId || null })
-    .eq('id', savedReportId);
-  if (actualServiceError) throw sanitizeDbError(actualServiceError, 'action.reports');
-
-  const { error: deleteActualStaffError } = await supabaseAdmin
-    .from('report_actual_staffs')
-    .delete()
-    .eq('report_id', savedReportId);
-  if (deleteActualStaffError) throw sanitizeDbError(deleteActualStaffError, 'action.reports');
-
-  if (actualStaffs.length > 0) {
-    const { error: insertActualStaffError } = await supabaseAdmin
-      .from('report_actual_staffs')
-      .insert(actualStaffs.map((staff, index) => ({
-        report_id: savedReportId,
-        staff_id: staff.staff_id,
-        staff_role_id: staff.staff_role_id || null,
-        sort_order: index,
-      })));
-    if (insertActualStaffError) throw sanitizeDbError(insertActualStaffError, 'action.reports');
-  }
 
   if (input.status === 'draft' && input.auditSource === 'ai_import') {
     await recordAuditEvent({

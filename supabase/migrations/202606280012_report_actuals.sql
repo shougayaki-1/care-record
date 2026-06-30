@@ -28,6 +28,8 @@ GRANT SELECT ON public.report_actual_staffs TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.report_actual_staffs TO service_role;
 GRANT UPDATE (actual_service_type_id) ON public.reports TO service_role;
 
+DROP POLICY IF EXISTS "Org members read report actual staffs" ON public.report_actual_staffs;
+
 CREATE POLICY "Org members read report actual staffs" ON public.report_actual_staffs
   FOR SELECT USING (
     EXISTS (
