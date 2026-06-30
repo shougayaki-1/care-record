@@ -11,6 +11,8 @@ SELECT ok(NOT has_table_privilege('authenticated','public.reports','UPDATE'), 'c
 SELECT ok(NOT has_table_privilege('authenticated','public.shifts','DELETE'), 'clients cannot hard-delete shifts');
 SELECT ok(has_function_privilege('authenticated','public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text,uuid,jsonb)','EXECUTE'),
   'authenticated users may call the bounded report RPC');
+SELECT ok(has_function_privilege('authenticated','public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text)','EXECUTE'),
+  'authenticated users may call the legacy-compatible report RPC');
 SELECT ok(NOT has_function_privilege('anon','public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text,uuid,jsonb)','EXECUTE'),
   'anonymous users cannot call the report RPC');
 SELECT has_trigger('public','audit_events','audit_events_chain_insert','audit events are hash chained');
