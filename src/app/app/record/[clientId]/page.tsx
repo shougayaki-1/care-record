@@ -5,7 +5,7 @@ import {
   Box, Button, Container, Typography, TextField,
   Stack, IconButton, CircularProgress,
   Divider,
-  Tabs, Tab, Alert, Chip
+  Tabs, Tab, Alert, Chip, MenuItem
 } from '@/components/ui/mui';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
@@ -44,6 +44,9 @@ type FormItem = {
 
 type FormAnswers = Record<string, string | number | boolean | string[]>;
 type HelperProfile = { id: string; name: string; defaultRoundTripDistanceKm?: number };
+type StaffRoleOption = { id: string; name: string };
+type ServiceTypeOption = { id: string; name: string };
+type ActualStaffInput = { staff_id: string; staff_role_id: string | null };
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 
 type ShiftStaffData = {
@@ -55,9 +58,11 @@ type ShiftSegmentData = {
     id: string;
     start_at: string;
     end_at: string;
-    service_type?: { name: string } | null;
+    service_type_id?: string | null;
+    service_type?: { id?: string; name: string } | null;
     shift_segment_staffs?: Array<{
         staff_id: string;
+        staff_role_id?: string | null;
         staff?: { name: string } | null;
     }>;
 };
@@ -70,7 +75,11 @@ type FormState = {
   template: FormItem[];
   answers: FormAnswers;
   selectableStaffs: HelperProfile[];
+  staffRoles: StaffRoleOption[];
+  serviceTypes: ServiceTypeOption[];
   selectedHelpers: string[];
+  actualStaffs: ActualStaffInput[];
+  actualServiceTypeId: string;
   startDateTime: string;
   endDateTime: string;
   serviceTime: string;
@@ -132,7 +141,11 @@ const formInitialState: FormState = {
   template: [],
   answers: {},
   selectableStaffs: [],
+  staffRoles: [],
+  serviceTypes: [],
   selectedHelpers: [],
+  actualStaffs: [],
+  actualServiceTypeId: '',
   startDateTime: '',
   endDateTime: '',
   serviceTime: '',
@@ -276,7 +289,11 @@ export default function RecordPage() {
     template,
     answers,
     selectableStaffs,
+    staffRoles,
+    serviceTypes,
     selectedHelpers,
+    actualStaffs,
+    actualServiceTypeId,
     startDateTime,
     endDateTime,
     serviceTime,
@@ -308,7 +325,11 @@ export default function RecordPage() {
   const setTemplate = useCallback((value: SetStateValue<FormItem[]>) => setFormField('template', value), [setFormField]);
   const setAnswers = useCallback((value: SetStateValue<FormAnswers>) => formDispatch({ type: 'SET_ANSWERS', value }), []);
   const setSelectableStaffs = useCallback((value: SetStateValue<HelperProfile[]>) => setFormField('selectableStaffs', value), [setFormField]);
+  const setStaffRoles = useCallback((value: SetStateValue<StaffRoleOption[]>) => setFormField('staffRoles', value), [setFormField]);
+  const setServiceTypes = useCallback((value: SetStateValue<ServiceTypeOption[]>) => setFormField('serviceTypes', value), [setFormField]);
   const setSelectedHelpers = useCallback((value: SetStateValue<string[]>) => setFormField('selectedHelpers', value), [setFormField]);
+  const setActualStaffs = useCallback((value: SetStateValue<ActualStaffInput[]>) => setFormField('actualStaffs', value), [setFormField]);
+  const setActualServiceTypeId = useCallback((value: SetStateValue<string>) => setFormField('actualServiceTypeId', value), [setFormField]);
   const setStartDateTime = useCallback((value: SetStateValue<string>) => setFormField('startDateTime', value), [setFormField]);
   const setEndDateTime = useCallback((value: SetStateValue<string>) => setFormField('endDateTime', value), [setFormField]);
   const setServiceTime = useCallback((value: SetStateValue<string>) => setFormField('serviceTime', value), [setFormField]);
@@ -365,10 +386,15 @@ export default function RecordPage() {
       const staffNames = (segment.shift_segment_staffs ?? [])
           .map((staff) => staff.staff?.name)
           .filter((name): name is string => Boolean(name));
+      setActualServiceTypeId(segment.service_type_id ?? '');
+      setActualStaffs((segment.shift_segment_staffs ?? []).map((staff) => ({
+          staff_id: staff.staff_id,
+          staff_role_id: staff.staff_role_id ?? null,
+      })));
       setSelectedHelpers(staffNames);
       setSelectedSegmentId(segment.id);
       setCurrentStatus('draft');
-  }, [formatDatetimeLocal, setCurrentStatus, setEndDateTime, setIsSpanningMonth, setOriginalShiftTimes, setSelectedHelpers, setSelectedSegmentId, setServiceTime, setStartDateTime]);
+  }, [formatDatetimeLocal, setActualServiceTypeId, setActualStaffs, setCurrentStatus, setEndDateTime, setIsSpanningMonth, setOriginalShiftTimes, setSelectedHelpers, setSelectedSegmentId, setServiceTime, setStartDateTime]);
 
   const setupTimeForPart = useCallback((part: 'part1' | 'part2', startIso: string, endIso: string) => {
       const s = new Date(startIso);
@@ -459,23 +485,44 @@ export default function RecordPage() {
       setSelectableStaffs(allStaffs);
 
       if (currentOrg) {
-        const { data: orgData } = await supabase
+        const [{ data: orgData }, { data: serviceTypeData }, { data: staffRoleData }] = await Promise.all([
+          supabase
           .from('organizations')
           .select('travel_cost_rate_yen_per_km')
           .eq('id', currentOrg.id)
-          .maybeSingle();
+          .maybeSingle(),
+          supabase
+            .from('service_types')
+            .select('id, name')
+            .eq('organization_id', currentOrg.id)
+            .eq('is_active', true)
+            .is('deleted_at', null)
+            .order('sort_order', { ascending: true })
+            .order('name', { ascending: true }),
+          supabase
+            .from('staff_roles')
+            .select('id, name')
+            .eq('organization_id', currentOrg.id)
+            .eq('is_active', true)
+            .is('deleted_at', null)
+            .order('sort_order', { ascending: true })
+            .order('name', { ascending: true }),
+        ]);
         setTravelCostRateYenPerKm(Number(orgData?.travel_cost_rate_yen_per_km ?? 20));
+        setServiceTypes((serviceTypeData ?? []) as ServiceTypeOption[]);
+        setStaffRoles((staffRoleData ?? []) as StaffRoleOption[]);
       }
 
       if (!currentReportId && !shiftId && user) {
         const myStaffRecord = allStaffs.find(s => s.user_id === user.id);
         if (myStaffRecord) {
             setSelectedHelpers([myStaffRecord.name]);
+            setActualStaffs([{ staff_id: myStaffRecord.id, staff_role_id: null }]);
             setRoundTripDistanceKm(String(myStaffRecord.defaultRoundTripDistanceKm || 0));
         }
       }
     } catch (error) { console.error('Error fetching base data:', error); }
-  }, [clientId, currentOrg, currentReportId, setClientName, setRoundTripDistanceKm, setSelectableStaffs, setSelectedHelpers, setTemplate, setTravelCostRateYenPerKm, shiftId]);
+  }, [clientId, currentOrg, currentReportId, setActualStaffs, setClientName, setRoundTripDistanceKm, setSelectableStaffs, setSelectedHelpers, setServiceTypes, setStaffRoles, setTemplate, setTravelCostRateYenPerKm, shiftId]);
 
   const loadExistingData = useCallback(async (targetId: string) => {
     if (!targetId) return;
@@ -490,6 +537,7 @@ export default function RecordPage() {
       setEndDateTime(formatDatetimeLocal(new Date(r.end_at)));
       setCurrentStatus(r.status);
       setSelectedSegmentId(r.segment_id ?? null);
+      setActualServiceTypeId(r.actual_service_type_id ?? '');
       setIsDirty(false);
 
       if (r.shift_id && !r.segment_id) {
@@ -517,7 +565,23 @@ export default function RecordPage() {
       setRoundTripDistanceKm(data.round_trip_distance_km || '0');
       setTravelCostRateYenPerKm(Number(data.travel_cost_rate_yen_per_km || travelCostRateYenPerKm || 20));
       setDistanceTouched(false);
-      setSelectedHelpers(data._helpers || []);
+      const { data: actualStaffRows, error: actualStaffError } = await supabase
+        .from('report_actual_staffs')
+        .select('staff_id, staff_role_id, staff:staffs(name)')
+        .eq('report_id', targetId)
+        .order('sort_order', { ascending: true });
+      if (actualStaffError) console.error('report_actual_staffs load error:', actualStaffError);
+      const typedActualStaffRows = (actualStaffRows ?? []) as unknown as Array<{ staff_id: string; staff_role_id: string | null; staff?: { name: string } | { name: string }[] | null }>;
+      if (typedActualStaffRows.length > 0) {
+        setActualStaffs(typedActualStaffRows.map((staff) => ({ staff_id: staff.staff_id, staff_role_id: staff.staff_role_id ?? null })));
+        setSelectedHelpers(typedActualStaffRows.map((staff) => {
+          const nestedStaff = Array.isArray(staff.staff) ? staff.staff[0] : staff.staff;
+          return nestedStaff?.name;
+        }).filter((name): name is string => Boolean(name)));
+      } else {
+        setActualStaffs([]);
+        setSelectedHelpers(data._helpers || []);
+      }
       setAnswers(data);
 
       if (currentOrg) {
@@ -525,7 +589,7 @@ export default function RecordPage() {
         setImages(await getReportImages(currentOrg.id, targetId));
       }
     } catch (e) { console.error(e); showToast('記録の読み込みに失敗しました', 'error'); }
-  }, [showToast, formatDatetimeLocal, currentOrg, setAnswers, setCurrentStatus, setDistanceTouched, setEndDateTime, setImages, setIsDirty, setIsSpanningMonth, setOriginalShiftTimes, setRoundTripDistanceKm, setSelectedHelpers, setSelectedPart, setSelectedSegmentId, setServiceTime, setStartDateTime, setTravelCostRateYenPerKm, setTravelTime, travelCostRateYenPerKm]);
+  }, [showToast, formatDatetimeLocal, currentOrg, setActualServiceTypeId, setActualStaffs, setAnswers, setCurrentStatus, setDistanceTouched, setEndDateTime, setImages, setIsDirty, setIsSpanningMonth, setOriginalShiftTimes, setRoundTripDistanceKm, setSelectedHelpers, setSelectedPart, setSelectedSegmentId, setServiceTime, setStartDateTime, setTravelCostRateYenPerKm, setTravelTime, travelCostRateYenPerKm]);
 
   useEffect(() => {
     if (currentReportId || distanceTouched || selectableStaffs.length === 0 || selectedHelpers.length === 0) return;
@@ -549,12 +613,14 @@ export default function RecordPage() {
                   ),
                   shift_segments (
                       id,
+                      service_type_id,
                       start_at,
                       end_at,
                       sort_order,
-                      service_type:service_types ( name ),
+                      service_type:service_types ( id, name ),
                       shift_segment_staffs (
                           staff_id,
+                          staff_role_id,
                           staff:staffs ( name )
                       )
                   )
@@ -631,6 +697,7 @@ export default function RecordPage() {
                   });
 
                   setSelectedHelpers(staffNames);
+                  setActualStaffs(typedShiftStaffs.map((staff) => ({ staff_id: staff.staff_id, staff_role_id: null })));
                   setCurrentStatus('draft');
               }
           }
@@ -653,7 +720,7 @@ export default function RecordPage() {
     if (!wsLoading && currentOrg) {
       init();
     }
-  }, [wsLoading, currentOrg, paramReportId, shiftId, segmentId, clientId, router, showToast, fetchBaseData, loadExistingData, formatDatetimeLocal, setupTimeForPart, applySegmentDefaults, setCurrentReportId, setCurrentStatus, setEndDateTime, setIsSpanningMonth, setLoading, setOriginalShiftTimes, setSelectedHelpers, setSelectedSegmentId, setServiceTime, setShiftSegments, setStartDateTime]);
+  }, [wsLoading, currentOrg, paramReportId, shiftId, segmentId, clientId, router, showToast, fetchBaseData, loadExistingData, formatDatetimeLocal, setupTimeForPart, applySegmentDefaults, setActualStaffs, setCurrentReportId, setCurrentStatus, setEndDateTime, setIsSpanningMonth, setLoading, setOriginalShiftTimes, setSelectedHelpers, setSelectedSegmentId, setServiceTime, setShiftSegments, setStartDateTime]);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -723,13 +790,14 @@ export default function RecordPage() {
     const ne: Record<string, string> = {};
     if (!serviceTime) ne['serviceTime'] = '必須項目です';
     if (selectedHelpers.length === 0) ne['helpers'] = '担当スタッフを選択してください';
+    if (actualStaffs.length !== selectedHelpers.length) ne['helpers'] = '担当スタッフをスタッフ名簿から選択してください';
     template.forEach(item => {
       const val = answers[item.id];
       if (item.required && (!val || (Array.isArray(val) && val.length === 0))) ne[item.id] = '必須項目です';
     });
     setErrors(ne);
     return Object.keys(ne).length === 0;
-  }, [answers, selectedHelpers.length, serviceTime, setErrors, template]);
+  }, [actualStaffs.length, answers, selectedHelpers.length, serviceTime, setErrors, template]);
 
   const saveReport = useCallback(async (status: ReportStatus, skipValidation = false) => {
     if (shiftId && shiftSegments.length > 0 && !selectedSegmentId) {
@@ -759,6 +827,8 @@ export default function RecordPage() {
         status,
         shiftId: shiftId || null,
         segmentId: selectedSegmentId || segmentId || null,
+        actualServiceTypeId: actualServiceTypeId || null,
+        actualStaffs,
         values: finalData,
         ...(status === 'draft' && hasAiDraftSource
           ? { auditSource: 'ai_import' as const, auditFileCount: 1 }
@@ -777,7 +847,7 @@ export default function RecordPage() {
       return true;
     } catch (e) { console.error(e); showToast('エラーが発生しました', 'error'); return false; } 
     finally { setSubmitting(false); }
-  }, [answers, clientId, currentOrg, currentReportId, endDateTime, hasAiDraftSource, roundTripDistanceKm, router, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setSubmitting, shiftId, shiftSegments.length, showToast, startDateTime, travelCostRateYenPerKm, travelTime, validate]);
+  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, endDateTime, hasAiDraftSource, roundTripDistanceKm, router, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setSubmitting, shiftId, shiftSegments.length, showToast, startDateTime, travelCostRateYenPerKm, travelTime, validate]);
 
   const handleDraftSave = useCallback(async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); } }, [saveReport, showToast]);
   const handleSubmit = useCallback(async () => {
@@ -869,6 +939,11 @@ export default function RecordPage() {
 
   const handleStaffChange = useCallback((value: string[]) => {
       setSelectedHelpers(value);
+      setActualStaffs(value.map((name) => {
+          const staff = selectableStaffs.find((helper) => helper.name === name);
+          const existing = staff ? actualStaffs.find((actualStaff) => actualStaff.staff_id === staff.id) : null;
+          return staff ? { staff_id: staff.id, staff_role_id: existing?.staff_role_id ?? null } : null;
+      }).filter((staff): staff is ActualStaffInput => Boolean(staff)));
       if (!currentReportId && !distanceTouched) {
           const staff = selectableStaffs.find((helper) => helper.name === value[0]);
           if (staff) setRoundTripDistanceKm(String(staff.defaultRoundTripDistanceKm || 0));
@@ -879,7 +954,7 @@ export default function RecordPage() {
           delete newErrors.helpers;
           setErrors(newErrors);
       }
-  }, [currentReportId, distanceTouched, errors, selectableStaffs, setErrors, setIsDirty, setRoundTripDistanceKm, setSelectedHelpers]);
+  }, [actualStaffs, currentReportId, distanceTouched, errors, selectableStaffs, setActualStaffs, setErrors, setIsDirty, setRoundTripDistanceKm, setSelectedHelpers]);
 
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}><CircularProgress /></Box>;
 
@@ -1035,6 +1110,28 @@ export default function RecordPage() {
             <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, bgcolor: 'background.paper' }}>
                 <Stack spacing={3}>
 
+                <Box sx={{ p: 1, mx: -1, borderRadius: 1 }}>
+                    <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>
+                        実績サービス種別
+                    </Typography>
+                    <TextField
+                        select
+                        fullWidth
+                        label="実績サービス種別"
+                        value={actualServiceTypeId}
+                        onChange={(e) => {
+                            setActualServiceTypeId(e.target.value);
+                            setIsDirty(true);
+                        }}
+                        helperText="予定と異なる場合は実際に提供したサービス種別を選択してください"
+                    >
+                        <MenuItem value="">未設定</MenuItem>
+                        {serviceTypes.map((serviceType) => (
+                            <MenuItem key={serviceType.id} value={serviceType.id}>{serviceType.name}</MenuItem>
+                        ))}
+                    </TextField>
+                </Box>
+
                 <Box sx={{ bgcolor: aiFilledFields.has('_helpers') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
                     <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
                         <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
@@ -1051,6 +1148,40 @@ export default function RecordPage() {
                         helperText={errors.helpers}
                         placeholder="スタッフ名簿から選択"
                     />
+                    {actualStaffs.length > 0 && (
+                        <Stack spacing={1.5} mt={2}>
+                            {actualStaffs.map((actualStaff) => {
+                                const staff = selectableStaffs.find((helper) => helper.id === actualStaff.staff_id);
+                                return (
+                                    <Stack key={actualStaff.staff_id} direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                                        <Typography variant="body2" sx={{ minWidth: 140, fontWeight: 'bold' }}>
+                                            {staff?.name ?? '担当スタッフ'}
+                                        </Typography>
+                                        <TextField
+                                            select
+                                            size="small"
+                                            fullWidth
+                                            label="実績役割"
+                                            value={actualStaff.staff_role_id ?? ''}
+                                            onChange={(e) => {
+                                                setActualStaffs((prev) => prev.map((item) => (
+                                                    item.staff_id === actualStaff.staff_id
+                                                        ? { ...item, staff_role_id: e.target.value || null }
+                                                        : item
+                                                )));
+                                                setIsDirty(true);
+                                            }}
+                                        >
+                                            <MenuItem value="">未設定</MenuItem>
+                                            {staffRoles.map((role) => (
+                                                <MenuItem key={role.id} value={role.id}>{role.name}</MenuItem>
+                                            ))}
+                                        </TextField>
+                                    </Stack>
+                                );
+                            })}
+                        </Stack>
+                    )}
                 </Box>
 
                 <Box sx={{ bgcolor: aiFilledFields.has('startDateTime') || aiFilledFields.has('endDateTime') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>

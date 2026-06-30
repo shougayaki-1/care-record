@@ -231,13 +231,13 @@ export default function ShiftManagePage() {
         }
     };
 
-    const handleCreateRecord = (shift: ShiftData) => {
+    const handleCreateRecord = (shift: ShiftData, segmentId?: string) => {
         if (shift.status === 'cancelled') {
             showToast('このシフトは現在キャンセル（お休み）されています。', 'info');
             return;
         }
         setShiftModalOpen(false);
-        router.push(`/app/record/${shift.client_id}?shiftId=${shift.id}`);
+        router.push(`/app/record/${shift.client_id}?shiftId=${shift.id}${segmentId ? `&segmentId=${segmentId}` : ''}`);
     };
 
     const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {

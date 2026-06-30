@@ -31,10 +31,12 @@ type ShiftData = {
 };
 
 type ReportData = { 
-    id: string; start_at: string; end_at: string; status: string; client_id: string; segment_id?: string | null;
+    id: string; start_at: string; end_at: string; status: string; client_id: string; segment_id?: string | null; actual_service_type_id?: string | null;
     clients: { name: string } | null; 
     helper?: { name: string } | null;
     report_values: { data: ReportValuesData }[] | null; 
+    actual_service_type?: { name: string } | null;
+    report_actual_staffs?: Array<{ staff?: { name: string } | null }>;
     report_shifts?: { shift_id: string }[] | null;
 };
 
@@ -60,7 +62,7 @@ type ShiftWithLinks = {
     id: string; start_at: string; end_at: string; client_id: string;
     clients: { name: string } | null;
     shift_staffs: Array<{ staffs: { name: string } | null }>;
-    report_shifts: Array<{ is_primary: boolean; reports: { id: string; start_at: string; end_at: string; status: string; segment_id?: string | null; deleted_at?: string | null; report_values?: { data: ReportValuesData }[] | null } | null }>;
+    report_shifts: Array<{ is_primary: boolean; reports: ReportForStats | null }>;
     shift_segments?: ShiftSegmentForStats[];
 };
 
@@ -70,8 +72,11 @@ type ReportForStats = {
     end_at: string;
     status: string;
     segment_id?: string | null;
+    actual_service_type_id?: string | null;
     deleted_at?: string | null;
     report_values?: { data: ReportValuesData }[] | null;
+    actual_service_type?: { name: string } | null;
+    report_actual_staffs?: Array<{ staff?: { name: string } | null }>;
 };
 
 type ShiftSegmentForStats = {
@@ -99,6 +104,8 @@ type ShiftVarianceRow = {
     segmentId: string | null;
     actualStaffNames: string;
     hasStaffMismatch: boolean;
+    actualServiceTypeName: string | null;
+    hasServiceTypeMismatch: boolean;
     isUnplanned: boolean;
     isLegacyReport: boolean;
     isMonthClipped: boolean;
@@ -161,7 +168,11 @@ function getReportHours(dataObj: ReportValuesData | null, startAt: string, endAt
     return { serviceHours: fallback, travelHours: 0, totalHours: fallback };
 }
 
-function getReportHelperNames(dataObj: ReportValuesData | null, fallback?: string | null): string[] {
+function getReportHelperNames(dataObj: ReportValuesData | null, fallback?: string | null, actualStaffs?: Array<{ staff?: { name: string } | null }>): string[] {
+    const actualStaffNames = (actualStaffs ?? [])
+        .map((staff) => staff.staff?.name)
+        .filter((name): name is string => Boolean(name));
+    if (actualStaffNames.length > 0) return actualStaffNames;
     const helpers = Array.isArray(dataObj?._helpers)
         ? dataObj._helpers.map(String).filter(Boolean)
         : [];
@@ -333,7 +344,7 @@ export default function StatisticsPage() {
                     addStatusCount(clientName, report.status);
                 }
                 if (targetTabIndex === 0) {
-                    const actualHelpers = dataObj?._helpers || [];
+                    const actualHelpers = getReportHelperNames(dataObj, undefined, report.report_actual_staffs);
                     const clipped = clipSlotToMonth(report.start_at, report.end_at, monthStart, monthEnd);
                     const linkedShiftId = report.report_shifts?.[0]?.shift_id ?? null;
                     const clientName = Array.isArray(report.clients) ? report.clients[0]?.name : report.clients?.name;
@@ -356,7 +367,7 @@ export default function StatisticsPage() {
                         });
                     };
 
-                    if (Array.isArray(actualHelpers) && actualHelpers.length > 0) {
+                    if (actualHelpers.length > 0) {
                         actualHelpers.forEach(helperName => {
                             if (helperName) {
                                 addActualForStaff(String(helperName));
@@ -478,17 +489,21 @@ export default function StatisticsPage() {
                     const effectivePlannedStaffs = plannedStaffNames.length > 0 ? plannedStaffNames : fallbackStaffNames;
                     const firstReport = linkedReports[0] ?? null;
                     const firstReportData = firstReport?.report_values?.[0]?.data ?? null;
-                    const actualStaffNames = firstReport ? getReportHelperNames(firstReportData) : [];
+                    const actualStaffNames = firstReport ? getReportHelperNames(firstReportData, undefined, firstReport.report_actual_staffs) : [];
+                    const plannedServiceTypeName = segment.service_type?.name ?? null;
+                    const actualServiceTypeName = firstReport?.actual_service_type?.name ?? null;
 
                     return [{
                         id: `segment-${segment.id}`,
                         shiftId: shift.id,
                         segmentId: segment.id,
                         clientId: shift.client_id,
-                        clientName: `${shift.clients?.name ?? '—'}${segment.service_type?.name ? ` / ${segment.service_type.name}` : ` / 区間${index + 1}`}`,
+                        clientName: `${shift.clients?.name ?? '—'}${plannedServiceTypeName ? ` / ${plannedServiceTypeName}` : ` / 区間${index + 1}`}`,
                         staffNames: effectivePlannedStaffs.join('、') || '—',
                         actualStaffNames: actualStaffNames.join('、') || '—',
                         hasStaffMismatch: namesDiffer(effectivePlannedStaffs, actualStaffNames),
+                        actualServiceTypeName,
+                        hasServiceTypeMismatch: Boolean(actualServiceTypeName && plannedServiceTypeName && actualServiceTypeName !== plannedServiceTypeName),
                         startAt: clippedSegment.start_at,
                         endAt: clippedSegment.end_at,
                         plannedH,
@@ -516,7 +531,7 @@ export default function StatisticsPage() {
             const actualH = actualMs > 0 ? actualMs / 3600000 : null;
             const diffH = actualH != null ? actualH - plannedH : null;
             const firstReport = linked.map(rs => rs.reports).find(r => r != null && !r.segment_id) ?? null;
-            const actualStaffNames = firstReport ? getReportHelperNames(firstReport.report_values?.[0]?.data ?? null) : [];
+            const actualStaffNames = firstReport ? getReportHelperNames(firstReport.report_values?.[0]?.data ?? null, undefined, firstReport.report_actual_staffs) : [];
 
             return [{
                 id: `shift-${shift.id}`,
@@ -527,6 +542,8 @@ export default function StatisticsPage() {
                 staffNames: fallbackStaffNames.join('、') || '—',
                 actualStaffNames: actualStaffNames.join('、') || '—',
                 hasStaffMismatch: namesDiffer(fallbackStaffNames, actualStaffNames),
+                actualServiceTypeName: firstReport?.actual_service_type?.name ?? null,
+                hasServiceTypeMismatch: false,
                 startAt: clippedShift.start_at,
                 endAt: clippedShift.end_at,
                 plannedH,
@@ -551,6 +568,7 @@ export default function StatisticsPage() {
             const helpers = Array.isArray(dataObj?._helpers)
                 ? dataObj._helpers.map(String).filter(Boolean)
                 : [];
+            const actualStaffNames = getReportHelperNames(dataObj ?? null, undefined, report.report_actual_staffs);
             const fallbackHelper = Array.isArray(report.helper) ? report.helper[0]?.name : report.helper?.name;
 
             rows.push({
@@ -559,9 +577,11 @@ export default function StatisticsPage() {
                 segmentId: null,
                 clientId: report.client_id,
                 clientName: report.clients?.name ?? '—',
-                staffNames: helpers.length > 0 ? helpers.join('、') : fallbackHelper || '未設定(担当者不明)',
-                actualStaffNames: helpers.length > 0 ? helpers.join('、') : fallbackHelper || '未設定(担当者不明)',
+                staffNames: actualStaffNames.length > 0 ? actualStaffNames.join('、') : helpers.length > 0 ? helpers.join('、') : fallbackHelper || '未設定(担当者不明)',
+                actualStaffNames: actualStaffNames.length > 0 ? actualStaffNames.join('、') : helpers.length > 0 ? helpers.join('、') : fallbackHelper || '未設定(担当者不明)',
                 hasStaffMismatch: false,
+                actualServiceTypeName: report.actual_service_type?.name ?? null,
+                hasServiceTypeMismatch: false,
                 startAt: clippedReport?.start_at ?? report.start_at,
                 endAt: clippedReport?.end_at ?? report.end_at,
                 plannedH: null,
@@ -1036,6 +1056,7 @@ export default function StatisticsPage() {
                                                         <Typography variant="body2">{row.staffNames}</Typography>
                                                         <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
                                                             {row.hasStaffMismatch && <Chip label={`担当不一致 実績: ${row.actualStaffNames}`} size="small" color="warning" variant="outlined" />}
+                                                            {row.hasServiceTypeMismatch && <Chip label={`サービス不一致 実績: ${row.actualServiceTypeName}`} size="small" color="warning" variant="outlined" />}
                                                             {row.isLegacyReport && <Chip label="大枠記録" size="small" color="default" variant="outlined" />}
                                                         </Stack>
                                                     </Stack>
@@ -1105,12 +1126,18 @@ export default function StatisticsPage() {
                                                         {row.isUnplanned && <Chip label={row.isLegacyReport ? '大枠記録' : '予定なし'} size="small" color="default" variant="outlined" />}
                                                         {row.isMonthClipped && <Chip label="月内分" size="small" variant="outlined" />}
                                                         {row.hasStaffMismatch && <Chip label="担当不一致" size="small" color="warning" variant="outlined" />}
+                                                        {row.hasServiceTypeMismatch && <Chip label="サービス不一致" size="small" color="warning" variant="outlined" />}
                                                     </Stack>
                                                     <Typography fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{row.clientName}</Typography>
                                                     <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{row.staffNames}</Typography>
                                                     {row.hasStaffMismatch && (
                                                         <Typography variant="caption" color="warning.main" sx={{ overflowWrap: 'anywhere' }}>
                                                             実績担当: {row.actualStaffNames}
+                                                        </Typography>
+                                                    )}
+                                                    {row.hasServiceTypeMismatch && (
+                                                        <Typography variant="caption" color="warning.main" sx={{ overflowWrap: 'anywhere' }}>
+                                                            実績サービス: {row.actualServiceTypeName}
                                                         </Typography>
                                                     )}
                                             </Box>

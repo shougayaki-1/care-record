@@ -31,6 +31,12 @@ export type ShiftData = {
     status: string;
     cancel_reason: string | null;
     shift_staffs: { staff_id: string; }[];
+    shift_segments?: Array<{
+        id: string;
+        start_at: string;
+        end_at: string;
+        service_type?: { name: string } | null;
+    }>;
 };
 
 type SegmentDraft = {
@@ -46,7 +52,7 @@ type Props = {
     onSave: (payload: ShiftPayload, shiftId?: string) => Promise<void>;
     onToggleCancel?: (shiftId: string, isCancel: boolean, reason: string) => Promise<void>;
     onDelete?: (shiftId: string) => Promise<void>;
-    onCreateRecord?: (shift: ShiftData) => void;
+    onCreateRecord?: (shift: ShiftData, segmentId?: string) => void;
     clients: ClientData[];
     staffs: StaffData[];
     organizationId: string;
@@ -228,16 +234,36 @@ export const ShiftFormModal = ({
                 )}
             contentSx={{ py: 3 }}
             actions={<>
-                {initialData && onCreateRecord && (
+                {initialData && onCreateRecord && (initialData.shift_segments?.length ?? 0) <= 1 && (
                     <AppButton
                         variant="outlined"
                         intent="secondary"
                         startIcon={<EditNoteIcon />}
-                        onClick={() => onCreateRecord(initialData)}
+                        onClick={() => onCreateRecord(initialData, initialData.shift_segments?.[0]?.id)}
                         disabled={loading || initialData.status === 'cancelled'}
                     >
                         記録作成
                     </AppButton>
+                )}
+                {initialData && onCreateRecord && (initialData.shift_segments?.length ?? 0) > 1 && (
+                    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                        {initialData.shift_segments?.map((segment, index) => {
+                            const start = new Date(segment.start_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                            const end = new Date(segment.end_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                            return (
+                                <AppButton
+                                    key={segment.id}
+                                    variant="outlined"
+                                    intent="secondary"
+                                    startIcon={<EditNoteIcon />}
+                                    onClick={() => onCreateRecord(initialData, segment.id)}
+                                    disabled={loading || initialData.status === 'cancelled'}
+                                >
+                                    {`${segment.service_type?.name ?? `区間${index + 1}`} ${start}-${end}`}
+                                </AppButton>
+                            );
+                        })}
+                    </Stack>
                 )}
                 <Box sx={{ flexGrow: 1 }} />
                 <AppButton variant="text" intent="secondary" onClick={onClose} disabled={loading}>閉じる</AppButton>
