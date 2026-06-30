@@ -6,6 +6,7 @@ import {
   Box, Typography, CircularProgress, Stack, Chip, Paper,
   IconButton, ToggleButton, ToggleButtonGroup, Tooltip
 } from '@/components/ui/mui';
+import { CalendarPageSkeleton } from '@/components/ui';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ListIcon from '@mui/icons-material/List';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
@@ -26,7 +27,7 @@ const ShiftCalendarViewer = dynamic(
   () => import('@/components/shifts/ShiftCalendarViewer').then((mod) => mod.ShiftCalendarViewer),
   {
     ssr: false,
-    loading: () => <Box display="flex" justifyContent="center" pt={8}><CircularProgress /></Box>,
+    loading: () => <CalendarPageSkeleton />,
   }
 );
 

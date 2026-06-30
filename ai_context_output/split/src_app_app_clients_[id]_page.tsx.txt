@@ -37,6 +37,7 @@ import { convertSchemaToReadable, FormItem as HelperFormItem } from '../../../..
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, CheckboxGroupField, PageLayout } from '@/components/ui';
+import { useFetchData } from '@/hooks/useFetchData';
 import {
     getClientAssignmentPermissionHints,
     saveClientAssignments,
@@ -75,7 +76,6 @@ export default function ClientSettingsPage() {
 
     const [openCopyDialog, setOpenCopyDialog] = useState(false);
     const [copyTab, setCopyTab] = useState(0); 
-    const [otherClients, setOtherClients] = useState<{id: string, name: string}[]>([]);
     const showSetupWizard = searchParams.get('setup') === '1';
 
     const fetchClientData = useCallback(async () => {
@@ -135,17 +135,22 @@ export default function ClientSettingsPage() {
     }, [clientId, currentOrg]);
 
     const fetchOtherClients = useCallback(async () => {
-        if (!currentOrg) return;
+        if (!currentOrg) return [];
         const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id).neq('id', clientId);
-        setOtherClients(data || []);
+        return data || [];
     }, [currentOrg, clientId]);
+
+    const { data: otherClients } = useFetchData(fetchOtherClients, [] as {id: string, name: string}[], !wsLoading && Boolean(currentOrg), () => {
+        showToast('コピー元利用者の取得に失敗しました', 'error');
+    });
 
     useEffect(() => {
         if (!wsLoading && currentOrg) {
-            fetchClientData();
-            fetchOtherClients();
+            const id = window.setTimeout(() => void fetchClientData(), 0);
+            return () => window.clearTimeout(id);
         }
-    }, [wsLoading, currentOrg, fetchClientData, fetchOtherClients]);
+        return undefined;
+    }, [wsLoading, currentOrg, fetchClientData]);
 
     const addField = () => {
         const newField: FormItem = { id: crypto.randomUUID(), label: '', type: 'checkbox', required: false, hasDetail: false };

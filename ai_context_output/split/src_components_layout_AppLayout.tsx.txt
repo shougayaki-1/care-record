@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Box, Avatar, Tooltip, IconButton, Divider, List, ListItem, ListItemButton,
   ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge, Popover, CircularProgress,
@@ -64,7 +64,7 @@ type Notification = {
   link_url?: string;
 };
 
-const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | null, onClose: () => void }) => {
+const NotificationsPopover = React.memo(function NotificationsPopover({ anchorEl, onClose }: { anchorEl: HTMLElement | null, onClose: () => void }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
@@ -83,7 +83,7 @@ const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | n
     if (anchorEl) fetchNotifications();
   }, [anchorEl]);
 
-  const handleRead = async (n: Notification) => {
+  const handleRead = useCallback(async (n: Notification) => {
     if (!n.is_read) {
       await markNotificationRead(n.id);
     }
@@ -91,7 +91,7 @@ const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | n
       router.push(n.link_url);
       onClose();
     }
-  };
+  }, [onClose, router]);
 
   const open = Boolean(anchorEl);
 
@@ -127,18 +127,19 @@ const NotificationsPopover = ({ anchorEl, onClose }: { anchorEl: HTMLElement | n
       )}
     </Popover>
   );
-};
+});
 
 // 上部 AppBar：組織切替ドロップダウン・通知・アカウントメニューを集約（Google Workspace 風）
-const TopAppBar = ({
-  orgList, currentOrg, switchOrg, onMenuClick, showMenuButton
+const TopAppBar = React.memo(function TopAppBar({
+  orgList, currentOrg, switchOrg, onMenuClick, showMenuButton, userId
 }: {
   orgList: Workspace[],
   currentOrg: Workspace | null,
   switchOrg: (id: string) => void,
   onMenuClick: () => void,
-  showMenuButton: boolean
-}) => {
+  showMenuButton: boolean,
+  userId: string | null,
+}) {
   const router = useRouter();
   const [userName, setUserName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
@@ -151,14 +152,18 @@ const TopAppBar = ({
   useEffect(() => {
     let cleanup: (() => void) | undefined;
     const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      let resolvedUserId = userId;
+      if (!resolvedUserId) {
+        const { data: { session } } = await supabase.auth.getSession();
+        resolvedUserId = session?.user.id ?? null;
+      }
+      if (!resolvedUserId) return;
 
       const [{ data: profile }, { count }] = await Promise.all([
-        supabase.from('profiles').select('name, avatar_url').eq('id', user.id).maybeSingle(),
+        supabase.from('profiles').select('name, avatar_url').eq('id', resolvedUserId).maybeSingle(),
         supabase.from('notifications')
           .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id)
+          .eq('user_id', resolvedUserId)
           .eq('is_read', false),
       ]);
 
@@ -169,7 +174,7 @@ const TopAppBar = ({
       setUnreadCount(count || 0);
 
       const channel = supabase.channel('notifications')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${resolvedUserId}` }, () => {
           setUnreadCount(prev => prev + 1);
         })
         .subscribe();
@@ -178,18 +183,20 @@ const TopAppBar = ({
     };
     void fetchUser();
     return () => { cleanup?.(); };
-  }, []);
+  }, [userId]);
 
-  const handleSwitchOrg = (id: string) => {
+  const handleSwitchOrg = useCallback((id: string) => {
     switchOrg(id);
     setOrgAnchor(null);
-  };
+  }, [switchOrg]);
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     setAccountAnchor(null);
     await logoutCurrentUser();
     router.push('/');
-  };
+  }, [router]);
+
+  const handleNotificationsClose = useCallback(() => setNotifAnchor(null), []);
 
   return (
     <AppBar position="static">
@@ -266,7 +273,7 @@ const TopAppBar = ({
             </Badge>
           </IconButton>
         </Tooltip>
-        <NotificationsPopover anchorEl={notifAnchor} onClose={() => setNotifAnchor(null)} />
+        <NotificationsPopover anchorEl={notifAnchor} onClose={handleNotificationsClose} />
 
         {userName && (
           <Typography
@@ -321,10 +328,10 @@ const TopAppBar = ({
       </Toolbar>
     </AppBar>
   );
-};
+});
 
 // 左ナビゲーション（Google 風：白基調・丸ピルの選択スタイル）
-const NavDrawer = ({
+const NavDrawer = React.memo(function NavDrawer({
   currentOrg,
   onClose,
   sidebarOpen = true,
@@ -334,18 +341,18 @@ const NavDrawer = ({
   onClose?: () => void,
   sidebarOpen?: boolean,
   onToggle?: () => void,
-}) => {
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [openReports, setOpenReports] = useState(true);
 
-  if (!currentOrg) return null;
-
-  const handleNav = (path: string) => {
+  const handleNav = useCallback((path: string) => {
     router.push(path);
     if (onClose) onClose();
-  };
+  }, [onClose, router]);
+
+  if (!currentOrg) return null;
 
   const isActive = (path: string, queryCheck?: { key: string, val: string }) => {
     if (pathname !== path) return false;
@@ -488,7 +495,7 @@ const NavDrawer = ({
       )}
     </Box>
   );
-};
+});
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
@@ -501,8 +508,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const stored = window.localStorage.getItem('care-record-sidebar-open');
     return stored === null ? true : stored === 'true';
   });
-  const { orgList, currentOrg, switchOrg } = useWorkspace();
+  const { orgList, currentOrg, switchOrg, userId } = useWorkspace();
   const sidebarWidth = sidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_COLLAPSED_WIDTH;
+  const handleMenuClick = useCallback(() => setMobileOpen(true), []);
+  const handleMobileClose = useCallback(() => setMobileOpen(false), []);
+  const handleSidebarToggle = useCallback(() => setSidebarOpen(v => !v), []);
 
   useEffect(() => {
     window.localStorage.setItem('care-record-sidebar-open', String(sidebarOpen));
@@ -524,8 +534,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         orgList={orgList}
         currentOrg={currentOrg}
         switchOrg={switchOrg}
-        onMenuClick={() => setMobileOpen(true)}
+        onMenuClick={handleMenuClick}
         showMenuButton={isMobile}
+        userId={userId}
       />
 
       <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
@@ -539,18 +550,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           height: '100%',
           transition: 'width 0.2s ease',
         }}>
-          <NavDrawer currentOrg={currentOrg} sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(v => !v)} />
+          <NavDrawer currentOrg={currentOrg} sidebarOpen={sidebarOpen} onToggle={handleSidebarToggle} />
         </Box>
 
         {/* モバイル：一時的なドロワー */}
         <Drawer
           variant="temporary"
           open={mobileOpen}
-          onClose={() => setMobileOpen(false)}
+          onClose={handleMobileClose}
           ModalProps={{ keepMounted: true }}
           sx={{ display: { xs: 'block', md: 'none' }, '& .MuiDrawer-paper': { width: SIDEBAR_WIDTH } }}
         >
-          <NavDrawer currentOrg={currentOrg} onClose={() => setMobileOpen(false)} />
+          <NavDrawer currentOrg={currentOrg} onClose={handleMobileClose} />
         </Drawer>
 
         <Box

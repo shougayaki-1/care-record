@@ -81,10 +81,30 @@ export const useShiftData = ({
     const [unsyncedCount, setUnsyncedCount] = useState(0);
 
     const masterDataReadyRef = useRef(false);
+    const activeTabRef = useRef(activeTab);
+    const selectedStaffIdRef = useRef(selectedStaffId);
+    const selectedClientIdRef = useRef(selectedClientId);
+    const currentStaffIdRef = useRef(currentStaffId);
 
     useEffect(() => {
         masterDataReadyRef.current = false;
     }, [currentOrg]);
+
+    useEffect(() => {
+        activeTabRef.current = activeTab;
+    }, [activeTab]);
+
+    useEffect(() => {
+        selectedStaffIdRef.current = selectedStaffId;
+    }, [selectedStaffId]);
+
+    useEffect(() => {
+        selectedClientIdRef.current = selectedClientId;
+    }, [selectedClientId]);
+
+    useEffect(() => {
+        currentStaffIdRef.current = currentStaffId;
+    }, [currentStaffId]);
 
     useEffect(() => {
         supabase.auth.getUser().then(({ data: { user } }) => {
@@ -146,24 +166,26 @@ export const useShiftData = ({
     }, [currentOrg]);
 
     const getShiftFilter = useCallback((): ShiftQueryFilter | null => {
-        if (activeTab === 'myShift') {
-            return currentStaffId ? { staffId: currentStaffId } : null;
+        const tab = activeTabRef.current;
+        if (tab === 'myShift') {
+            return currentStaffIdRef.current ? { staffId: currentStaffIdRef.current } : null;
         }
-        if (activeTab === 'byStaff' && selectedStaffId !== 'all') {
-            return { staffId: selectedStaffId };
+        if (tab === 'byStaff' && selectedStaffIdRef.current !== 'all') {
+            return { staffId: selectedStaffIdRef.current };
         }
-        if (activeTab === 'byClient' && selectedClientId !== 'all') {
-            return { clientId: selectedClientId };
+        if (tab === 'byClient' && selectedClientIdRef.current !== 'all') {
+            return { clientId: selectedClientIdRef.current };
         }
         return {};
-    }, [activeTab, currentStaffId, selectedStaffId, selectedClientId]);
+    }, []);
 
     const fetchSeqRef = useRef(0);
 
     const fetchData = useCallback(async (isBackground = false, range?: ShiftDateRange) => {
         if (!currentOrg) return;
+        const tab = activeTabRef.current;
         // myShift tab requires knowing the current staff — skip until master data is ready
-        if (activeTab === 'myShift' && !masterDataReadyRef.current) {
+        if (tab === 'myShift' && !masterDataReadyRef.current) {
             setInitialLoading(false);
             setIsFetching(false);
             return;
@@ -182,7 +204,7 @@ export const useShiftData = ({
             : getCurrentMonthRange());
 
         try {
-            if (activeTab === 'patterns') {
+            if (tab === 'patterns') {
                 await fetchPatterns();
                 return;
             }
@@ -205,7 +227,7 @@ export const useShiftData = ({
             const typedShifts = (fetchedShifts as unknown as FetchedShiftData[]) || [];
 
             setRawShifts(typedShifts);
-            const isEditable = activeTab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true);
+            const isEditable = tab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true);
             setEvents(convertToCalendarEvents(typedShifts, !isEditable));
             void fetchUnsyncedCount().catch(console.error);
         } catch (error) {
@@ -217,7 +239,7 @@ export const useShiftData = ({
                 setIsFetching(false);
             }
         }
-    }, [currentOrg, showToast, calendarRef, activeTab, fetchPatterns, getShiftFilter, fetchUnsyncedCount]);
+    }, [currentOrg, showToast, calendarRef, fetchPatterns, getShiftFilter, fetchUnsyncedCount]);
 
     useEffect(() => {
         if (rawShifts.length === 0) {

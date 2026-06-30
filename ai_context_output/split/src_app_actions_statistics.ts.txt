@@ -26,12 +26,12 @@ export async function getStatisticsData(
         id, start_at, end_at, status, client_id,
         clients (name),
         shift_staffs (staff_id, staffs(name)),
-        report_shifts (is_primary, reports(id, start_at, end_at, status, segment_id, deleted_at, report_values(data))),
+        report_shifts (is_primary, reports(id, start_at, end_at, status, segment_id, actual_service_type_id, deleted_at, report_values(data), actual_service_type:service_types(name), report_actual_staffs(staff:staffs(name)))),
         shift_segments (
           id, start_at, end_at, sort_order,
           service_type:service_types(name),
           shift_segment_staffs(staff_id, staff:staffs(name)),
-          reports(id, start_at, end_at, status, segment_id, deleted_at, report_values(data))
+          reports(id, start_at, end_at, status, segment_id, actual_service_type_id, deleted_at, report_values(data), actual_service_type:service_types(name), report_actual_staffs(staff:staffs(name)))
         )
       `)
       .eq('organization_id', organizationId)
@@ -42,10 +42,12 @@ export async function getStatisticsData(
     supabaseAdmin
       .from('reports')
       .select(`
-        id, start_at, end_at, status, client_id, segment_id,
+        id, start_at, end_at, status, client_id, segment_id, actual_service_type_id,
         clients!inner (id, name, organization_id),
         helper:profiles!reports_helper_id_fkey (name),
         report_values (data),
+        actual_service_type:service_types(name),
+        report_actual_staffs(staff:staffs(name)),
         report_shifts (shift_id)
       `)
       .eq('clients.organization_id', organizationId)
@@ -67,7 +69,7 @@ export async function getStatisticsData(
   if (premiumTypesError) throw sanitizeDbError(premiumTypesError, 'action.statistics.premiumTypes');
 
   return {
-    shifts: (shiftsWithLinks ?? []).map(({ report_shifts: _rs, ...s }) => s),
+    shifts: shiftsWithLinks ?? [],
     reports: reports ?? [],
     shiftsWithLinks: shiftsWithLinks ?? [],
     internalWorkRecords,
