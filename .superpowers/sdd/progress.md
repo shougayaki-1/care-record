@@ -1,19 +1,15 @@
-# SDD Progress Ledger — Plan: サービス区間を唯一の時間・スタッフ単位とする
+# SDD Progress Ledger — Plan: RLS × 柔軟ロール 権限整合
 
 ## Tasks
-- [x] Task 1: DB Migration — shift_segment_staffs アクセス制御対応
-- [x] Task 2: shiftSegments.ts — shift_staffs 自動同期
-- [x] Task 3: shift.ts — staffIds 削除、segments 追加
-- [x] Task 4: ShiftFormModal — スタッフピッカー廃止、インラインセグメント必須化
-- [x] Task 5: ShiftPatternModal — staffIds フォールバック削除、セグメント必須化
-- [x] Task 6: Record Page — segmentId 必須化
+- [ ] Task 1: permission_alignment.sql の内容検証
+- [ ] Task 2: permission_alignment.sql を Supabase DB に適用
+- [ ] Task 3: report 系 RLS ポリシーの修正（新規マイグレーション作成）
+- [ ] Task 4: 本番 DB への適用確認
 
 ## Log
-Base commit: 382c1bf
-Task 1: complete (commits 382c1bf..aa99f5b, review clean — Minor: shift_segments has no deleted_at, finding is N/A)
-Task 2: complete (commits aa99f5b..526c39d, review clean)
-Task 3: complete (commits 526c39d..80cfe43, review clean)
-Task 4: complete (commits 80cfe43..45cd2d6, review clean — Minor: staffRoles fetch unused (plan-mandated); key=idx; no catch on Promise.all)
-Task 5: complete (commits 45cd2d6..b07959a, review clean)
-Task 6: complete (commits b07959a..bc4a3d1, review clean)
-Fix: complete (commit 196cb4e — Google Calendar sync ordering + deleteShiftSegment shift_staffs sync)
+Base commit: dcb7b11
+Task 1: complete (no code changes — verification only; Minor: can_access_client GRANT missing, will add in Task 3 migration)
+Task 2: complete (local DB push applied — all new policies confirmed in local DB dump)
+Task 3: complete (commits dcb7b11..a54d73f, review clean — Minor: GRANT comment misleading but idempotent/harmless)
+Task 4: complete (supabase migration list confirms 20260701000002 + 20260701000003 applied to remote)
+Fix: GRANT EXECUTE for get_member_record_action_scope/view_scope added (commit 54882a0) — final review Important finding resolved

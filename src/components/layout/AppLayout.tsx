@@ -363,6 +363,14 @@ const NavDrawer = React.memo(function NavDrawer({
 
   const isAdmin = Object.values(currentOrg.effectivePermissions.management).some(Boolean);
   const canViewShiftManagement = checkShiftPermission(currentOrg.effectivePermissions, 'view', true);
+  const canViewReports = checkManagementPermission(currentOrg.effectivePermissions, 'reports');
+  const canManageOrganization = checkManagementPermission(currentOrg.effectivePermissions, 'organization')
+    || checkManagementPermission(currentOrg.effectivePermissions, 'integrations')
+    || checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete')
+    || checkManagementPermission(currentOrg.effectivePermissions, 'ownerTransfer');
+  const canManageClients = checkManagementPermission(currentOrg.effectivePermissions, 'clients');
+  const canManageStaffs = checkManagementPermission(currentOrg.effectivePermissions, 'staffs');
+  const canViewAuditLogs = checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs');
 
   const categoryStyle = {
     px: 3,
@@ -449,37 +457,39 @@ const NavDrawer = React.memo(function NavDrawer({
           )}
         </List>
 
-        {isAdmin && (
+        {(isAdmin || canViewReports) && (
           <>
-            <Box onClick={() => sidebarOpen && setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: sidebarOpen ? 'pointer' : 'default', '&:hover': { color: 'text.primary' } }}>
-              提供記録一覧
-              {openReports ? <ExpandLess fontSize="small" sx={{ ml: 'auto' }} /> : <ExpandMore fontSize="small" sx={{ ml: 'auto' }} />}
-            </Box>
-            <Collapse in={sidebarOpen ? openReports : true} timeout="auto" unmountOnExit>
-              <List disablePadding>
-                {navButton('全件表示', <TagIcon fontSize="small" />, '/app/reports')}
-                {navButton('未承認・差戻し', <WarningAmberIcon fontSize="small" color="warning" />, '/app/reports?status=unapproved', { key: 'status', val: 'unapproved' })}
-                {navButton('今月の記録', <CalendarMonthIcon fontSize="small" />, '/app/reports?period=current_month', { key: 'period', val: 'current_month' })}
-              </List>
-            </Collapse>
+            {canViewReports && (
+              <>
+                <Box onClick={() => sidebarOpen && setOpenReports(!openReports)} sx={{ ...categoryStyle, display: 'flex', alignItems: 'center', cursor: sidebarOpen ? 'pointer' : 'default', '&:hover': { color: 'text.primary' } }}>
+                  提供記録一覧
+                  {openReports ? <ExpandLess fontSize="small" sx={{ ml: 'auto' }} /> : <ExpandMore fontSize="small" sx={{ ml: 'auto' }} />}
+                </Box>
+                <Collapse in={sidebarOpen ? openReports : true} timeout="auto" unmountOnExit>
+                  <List disablePadding>
+                    {navButton('全件表示', <TagIcon fontSize="small" />, '/app/reports')}
+                    {navButton('未承認・差戻し', <WarningAmberIcon fontSize="small" color="warning" />, '/app/reports?status=unapproved', { key: 'status', val: 'unapproved' })}
+                    {navButton('今月の記録', <CalendarMonthIcon fontSize="small" />, '/app/reports?period=current_month', { key: 'period', val: 'current_month' })}
+                  </List>
+                </Collapse>
+              </>
+            )}
 
             <Typography sx={categoryStyle}>管理</Typography>
             <List disablePadding>
-              {isAdmin && (
+              {canManageOrganization && (
                 navButton('事業所設定', <BusinessIcon fontSize="small" />, '/app/settings')
               )}
 
-              {navButton('利用者管理', <PeopleIcon fontSize="small" />, '/app/clients')}
-              {navButton('スタッフ(名簿)管理', <BadgeIcon fontSize="small" />, '/app/staff')}
+              {canManageClients && navButton('利用者管理', <PeopleIcon fontSize="small" />, '/app/clients')}
+              {canManageStaffs && navButton('スタッフ(名簿)管理', <BadgeIcon fontSize="small" />, '/app/staff')}
 
               {checkManagementPermission(currentOrg.effectivePermissions, 'accounts') && (
                 navButton('アカウント・権限管理', <KeyIcon fontSize="small" />, '/app/accounts')
               )}
-              {navButton('統計・予実管理', <AssessmentIcon fontSize="small" />, '/app/statistics')}
-              {checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs') &&
-                navButton('ログ', <ListAltIcon fontSize="small" />, '/app/logs')}
-              {checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs') &&
-                navButton('バックアップ閲覧', <BackupIcon fontSize="small" />, '/app/backup')}
+              {canViewReports && navButton('統計・予実管理', <AssessmentIcon fontSize="small" />, '/app/statistics')}
+              {canViewAuditLogs && navButton('ログ', <ListAltIcon fontSize="small" />, '/app/logs')}
+              {canViewAuditLogs && navButton('バックアップ閲覧', <BackupIcon fontSize="small" />, '/app/backup')}
             </List>
           </>
         )}
@@ -521,8 +531,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const shiftAccessDenied = Boolean(
     currentOrg && pathname.startsWith('/app/shifts/manage') && !checkShiftPermission(currentOrg.effectivePermissions, 'view', true)
   );
+  const settingsAccessDenied = Boolean(
+    currentOrg && pathname.startsWith('/app/settings') && !(
+      checkManagementPermission(currentOrg.effectivePermissions, 'organization')
+      || checkManagementPermission(currentOrg.effectivePermissions, 'integrations')
+      || checkManagementPermission(currentOrg.effectivePermissions, 'organizationDelete')
+      || checkManagementPermission(currentOrg.effectivePermissions, 'ownerTransfer')
+    )
+  );
   const accessDenied = Boolean(
-    shiftAccessDenied || (currentOrg && matchedRoute && !(
+    shiftAccessDenied || settingsAccessDenied || (currentOrg && matchedRoute && !(
       checkManagementPermission(currentOrg.effectivePermissions, matchedRoute.area)
     ))
   );

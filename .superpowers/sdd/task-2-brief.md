@@ -1,39 +1,55 @@
-## Task 2: `shiftSegments.ts` — セグメント保存後に `shift_staffs` を自動同期
-
-`saveShiftSegments` 実行後、そのシフトの全セグメントからユニークなスタッフIDを集め、`shift_staffs` を置き換える。これにより既存コードが `shift_staffs` を参照し続けても正しい値が得られる。
+## Task 2: `permission_alignment.sql` を Supabase DB に適用
 
 **Files:**
-- Modify: `src/app/actions/shiftSegments.ts`
+- Execute: `supabase db push` or `supabase migration up`
 
-- [ ] **Step 1: `saveShiftSegments` の末尾に `shift_staffs` 同期処理を追加**
-
-`src/app/actions/shiftSegments.ts` の `saveShiftSegments` 関数の末尾（`return` 直前）に追記:
-
-```typescript
-// Derive shift_staffs from segment staffs (shift_staffs is now a read-only denorm)
-const { data: segStaffs } = await supabaseAdmin
-    .from('shift_segment_staffs')
-    .select('staff_id, shift_segments!inner(shift_id)')
-    .eq('shift_segments.shift_id', shiftId);
-
-const uniqueStaffIds = [...new Set((segStaffs ?? []).map((r: { staff_id: string }) => r.staff_id))];
-await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
-if (uniqueStaffIds.length > 0) {
-    await supabaseAdmin.from('shift_staffs').insert(
-        uniqueStaffIds.map((staff_id: string) => ({ shift_id: shiftId, staff_id }))
-    );
-}
-```
-
-- [ ] **Step 2: 動作確認（手動）**
-
-既存シフトのセグメントを保存 → `shift_staffs` がセグメントのスタッフと一致していることを Supabase Studio で確認。
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 2.1: ローカル DB でマイグレーションを適用**
 
 ```bash
-git add src/app/actions/shiftSegments.ts
-git commit -m "feat(segments): sync shift_staffs from segment staffs on save"
+supabase db push --local
+# または
+supabase migration up
+```
+
+期待：`20260701000002_permission_alignment` が適用される
+
+- [ ] **Step 2.2: ポリシー変更を確認（ローカル DB）**
+
+```sql
+-- Supabase Studio の SQL Editor または psql で実行
+SELECT tablename, policyname, cmd, qual
+FROM pg_policies
+WHERE tablename IN (
+  'internal_work_records', 'shifts', 'clients', 'staffs',
+  'organization_members', 'invitations', 'assignments',
+  'organizations', 'shift_staffs', 'shift_patterns'
+)
+ORDER BY tablename, policyname;
+```
+
+確認内容：
+- `Internal work visible to org members` が存在しない（DROP 済み）
+- `Internal work visible by flexible role` が存在する
+- `Admins can insert shifts` が存在しない（DROP 済み）
+- `Shift creators insert shifts` が存在する
+
+- [ ] **Step 2.3: `is_org_admin` 変更を確認**
+
+```sql
+SELECT pg_get_functiondef(oid)
+FROM pg_proc
+WHERE proname = 'is_org_admin'
+  AND pronamespace = 'public'::regnamespace;
+```
+
+期待：`records` キーへの参照がなく、`role = 'owner'` チェックのみであること
+
+- [ ] **Step 2.4: Commit**
+
+```bash
+# マイグレーション適用後、問題なければ
+git add supabase/migrations/20260701000002_permission_alignment.sql
+git commit -m "feat: apply permission_alignment migration to align RLS with flexible roles"
 ```
 
 ---
