@@ -21,9 +21,11 @@ export default function LoginPage() {
     const checkSession = async () => {
       console.log('[LoginPage] Checking session...');
 
-      // サーバー側セッション検証でアイドルタイムアウト/期限切れと判定された場合は
+      // サーバー側セッション検証で失敗・タイムアウトと判定された場合は
       // Supabase セッションも破棄してログイン画面を表示する（リダイレクトループ防止）
-      if (reasonParam === 'idle_timeout') {
+      // errorParam がある場合も同様にログアウト必須: セッションが残ったまま /app へ
+      // リダイレクトするとミドルウェアが再度エラーを返しループする。
+      if (reasonParam === 'idle_timeout' || errorParam) {
         await logoutCurrentUser();
         setChecking(false);
         return;
@@ -47,7 +49,7 @@ export default function LoginPage() {
       }
     };
     checkSession();
-  }, [router, searchParams, reasonParam]);
+  }, [router, searchParams, reasonParam, errorParam]);
 
   if (checking) {
     return (
