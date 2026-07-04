@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Box, Avatar, Tooltip, IconButton, Divider, List, ListItem, ListItemButton,
   ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge, Popover, CircularProgress,
@@ -342,15 +343,9 @@ const NavDrawer = React.memo(function NavDrawer({
   sidebarOpen?: boolean,
   onToggle?: () => void,
 }) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [openReports, setOpenReports] = useState(true);
-
-  const handleNav = useCallback((path: string) => {
-    router.push(path);
-    if (onClose) onClose();
-  }, [onClose, router]);
 
   if (!currentOrg) return null;
 
@@ -420,7 +415,7 @@ const NavDrawer = React.memo(function NavDrawer({
     return (
     <ListItem disablePadding>
       <Tooltip title={sidebarOpen ? '' : label} placement="right" arrow>
-        <ListItemButton onClick={() => handleNav(path)} sx={itemStyle(isActive(activePath, queryCheck))}>
+        <ListItemButton component={Link} href={path} onClick={() => onClose?.()} sx={itemStyle(isActive(activePath, queryCheck))}>
           <ListItemIcon>{icon}</ListItemIcon>
           <ListItemText primary={label} {...textProps} />
         </ListItemButton>
