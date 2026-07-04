@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
-import { 
+import {
   Box, Typography, Alert, CircularProgress, LinearProgress, Stack, Divider,
-  Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow
+  Chip, Tabs, Tab
 } from '@/components/ui/mui';
-import { AppButton, AppDialog, AppTextField, DateTimeField, NumberField, PageBody, PageLayout } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, NumberField, PageBody, PageLayout } from '@/components/ui';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
@@ -22,7 +22,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
-import { deleteOrganization, disconnectGoogleCalendar, getAuditLogs, exportAuditLogsCsv, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName, updateTravelCostSettings } from '@/app/actions/organization';
+import { deleteOrganization, disconnectGoogleCalendar, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName, updateTravelCostSettings } from '@/app/actions/organization';
 import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -34,15 +34,6 @@ import { getSettingsSectionsData } from '@/app/actions/settingsSections';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 import type { ServiceType } from '@/app/actions/serviceTypes';
 import type { StaffRole } from '@/app/actions/staffRoles';
-
-type AuditLog = {
-    id: string;
-    created_at: string;
-    action_type: string;
-    resource_id: string | null;
-    details: Record<string, unknown> | null;
-    profiles: { name: string } | null; 
-};
 
 type GasResponse = {
     status: string;
@@ -78,10 +69,6 @@ function SettingsContent() {
     const [syncProgress, setSyncProgress] = useState<{ total: number; current: number } | null>(null);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
-    const [logs, setLogs] = useState<AuditLog[]>([]);
-    const [logFrom, setLogFrom] = useState('');
-    const [logTo, setLogTo] = useState('');
-
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
     const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
     const [confirmInput, setConfirmInput] = useState('');
@@ -117,32 +104,6 @@ function SettingsContent() {
         }
     }, [currentOrg]);
 
-    const fetchLogs = useCallback(async () => {
-        if (!currentOrg) return;
-        try {
-            const data = await getAuditLogs(currentOrg.id, {
-                from: logFrom ? new Date(logFrom).toISOString() : null,
-                to: logTo ? new Date(logTo).toISOString() : null,
-            });
-            setLogs((data as unknown as AuditLog[]) || []);
-        } catch (e) { console.error(e); }
-    }, [currentOrg, logFrom, logTo]);
-
-    const handleExportLogs = useCallback(async () => {
-        if (!currentOrg) return;
-        try {
-            const { filename, csv } = await exportAuditLogsCsv(currentOrg.id, {
-                from: logFrom ? new Date(logFrom).toISOString() : null,
-                to: logTo ? new Date(logTo).toISOString() : null,
-            });
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = filename; a.click();
-            URL.revokeObjectURL(url);
-        } catch (e) { console.error(e); }
-    }, [currentOrg, logFrom, logTo]);
-
     useEffect(() => {
         if (!wsLoading && currentOrg) {
             if (!Object.values(currentOrg.effectivePermissions.management).some(Boolean)) {
@@ -151,7 +112,7 @@ function SettingsContent() {
             }
             fetchOrgDetails();
         }
-    }, [wsLoading, currentOrg, router, fetchOrgDetails, fetchLogs]);
+    }, [wsLoading, currentOrg, router, fetchOrgDetails]);
 
     // 労働時間ルール・サービス種別・スタッフ役割: 3セクション分をまとめて1回のServer Actionで取得し、
     // 各コンポーネントの初期表示props（initialLaborPremiumTypes等）として渡す。
@@ -427,6 +388,9 @@ function SettingsContent() {
                 </Stack>
                 <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="scrollable" allowScrollButtonsMobile>
                     <Tab label="基本設定" />
+                    <Tab label="Google連携" />
+                    <Tab label="勤務・帳票ルール" />
+                    <Tab label="危険な設定" />
                 </Tabs>
             </Box>
 
@@ -475,7 +439,11 @@ function SettingsContent() {
                                     </Stack>
                                 </Box>
                             )}
+                        </Stack>
+                    )}
 
+                    {tabIndex === 1 && (
+                        <Stack spacing={3}>
                             {/* Google Drive連携 */}
                             <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>
                                 <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={2}>
@@ -619,7 +587,11 @@ function SettingsContent() {
                                     )}
                                 </Box>
                             </Box>
+                        </Stack>
+                    )}
 
+                    {tabIndex === 2 && (
+                        <Stack spacing={3}>
                             {/* 労働時間ルール */}
                             {canEditOrganization && (
                                 <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
@@ -652,7 +624,11 @@ function SettingsContent() {
                                     <StaffRoleSettings orgId={currentOrg.id} initialStaffRoles={settingsSectionsData?.staffRoles} />
                                 </Box>
                             )}
+                        </Stack>
+                    )}
 
+                    {tabIndex === 3 && (
+                        <Stack spacing={3}>
                             {/* 危険な設定 */}
                             <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: 'error.light', bgcolor: 'background.danger' }}>
                                 <Stack direction="row" alignItems="center" gap={1} mb={2}>
@@ -691,42 +667,6 @@ function SettingsContent() {
                         </Stack>
                     )}
 
-                    {tabIndex === 1 && (
-                        <Box>
-                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} sx={{ p: 2 }}>
-                                <DateTimeField kind="date" label="開始日" size="small" value={logFrom} onChange={(e) => setLogFrom(e.target.value)} />
-                                <DateTimeField kind="date" label="終了日" size="small" value={logTo} onChange={(e) => setLogTo(e.target.value)} />
-                                <AppButton variant="outlined" intent="secondary" onClick={fetchLogs}>絞り込み</AppButton>
-                                <Box sx={{ flexGrow: 1 }} />
-                                <AppButton onClick={handleExportLogs}>CSVエクスポート</AppButton>
-                            </Stack>
-                            <Divider />
-                            <Table>
-                                <TableHead>
-                                    <TableRow>
-                                        <TableCell>日時</TableCell>
-                                        <TableCell>操作者</TableCell>
-                                        <TableCell>操作内容</TableCell>
-                                        <TableCell>対象</TableCell>
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    {logs.length === 0 ? (
-                                        <TableRow><TableCell colSpan={4} align="center">ログはありません</TableCell></TableRow>
-                                    ) : (
-                                        logs.map((log) => (
-                                            <TableRow key={log.id}>
-                                                <TableCell>{new Date(log.created_at).toLocaleString()}</TableCell>
-                                                <TableCell>{log.profiles?.name || '不明'}</TableCell>
-                                                <TableCell>{log.action_type}</TableCell>
-                                                <TableCell>{log.resource_id || '-'}</TableCell>
-                                            </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </Box>
-                    )}
             </PageBody>
 
             <AppDialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)} title="事業所の完全削除" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton><AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name}>削除実行</AppButton></>}>

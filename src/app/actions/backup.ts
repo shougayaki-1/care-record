@@ -32,6 +32,35 @@ export type ListDailyBackupsResult =
   | { configured: false }
   | { configured: true; files: BackupFileEntry[] };
 
+export type LastBackupRun = {
+  createdAt: string;
+  outcome: 'success' | 'failure';
+  details: Record<string, unknown> | null;
+} | null;
+
+/** 直近の自動バックアップcron実行状況を監査ログから取得する（cron側で action: 'backup.cron_run' として記録） */
+export async function getLastBackupRun(orgId: string): Promise<LastBackupRun> {
+  await assertOrgPermission(orgId, 'auditLogs');
+
+  const { data, error } = await supabaseAdmin
+    .from('audit_events')
+    .select('created_at, outcome, details')
+    .eq('organization_id', orgId)
+    .eq('action_type', 'backup.cron_run')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(`最終バックアップ実行状況の取得に失敗しました: ${error.message}`);
+  if (!data) return null;
+
+  return {
+    createdAt: data.created_at,
+    outcome: (data.outcome as 'success' | 'failure') ?? 'success',
+    details: (data.details as Record<string, unknown> | null) ?? null,
+  };
+}
+
 export async function listDailyBackups(orgId: string): Promise<ListDailyBackupsResult> {
   await assertOrgPermission(orgId, 'auditLogs');
 

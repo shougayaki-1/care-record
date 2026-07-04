@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Box, Typography, CircularProgress, Stack, TextField, MenuItem, Select, InputAdornment,
+  Alert, Box, Typography, CircularProgress, Stack, TextField, MenuItem, Select, InputAdornment,
 } from '@/components/ui/mui';
 import BackupIcon from '@mui/icons-material/Backup';
 import SearchIcon from '@mui/icons-material/Search';
@@ -10,8 +10,8 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter } from 'next/navigation';
 import { checkManagementPermission } from '@/utils/permissions';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
-import { listDailyBackups, getBackupRecords, triggerDailyBackup } from '@/app/actions/backup';
-import type { BackupFileEntry, BackupRecord, ListDailyBackupsResult } from '@/app/actions/backup';
+import { listDailyBackups, getBackupRecords, triggerDailyBackup, getLastBackupRun } from '@/app/actions/backup';
+import type { BackupFileEntry, BackupRecord, ListDailyBackupsResult, LastBackupRun } from '@/app/actions/backup';
 import { useToast } from '@/components/ui/ToastProvider';
 import { AppButton, AppDialog, DataTable, InnerPageHeader, PageContainer, PageLayout, StatusChip } from '@/components/ui';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
@@ -91,6 +91,9 @@ export default function BackupPage() {
   const [helperFilter, setHelperFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedRecord, setSelectedRecord] = useState<BackupRecord | null>(null);
+  const [lastRun, setLastRun] = useState<LastBackupRun>(null);
+  const [lastRunLoaded, setLastRunLoaded] = useState(false);
+  const [lastRunStale, setLastRunStale] = useState(false);
 
   useEffect(() => {
     if (!wsLoading && currentOrg) {
@@ -99,6 +102,17 @@ export default function BackupPage() {
       }
     }
   }, [wsLoading, currentOrg, router]);
+
+  useEffect(() => {
+    if (!currentOrg) return;
+    getLastBackupRun(currentOrg.id)
+      .then((run) => {
+        setLastRun(run);
+        setLastRunStale(!run || (Date.now() - new Date(run.createdAt).getTime()) > 30 * 60 * 60 * 1000);
+        setLastRunLoaded(true);
+      })
+      .catch(() => setLastRunLoaded(true));
+  }, [currentOrg]);
 
   const refreshFiles = useCallback(async (orgId: string, preferredPath?: string) => {
     setLoadingFiles(true);
@@ -211,6 +225,18 @@ export default function BackupPage() {
 
       <PageContainer>
         <Box sx={{ maxWidth: 1120, mx: 'auto' }}>
+          {lastRunLoaded && (
+            lastRunStale || !lastRun ? (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                自動バックアップの実行記録がありません。Vercelの環境変数（CRON_SECRET, GCP_PROJECT_ID, GCP_SERVICE_ACCOUNT_KEY_JSON等）とcronの実行状況を確認してください。
+              </Alert>
+            ) : (
+              <Alert severity={lastRun.outcome === 'success' ? 'success' : 'error'} sx={{ mb: 2 }}>
+                最終自動バックアップ実行: {new Date(lastRun.createdAt).toLocaleString()}（{lastRun.outcome === 'success' ? '成功' : '失敗'}）
+              </Alert>
+            )
+          )}
+
           {gcsNotConfigured && (
             <Box sx={{ p: { xs: 2, sm: 3 }, mb: 2, borderTop: 1, borderBottom: 1, borderColor: 'warning.main' }}>
               <Stack spacing={1.5} alignItems="center" textAlign="center">

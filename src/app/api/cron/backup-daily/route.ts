@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getActiveOrganizationIds, exportReportsAsCsv } from '@/utils/gcs/export';
 import { isGcsBackupConfigured, uploadToGCS } from '@/utils/gcs/upload';
 import { generateBackupHtml } from '@/utils/gcs/html';
+import { recordAuditEvent } from '@/utils/supabase/audit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -13,9 +14,29 @@ function authorized(request: NextRequest): boolean {
   );
 }
 
+/** 監査ログへ記録できなくても本処理自体は継続させるためのbest-effortラッパー */
+async function logBackupRun(params: { organizationId: string | null; outcome: 'success' | 'failure'; details: Record<string, unknown> }) {
+  try {
+    await recordAuditEvent({
+      organizationId: params.organizationId,
+      actorId: null,
+      action: 'backup.cron_run',
+      resourceType: 'backup',
+      outcome: params.outcome,
+      details: params.details,
+    });
+  } catch (e) {
+    console.error('[cron:backup-daily] failed to record audit event', e);
+  }
+}
+
 export async function GET(request: NextRequest) {
-  if (!authorized(request)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!authorized(request)) {
+    await logBackupRun({ organizationId: null, outcome: 'failure', details: { reason: 'unauthorized' } });
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
   if (!isGcsBackupConfigured()) {
+    await logBackupRun({ organizationId: null, outcome: 'failure', details: { reason: 'gcs_not_configured' } });
     return NextResponse.json({ ok: false, error: 'gcs_not_configured' }, { status: 500 });
   }
 
@@ -30,21 +51,28 @@ export async function GET(request: NextRequest) {
     let empty = 0;
 
     for (const orgId of orgIds) {
-      const csv = await exportReportsAsCsv(orgId);
-      const rows = csvToHtmlRows(csv);
-      const html = generateBackupHtml(today, rows);
+      try {
+        const csv = await exportReportsAsCsv(orgId);
+        const rows = csvToHtmlRows(csv);
+        const html = generateBackupHtml(today, rows);
 
-      await Promise.all([
-        uploadToGCS(bucket, `daily/${orgId}/${today}/${version}.csv`, csv),
-        uploadToGCS(bucket, `daily/${orgId}/${today}/${version}.html`, html),
-      ]);
-      succeeded++;
-      if (rows.length === 0) empty++;
+        await Promise.all([
+          uploadToGCS(bucket, `daily/${orgId}/${today}/${version}.csv`, csv),
+          uploadToGCS(bucket, `daily/${orgId}/${today}/${version}.html`, html),
+        ]);
+        succeeded++;
+        if (rows.length === 0) empty++;
+        await logBackupRun({ organizationId: orgId, outcome: 'success', details: { records: rows.length, empty: rows.length === 0, date: today } });
+      } catch (orgErr) {
+        console.error('[cron:backup-daily] org failed', orgId, orgErr);
+        await logBackupRun({ organizationId: orgId, outcome: 'failure', details: { date: today, reason: orgErr instanceof Error ? orgErr.message : 'unknown' } });
+      }
     }
 
     return NextResponse.json({ ok: true, orgs: succeeded, empty, date: today });
   } catch (err) {
     console.error('[cron:backup-daily]', err);
+    await logBackupRun({ organizationId: null, outcome: 'failure', details: { date: today, reason: err instanceof Error ? err.message : 'unknown' } });
     return NextResponse.json({ ok: false, error: 'backup_failed' }, { status: 500 });
   }
 }

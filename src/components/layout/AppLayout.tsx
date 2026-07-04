@@ -33,6 +33,7 @@ import KeyIcon from '@mui/icons-material/Key';
 import BackupIcon from '@mui/icons-material/Backup';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -488,6 +489,24 @@ const NavDrawer = React.memo(function NavDrawer({
             </List>
           </>
         )}
+      </Box>
+      <Box sx={{ borderTop: '1px solid', borderColor: 'divider', p: 1 }}>
+        <List disablePadding>
+          <ListItem disablePadding>
+            <Tooltip title={sidebarOpen ? '' : 'マニュアル'} placement="right" arrow>
+              <ListItemButton
+                component="a"
+                href="/manual"
+                target="_blank"
+                rel="noreferrer"
+                sx={itemStyle(false)}
+              >
+                <ListItemIcon><MenuBookIcon fontSize="small" /></ListItemIcon>
+                <ListItemText primary="マニュアル" {...textProps} />
+              </ListItemButton>
+            </Tooltip>
+          </ListItem>
+        </List>
       </Box>
       {onToggle && (
         <Box sx={{ borderTop: '1px solid', borderColor: 'divider', p: 1 }}>

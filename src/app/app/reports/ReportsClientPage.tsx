@@ -79,10 +79,19 @@ export default function ReportsClientPage() {
   const [processing, setProcessing] = useState(false);
   const [gasProgress, setGasProgress] = useState<{ total: number, current: number, currentName: string } | null>(null);
 
+  // URLのクエリパラメータからフィルタ状態を復元する。詳細確認画面から戻る(router.back())と
+  // 直前のURL(下記の同期effectで書き込まれたもの)がそのまま復元されるため、絞り込み条件が維持される。
   useEffect(() => {
       const statusParam = searchParams.get('status');
       const periodParam = searchParams.get('period');
       const shiftParam = searchParams.get('shiftId');
+      const clientIdParam = searchParams.get('clientId');
+      const fromParam = searchParams.get('from');
+      const toParam = searchParams.get('to');
+      const recordStatusParam = searchParams.get('recordStatus');
+      const orderParam = searchParams.get('order');
+      const orderByParam = searchParams.get('orderBy');
+
       if (statusParam === 'unapproved') setOnlyPending(true); else setOnlyPending(false);
       if (periodParam === 'current_month') {
           const now = new Date();
@@ -90,9 +99,35 @@ export default function ReportsClientPage() {
           const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
           const formatDate = (d: Date) => d.toISOString().split('T')[0];
           setStartDate(formatDate(firstDay)); setEndDate(formatDate(lastDay));
+      } else {
+          if (fromParam) setStartDate(fromParam);
+          if (toParam) setEndDate(toParam);
       }
       setFilterShiftId(shiftParam || null);
+      if (clientIdParam) setFilterClientId(clientIdParam);
+      if (recordStatusParam) setFilterStatus(recordStatusParam);
+      if (orderParam === 'asc' || orderParam === 'desc') setOrder(orderParam);
+      if (orderByParam) setOrderBy(orderByParam);
   }, [searchParams]);
+
+  // フィルタ・ソート状態が変わるたびにURLへ同期する(router.replaceでhistoryを増やさない)。
+  // 既にURLと一致する場合は呼ばない(上の復元effectとの往復ループを防ぐ)。
+  useEffect(() => {
+      const params = new URLSearchParams();
+      if (filterClientId !== 'all') params.set('clientId', filterClientId);
+      if (filterStatus !== 'all') params.set('recordStatus', filterStatus);
+      if (startDate) params.set('from', startDate);
+      if (endDate) params.set('to', endDate);
+      if (onlyPending) params.set('status', 'unapproved');
+      if (filterShiftId) params.set('shiftId', filterShiftId);
+      if (order !== 'desc') params.set('order', order);
+      if (orderBy !== 'start_at') params.set('orderBy', orderBy);
+
+      const nextQs = params.toString();
+      const currentQs = searchParams.toString();
+      if (nextQs === currentQs) return;
+      router.replace(nextQs ? `/app/reports?${nextQs}` : '/app/reports', { scroll: false });
+  }, [filterClientId, filterStatus, startDate, endDate, onlyPending, filterShiftId, order, orderBy, searchParams, router]);
 
   const fetchClients = useCallback(async () => {
     if (!currentOrg) return;

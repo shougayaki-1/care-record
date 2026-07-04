@@ -597,6 +597,11 @@ export default function StatisticsPage() {
         return rows.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
     }, [rawShiftsWithLinks, rawReports, targetMonth]);
 
+    const unregisteredCount = useMemo(
+        () => shiftVarianceRows.filter(row => !row.reportId).length,
+        [shiftVarianceRows],
+    );
+
     const aggregatedTotals = useMemo(() => {
         return visibleAggregatedData.rows.reduce(
             (total, row) => ({
@@ -733,7 +738,17 @@ export default function StatisticsPage() {
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
                 {(isPending || isAggregatedStale) && <LinearProgress sx={{ mb: 2 }} />}
                 <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} mb={3} spacing={2}>
-                    <MonthField label="対象月" size="small" value={targetMonth} onChange={handleTargetMonthChange} sx={{ minWidth: { xs: 0, sm: 200 } }} />
+                    <Stack direction="row" spacing={1.5} alignItems="center" useFlexGap flexWrap="wrap">
+                        <MonthField label="対象月" size="small" value={targetMonth} onChange={handleTargetMonthChange} sx={{ minWidth: { xs: 0, sm: 200 } }} />
+                        {!loading && (
+                            <Chip
+                                size="small"
+                                color={unregisteredCount > 0 ? 'warning' : 'default'}
+                                variant={unregisteredCount > 0 ? 'filled' : 'outlined'}
+                                label={`未登録の実績 ${unregisteredCount}件`}
+                            />
+                        )}
+                    </Stack>
                     {tabIndex < 2 && <Button variant="outlined" color="primary" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={loading || visibleAggregatedData.rows.length === 0} sx={{ bgcolor: 'background.paper' }}>CSVダウンロード</Button>}
                 </Stack>
 

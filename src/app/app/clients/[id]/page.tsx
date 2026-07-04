@@ -189,6 +189,31 @@ export default function ClientSettingsPage() {
         setFormItems(newItems);
     };
 
+    // 選択肢はカンマ区切り文字列として保存する既存フォーマットを維持しつつ、行編集UIで扱えるようにする
+    const getOptionsArray = (options?: string): string[] => (options ? options.split(',') : []);
+    const updateOption = (index: number, optIndex: number, value: string) => {
+        const opts = getOptionsArray(formItems[index].options);
+        opts[optIndex] = value;
+        updateField(index, 'options', opts.join(','));
+    };
+    const addOption = (index: number) => {
+        const opts = getOptionsArray(formItems[index].options);
+        opts.push('');
+        updateField(index, 'options', opts.join(','));
+    };
+    const removeOption = (index: number, optIndex: number) => {
+        const opts = getOptionsArray(formItems[index].options);
+        opts.splice(optIndex, 1);
+        updateField(index, 'options', opts.join(','));
+    };
+    const moveOption = (index: number, optIndex: number, direction: 'up' | 'down') => {
+        const opts = getOptionsArray(formItems[index].options);
+        const targetIndex = direction === 'up' ? optIndex - 1 : optIndex + 1;
+        if (targetIndex < 0 || targetIndex >= opts.length) return;
+        [opts[optIndex], opts[targetIndex]] = [opts[targetIndex], opts[optIndex]];
+        updateField(index, 'options', opts.join(','));
+    };
+
     const handleSaveForm = async () => {
         setIsSaving(true);
         setMessage(null);
@@ -456,7 +481,30 @@ export default function ClientSettingsPage() {
                                                     <FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: { xs: 0, sm: 1 } }} />
                                                 )}
                                                 {(item.type === 'select' || item.type === 'multicheckbox') && (
-                                                    <TextField label="選択肢（カンマ区切り）" size="small" fullWidth value={item.options || ''} onChange={(e) => updateField(index, 'options', e.target.value)} slotProps={{ input: { startAdornment: <CheckBoxIcon sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} /> } }} />
+                                                    <Box sx={{ mt: 0.5 }}>
+                                                        <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" gap={0.5} sx={{ mb: 0.75 }}>
+                                                            <CheckBoxIcon sx={{ fontSize: 16 }} />選択肢
+                                                        </Typography>
+                                                        <Stack spacing={0.75}>
+                                                            {getOptionsArray(item.options).map((opt, optIndex, arr) => (
+                                                                <Stack key={optIndex} direction="row" spacing={0.5} alignItems="center">
+                                                                    <TextField
+                                                                        size="small"
+                                                                        fullWidth
+                                                                        value={opt}
+                                                                        placeholder={`選択肢 ${optIndex + 1}`}
+                                                                        onChange={(e) => updateOption(index, optIndex, e.target.value)}
+                                                                    />
+                                                                    <IconButton size="small" onClick={() => moveOption(index, optIndex, 'up')} disabled={optIndex === 0}><ArrowUpwardIcon fontSize="small" /></IconButton>
+                                                                    <IconButton size="small" onClick={() => moveOption(index, optIndex, 'down')} disabled={optIndex === arr.length - 1}><ArrowDownwardIcon fontSize="small" /></IconButton>
+                                                                    <IconButton size="small" color="error" onClick={() => removeOption(index, optIndex)}><DeleteIcon fontSize="small" /></IconButton>
+                                                                </Stack>
+                                                            ))}
+                                                            <Button size="small" startIcon={<AddCircleIcon />} onClick={() => addOption(index)} sx={{ alignSelf: 'flex-start' }}>
+                                                                選択肢を追加
+                                                            </Button>
+                                                        </Stack>
+                                                    </Box>
                                                 )}
                                             </Box>
                                         </Stack>
@@ -473,9 +521,18 @@ export default function ClientSettingsPage() {
                         <CardContent>
                             <Typography variant="subtitle1" fontWeight="bold" gutterBottom>この利用者を担当するスタッフを選択してください</Typography>
                             <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。往復距離は記録作成時の初期値になります。</Typography>
-                            {permissionHints.some((hint) => hint.canCreateAllRecords) && (
+                            {permissionHints.some((hint) => hint.canCreateAllRecords && !assignedStaffIds.includes(hint.staffId)) && (
                                 <Alert severity="info" sx={{ mb: 2 }}>
-                                    全体の記録作成権限を持つスタッフは、ここで担当に入っていなくても記録を作成できます。
+                                    <Typography variant="body2" fontWeight="bold" gutterBottom>
+                                        以下のスタッフは担当に入っていませんが、全体の記録作成権限を持つため記録を作成できます:
+                                    </Typography>
+                                    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
+                                        {allStaffs
+                                            .filter((staff) => !assignedStaffIds.includes(staff.id) && permissionHints.find((hint) => hint.staffId === staff.id)?.canCreateAllRecords)
+                                            .map((staff) => (
+                                                <Chip key={staff.id} label={staff.name} size="small" color="info" variant="outlined" />
+                                            ))}
+                                    </Stack>
                                 </Alert>
                             )}
                             <Stack spacing={3}>
@@ -503,15 +560,6 @@ export default function ClientSettingsPage() {
                                                 <Stack key={staff.id} direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
                                                     <Box sx={{ minWidth: { sm: 180 } }}>
                                                         <Typography sx={{ fontWeight: 'bold', overflowWrap: 'anywhere' }}>{staff.name}</Typography>
-                                                        {permissionHints.find((hint) => hint.staffId === staff.id)?.canCreateAllRecords && (
-                                                            <Chip
-                                                                label="全体権限で記録作成可"
-                                                                size="small"
-                                                                color="success"
-                                                                variant="outlined"
-                                                                sx={{ mt: 0.5 }}
-                                                            />
-                                                        )}
                                                     </Box>
                                                     <TextField
                                                         label="往復距離"
