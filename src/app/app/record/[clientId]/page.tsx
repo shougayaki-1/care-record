@@ -563,8 +563,12 @@ export default function RecordPage() {
           .order('sort_order', { ascending: true }),
         currentOrg
           ? (async () => {
-              await auditReportView(currentOrg.id, targetId);
-              setImages(await getReportImages(currentOrg.id, targetId));
+              try {
+                await auditReportView(currentOrg.id, targetId);
+                setImages(await getReportImages(currentOrg.id, targetId));
+              } catch (auditImageError) {
+                console.error('audit/image load error:', auditImageError);
+              }
             })()
           : Promise.resolve(),
       ]);
