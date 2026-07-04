@@ -24,7 +24,7 @@ type DraftReport = { id: string; created_at: string; };
 
 export default function RecordSelectPage() {
     const router = useRouter();
-    const { currentOrg, loading: wsLoading } = useWorkspace();
+    const { currentOrg, userId, loading: wsLoading } = useWorkspace();
     const [clients, setClients] = useState<Client[]>([]);
     const [loading, setLoading] = useState(true);
     const [clientDrafts, setClientDrafts] = useState<Record<string, DraftReport[]>>({});
@@ -33,8 +33,7 @@ export default function RecordSelectPage() {
     const fetchData = useCallback(async () => {
         if (!currentOrg) return;
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            if (!userId) return;
 
             const canCreateAll = currentOrg.effectivePermissions.records.create === 'all';
             const canCreateAssigned = currentOrg.effectivePermissions.records.create === 'assigned';
@@ -54,7 +53,7 @@ export default function RecordSelectPage() {
                         const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
                         return (data ?? []) as Client[];
                     } else if (canCreateAssigned) {
-                        const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', user.id);
+                        const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', userId);
                         return ((data ?? []) as unknown as { clients: Client | null }[])
                             .map(d => d.clients).filter((c): c is Client => c !== null);
                     }
@@ -73,7 +72,7 @@ export default function RecordSelectPage() {
             if (targetClients.length > 0) {
                 const { data: drafts } = await supabase.from('reports')
                     .select('id, client_id, created_at')
-                    .eq('helper_id', user.id)
+                    .eq('helper_id', userId)
                     .eq('status', 'draft')
                     .is('deleted_at', null)
                     .in('client_id', targetClients.map(c => c.id))
@@ -86,7 +85,7 @@ export default function RecordSelectPage() {
                 setClientDrafts(draftsMap);
             }
         } catch (e) { console.error(e); } finally { setLoading(false); }
-    }, [currentOrg]);
+    }, [currentOrg, userId]);
 
     useEffect(() => { if (!wsLoading && currentOrg) fetchData(); }, [wsLoading, currentOrg, fetchData]);
 

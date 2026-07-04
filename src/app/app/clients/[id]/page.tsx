@@ -80,13 +80,33 @@ export default function ClientSettingsPage() {
 
     const fetchClientData = useCallback(async () => {
         try {
-            const { data: client } = await supabase.from('clients').select('name, google_template_id').eq('id', clientId).single();
+            const [
+                { data: client },
+                { data: template },
+                staffsResult,
+                { data: assigns },
+                permissionHintsResult,
+            ] = await Promise.all([
+                supabase.from('clients').select('name, google_template_id').eq('id', clientId).single(),
+                supabase.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle(),
+                currentOrg
+                    ? supabase
+                        .from('staffs')
+                        .select('id, name, user_id')
+                        .eq('organization_id', currentOrg.id)
+                        .is('archived_at', null)
+                        .order('sort_order', { ascending: true, nullsFirst: false })
+                        .order('name', { ascending: true })
+                    : Promise.resolve(null),
+                supabase.from('assignments').select('staff_id, helper_id, round_trip_distance_km').eq('client_id', clientId),
+                currentOrg ? getClientAssignmentPermissionHints(currentOrg.id, clientId) : Promise.resolve(null),
+            ]);
+
             if (client) {
                 setClientName(client.name);
                 setTemplateId(client.google_template_id || '');
             }
 
-            const { data: template } = await supabase.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle();
             if (template?.schema && Array.isArray(template.schema) && template.schema.length > 0) {
                 setFormItems(template.schema as FormItem[]);
             } else {
@@ -95,14 +115,8 @@ export default function ClientSettingsPage() {
             }
 
             if (currentOrg) {
-                const { data: staffRows, error: staffsError } = await supabase
-                    .from('staffs')
-                    .select('id, name, user_id')
-                    .eq('organization_id', currentOrg.id)
-                    .is('archived_at', null)
-                    .order('sort_order', { ascending: true, nullsFirst: false })
-                    .order('name', { ascending: true });
-                if (staffsError) throw staffsError;
+                if (staffsResult?.error) throw staffsResult.error;
+                const staffRows = staffsResult?.data;
                 const staffs: Staff[] = (staffRows || []).map((staff) => ({
                     id: staff.id,
                     name: staff.name,
@@ -110,7 +124,6 @@ export default function ClientSettingsPage() {
                 }));
                 setAllStaffs(staffs);
 
-                const { data: assigns } = await supabase.from('assignments').select('staff_id, helper_id, round_trip_distance_km').eq('client_id', clientId);
                 if (assigns) {
                     const staffIdByUserId = new Map(staffs.filter((staff) => staff.userId).map((staff) => [staff.userId, staff.id]));
                     const ids = assigns
@@ -124,7 +137,7 @@ export default function ClientSettingsPage() {
                     });
                     setRoundTripDistances(distances);
                 }
-                setPermissionHints(await getClientAssignmentPermissionHints(currentOrg.id, clientId));
+                if (permissionHintsResult) setPermissionHints(permissionHintsResult);
             }
 
         } catch (error) {

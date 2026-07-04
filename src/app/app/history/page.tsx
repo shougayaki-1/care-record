@@ -85,7 +85,7 @@ const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month
 
 export default function HistoryPage() {
     const router = useRouter();
-    const { currentOrg, loading: wsLoading } = useWorkspace();
+    const { currentOrg, userId, loading: wsLoading } = useWorkspace();
     const [viewMode, setViewMode] = useState(0); // 0: List, 1: Calendar
     const [reports, setReports] = useState<Report[]>([]);
     const [filterDate, setFilterDate] = useState('');
@@ -94,13 +94,12 @@ export default function HistoryPage() {
     useEffect(() => {
         const fetchData = async () => {
             if (!currentOrg) return;
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            if (!userId) return;
             const { data: myStaff } = await supabase
                 .from('staffs')
                 .select('name')
                 .eq('organization_id', currentOrg.id)
-                .eq('user_id', user.id)
+                .eq('user_id', userId)
                 .is('deleted_at', null)
                 .maybeSingle();
 
@@ -126,7 +125,7 @@ export default function HistoryPage() {
                 const typedData = data as unknown as Report[];
                 const myName = myStaff?.name;
                 setReports(typedData.filter((report) => {
-                    if (report.helper_id === user.id) return true;
+                    if (report.helper_id === userId) return true;
                     const helpers = report.report_values?.[0]?.data?._helpers;
                     return Boolean(myName && Array.isArray(helpers) && helpers.includes(myName));
                 }));
@@ -134,7 +133,7 @@ export default function HistoryPage() {
         };
 
         if (!wsLoading) fetchData();
-    }, [wsLoading, currentOrg, filterDate, viewMode, currentMonth]);
+    }, [wsLoading, currentOrg, userId, filterDate, viewMode, currentMonth]);
 
     const handleEdit = (report: Report) => router.push(`/app/record/${report.client_id}?reportId=${report.id}`);
 
