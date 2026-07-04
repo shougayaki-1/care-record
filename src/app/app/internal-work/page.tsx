@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Box, Button, Chip, Divider, Stack, TextField, Typography,
   MenuItem,
@@ -11,8 +11,8 @@ import { FormPageSkeleton, InnerPageHeader, MonthField, PageBody, PageLayout, Pa
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import {
+  getInternalWorkPageData,
   listInternalWorkRecords,
-  listInternalWorkStaffOptions,
   type InternalWorkRecord,
   type InternalWorkStaffOption,
 } from '@/app/actions/internalWork';
@@ -46,6 +46,14 @@ export default function InternalWorkPage() {
   const canViewAll = internalWorkPermissions.view === 'all';
   const canCreateInternalWork = internalWorkPermissions.create !== 'none';
 
+  // 初期ロードが「開始済み」か（二重発火防止用）と「完了済み」か
+  // （フィルタ変更エフェクトを許可してよいか）を別々に管理する。
+  // 開始と完了を1つのフラグにまとめると、初期ロードの非同期処理が
+  // 完了する前に同一コミット内でフィルタ変更エフェクトが走り、
+  // loadRecords() が二重発火してしまう。
+  const initialLoadStartedRef = useRef(false);
+  const initialLoadCompletedRef = useRef(false);
+
   const loadRecords = useCallback(async () => {
     if (!currentOrg) return;
     setLoading(true);
@@ -61,23 +69,53 @@ export default function InternalWorkPage() {
     }
   }, [currentOrg, targetMonth, selectedStaffId, canViewAll, showToast]);
 
-  const loadStaffOptions = useCallback(async () => {
-    if (!currentOrg) return;
-    try {
-      const options = await listInternalWorkStaffOptions(currentOrg.id);
-      setStaffOptions(options);
-    } catch (e) {
-      console.error(e);
-      showToast('スタッフ一覧の取得に失敗しました', 'error');
-    }
-  }, [currentOrg, showToast]);
-
+  // 初期ロード: currentOrg が最初に準備できたタイミングで1回だけ、
+  // records と staffOptions をまとめて取得する。
   useEffect(() => {
-    if (!wsLoading && currentOrg) {
-      void loadStaffOptions();
-      void loadRecords();
-    }
-  }, [wsLoading, currentOrg, loadStaffOptions, loadRecords]);
+    if (wsLoading || !currentOrg || initialLoadStartedRef.current) return;
+    initialLoadStartedRef.current = true;
+
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const { start, end } = monthRange(targetMonth);
+        const staffId = canViewAll && selectedStaffId !== 'all' ? selectedStaffId : null;
+        const { records: initialRecords, staffOptions: initialStaffOptions } = await getInternalWorkPageData(
+          currentOrg.id,
+          start,
+          end,
+          staffId,
+        );
+        if (cancelled) return;
+        setRecords(initialRecords);
+        setStaffOptions(initialStaffOptions);
+      } catch (e) {
+        if (cancelled) return;
+        console.error(e);
+        showToast('内勤実績の取得に失敗しました', 'error');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          initialLoadCompletedRef.current = true;
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsLoading, currentOrg]);
+
+  // フィルタ変更時の再取得: 初期ロード完了後、targetMonth/selectedStaffId が
+  // 変わるたびに records のみ再取得する（staffOptions は再取得しない）。
+  // 初期ロードの実行中（完了前）にこのエフェクトが同一コミットで走っても
+  // initialLoadCompletedRef はまだ false のため、二重発火しない。
+  useEffect(() => {
+    if (!initialLoadCompletedRef.current) return;
+    void loadRecords();
+  }, [loadRecords]);
 
   if (wsLoading || !currentOrg) return <FormPageSkeleton />;
 
