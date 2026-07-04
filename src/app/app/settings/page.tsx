@@ -30,6 +30,10 @@ import { getGoogleAuthUrlAction } from '@/app/actions/google';
 import LaborPremiumSettings from '@/components/settings/LaborPremiumSettings';
 import ServiceTypeSettings from '@/components/settings/ServiceTypeSettings';
 import StaffRoleSettings from '@/components/settings/StaffRoleSettings';
+import { getSettingsSectionsData } from '@/app/actions/settingsSections';
+import type { LaborPremiumType } from '@/utils/laborPremium';
+import type { ServiceType } from '@/app/actions/serviceTypes';
+import type { StaffRole } from '@/app/actions/staffRoles';
 
 type AuditLog = {
     id: string;
@@ -81,6 +85,13 @@ function SettingsContent() {
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
     const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
     const [confirmInput, setConfirmInput] = useState('');
+
+    // 労働時間ルール・サービス種別・スタッフ役割の3セクションをまとめて1回で取得する
+    const [settingsSectionsData, setSettingsSectionsData] = useState<{
+        laborPremiumTypes: LaborPremiumType[];
+        serviceTypes: ServiceType[];
+        staffRoles: StaffRole[];
+    } | null>(null);
     const canRepairCalendarSync = Boolean(
         currentOrg &&
         checkShiftPermission(currentOrg.effectivePermissions, 'edit', true) &&
@@ -141,6 +152,17 @@ function SettingsContent() {
             fetchOrgDetails();
         }
     }, [wsLoading, currentOrg, router, fetchOrgDetails, fetchLogs]);
+
+    // 労働時間ルール・サービス種別・スタッフ役割: 3セクション分をまとめて1回のServer Actionで取得し、
+    // 各コンポーネントの初期表示props（initialLaborPremiumTypes等）として渡す。
+    useEffect(() => {
+        if (!currentOrg) return;
+        let cancelled = false;
+        getSettingsSectionsData(currentOrg.id)
+            .then((data) => { if (!cancelled) setSettingsSectionsData(data); })
+            .catch((e) => { console.error(e); });
+        return () => { cancelled = true; };
+    }, [currentOrg]);
 
     // Google OAuth コールバック後のトースト表示
     useEffect(() => {
@@ -605,7 +627,7 @@ function SettingsContent() {
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         深夜割り増し・時間外割り増しなどの種別と計算方法を管理します。
                                     </Typography>
-                                    <LaborPremiumSettings orgId={currentOrg.id} />
+                                    <LaborPremiumSettings orgId={currentOrg.id} initialLaborPremiumTypes={settingsSectionsData?.laborPremiumTypes} />
                                 </Box>
                             )}
 
@@ -616,7 +638,7 @@ function SettingsContent() {
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         シフト内の区間に設定できるサービス種別（例：重度訪問介護、移動支援）を管理します。
                                     </Typography>
-                                    <ServiceTypeSettings orgId={currentOrg.id} />
+                                    <ServiceTypeSettings orgId={currentOrg.id} initialServiceTypes={settingsSectionsData?.serviceTypes} />
                                 </Box>
                             )}
 
@@ -627,7 +649,7 @@ function SettingsContent() {
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         シフト区間内でのスタッフの役割（例：正職員、パート、ボランティア）を管理します。無給フラグを設定することで給与計算から除外できます。
                                     </Typography>
-                                    <StaffRoleSettings orgId={currentOrg.id} />
+                                    <StaffRoleSettings orgId={currentOrg.id} initialStaffRoles={settingsSectionsData?.staffRoles} />
                                 </Box>
                             )}
 

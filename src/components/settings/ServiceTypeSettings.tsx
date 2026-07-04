@@ -11,9 +11,15 @@ import {
   type ServiceType,
 } from '@/app/actions/serviceTypes';
 
-export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
-  const [rows, setRows] = useState<ServiceType[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function ServiceTypeSettings({
+  orgId,
+  initialServiceTypes,
+}: {
+  orgId: string;
+  initialServiceTypes?: ServiceType[];
+}) {
+  const [rows, setRows] = useState<ServiceType[]>(initialServiceTypes ?? []);
+  const [loading, setLoading] = useState(initialServiceTypes === undefined);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -39,7 +45,11 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
     }
   };
 
-  useEffect(() => { load(); }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (initialServiceTypes !== undefined) return;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
 
   const handleToggleActive = async (row: ServiceType) => {
     try {
