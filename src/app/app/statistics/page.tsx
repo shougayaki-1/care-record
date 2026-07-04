@@ -15,7 +15,7 @@ import { useRouter } from 'next/navigation';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
-import { MonthField } from '@/components/ui';
+import { MonthField, TablePageSkeleton } from '@/components/ui';
 import { aggregatePremiumMinutes, type LaborPremiumType } from '@/utils/laborPremium';
 import { type InternalWorkRecord } from '@/app/actions/internalWork';
 import { getStatisticsData } from '@/app/actions/statistics';
@@ -714,7 +714,7 @@ export default function StatisticsPage() {
         document.body.removeChild(link);
     };
 
-    if (wsLoading || !currentOrg) return null;
+    if (wsLoading || !currentOrg) return <TablePageSkeleton />;
 
     return (
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>

@@ -79,10 +79,20 @@ export async function getAccountOverview(orgId: string): Promise<{ currentUserId
 
     const profileNames = new Map((profiles || []).map((profile) => [profile.id, profile.name]));
     const authEmails = new Map<string, string>();
-    await Promise.all(memberIds.map(async (memberId) => {
-        const { data } = await supabaseAdmin.auth.admin.getUserById(memberId);
-        if (data.user?.email) authEmails.set(memberId, data.user.email);
-    }));
+    if (memberIds.length > 0) {
+        const memberIdSet = new Set(memberIds);
+        const perPage = 1000;
+        let page = 1;
+        while (true) {
+            const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
+            if (error) throw new Error('アカウント情報を取得できませんでした');
+            for (const user of data.users) {
+                if (memberIdSet.has(user.id) && user.email) authEmails.set(user.id, user.email);
+            }
+            if (data.users.length < perPage) break;
+            page += 1;
+        }
+    }
 
     // Build a map of userId -> roles[]
     const rolesMap = new Map<string, { id: string; name: string; color: string | null }[]>();

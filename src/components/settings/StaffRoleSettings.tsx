@@ -11,9 +11,15 @@ import {
   type StaffRole,
 } from '@/app/actions/staffRoles';
 
-export default function StaffRoleSettings({ orgId }: { orgId: string }) {
-  const [rows, setRows] = useState<StaffRole[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function StaffRoleSettings({
+  orgId,
+  initialStaffRoles,
+}: {
+  orgId: string;
+  initialStaffRoles?: StaffRole[];
+}) {
+  const [rows, setRows] = useState<StaffRole[]>(initialStaffRoles ?? []);
+  const [loading, setLoading] = useState(initialStaffRoles === undefined);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -41,7 +47,11 @@ export default function StaffRoleSettings({ orgId }: { orgId: string }) {
     }
   };
 
-  useEffect(() => { load(); }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (initialStaffRoles !== undefined) return;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
 
   const handleToggleActive = async (row: StaffRole) => {
     try {

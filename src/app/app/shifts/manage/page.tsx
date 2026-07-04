@@ -61,7 +61,7 @@ const ShiftPatternModal = dynamic(
 );
 
 export default function ShiftManagePage() {
-    const { currentOrg, loading: wsLoading } = useWorkspace();
+    const { currentOrg, userId, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
     const confirm = useConfirm();
     const router = useRouter();
@@ -101,7 +101,7 @@ export default function ShiftManagePage() {
         currentStaffId, initialLoading, isFetching,
         unsyncedCount, setUnsyncedCount,
         fetchData, fetchMasterData,
-    } = useShiftData({ currentOrg, showToast, calendarRef, activeTab, selectedStaffId, selectedClientId });
+    } = useShiftData({ currentOrg, userId, showToast, calendarRef, activeTab, selectedStaffId, selectedClientId });
 
     useEffect(() => {
         const shiftIdParam = searchParams.get('shiftId');
@@ -437,7 +437,7 @@ export default function ShiftManagePage() {
         startTransition(() => setActiveTab(value));
     }, [activeTab, startTransition]);
 
-    if (wsLoading || !currentOrg) return null;
+    if (wsLoading || !currentOrg) return <CalendarPageSkeleton />;
 
     const canUseOrgWideTabs = currentOrg.effectivePermissions.shifts.view === 'all';
     const canCreateShift = checkShiftPermission(currentOrg.effectivePermissions, 'create', true);

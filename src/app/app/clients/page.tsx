@@ -14,7 +14,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { AppButton, AppDialog, AppTextField, DataTable, PageBody, PageHeader, PageLayout, StatusChip, SwitchField } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, DataTable, PageBody, PageHeader, PageLayout, StatusChip, SwitchField, TablePageSkeleton } from '@/components/ui';
 import { createClient, setClientArchived, softDeleteClient, updateClientName } from '@/app/actions/clients';
 
 type Client = {
@@ -133,7 +133,7 @@ export default function ClientsPage() {
 
   const handleGoSettings = (id: string) => { router.push(`/app/clients/${id}`); };
 
-  if (loading || wsLoading) return null;
+  if (loading || wsLoading) return <TablePageSkeleton />;
 
   return (
     <PageLayout>

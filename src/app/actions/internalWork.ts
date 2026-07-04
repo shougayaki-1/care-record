@@ -184,6 +184,65 @@ export async function listInternalWorkRecords(
   return (data ?? []) as unknown as InternalWorkRecord[];
 }
 
+export async function getInternalWorkPageData(
+  organizationId: string,
+  startAt: string,
+  endAt: string,
+  staffId?: string | null,
+): Promise<{ records: InternalWorkRecord[]; staffOptions: InternalWorkStaffOption[] }> {
+  const user = await getAuthedUser();
+  await assertOrgRole(organizationId);
+
+  const [records, staffOptions] = await Promise.all([
+    (async (): Promise<InternalWorkRecord[]> => {
+      const permission = await getInternalWorkPermission(organizationId, user.id, 'view');
+      if (permission.scope === 'none') throw new Error('内勤実績を閲覧する権限がありません');
+
+      const targetStaffId = permission.scope === 'all' ? (staffId || null) : permission.ownStaffId;
+      if (permission.scope !== 'all' && !targetStaffId) return [];
+      if (targetStaffId) await assertStaffInOrg(organizationId, targetStaffId);
+
+      let query = supabaseAdmin
+        .from('internal_work_records')
+        .select('id, organization_id, staff_id, title, work_type, start_at, end_at, work_hours, status, note, staffs(name)')
+        .eq('organization_id', organizationId)
+        .is('deleted_at', null)
+        .gte('end_at', startAt)
+        .lte('start_at', endAt);
+
+      if (targetStaffId) query = query.eq('staff_id', targetStaffId);
+
+      const { data, error } = await query.order('start_at', { ascending: false });
+
+      if (error) throw sanitizeDbError(error, 'action.internalWork');
+      return (data ?? []) as unknown as InternalWorkRecord[];
+    })(),
+    (async (): Promise<InternalWorkStaffOption[]> => {
+      const permission = await getInternalWorkPermission(organizationId, user.id, 'create');
+      if (permission.scope === 'none') return [];
+
+      let query = supabaseAdmin
+        .from('staffs')
+        .select('id, name')
+        .eq('organization_id', organizationId)
+        .is('deleted_at', null)
+        .is('archived_at', null);
+      if (permission.scope !== 'all') {
+        if (!permission.ownStaffId) return [];
+        query = query.eq('id', permission.ownStaffId);
+      }
+
+      const { data, error } = await query
+        .order('sort_order', { ascending: true, nullsFirst: false })
+        .order('name', { ascending: true });
+      if (error) throw sanitizeDbError(error, 'action.internalWork');
+      return (data ?? []) as InternalWorkStaffOption[];
+    })(),
+  ]);
+
+  return { records, staffOptions };
+}
+
 export async function listMyInternalWorkRecords(
   organizationId: string,
   startAt: string,

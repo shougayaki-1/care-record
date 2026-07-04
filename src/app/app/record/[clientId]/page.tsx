@@ -274,7 +274,7 @@ export default function RecordPage() {
   const searchParams = useSearchParams();
   const { showToast } = useToast();
   const confirm = useConfirm();
-  const { currentOrg, loading: wsLoading } = useWorkspace();
+  const { currentOrg, loading: wsLoading, userId } = useWorkspace();
   
   const paramReportId = searchParams.get('reportId');
   const shiftId = searchParams.get('shiftId');
@@ -456,65 +456,70 @@ export default function RecordPage() {
   };
 
   const fetchBaseData = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
     if (!currentOrg) return;
 
     try {
-      const { data: client } = await supabase.from('clients').select('*').eq('id', clientId).single();
-      if (client) {
-        setClientName(client.name);
-        const { data: tmpl } = await supabase.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle();
-        const schema = (tmpl?.schema as FormItem[]) || DEFAULT_TEMPLATE;
-        setTemplate(schema.filter(i => !['service_time', 'travel_time', 'round_trip_distance_km', 'travel_cost_yen'].includes(i.id)));
-      }
-
-      const { data: staffsData } = await supabase
-        .from('staffs')
-        .select('id, name, user_id')
-        .eq('organization_id', currentOrg.id)
-        .is('archived_at', null)
-        .order('sort_order', { ascending: true, nullsFirst: false })
-        .order('name', { ascending: true });
-
-      const { data: assignmentRows } = await supabase
-        .from('assignments')
-        .select('staff_id, round_trip_distance_km')
-        .eq('client_id', clientId);
-      const distanceByStaffId = new Map((assignmentRows || []).map((assignment) => [assignment.staff_id, Number(assignment.round_trip_distance_km || 0)]));
-      const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id, defaultRoundTripDistanceKm: distanceByStaffId.get(s.id) || 0 }));
-      setSelectableStaffs(allStaffs);
-
-      if (currentOrg) {
-        const [{ data: orgData }, { data: serviceTypeData }, { data: staffRoleData }] = await Promise.all([
-          supabase
+      const [
+        { data: client },
+        { data: tmpl },
+        { data: staffsData },
+        { data: assignmentRows },
+        { data: orgData },
+        { data: serviceTypeData },
+        { data: staffRoleData },
+      ] = await Promise.all([
+        supabase.from('clients').select('*').eq('id', clientId).single(),
+        supabase.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle(),
+        supabase
+          .from('staffs')
+          .select('id, name, user_id')
+          .eq('organization_id', currentOrg.id)
+          .is('archived_at', null)
+          .order('sort_order', { ascending: true, nullsFirst: false })
+          .order('name', { ascending: true }),
+        supabase
+          .from('assignments')
+          .select('staff_id, round_trip_distance_km')
+          .eq('client_id', clientId),
+        supabase
           .from('organizations')
           .select('travel_cost_rate_yen_per_km')
           .eq('id', currentOrg.id)
           .maybeSingle(),
-          supabase
-            .from('service_types')
-            .select('id, name')
-            .eq('organization_id', currentOrg.id)
-            .eq('is_active', true)
-            .is('deleted_at', null)
-            .order('sort_order', { ascending: true })
-            .order('name', { ascending: true }),
-          supabase
-            .from('staff_roles')
-            .select('id, name')
-            .eq('organization_id', currentOrg.id)
-            .eq('is_active', true)
-            .is('deleted_at', null)
-            .order('sort_order', { ascending: true })
-            .order('name', { ascending: true }),
-        ]);
-        setTravelCostRateYenPerKm(Number(orgData?.travel_cost_rate_yen_per_km ?? 20));
-        setServiceTypes((serviceTypeData ?? []) as ServiceTypeOption[]);
-        setStaffRoles((staffRoleData ?? []) as StaffRoleOption[]);
+        supabase
+          .from('service_types')
+          .select('id, name')
+          .eq('organization_id', currentOrg.id)
+          .eq('is_active', true)
+          .is('deleted_at', null)
+          .order('sort_order', { ascending: true })
+          .order('name', { ascending: true }),
+        supabase
+          .from('staff_roles')
+          .select('id, name')
+          .eq('organization_id', currentOrg.id)
+          .eq('is_active', true)
+          .is('deleted_at', null)
+          .order('sort_order', { ascending: true })
+          .order('name', { ascending: true }),
+      ]);
+
+      if (client) {
+        setClientName(client.name);
+        const schema = (tmpl?.schema as FormItem[]) || DEFAULT_TEMPLATE;
+        setTemplate(schema.filter(i => !['service_time', 'travel_time', 'round_trip_distance_km', 'travel_cost_yen'].includes(i.id)));
       }
 
-      if (!currentReportId && !shiftId && user) {
-        const myStaffRecord = allStaffs.find(s => s.user_id === user.id);
+      const distanceByStaffId = new Map((assignmentRows || []).map((assignment) => [assignment.staff_id, Number(assignment.round_trip_distance_km || 0)]));
+      const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id, defaultRoundTripDistanceKm: distanceByStaffId.get(s.id) || 0 }));
+      setSelectableStaffs(allStaffs);
+
+      setTravelCostRateYenPerKm(Number(orgData?.travel_cost_rate_yen_per_km ?? 20));
+      setServiceTypes((serviceTypeData ?? []) as ServiceTypeOption[]);
+      setStaffRoles((staffRoleData ?? []) as StaffRoleOption[]);
+
+      if (!currentReportId && !shiftId && userId) {
+        const myStaffRecord = allStaffs.find(s => s.user_id === userId);
         if (myStaffRecord) {
             setSelectedHelpers([myStaffRecord.name]);
             setActualStaffs([{ staff_id: myStaffRecord.id, staff_role_id: null }]);
@@ -522,7 +527,7 @@ export default function RecordPage() {
         }
       }
     } catch (error) { console.error('Error fetching base data:', error); }
-  }, [clientId, currentOrg, currentReportId, setActualStaffs, setClientName, setRoundTripDistanceKm, setSelectableStaffs, setSelectedHelpers, setServiceTypes, setStaffRoles, setTemplate, setTravelCostRateYenPerKm, shiftId]);
+  }, [clientId, currentOrg, currentReportId, setActualStaffs, setClientName, setRoundTripDistanceKm, setSelectableStaffs, setSelectedHelpers, setServiceTypes, setStaffRoles, setTemplate, setTravelCostRateYenPerKm, shiftId, userId]);
 
   const loadExistingData = useCallback(async (targetId: string) => {
     if (!targetId) return;
@@ -540,24 +545,49 @@ export default function RecordPage() {
       setActualServiceTypeId(r.actual_service_type_id ?? '');
       setIsDirty(false);
 
-      if (r.shift_id && !r.segment_id) {
-          const { data: shift } = await supabase.from('shifts').select('start_at, end_at').eq('id', r.shift_id).maybeSingle();
-          if (shift) {
-              const s = new Date(shift.start_at);
-              const e = new Date(shift.end_at);
-              const isCrossMonth = s.getMonth() !== e.getMonth();
-              setIsSpanningMonth(isCrossMonth);
-              setOriginalShiftTimes({ start_at: shift.start_at, end_at: shift.end_at });
+      const shiftPromise = (r.shift_id && !r.segment_id)
+        ? supabase.from('shifts').select('start_at, end_at').eq('id', r.shift_id).maybeSingle()
+        : Promise.resolve(null);
 
-              if (isCrossMonth) {
-                  const isPart1 = new Date(r.start_at).getTime() === s.getTime();
-                  setSelectedPart(isPart1 ? 'part1' : 'part2');
+      const [
+        shiftResult,
+        { data: v, error: vError },
+        { data: actualStaffRows, error: actualStaffError },
+      ] = await Promise.all([
+        shiftPromise,
+        supabase.from('report_values').select('data').eq('report_id', targetId).maybeSingle(),
+        supabase
+          .from('report_actual_staffs')
+          .select('staff_id, staff_role_id, staff:staffs(name)')
+          .eq('report_id', targetId)
+          .order('sort_order', { ascending: true }),
+        currentOrg
+          ? (async () => {
+              try {
+                await auditReportView(currentOrg.id, targetId);
+                setImages(await getReportImages(currentOrg.id, targetId));
+              } catch (auditImageError) {
+                console.error('audit/image load error:', auditImageError);
               }
+            })()
+          : Promise.resolve(),
+      ]);
+
+      if (shiftResult?.data) {
+          const shift = shiftResult.data;
+          const s = new Date(shift.start_at);
+          const e = new Date(shift.end_at);
+          const isCrossMonth = s.getMonth() !== e.getMonth();
+          setIsSpanningMonth(isCrossMonth);
+          setOriginalShiftTimes({ start_at: shift.start_at, end_at: shift.end_at });
+
+          if (isCrossMonth) {
+              const isPart1 = new Date(r.start_at).getTime() === s.getTime();
+              setSelectedPart(isPart1 ? 'part1' : 'part2');
           }
       }
 
       // ★修正: .single() だと行欠落/複数行でエラーになり全項目が空になるため maybeSingle に変更
-      const { data: v, error: vError } = await supabase.from('report_values').select('data').eq('report_id', targetId).maybeSingle();
       if (vError) console.error('report_values load error:', vError);
       const data = (v?.data || {}) as FormAnswers & { service_time?: string; travel_time?: string; round_trip_distance_km?: string; _helpers?: string[] };
       setServiceTime(data.service_time || '');
@@ -565,11 +595,6 @@ export default function RecordPage() {
       setRoundTripDistanceKm(data.round_trip_distance_km || '0');
       setTravelCostRateYenPerKm(Number(data.travel_cost_rate_yen_per_km || travelCostRateYenPerKm || 20));
       setDistanceTouched(false);
-      const { data: actualStaffRows, error: actualStaffError } = await supabase
-        .from('report_actual_staffs')
-        .select('staff_id, staff_role_id, staff:staffs(name)')
-        .eq('report_id', targetId)
-        .order('sort_order', { ascending: true });
       if (actualStaffError) console.error('report_actual_staffs load error:', actualStaffError);
       const typedActualStaffRows = (actualStaffRows ?? []) as unknown as Array<{ staff_id: string; staff_role_id: string | null; staff?: { name: string } | { name: string }[] | null }>;
       if (typedActualStaffRows.length > 0) {
@@ -583,11 +608,6 @@ export default function RecordPage() {
         setSelectedHelpers(data._helpers || []);
       }
       setAnswers(data);
-
-      if (currentOrg) {
-        await auditReportView(currentOrg.id, targetId);
-        setImages(await getReportImages(currentOrg.id, targetId));
-      }
     } catch (e) { console.error(e); showToast('記録の読み込みに失敗しました', 'error'); }
   }, [showToast, formatDatetimeLocal, currentOrg, setActualServiceTypeId, setActualStaffs, setAnswers, setCurrentStatus, setDistanceTouched, setEndDateTime, setImages, setIsDirty, setIsSpanningMonth, setOriginalShiftTimes, setRoundTripDistanceKm, setSelectedHelpers, setSelectedPart, setSelectedSegmentId, setServiceTime, setStartDateTime, setTravelCostRateYenPerKm, setTravelTime, travelCostRateYenPerKm]);
 

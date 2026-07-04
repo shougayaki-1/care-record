@@ -43,6 +43,7 @@ export type ShiftDateRange = {
 
 type UseShiftDataParams = {
     currentOrg: { id: string; role: string; effectivePermissions: RolePermissions } | null;
+    userId: string | null;
     showToast: (msg: string, severity?: 'success' | 'info' | 'warning' | 'error') => void;
     calendarRef: RefObject<FullCalendar | null>;
     activeTab: TabId;
@@ -60,6 +61,7 @@ const getCurrentMonthRange = (): ShiftDateRange => {
 
 export const useShiftData = ({
     currentOrg,
+    userId,
     showToast,
     calendarRef,
     activeTab,
@@ -76,7 +78,7 @@ export const useShiftData = ({
     const [clients, setClients] = useState<ClientData[]>([]);
     const [staffs, setStaffs] = useState<StaffData[]>([]);
 
-    const [currentUserId, setCurrentUserId] = useState('');
+    const currentUserId = userId ?? '';
     const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
     const [unsyncedCount, setUnsyncedCount] = useState(0);
 
@@ -105,12 +107,6 @@ export const useShiftData = ({
     useEffect(() => {
         currentStaffIdRef.current = currentStaffId;
     }, [currentStaffId]);
-
-    useEffect(() => {
-        supabase.auth.getUser().then(({ data: { user } }) => {
-            if (user) setCurrentUserId(user.id);
-        });
-    }, []);
 
     const fetchMasterData = useCallback(async () => {
         if (!currentOrg) return;

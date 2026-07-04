@@ -52,9 +52,15 @@ function rowToEditState(row: PremiumRow): EditState {
   };
 }
 
-export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
-  const [rows, setRows] = useState<PremiumRow[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function LaborPremiumSettings({
+  orgId,
+  initialLaborPremiumTypes,
+}: {
+  orgId: string;
+  initialLaborPremiumTypes?: LaborPremiumType[];
+}) {
+  const [rows, setRows] = useState<PremiumRow[]>((initialLaborPremiumTypes as PremiumRow[]) ?? []);
+  const [loading, setLoading] = useState(initialLaborPremiumTypes === undefined);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -80,7 +86,11 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
     }
   };
 
-  useEffect(() => { load(); }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (initialLaborPremiumTypes !== undefined) return;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
 
   const handleToggleEnabled = async (row: PremiumRow) => {
     try {

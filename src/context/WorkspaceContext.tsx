@@ -67,14 +67,13 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       }
 
       // デプロイ前ログインのセッションが user_session_activity に未登録の場合に備えて登録する。
-      // getAuthedUser が呼ばれる前に完了させる必要があるため await する。
-      await ensureSessionActivity(session.access_token);
-      if (!isCurrent()) return;
-      setUserId(session.user.id);
+      // ensureSessionActivity は getAuthedUser（Server Action）呼び出し前に完了が必要だが、
+      // 本人のJWT直クエリ（RLS）ならば並列実行しても安全。Server Action呼び出しはworkspace ready後のため。
 
       // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
       // organization_member_roles を JOIN することで 3RTT → 2RTT に削減。
-      const [{ data: members, error: memberError }, { data: profile, error: profileError }] = await Promise.all([
+      const [, { data: members, error: memberError }, { data: profile, error: profileError }] = await Promise.all([
+        ensureSessionActivity(session.access_token),
         supabase
           .from('organization_members')
           .select('organization_id, role, organizations!inner(id, name), organization_member_roles(organization_roles(permissions))')
@@ -85,6 +84,9 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
           .eq('id', session.user.id)
           .maybeSingle(),
       ]);
+
+      if (!isCurrent()) return;
+      setUserId(session.user.id);
 
       if (memberError || profileError) {
         if (!isCurrent()) return;
