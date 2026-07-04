@@ -171,7 +171,7 @@ export default function MyShiftsPage() {
 
   const calendarEvents = convertToCalendarEvents(shifts, true);
 
-  if (wsLoading || !currentOrg) return null;
+  if (wsLoading || !currentOrg) return <CalendarPageSkeleton />;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>

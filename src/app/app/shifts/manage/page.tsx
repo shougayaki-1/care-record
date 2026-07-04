@@ -437,7 +437,7 @@ export default function ShiftManagePage() {
         startTransition(() => setActiveTab(value));
     }, [activeTab, startTransition]);
 
-    if (wsLoading || !currentOrg) return null;
+    if (wsLoading || !currentOrg) return <CalendarPageSkeleton />;
 
     const canUseOrgWideTabs = currentOrg.effectivePermissions.shifts.view === 'all';
     const canCreateShift = checkShiftPermission(currentOrg.effectivePermissions, 'create', true);

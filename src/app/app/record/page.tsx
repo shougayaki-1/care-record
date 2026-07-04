@@ -14,7 +14,7 @@ import TodayIcon from '@mui/icons-material/Today';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { InnerPageHeader, PageLayout } from '@/components/ui';
+import { InnerPageHeader, PageLayout, TablePageSkeleton } from '@/components/ui';
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
 import { checkRecordPermission, checkShiftPermission } from '@/utils/permissions';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
@@ -104,7 +104,7 @@ export default function RecordSelectPage() {
         return `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')} - ${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
     };
 
-    if (loading || wsLoading) return null;
+    if (loading || wsLoading) return <TablePageSkeleton />;
     const canCreateAnyRecord = currentOrg ? checkRecordPermission(currentOrg.effectivePermissions, 'create', true) : false;
 
     return (

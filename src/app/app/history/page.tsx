@@ -15,7 +15,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { InnerPageHeader, PageLayout } from '@/components/ui';
+import { CalendarPageSkeleton, InnerPageHeader, PageLayout } from '@/components/ui';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 
 type Report = {
@@ -142,7 +142,7 @@ export default function HistoryPage() {
         setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + diff, 1));
     };
 
-    if (wsLoading || !currentOrg) return null;
+    if (wsLoading || !currentOrg) return <CalendarPageSkeleton />;
 
     return (
         <PageLayout>

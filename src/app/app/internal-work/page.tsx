@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/mui';
 import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import AddIcon from '@mui/icons-material/Add';
-import { InnerPageHeader, MonthField, PageBody, PageLayout, PageSection, PageToolbar } from '@/components/ui';
+import { FormPageSkeleton, InnerPageHeader, MonthField, PageBody, PageLayout, PageSection, PageToolbar } from '@/components/ui';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import {
@@ -79,7 +79,7 @@ export default function InternalWorkPage() {
     }
   }, [wsLoading, currentOrg, loadStaffOptions, loadRecords]);
 
-  if (wsLoading || !currentOrg) return null;
+  if (wsLoading || !currentOrg) return <FormPageSkeleton />;
 
   return (
     <PageLayout>

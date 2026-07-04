@@ -6,7 +6,7 @@ import {
 } from '@/components/ui/mui';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
-import { InnerPageHeader, PageBody, PageLayout, PageSection } from '@/components/ui';
+import { InnerPageHeader, PageBody, PageLayout, PageSection, TablePageSkeleton } from '@/components/ui';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { exportAuditLogsCsv, getAuditLogs, listCloudLogEntries, type CloudLogEntry } from '@/app/actions/organization';
 import { checkManagementPermission } from '@/utils/permissions';
@@ -73,7 +73,7 @@ export default function LogsPage() {
     URL.revokeObjectURL(url);
   };
 
-  if (wsLoading || !currentOrg) return null;
+  if (wsLoading || !currentOrg) return <TablePageSkeleton />;
   if (!canView) return <Box p={3}><Alert severity="warning">操作ログを閲覧する権限がありません。</Alert></Box>;
 
   return (

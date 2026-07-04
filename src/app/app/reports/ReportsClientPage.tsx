@@ -31,7 +31,7 @@ import { updateClientGoogleLink } from '@/app/actions/clients';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { InnerPageHeader, PageBody, PageLayout } from '@/components/ui';
+import { InnerPageHeader, PageBody, PageLayout, TablePageSkeleton } from '@/components/ui';
 import { checkRecordPermission } from '@/utils/permissions';
 import { getReportStatusChipColor, getReportStatusLabel, type ReportStatus } from '@/utils/reportStatus';
 
@@ -546,7 +546,7 @@ export default function ReportsClientPage() {
   if (searchParams.get('period') === 'current_month') headerTitle = "今月の記録";
   if (filterShiftId) headerTitle = "シフト内の記録";
 
-  if (wsLoading || !currentOrg) return null;
+  if (wsLoading || !currentOrg) return <TablePageSkeleton />;
   const canApproveRecords = checkRecordPermission(currentOrg.effectivePermissions, 'approve', true);
   const canDeleteRecords = checkRecordPermission(currentOrg.effectivePermissions, 'delete', true);
 
