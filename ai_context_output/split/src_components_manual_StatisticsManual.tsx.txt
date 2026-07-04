@@ -1,0 +1,218 @@
+'use client';
+
+import { useState } from 'react';
+import {
+  Box,
+  Button,
+  Chip,
+  Collapse,
+  Divider,
+  IconButton,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+} from '@/components/ui/mui';
+import EditNoteIcon from '@mui/icons-material/EditNote';
+import EventNoteIcon from '@mui/icons-material/EventNote';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { ShiftVarianceTable } from '@/components/statistics/ShiftVarianceTable';
+import { ManualCallout, ManualDefinitionList, ManualDemoFrame, ManualScreenHighlight, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
+
+type VarianceRow = {
+  id: string;
+  start: string;
+  end: string;
+  clientName: string;
+  staffNames: string;
+  actualStaffNames?: string;
+  plannedH: number | null;
+  actualH: number | null;
+  diffH: number | null;
+  flags?: string[];
+  details: Array<{ kind: 'planned' | 'actual'; label: string; hours: number; note: string }>;
+};
+
+const rows: VarianceRow[] = [
+  {
+    id: 'shift-1',
+    start: '7/4 09:00',
+    end: '7/4 10:30',
+    clientName: '山田 太郎',
+    staffNames: '佐藤 花子',
+    plannedH: 1.5,
+    actualH: 1.5,
+    diffH: 0,
+    details: [
+      { kind: 'planned', label: '予定', hours: 1.5, note: '重度訪問介護 09:00-10:30' },
+      { kind: 'actual', label: '実績', hours: 1.5, note: '記録作成済み・承認待ち' },
+    ],
+  },
+  {
+    id: 'shift-2',
+    start: '7/4 18:00',
+    end: '7/4 21:00',
+    clientName: '鈴木 花子',
+    staffNames: '田中 一郎',
+    actualStaffNames: '佐藤 花子',
+    plannedH: 3.0,
+    actualH: 2.5,
+    diffH: -0.5,
+    flags: ['担当不一致', '実績が30分短い'],
+    details: [
+      { kind: 'planned', label: '予定', hours: 3.0, note: '移動支援 18:00-21:00 / 予定担当: 田中 一郎' },
+      { kind: 'actual', label: '実績', hours: 2.5, note: '18:00-20:30 / 実績担当: 佐藤 花子' },
+    ],
+  },
+  {
+    id: 'shift-3',
+    start: '7/5 08:00',
+    end: '7/5 09:00',
+    clientName: '山田 太郎',
+    staffNames: '佐藤 花子',
+    plannedH: 1.0,
+    actualH: null,
+    diffH: null,
+    flags: ['実績なし'],
+    details: [
+      { kind: 'planned', label: '予定', hours: 1.0, note: '身体介護 08:00-09:00' },
+    ],
+  },
+];
+
+export default function StatisticsManual() {
+  return (
+    <Stack spacing={3}>
+      <ManualSection title="統計・予実管理の考え方" subtitle="シフト予定と記録実績を突き合わせ、未入力・時間差・担当違いを早く見つけるための章です。">
+        <Stack spacing={1.5}>
+          <ManualStep number={1} title="予定時間を基準にする" body="シフトの開始・終了から予定時間を計算し、同じシフトに紐付いた記録の実績時間と比較します。" />
+          <ManualStep number={2} title="実績がない予定を見つける" body="予定はあるのに記録がない場合は、差異表で「実績なし」として表示します。記録作成ボタンから不足分の入力へ進めます。" />
+          <ManualStep number={3} title="担当不一致を警告する" body="予定担当と記録作成者または実績担当が異なる場合、警告チップで表示します。代理対応や入力ミスの確認に使います。" />
+        </Stack>
+      </ManualSection>
+
+      <ManualSection title="差異が出たときの確認順">
+        <ManualDefinitionList
+          items={[
+            { term: '予定より短い', description: '訪問時間の短縮、早退、記録の終了時刻ミス、月跨ぎの片側だけ入力などを確認します。' },
+            { term: '予定より長い', description: '延長対応、開始時刻の前倒し、シフト未調整、複数記録の重複を確認します。' },
+            { term: '担当不一致', description: '実際に訪問したスタッフ名、代理対応、予定担当の修正漏れ、記録作成者の選択ミスを確認します。' },
+          ]}
+        />
+      </ManualSection>
+
+      <ShiftVarianceDemo />
+    </Stack>
+  );
+}
+
+function ShiftVarianceDemo() {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({ 'shift-2': true });
+  const totals = rows.reduce((acc, row) => ({
+    planned: acc.planned + (row.plannedH ?? 0),
+    actual: acc.actual + (row.actualH ?? 0),
+  }), { planned: 0, actual: 0 });
+  const diff = totals.actual - totals.planned;
+
+  return (
+    <ManualDemoFrame title="シフト差異合計と詳細表示">
+      <ManualScreenHighlight number={1} label="サマリーで全体差異を把握">
+        <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+          <Box sx={{ px: { xs: 1.5, sm: 2 }, py: 1.5, bgcolor: 'background.tint', borderBottom: 1, borderColor: 'divider' }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
+              <Typography variant="subtitle2" fontWeight={800}>シフト差異合計</Typography>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                <Chip size="small" variant="outlined" label={`予定 ${totals.planned.toFixed(1)}h`} />
+                <Chip size="small" color="primary" label={`実績 ${totals.actual.toFixed(1)}h`} />
+                <Chip size="small" color="warning" variant="outlined" label={`差異 ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}h`} />
+              </Stack>
+            </Stack>
+          </Box>
+
+          <ShiftVarianceTable>
+            <TableContainer sx={{ overflowX: 'auto' }}>
+              <Table size="small">
+                <TableHead sx={{ bgcolor: 'background.tint' }}>
+                  <TableRow>
+                    <TableCell />
+                    <TableCell sx={{ fontWeight: 800 }}>シフト日時</TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>利用者名</TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>担当職員</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800 }}>予定(h)</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800 }}>実績(h)</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800 }}>差異(h)</TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>操作</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {rows.map((row) => {
+                    const open = Boolean(expanded[row.id]);
+                    return (
+                      <TableRow key={row.id} hover>
+                        <TableCell padding="checkbox" sx={{ verticalAlign: 'top' }}>
+                          <IconButton size="small" onClick={() => setExpanded((current) => ({ ...current, [row.id]: !open }))}>
+                            {open ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                          </IconButton>
+                        </TableCell>
+                        <TableCell sx={{ verticalAlign: 'top' }}>{row.start} - {row.end}</TableCell>
+                        <TableCell sx={{ verticalAlign: 'top' }}>{row.clientName}</TableCell>
+                        <TableCell sx={{ verticalAlign: 'top' }}>
+                          <Stack spacing={0.75}>
+                            <Typography variant="body2">{row.staffNames}</Typography>
+                            <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+                              {row.flags?.map((flag) => (
+                                <Chip key={flag} label={flag === '担当不一致' && row.actualStaffNames ? `担当不一致 実績: ${row.actualStaffNames}` : flag} size="small" color="warning" variant="outlined" />
+                              ))}
+                            </Stack>
+                          </Stack>
+                        </TableCell>
+                        <TableCell align="right" sx={{ verticalAlign: 'top' }}>{row.plannedH?.toFixed(1) ?? '-'}</TableCell>
+                        <TableCell align="right" sx={{ verticalAlign: 'top' }}>{row.actualH?.toFixed(1) ?? '-'}</TableCell>
+                        <TableCell align="right" sx={{ verticalAlign: 'top', color: row.diffH != null && row.diffH < -0.1 ? 'error.main' : 'text.primary', fontWeight: row.diffH != null && row.diffH < -0.1 ? 800 : 400 }}>
+                          {row.diffH == null ? '-' : `${row.diffH >= 0 ? '+' : ''}${row.diffH.toFixed(1)}`}
+                        </TableCell>
+                        <TableCell sx={{ verticalAlign: 'top' }}>
+                          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                            {row.actualH == null ? (
+                              <Button size="small" variant="contained" startIcon={<EditNoteIcon />} onClick={() => undefined}>実績作成</Button>
+                            ) : (
+                              <Button size="small" variant="outlined" startIcon={<EditNoteIcon />} onClick={() => undefined}>実績確認</Button>
+                            )}
+                            <Button size="small" variant="outlined" color="inherit" startIcon={<EventNoteIcon />} onClick={() => undefined}>シフト確認</Button>
+                          </Stack>
+                          <Collapse in={open} timeout="auto" unmountOnExit>
+                            <Divider sx={{ my: 1.5 }} />
+                            <Stack spacing={1}>
+                              {row.details.map((detail) => (
+                                <Box key={`${row.id}-${detail.kind}`}>
+                                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                    <Chip size="small" label={detail.label} color={detail.kind === 'actual' ? 'primary' : 'default'} variant={detail.kind === 'actual' ? 'filled' : 'outlined'} />
+                                    <Typography variant="body2" fontWeight={800}>{detail.hours.toFixed(2)}h</Typography>
+                                  </Stack>
+                                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{detail.note}</Typography>
+                                </Box>
+                              ))}
+                            </Stack>
+                          </Collapse>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </ShiftVarianceTable>
+        </Paper>
+      </ManualScreenHighlight>
+      <ManualCallout title="運用で見る場所">
+        月末締め前に、差異が大きい行、実績なし、担当不一致、サービス不一致の順に確認すると、帳票や請求前の手戻りを減らせます。
+      </ManualCallout>
+    </ManualDemoFrame>
+  );
+}

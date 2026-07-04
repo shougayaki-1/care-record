@@ -1,0 +1,265 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import {
+  Box,
+  Chip,
+  Divider,
+  FormHelperText,
+  LinearProgress,
+  Paper,
+  Stack,
+  Tab,
+  Tabs,
+  Typography,
+} from '@/components/ui/mui';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import EditNoteIcon from '@mui/icons-material/EditNote';
+import PersonIcon from '@mui/icons-material/Person';
+import { AiImportReviewTable, AppButton, AppTextField, DateTimeField, DynamicFormField, InnerPageHeader, PageLayout, type ReviewRow } from '@/components/ui';
+import { ManualCallout, ManualDefinitionList, ManualDemoFrame, ManualScreenHighlight, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
+
+const clients = [
+  { id: 'client-yamada', name: '山田 太郎' },
+  { id: 'client-suzuki', name: '鈴木 花子' },
+];
+
+const helpers = [
+  { id: 'helper-sato', name: '佐藤 花子' },
+  { id: 'helper-tanaka', name: '田中 一郎' },
+];
+
+const reviewRows: ReviewRow[] = [
+  {
+    id: 'review-1',
+    fileIndex: 0,
+    fileName: '訪問記録_山田太郎_0704.pdf',
+    fileType: 'application/pdf',
+    previewUrl: null,
+    fileCount: 1,
+    result: {
+      meta: {
+        date: '2026-07-04',
+        start_at: '09:00',
+        end_at: '10:30',
+        client_name: '山田 太郎',
+        helper_names: ['佐藤 花子'],
+        client_id_candidate: 'client-yamada',
+        helper_id_candidates: ['helper-sato'],
+      },
+      values: { meal: '朝食全量、水分300ml', medicine: true, condition: '発熱なし。表情良好。' },
+      confidence: 'high',
+      warnings: [],
+    },
+    date: '2026-07-04',
+    startAt: '09:00',
+    endAt: '10:30',
+    clientId: 'client-yamada',
+    helperId: 'helper-sato',
+    status: 'confirmed',
+  },
+  {
+    id: 'review-2',
+    fileIndex: 1,
+    fileName: 'IMG_2048.png',
+    fileType: 'image/png',
+    previewUrl: null,
+    fileCount: 2,
+    result: {
+      meta: {
+        date: '2026-07-04',
+        start_at: '18:00',
+        end_at: '21:00',
+        client_name: '鈴木様',
+        helper_names: [],
+        client_id_candidate: 'client-suzuki',
+        helper_id_candidates: [],
+      },
+      values: { care: ['排泄介助', '他'], care_detail: '衣類交換あり' },
+      confidence: 'medium',
+      warnings: ['スタッフ名の読み取りが不明確です'],
+    },
+    date: '2026-07-04',
+    startAt: '18:00',
+    endAt: '21:00',
+    clientId: 'client-suzuki',
+    helperId: null,
+    status: 'pending',
+  },
+];
+
+export default function RecordAndAiManual() {
+  return (
+    <Stack spacing={3}>
+      <ManualSection title="記録作成の基本フロー" subtitle="現場スタッフが毎回確認する、シフト選択から保存前チェックまでの手順です。">
+        <Stack spacing={1.5}>
+          <ManualStep number={1} title="利用者またはシフトから開始" body="今日のシフト、自分のシフト、または利用者一覧から記録画面を開きます。シフトから開始すると、日時・利用者・担当が候補として入ります。" />
+          <ManualStep number={2} title="サービス区間を選択" body="同じ訪問内に複数サービス区間がある場合は、どの区間の実績を作成するか選択します。" />
+          <ManualStep number={3} title="必須項目と詳細入力を確認" body="赤枠の項目は保存前に修正します。詳細入力を許可した項目では、スイッチONや「他」選択時に補足欄が表示されます。" />
+        </Stack>
+      </ManualSection>
+
+      <RecordDemo />
+
+      <ManualSection title="AI一括取込の確認ポイント" subtitle="紙・PDFから作った候補は、保存前に必ず人がレビューします。">
+        <ManualDefinitionList
+          items={[
+            { term: 'アップロード', description: 'PDF、JPEG、PNG、WebPを選択します。複数画像は1件の記録としてグループ化する運用も説明します。' },
+            { term: '黄色背景', description: 'AIが自動入力した項目は background.aiHighlight の黄色背景で示され、手入力との違いが分かります。' },
+            { term: 'レビュー', description: '利用者、スタッフ、日付、開始・終了、信頼度、警告を確認し、問題ない行だけ下書き保存します。' },
+          ]}
+        />
+      </ManualSection>
+
+      <AiImportDemo />
+    </Stack>
+  );
+}
+
+function RecordDemo() {
+  const [part, setPart] = useState<'first' | 'second'>('first');
+  const selectedPart = part === 'first'
+    ? { label: '前半', start: '2026-07-31T22:00', end: '2026-07-31T23:59', time: '2.0' }
+    : { label: '後半', start: '2026-08-01T00:00', end: '2026-08-01T07:00', time: '7.0' };
+
+  return (
+    <ManualDemoFrame title="記録作成デモ：日またぎ夜勤の入力">
+      <PageLayout sx={{ height: 'auto', minHeight: 0, bgcolor: 'background.paper', border: 1, borderColor: 'divider' }}>
+        <InnerPageHeader
+          icon={<EditNoteIcon />}
+          title="山田 太郎 様の記録"
+          actions={<AppButton onClick={() => undefined}>保存</AppButton>}
+        />
+        <Box sx={{ p: { xs: 2, md: 3 } }}>
+          <Stack spacing={2.5}>
+            <ManualScreenHighlight number={1} label="サービス区間を選択">
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                {['重度訪問 22:00-翌07:00', '移動支援 07:30-08:30'].map((label, index) => (
+                  <AppButton key={label} variant={index === 0 ? 'contained' : 'outlined'} onClick={() => undefined} sx={{ justifyContent: 'flex-start' }}>
+                    {label}
+                  </AppButton>
+                ))}
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+                シフト区間を選ぶと、対応するサービス種別・予定時刻・担当候補が記録へ反映されます。
+              </Typography>
+            </ManualScreenHighlight>
+
+            <ManualScreenHighlight number={2} label="月末跨ぎは前半/後半に分割">
+              <Tabs value={part} onChange={(_, value) => setPart(value)} sx={{ mb: 2 }}>
+                <Tab value="first" label="前半 7/31" />
+                <Tab value="second" label="後半 8/1" />
+              </Tabs>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                <DateTimeField kind="datetime-local" label={`${selectedPart.label} 開始`} value={selectedPart.start} />
+                <DateTimeField kind="datetime-local" label={`${selectedPart.label} 終了`} value={selectedPart.end} />
+                <AppTextField label="提供時間" value={selectedPart.time} slotProps={{ input: { endAdornment: <Typography variant="caption">時間</Typography> } }} />
+              </Stack>
+            </ManualScreenHighlight>
+
+            <ManualScreenHighlight number={3} label="必須エラーと詳細入力">
+              <Stack spacing={0} divider={<Divider />}>
+                <Box sx={{ p: 2, bgcolor: 'background.danger' }}>
+                  <DynamicFormField
+                    item={{ id: 'meal', label: '食事・水分', type: 'text', required: true }}
+                    value=""
+                    error="必須項目です"
+                    onChange={() => undefined}
+                  />
+                </Box>
+                <Box sx={{ p: 2 }}>
+                  <DynamicFormField
+                    item={{ id: 'medicine', label: '服薬確認', type: 'checkbox', hasDetail: true }}
+                    value
+                    detailValue="眠前薬は未確認。ご家族へ申し送り済み。"
+                    onChange={() => undefined}
+                    onDetailChange={() => undefined}
+                  />
+                </Box>
+                <Box sx={{ p: 2 }}>
+                  <DynamicFormField
+                    item={{ id: 'care', label: '実施したケア', type: 'multicheckbox', options: '排泄介助,食事介助,更衣,他', required: true, hasDetail: true }}
+                    value={['排泄介助', '他']}
+                    detailValue="衣類交換、陰部洗浄を実施。"
+                    onChange={() => undefined}
+                    onDetailChange={() => undefined}
+                  />
+                </Box>
+              </Stack>
+              <FormHelperText sx={{ mt: 1 }}>保存前に赤背景の必須エラーを解消します。</FormHelperText>
+            </ManualScreenHighlight>
+          </Stack>
+        </Box>
+      </PageLayout>
+    </ManualDemoFrame>
+  );
+}
+
+function AiImportDemo() {
+  const [rows, setRows] = useState(reviewRows);
+  const confirmedCount = useMemo(() => rows.filter((row) => row.status === 'confirmed').length, [rows]);
+
+  return (
+    <ManualDemoFrame title="AI一括取込デモ：アップロードからレビューまで">
+      <Stack spacing={2.5}>
+        <ManualScreenHighlight number={1} label="ドラッグ&ドロップで取り込み">
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 3,
+              textAlign: 'center',
+              border: '2px dashed',
+              borderColor: 'primary.light',
+              bgcolor: 'background.default',
+            }}
+          >
+            <CloudUploadIcon color="primary" sx={{ fontSize: 40, mb: 0.5 }} />
+            <Typography fontWeight={800}>クリックまたはドラッグ&ドロップでファイルを選択</Typography>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>PDF・JPEG・PNG・WebP（最大10MB）</Typography>
+          </Paper>
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} useFlexGap flexWrap="wrap">
+            <Chip label="訪問記録_山田太郎_0704.pdf" icon={<AutoFixHighIcon />} />
+            <Chip label="IMG_2048.png + IMG_2049.png" color="primary" variant="outlined" />
+          </Stack>
+        </ManualScreenHighlight>
+
+        <ManualScreenHighlight number={2} label="AI入力箇所は黄色背景">
+          <Stack spacing={1.5}>
+            <LinearProgress variant="determinate" value={100} />
+            <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' } }}>
+              <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'background.aiHighlight', border: 1, borderColor: 'divider' }}>
+                <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" gap={0.5}><CalendarTodayIcon fontSize="small" />サービス日時</Typography>
+                <Typography fontWeight={800}>2026/07/04 09:00-10:30</Typography>
+              </Box>
+              <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'background.aiHighlight', border: 1, borderColor: 'divider' }}>
+                <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" gap={0.5}><PersonIcon fontSize="small" />担当スタッフ</Typography>
+                <Typography fontWeight={800}>佐藤 花子</Typography>
+              </Box>
+              <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'background.aiHighlight', border: 1, borderColor: 'divider' }}>
+                <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" gap={0.5}><AccessTimeIcon fontSize="small" />提供時間</Typography>
+                <Typography fontWeight={800}>1.5時間</Typography>
+              </Box>
+            </Box>
+          </Stack>
+        </ManualScreenHighlight>
+
+        <ManualScreenHighlight number={3} label={`レビューして下書き保存（確認済み ${confirmedCount} 件）`}>
+          <AiImportReviewTable
+            rows={rows}
+            clients={clients}
+            helpers={helpers}
+            saving={false}
+            onRowChange={(id, changes) => setRows((current) => current.map((row) => row.id === id ? { ...row, ...changes } : row))}
+            onSaveSelected={async () => undefined}
+          />
+        </ManualScreenHighlight>
+      </Stack>
+      <ManualCallout tone="warning" title="AI取込の注意点">
+        AIの結果は候補です。黄色背景の内容、信頼度、警告アイコン、未選択の利用者・スタッフを確認してから保存します。
+      </ManualCallout>
+    </ManualDemoFrame>
+  );
+}

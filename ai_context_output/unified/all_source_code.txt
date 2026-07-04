@@ -15897,7 +15897,11 @@ import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import { ManualDemo } from '@/components/manual/ManualDemos';
 import { ManualCallout, ManualDefinitionList, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
 import FormSettingsManual from '@/components/manual/FormSettingsManual';
+import IntegrationGuideManual from '@/components/manual/IntegrationGuideManual';
+import RecordAndAiManual from '@/components/manual/RecordAndAiManual';
+import RolesAndPermissionsManual from '@/components/manual/RolesAndPermissionsManual';
 import ShiftGuideManual from '@/components/manual/ShiftGuideManual';
+import StatisticsManual from '@/components/manual/StatisticsManual';
 
 type ManualId =
   | 'proposal'
@@ -16055,17 +16059,16 @@ function ManualContent({ id }: { id: ManualId }) {
   if (id === 'shifts') return <ShiftContent />;
   if (id === 'proposal') return <ProposalContent />;
   if (id === 'clients') return <FeatureContent demo="clients" title="利用者管理" audience="管理者" related="記録フォーム設定、シフト管理、提供記録一覧" points={['利用者の新規登録、氏名編集、アーカイブ、削除状態への変更を扱います。', '担当スタッフが未設定の利用者は、記録作成や担当のみ権限の表示範囲に影響します。', '詳細設定から利用者ごとの記録フォーム、担当、基本情報を整備します。']} />;
-  if (id === 'record') return <FeatureContent demo="record" title="記録作成" audience="スタッフ・管理者" related="自分のシフト、提供記録一覧、AI一括取込" points={['今日のシフトまたは利用者一覧から記録を作成します。', '日付、開始終了時刻、担当、利用者別フォームの入力を確認して保存します。', '下書きや差戻し記録は再編集でき、承認後の編集可否は権限に従います。']} />;
-  if (id === 'ai-import') return <FeatureContent demo="ai" title="AI一括取込" audience="管理者・記録担当" related="記録作成、提供記録一覧" points={['PDF、JPEG、PNG、WebP を取り込み、AIが記録候補を抽出します。', '複数画像を1件にまとめる場合は、画像だけを選択してグループ化します。PDFは単独処理です。', '抽出結果は必ずレビューし、利用者・スタッフ・日時・本文を確認してから保存します。']} />;
+  if (id === 'record' || id === 'ai-import') return <RecordAndAiContent />;
   if (id === 'internal-work') return <FeatureContent demo="internalWork" title="内勤記録" audience="スタッフ・管理者" related="統計・予実管理、スタッフ管理" points={['訪問以外の電話対応、記録整理、事務作業などを時間として残します。', '自分の内勤記録を作成し、権限がある管理者は全体の状況を確認します。', '統計や労務集計に反映されるため、業務内容と時間を具体的に入力します。']} />;
   if (id === 'reports') return <FeatureContent demo="reports" title="提供記録一覧・帳票" audience="管理者" related="記録作成、シフト管理、統計" points={['全件、未承認・差戻し、今月の記録などの切り口で確認します。', '内容確認後に承認、差戻し、PDF出力を行います。', 'シフト紐付けがある記録は予実確認や月次帳票で利用します。']} />;
-  if (id === 'permissions' || id === 'accounts') return <FeatureContent demo="roles" title={id === 'permissions' ? '権限とロール' : 'アカウント・権限管理'} audience="オーナー・管理者" related="スタッフ管理、事業所設定、ログ" points={['権限は「全件」「担当のみ」「なし」と、管理機能ごとの許可で構成されます。', '複数ロールを割り当てた場合、より強い権限が有効になります。', '招待、ロール変更、退職者対応は監査ログに残る前提で慎重に行います。']} />;
+  if (id === 'permissions' || id === 'accounts') return <RolesAndPermissionsContent />;
   if (id === 'logs-backup') return <FeatureContent demo="logs" title="ログ・バックアップ" audience="オーナー・管理者" related="セキュリティ、アカウント管理" points={['操作ログを日時、操作者、対象、結果で確認します。', 'CSVエクスポートは監査や問い合わせ対応の証跡として利用します。', 'バックアップ閲覧は保全状況の確認を目的とし、復元は運用手順に従って実施します。']} />;
   if (id === 'start') return <StartContent />;
   if (id === 'common') return <CommonContent />;
-  if (id === 'statistics') return <TextOnlyContent title="統計・予実管理" audience="管理者" related="シフト管理、提供記録一覧、内勤記録" points={['スタッフ別・利用者別に提供時間、勤務時間、内勤時間を確認します。', 'シフト予定と実績記録の差分を確認し、未入力・時間不整合・承認漏れを発見します。', '集計値が想定と異なる場合は、対象期間、承認状態、シフト紐付け、削除状態を確認します。']} />;
+  if (id === 'statistics') return <StatisticsContent />;
   if (id === 'staff') return <TextOnlyContent title="スタッフ管理" audience="管理者" related="アカウント管理、利用者管理、シフト管理" points={['スタッフ名簿は、シフト担当、利用者担当、記録担当の候補として利用します。', 'ログインするアカウントとは別概念のため、名簿登録だけではログインできません。', '職種、稼働状況、担当利用者を整備することで、担当のみ権限の表示範囲が明確になります。']} />;
-  if (id === 'settings') return <TextOnlyContent title="事業所設定" audience="オーナー・管理者" related="ロール管理、Google連携、シフト管理" points={['事業所基本情報、サービス種別、スタッフ役割、割増・労務設定を管理します。', 'Google連携はシフト同期に関係するため、認可切れや同期失敗の確認手順を記載します。', '事業所削除やオーナー移管は影響範囲が大きいため、権限者限定の重要操作として扱います。']} />;
+  if (id === 'settings') return <IntegrationGuideContent />;
   if (id === 'security') return <SecurityContent />;
   if (id === 'troubleshooting') return <TroubleshootingContent />;
   return <GlossaryContent />;
@@ -16139,6 +16142,46 @@ function ShiftContent() {
       <ManualDemo kind="shifts" />
       <Divider />
       <ShiftGuideManual />
+    </Stack>
+  );
+}
+
+function RecordAndAiContent() {
+  return (
+    <Stack spacing={3}>
+      <TextOnlyContent title="記録作成・AI一括取込" audience="スタッフ・管理者" related="自分のシフト、提供記録一覧、記録フォーム設定、統計" compact points={['現場スタッフが日々使う記録作成と、紙・PDFから候補を作るAI取込を一連の流れとして説明します。', '日またぎ夜勤、サービス区間、必須エラー、詳細入力、AIハイライト、レビュー保存までを実UIに近いデモで確認できます。', 'マニュアル内の操作は静的なモックで、保存・削除・AI API呼び出しは実行されません。']} />
+      <Divider />
+      <RecordAndAiManual />
+    </Stack>
+  );
+}
+
+function StatisticsContent() {
+  return (
+    <Stack spacing={3}>
+      <TextOnlyContent title="統計・予実管理" audience="管理者" related="シフト管理、提供記録一覧、内勤記録" compact points={['スタッフ別・利用者別に提供時間、勤務時間、内勤時間を確認します。', 'シフト予定と実績記録の差分を確認し、未入力・時間不整合・担当不一致・承認漏れを発見します。', '集計値が想定と異なる場合は、対象期間、承認状態、シフト紐付け、削除状態を確認します。']} />
+      <Divider />
+      <StatisticsManual />
+    </Stack>
+  );
+}
+
+function IntegrationGuideContent() {
+  return (
+    <Stack spacing={3}>
+      <TextOnlyContent title="Google連携・帳票セットアップ" audience="オーナー・管理者" related="事業所設定、利用者設定、シフト管理、提供記録一覧" compact points={['事業所のGoogleドライブとGoogleカレンダー連携を初期設定し、帳票保存とシフト同期を使える状態にします。', '利用者設定で帳票テンプレートを作成し、開始時間などの差し込みタグをコピーして帳票へ配置します。', '同期エラー発生時は未同期件数、進捗、修復ボタンの意味を確認して復旧します。']} />
+      <Divider />
+      <IntegrationGuideManual />
+    </Stack>
+  );
+}
+
+function RolesAndPermissionsContent() {
+  return (
+    <Stack spacing={3}>
+      <TextOnlyContent title="権限とロール" audience="オーナー・管理者" related="スタッフ管理、事業所設定、ログ" compact points={['権限は「全体」「担当のみ」「なし」と、管理機能ごとの許可で構成されます。', '複数ロールを割り当てた場合、より強い権限が有効になります。', 'シフトカレンダーや記録一覧の見え方は、担当割当とロール設定によって変わります。']} />
+      <Divider />
+      <RolesAndPermissionsManual />
     </Stack>
   );
 }
@@ -18647,6 +18690,226 @@ export default function FormSettingsManual() {
 
 
 
+--- START OF FILE src/components/manual/IntegrationGuideManual.tsx ---
+
+'use client';
+
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Alert,
+  Box,
+  Chip,
+  Divider,
+  LinearProgress,
+  Paper,
+  Stack,
+  Typography,
+} from '@/components/ui/mui';
+import BuildIcon from '@mui/icons-material/Build';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import CloudQueueIcon from '@mui/icons-material/CloudQueue';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import DescriptionIcon from '@mui/icons-material/Description';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import LinkIcon from '@mui/icons-material/Link';
+import LinkOffIcon from '@mui/icons-material/LinkOff';
+import SettingsIcon from '@mui/icons-material/Settings';
+import SyncIcon from '@mui/icons-material/Sync';
+import { AppButton, AppTextField, PageBody, PageLayout } from '@/components/ui';
+import { ManualCallout, ManualDefinitionList, ManualDemoFrame, ManualScreenHighlight, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
+
+const mergeTags = [
+  { tag: '{{利用者名}}', description: '帳票対象の利用者名' },
+  { tag: '{{サービス日}}', description: '記録の日付' },
+  { tag: '{{開始時間}}', description: 'サービス開始時刻' },
+  { tag: '{{終了時間}}', description: 'サービス終了時刻' },
+  { tag: '{{担当スタッフ}}', description: '実績担当スタッフ名' },
+  { tag: '{{記録_食事・水分}}', description: '記録フォーム項目の回答' },
+];
+
+export default function IntegrationGuideManual() {
+  return (
+    <Stack spacing={3}>
+      <ManualSection title="導入時に行うGoogle連携と帳票セットアップ" subtitle="管理者が最初に整える、保存先・カレンダー・テンプレートの設定手順です。">
+        <Stack spacing={1.5}>
+          <ManualStep number={1} title="事業所設定でGoogle連携" body="Googleドライブは帳票保存先、Googleカレンダーはシフト同期先です。権限を持つ管理者がOAuth連携します。" />
+          <ManualStep number={2} title="利用者ごとの帳票テンプレート作成" body="利用者設定からテンプレートを作成し、差し込みタグを文書内へ配置します。" />
+          <ManualStep number={3} title="同期エラーを修復" body="未同期件数や進捗を確認し、必要に応じて「未同期を同期」または「同期を修復」を実行します。" />
+        </Stack>
+      </ManualSection>
+
+      <IntegrationSettingsDemo />
+
+      <ManualSection title="差し込みタグの使い方">
+        <ManualDefinitionList
+          items={[
+            { term: '固定タグ', description: '利用者名、サービス日、開始時間、終了時間など、どの帳票でも使う基本情報です。' },
+            { term: '記録項目タグ', description: '記録フォーム設定で作った質問項目に対応します。項目名変更時はテンプレート側の見直しも行います。' },
+            { term: 'コピー操作', description: 'タグ一覧からコピーし、Googleドキュメントや帳票テンプレート内の差し込みたい位置へ貼り付けます。' },
+          ]}
+        />
+      </ManualSection>
+
+      <TemplateSetupDemo />
+    </Stack>
+  );
+}
+
+function IntegrationSettingsDemo() {
+  return (
+    <ManualDemoFrame title="事業所設定：Googleドライブ / カレンダー連携">
+      <PageLayout sx={{ height: 'auto', minHeight: 0, bgcolor: 'background.paper', border: 1, borderColor: 'divider' }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', px: { xs: 2, sm: 3 }, bgcolor: 'background.paper' }}>
+          <Stack direction="row" alignItems="center" height={64} spacing={2}>
+            <SettingsIcon sx={{ color: 'action.active' }} />
+            <Typography variant="h6" fontWeight={800}>事業所設定</Typography>
+          </Stack>
+        </Box>
+        <PageBody maxWidth={820} sx={{ overflowY: 'visible' }}>
+          <Stack spacing={3}>
+            <ManualScreenHighlight number={1} label="Googleドライブ連携">
+              <IntegrationCard
+                icon={<CloudQueueIcon color="primary" fontSize="large" />}
+                title="Googleドライブ連携"
+                description="帳票の保存先フォルダを管理します"
+                status="連携済み"
+                tone="primary"
+              >
+                <Typography variant="body2">
+                  連携中のフォルダID: <Box component="code" sx={{ overflowWrap: 'anywhere' }}>care-record-demo-folder</Box>
+                </Typography>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap">
+                  <AppButton variant="outlined" intent="secondary" startIcon={<LinkIcon />} onClick={() => undefined}>フォルダを開く</AppButton>
+                  <AppButton variant="text" intent="danger" startIcon={<LinkOffIcon />} onClick={() => undefined}>連携を解除</AppButton>
+                  <AppButton variant="text" intent="warning" onClick={() => undefined}>フォルダを再作成/修復</AppButton>
+                </Stack>
+              </IntegrationCard>
+            </ManualScreenHighlight>
+
+            <ManualScreenHighlight number={2} label="Googleカレンダー連携と同期修復">
+              <IntegrationCard
+                icon={<CalendarMonthIcon color="success" fontSize="large" />}
+                title="Googleカレンダー連携"
+                description="事業所専用カレンダーを自動作成し、シフトを同期します"
+                status="連携済み"
+                tone="success"
+              >
+                <Typography variant="body2">
+                  連携中のカレンダーID: <Box component="code" sx={{ overflowWrap: 'anywhere' }}>care-record-demo-calendar@group.calendar.google.com</Box>
+                </Typography>
+                <Alert severity="warning">未同期の予定が <strong>3件</strong> あります（全42件中）。「未同期を同期」で解消できます。</Alert>
+                <Box>
+                  <LinearProgress variant="determinate" value={60} sx={{ height: 6, borderRadius: 1 }} />
+                  <Typography variant="caption" color="text.secondary">3 / 5 件 処理中...</Typography>
+                </Box>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap">
+                  <AppButton intent="warning" startIcon={<BuildIcon />} onClick={() => undefined}>未同期を同期（3件）</AppButton>
+                  <AppButton variant="outlined" startIcon={<SyncIcon />} onClick={() => undefined}>同期を修復</AppButton>
+                  <AppButton variant="outlined" intent="danger" startIcon={<LinkOffIcon />} onClick={() => undefined}>連携を解除</AppButton>
+                </Stack>
+              </IntegrationCard>
+            </ManualScreenHighlight>
+          </Stack>
+        </PageBody>
+      </PageLayout>
+    </ManualDemoFrame>
+  );
+}
+
+function IntegrationCard({
+  icon,
+  title,
+  description,
+  status,
+  tone,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  status: string;
+  tone: 'primary' | 'success';
+  children: React.ReactNode;
+}) {
+  return (
+    <Box sx={{ p: { xs: 2, sm: 3 }, borderRadius: 1, bgcolor: tone === 'success' ? 'background.success' : 'background.tint' }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={2}>
+        {icon}
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="h6" fontWeight={800}>{title}</Typography>
+          <Typography variant="body2" color="text.secondary">{description}</Typography>
+        </Box>
+        <Chip label={status} color={tone === 'success' ? 'success' : 'primary'} size="small" icon={<LinkIcon />} sx={{ ml: { sm: 'auto' } }} />
+      </Stack>
+      <Stack spacing={2} sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: 1, borderColor: 'divider' }}>
+        {children}
+      </Stack>
+    </Box>
+  );
+}
+
+function TemplateSetupDemo() {
+  return (
+    <ManualDemoFrame title="利用者設定：帳票テンプレートと差し込みタグ">
+      <Stack spacing={2.5}>
+        <ManualScreenHighlight number={1} label="テンプレート作成">
+          <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+            <Box sx={{ px: 2, py: 1.5, bgcolor: 'background.subtle', borderBottom: 1, borderColor: 'divider' }}>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <DescriptionIcon color="action" />
+                <Typography fontWeight={800}>山田 太郎 様 帳票テンプレート</Typography>
+              </Stack>
+            </Box>
+            <Box sx={{ p: 2 }}>
+              <Stack spacing={2}>
+                <AppTextField label="テンプレート名" value="重度訪問介護 提供記録票" size="small" />
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                  <AppButton startIcon={<DescriptionIcon />} onClick={() => undefined}>テンプレートを作成</AppButton>
+                  <AppButton variant="outlined" startIcon={<LinkIcon />} onClick={() => undefined}>Googleドキュメントを開く</AppButton>
+                </Stack>
+              </Stack>
+            </Box>
+          </Paper>
+        </ManualScreenHighlight>
+
+        <ManualScreenHighlight number={2} label="差し込みタグをコピー">
+          <Accordion defaultExpanded disableGutters>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography fontWeight={800}>基本情報タグ</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Stack divider={<Divider flexItem />}>
+                {mergeTags.map((item) => (
+                  <Stack key={item.tag} direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }} sx={{ py: 1 }}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography component="code" fontWeight={800}>{item.tag}</Typography>
+                      <Typography variant="caption" color="text.secondary" display="block">{item.description}</Typography>
+                    </Box>
+                    <AppButton size="small" variant="outlined" startIcon={<ContentCopyIcon />} onClick={() => undefined}>コピー</AppButton>
+                  </Stack>
+                ))}
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
+        </ManualScreenHighlight>
+
+        <ManualScreenHighlight number={3} label="同期エラー時の案内">
+          <Alert severity="info">
+            テンプレートの保存先フォルダやカレンダー同期に失敗した場合は、事業所設定の連携状態、Google側の権限、未同期件数、修復ボタンの順に確認します。
+          </Alert>
+        </ManualScreenHighlight>
+      </Stack>
+      <ManualCallout tone="success" title="初期導入の完了条件">
+        ドライブ連携済み、カレンダー連携済み、利用者ごとのテンプレート作成済み、差し込みタグ配置済み、未同期0件になれば、帳票・シフト同期の初期設定は完了です。
+      </ManualCallout>
+    </ManualDemoFrame>
+  );
+}
+
+
+
 --- START OF FILE src/components/manual/ManualDemos.tsx ---
 
 'use client';
@@ -19066,6 +19329,494 @@ export function ManualDefinitionList({ items }: { items: Array<{ term: string; d
 
 
 
+--- START OF FILE src/components/manual/RecordAndAiManual.tsx ---
+
+'use client';
+
+import { useMemo, useState } from 'react';
+import {
+  Box,
+  Chip,
+  Divider,
+  FormHelperText,
+  LinearProgress,
+  Paper,
+  Stack,
+  Tab,
+  Tabs,
+  Typography,
+} from '@/components/ui/mui';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import EditNoteIcon from '@mui/icons-material/EditNote';
+import PersonIcon from '@mui/icons-material/Person';
+import { AiImportReviewTable, AppButton, AppTextField, DateTimeField, DynamicFormField, InnerPageHeader, PageLayout, type ReviewRow } from '@/components/ui';
+import { ManualCallout, ManualDefinitionList, ManualDemoFrame, ManualScreenHighlight, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
+
+const clients = [
+  { id: 'client-yamada', name: '山田 太郎' },
+  { id: 'client-suzuki', name: '鈴木 花子' },
+];
+
+const helpers = [
+  { id: 'helper-sato', name: '佐藤 花子' },
+  { id: 'helper-tanaka', name: '田中 一郎' },
+];
+
+const reviewRows: ReviewRow[] = [
+  {
+    id: 'review-1',
+    fileIndex: 0,
+    fileName: '訪問記録_山田太郎_0704.pdf',
+    fileType: 'application/pdf',
+    previewUrl: null,
+    fileCount: 1,
+    result: {
+      meta: {
+        date: '2026-07-04',
+        start_at: '09:00',
+        end_at: '10:30',
+        client_name: '山田 太郎',
+        helper_names: ['佐藤 花子'],
+        client_id_candidate: 'client-yamada',
+        helper_id_candidates: ['helper-sato'],
+      },
+      values: { meal: '朝食全量、水分300ml', medicine: true, condition: '発熱なし。表情良好。' },
+      confidence: 'high',
+      warnings: [],
+    },
+    date: '2026-07-04',
+    startAt: '09:00',
+    endAt: '10:30',
+    clientId: 'client-yamada',
+    helperId: 'helper-sato',
+    status: 'confirmed',
+  },
+  {
+    id: 'review-2',
+    fileIndex: 1,
+    fileName: 'IMG_2048.png',
+    fileType: 'image/png',
+    previewUrl: null,
+    fileCount: 2,
+    result: {
+      meta: {
+        date: '2026-07-04',
+        start_at: '18:00',
+        end_at: '21:00',
+        client_name: '鈴木様',
+        helper_names: [],
+        client_id_candidate: 'client-suzuki',
+        helper_id_candidates: [],
+      },
+      values: { care: ['排泄介助', '他'], care_detail: '衣類交換あり' },
+      confidence: 'medium',
+      warnings: ['スタッフ名の読み取りが不明確です'],
+    },
+    date: '2026-07-04',
+    startAt: '18:00',
+    endAt: '21:00',
+    clientId: 'client-suzuki',
+    helperId: null,
+    status: 'pending',
+  },
+];
+
+export default function RecordAndAiManual() {
+  return (
+    <Stack spacing={3}>
+      <ManualSection title="記録作成の基本フロー" subtitle="現場スタッフが毎回確認する、シフト選択から保存前チェックまでの手順です。">
+        <Stack spacing={1.5}>
+          <ManualStep number={1} title="利用者またはシフトから開始" body="今日のシフト、自分のシフト、または利用者一覧から記録画面を開きます。シフトから開始すると、日時・利用者・担当が候補として入ります。" />
+          <ManualStep number={2} title="サービス区間を選択" body="同じ訪問内に複数サービス区間がある場合は、どの区間の実績を作成するか選択します。" />
+          <ManualStep number={3} title="必須項目と詳細入力を確認" body="赤枠の項目は保存前に修正します。詳細入力を許可した項目では、スイッチONや「他」選択時に補足欄が表示されます。" />
+        </Stack>
+      </ManualSection>
+
+      <RecordDemo />
+
+      <ManualSection title="AI一括取込の確認ポイント" subtitle="紙・PDFから作った候補は、保存前に必ず人がレビューします。">
+        <ManualDefinitionList
+          items={[
+            { term: 'アップロード', description: 'PDF、JPEG、PNG、WebPを選択します。複数画像は1件の記録としてグループ化する運用も説明します。' },
+            { term: '黄色背景', description: 'AIが自動入力した項目は background.aiHighlight の黄色背景で示され、手入力との違いが分かります。' },
+            { term: 'レビュー', description: '利用者、スタッフ、日付、開始・終了、信頼度、警告を確認し、問題ない行だけ下書き保存します。' },
+          ]}
+        />
+      </ManualSection>
+
+      <AiImportDemo />
+    </Stack>
+  );
+}
+
+function RecordDemo() {
+  const [part, setPart] = useState<'first' | 'second'>('first');
+  const selectedPart = part === 'first'
+    ? { label: '前半', start: '2026-07-31T22:00', end: '2026-07-31T23:59', time: '2.0' }
+    : { label: '後半', start: '2026-08-01T00:00', end: '2026-08-01T07:00', time: '7.0' };
+
+  return (
+    <ManualDemoFrame title="記録作成デモ：日またぎ夜勤の入力">
+      <PageLayout sx={{ height: 'auto', minHeight: 0, bgcolor: 'background.paper', border: 1, borderColor: 'divider' }}>
+        <InnerPageHeader
+          icon={<EditNoteIcon />}
+          title="山田 太郎 様の記録"
+          actions={<AppButton onClick={() => undefined}>保存</AppButton>}
+        />
+        <Box sx={{ p: { xs: 2, md: 3 } }}>
+          <Stack spacing={2.5}>
+            <ManualScreenHighlight number={1} label="サービス区間を選択">
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                {['重度訪問 22:00-翌07:00', '移動支援 07:30-08:30'].map((label, index) => (
+                  <AppButton key={label} variant={index === 0 ? 'contained' : 'outlined'} onClick={() => undefined} sx={{ justifyContent: 'flex-start' }}>
+                    {label}
+                  </AppButton>
+                ))}
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+                シフト区間を選ぶと、対応するサービス種別・予定時刻・担当候補が記録へ反映されます。
+              </Typography>
+            </ManualScreenHighlight>
+
+            <ManualScreenHighlight number={2} label="月末跨ぎは前半/後半に分割">
+              <Tabs value={part} onChange={(_, value) => setPart(value)} sx={{ mb: 2 }}>
+                <Tab value="first" label="前半 7/31" />
+                <Tab value="second" label="後半 8/1" />
+              </Tabs>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                <DateTimeField kind="datetime-local" label={`${selectedPart.label} 開始`} value={selectedPart.start} />
+                <DateTimeField kind="datetime-local" label={`${selectedPart.label} 終了`} value={selectedPart.end} />
+                <AppTextField label="提供時間" value={selectedPart.time} slotProps={{ input: { endAdornment: <Typography variant="caption">時間</Typography> } }} />
+              </Stack>
+            </ManualScreenHighlight>
+
+            <ManualScreenHighlight number={3} label="必須エラーと詳細入力">
+              <Stack spacing={0} divider={<Divider />}>
+                <Box sx={{ p: 2, bgcolor: 'background.danger' }}>
+                  <DynamicFormField
+                    item={{ id: 'meal', label: '食事・水分', type: 'text', required: true }}
+                    value=""
+                    error="必須項目です"
+                    onChange={() => undefined}
+                  />
+                </Box>
+                <Box sx={{ p: 2 }}>
+                  <DynamicFormField
+                    item={{ id: 'medicine', label: '服薬確認', type: 'checkbox', hasDetail: true }}
+                    value
+                    detailValue="眠前薬は未確認。ご家族へ申し送り済み。"
+                    onChange={() => undefined}
+                    onDetailChange={() => undefined}
+                  />
+                </Box>
+                <Box sx={{ p: 2 }}>
+                  <DynamicFormField
+                    item={{ id: 'care', label: '実施したケア', type: 'multicheckbox', options: '排泄介助,食事介助,更衣,他', required: true, hasDetail: true }}
+                    value={['排泄介助', '他']}
+                    detailValue="衣類交換、陰部洗浄を実施。"
+                    onChange={() => undefined}
+                    onDetailChange={() => undefined}
+                  />
+                </Box>
+              </Stack>
+              <FormHelperText sx={{ mt: 1 }}>保存前に赤背景の必須エラーを解消します。</FormHelperText>
+            </ManualScreenHighlight>
+          </Stack>
+        </Box>
+      </PageLayout>
+    </ManualDemoFrame>
+  );
+}
+
+function AiImportDemo() {
+  const [rows, setRows] = useState(reviewRows);
+  const confirmedCount = useMemo(() => rows.filter((row) => row.status === 'confirmed').length, [rows]);
+
+  return (
+    <ManualDemoFrame title="AI一括取込デモ：アップロードからレビューまで">
+      <Stack spacing={2.5}>
+        <ManualScreenHighlight number={1} label="ドラッグ&ドロップで取り込み">
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 3,
+              textAlign: 'center',
+              border: '2px dashed',
+              borderColor: 'primary.light',
+              bgcolor: 'background.default',
+            }}
+          >
+            <CloudUploadIcon color="primary" sx={{ fontSize: 40, mb: 0.5 }} />
+            <Typography fontWeight={800}>クリックまたはドラッグ&ドロップでファイルを選択</Typography>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>PDF・JPEG・PNG・WebP（最大10MB）</Typography>
+          </Paper>
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} useFlexGap flexWrap="wrap">
+            <Chip label="訪問記録_山田太郎_0704.pdf" icon={<AutoFixHighIcon />} />
+            <Chip label="IMG_2048.png + IMG_2049.png" color="primary" variant="outlined" />
+          </Stack>
+        </ManualScreenHighlight>
+
+        <ManualScreenHighlight number={2} label="AI入力箇所は黄色背景">
+          <Stack spacing={1.5}>
+            <LinearProgress variant="determinate" value={100} />
+            <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' } }}>
+              <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'background.aiHighlight', border: 1, borderColor: 'divider' }}>
+                <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" gap={0.5}><CalendarTodayIcon fontSize="small" />サービス日時</Typography>
+                <Typography fontWeight={800}>2026/07/04 09:00-10:30</Typography>
+              </Box>
+              <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'background.aiHighlight', border: 1, borderColor: 'divider' }}>
+                <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" gap={0.5}><PersonIcon fontSize="small" />担当スタッフ</Typography>
+                <Typography fontWeight={800}>佐藤 花子</Typography>
+              </Box>
+              <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'background.aiHighlight', border: 1, borderColor: 'divider' }}>
+                <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" gap={0.5}><AccessTimeIcon fontSize="small" />提供時間</Typography>
+                <Typography fontWeight={800}>1.5時間</Typography>
+              </Box>
+            </Box>
+          </Stack>
+        </ManualScreenHighlight>
+
+        <ManualScreenHighlight number={3} label={`レビューして下書き保存（確認済み ${confirmedCount} 件）`}>
+          <AiImportReviewTable
+            rows={rows}
+            clients={clients}
+            helpers={helpers}
+            saving={false}
+            onRowChange={(id, changes) => setRows((current) => current.map((row) => row.id === id ? { ...row, ...changes } : row))}
+            onSaveSelected={async () => undefined}
+          />
+        </ManualScreenHighlight>
+      </Stack>
+      <ManualCallout tone="warning" title="AI取込の注意点">
+        AIの結果は候補です。黄色背景の内容、信頼度、警告アイコン、未選択の利用者・スタッフを確認してから保存します。
+      </ManualCallout>
+    </ManualDemoFrame>
+  );
+}
+
+
+
+--- START OF FILE src/components/manual/RolesAndPermissionsManual.tsx ---
+
+'use client';
+
+import dynamic from 'next/dynamic';
+import type { EventInput } from '@fullcalendar/core';
+import {
+  Box,
+  Chip,
+  Divider,
+  Paper,
+  Stack,
+  Tab,
+  Tabs,
+  Typography,
+} from '@/components/ui/mui';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import GroupsIcon from '@mui/icons-material/Groups';
+import PersonIcon from '@mui/icons-material/Person';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import { DataTable, StatusChip } from '@/components/ui';
+import { ManualCallout, ManualDefinitionList, ManualDemoFrame, ManualScreenHighlight, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
+import { useState } from 'react';
+
+const ShiftCalendarViewer = dynamic(
+  () => import('@/components/shifts/ShiftCalendarViewer').then((mod) => mod.ShiftCalendarViewer),
+  { ssr: false },
+);
+
+const allEvents: EventInput[] = [
+  {
+    id: 'all-1',
+    title: '山田 太郎 様',
+    start: '2026-07-06T09:00:00',
+    end: '2026-07-06T10:30:00',
+    backgroundColor: '#2255CC',
+    borderColor: '#2255CC',
+    extendedProps: { staffNames: '佐藤 花子', reportStatuses: [{ id: 'r1', status: 'approved', is_primary: true }] },
+  },
+  {
+    id: 'all-2',
+    title: '鈴木 花子 様',
+    start: '2026-07-07T18:00:00',
+    end: '2026-07-07T21:00:00',
+    backgroundColor: '#7C3AED',
+    borderColor: '#7C3AED',
+    extendedProps: { staffNames: '田中 一郎', reportStatuses: [] },
+  },
+  {
+    id: 'all-3',
+    title: '高橋 健 様',
+    start: '2026-07-09T08:00:00',
+    end: '2026-07-09T09:00:00',
+    backgroundColor: '#0F766E',
+    borderColor: '#0F766E',
+    extendedProps: { staffNames: '佐藤 花子', reportStatuses: [{ id: 'r2', status: 'draft', is_primary: true }] },
+  },
+];
+
+const assignedOnlyEvents = allEvents.filter((event) => String(event.extendedProps?.staffNames ?? '').includes('佐藤'));
+
+export default function RolesAndPermissionsManual() {
+  return (
+    <Stack spacing={3}>
+      <ManualSection title="権限とロールの基本" subtitle="CareRecordでは、画面ごとに「全体」「担当のみ」「なし」の範囲を組み合わせて操作範囲を決めます。">
+        <Stack spacing={1.5}>
+          <ManualStep number={1} title="全体権限" body="事業所内の全利用者、全スタッフ、全シフト、全記録を確認できます。管理者や承認担当者向けです。" />
+          <ManualStep number={2} title="担当のみ権限" body="自分が担当に入っている利用者・シフト・記録だけを確認できます。一般スタッフの日常利用に向きます。" />
+          <ManualStep number={3} title="なし" body="該当メニューやデータを表示しません。管理機能は必要な担当者だけに付与します。" />
+        </Stack>
+      </ManualSection>
+
+      <ManualSection title="権限設計の目安">
+        <ManualDefinitionList
+          items={[
+            { term: '管理者', description: 'シフト作成、記録承認、統計確認が必要なため、シフト・記録は全体権限にします。' },
+            { term: '一般スタッフ', description: '自分の担当シフトから記録を作成できればよいため、シフト・記録は担当のみ権限にします。' },
+            { term: '事務担当', description: '帳票や統計だけ見るなど、業務範囲に応じて管理機能を限定します。' },
+          ]}
+        />
+      </ManualSection>
+
+      <RoleMatrixDemo />
+      <CalendarPermissionDemo />
+    </Stack>
+  );
+}
+
+function RoleMatrixDemo() {
+  const rows = [
+    { id: 'admin', role: '管理者', records: '全体', shifts: '全体', clients: '全体', management: '許可' },
+    { id: 'staff', role: '一般スタッフ', records: '担当のみ', shifts: '担当のみ', clients: '担当のみ', management: 'なし' },
+    { id: 'office', role: '事務担当', records: '全体', shifts: '閲覧のみ', clients: '全体', management: '一部許可' },
+  ];
+
+  return (
+    <ManualDemoFrame title="ロールごとの見える範囲">
+      <ManualScreenHighlight number={1} label="全体 / 担当のみ / なしを画面ごとに設定">
+        <DataTable
+          rows={rows}
+          getRowKey={(row) => row.id}
+          columns={[
+            { key: 'role', header: 'ロール', render: (row) => <Typography fontWeight={800}>{row.role}</Typography> },
+            { key: 'records', header: '記録', render: (row) => <PermissionChip value={row.records} /> },
+            { key: 'shifts', header: 'シフト', render: (row) => <PermissionChip value={row.shifts} /> },
+            { key: 'clients', header: '利用者', render: (row) => <PermissionChip value={row.clients} /> },
+            { key: 'management', header: '管理機能', render: (row) => <StatusChip label={row.management} tone={row.management === 'なし' ? 'default' : 'info'} size="small" /> },
+          ]}
+        />
+      </ManualScreenHighlight>
+    </ManualDemoFrame>
+  );
+}
+
+function PermissionChip({ value }: { value: string }) {
+  const tone = value === '全体' ? 'primary' : value === '担当のみ' ? 'warning' : 'default';
+  return <Chip label={value} size="small" color={tone} variant={tone === 'default' ? 'outlined' : 'filled'} />;
+}
+
+function CalendarPermissionDemo() {
+  const [tab, setTab] = useState<'all' | 'assigned'>('all');
+
+  return (
+    <ManualDemoFrame title="シフトカレンダーの見え方比較">
+      <ManualScreenHighlight number={2} label="同じ月でも権限で表示対象が変わる">
+        <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ display: { xs: 'flex', md: 'none' }, mb: 2 }}>
+          <Tab value="all" label="全体権限" />
+          <Tab value="assigned" label="担当のみ" />
+        </Tabs>
+
+        <Box sx={{ display: { xs: tab === 'all' ? 'block' : 'none', md: 'grid' }, gridTemplateColumns: { md: '1fr 1fr' }, gap: 2 }}>
+          <CalendarPanel
+            icon={<AdminPanelSettingsIcon color="primary" />}
+            title="全体権限の管理者"
+            description="全利用者・全スタッフの予定を確認できます。未作成や承認状態も俯瞰できます。"
+            events={allEvents}
+            badge="3件表示"
+          />
+          <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+            <CalendarPanel
+              icon={<PersonIcon color="warning" />}
+              title="担当のみ権限のスタッフ"
+              description="自分が担当に入っているシフトだけが表示されます。ほかの利用者予定は見えません。"
+              events={assignedOnlyEvents}
+              badge="2件表示"
+            />
+          </Box>
+        </Box>
+
+        <Box sx={{ display: { xs: tab === 'assigned' ? 'block' : 'none', md: 'none' } }}>
+          <CalendarPanel
+            icon={<PersonIcon color="warning" />}
+            title="担当のみ権限のスタッフ"
+            description="自分が担当に入っているシフトだけが表示されます。ほかの利用者予定は見えません。"
+            events={assignedOnlyEvents}
+            badge="2件表示"
+          />
+        </Box>
+      </ManualScreenHighlight>
+      <ManualCallout tone="warning" title="担当のみ権限で見えない場合">
+        利用者担当、シフト担当、スタッフ名簿、ログインアカウントとの紐付けを確認します。担当に入っていない予定は、正常に非表示になります。
+      </ManualCallout>
+    </ManualDemoFrame>
+  );
+}
+
+function CalendarPanel({
+  icon,
+  title,
+  description,
+  events,
+  badge,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  events: EventInput[];
+  badge: string;
+}) {
+  return (
+    <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1, minWidth: 0 }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+        {icon}
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography fontWeight={800}>{title}</Typography>
+          <Typography variant="caption" color="text.secondary">{description}</Typography>
+        </Box>
+        <Chip label={badge} size="small" color="primary" variant="outlined" />
+      </Stack>
+      <Divider sx={{ mb: 1.5 }} />
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+        <CalendarMonthIcon color="action" fontSize="small" />
+        <Typography variant="subtitle2" fontWeight={800}>2026年7月 シフト</Typography>
+        <Box sx={{ flex: 1 }} />
+        <Chip icon={<VisibilityIcon />} label={title.includes('全体') ? '全予定' : '自分の担当'} size="small" />
+      </Stack>
+      <Box sx={{ '& .fc-toolbar-title': { fontSize: '0.88rem !important' }, '& .fc-button': { minHeight: '30px !important', px: '8px !important' } }}>
+        <ShiftCalendarViewer
+          events={events}
+          initialView="dayGridMonth"
+          headerToolbar={{ left: 'prev,next', center: 'title', right: '' }}
+          selectable={false}
+          editable={false}
+          onEventClick={() => undefined}
+          onDateSelect={() => undefined}
+          noEventsText="表示できるシフトはありません"
+        />
+      </Box>
+      <Stack direction="row" spacing={1} mt={1} useFlexGap flexWrap="wrap">
+        <Chip icon={<GroupsIcon />} label={title.includes('全体') ? '山田・鈴木・高橋を表示' : '佐藤担当分だけ表示'} size="small" variant="outlined" />
+      </Stack>
+    </Paper>
+  );
+}
+
+
+
 --- START OF FILE src/components/manual/ShiftGuideManual.tsx ---
 
 'use client';
@@ -19424,6 +20175,229 @@ export default function ShiftGuideManual() {
             </StepBlock>
         </Box>
     );
+}
+
+
+
+--- START OF FILE src/components/manual/StatisticsManual.tsx ---
+
+'use client';
+
+import { useState } from 'react';
+import {
+  Box,
+  Button,
+  Chip,
+  Collapse,
+  Divider,
+  IconButton,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+} from '@/components/ui/mui';
+import EditNoteIcon from '@mui/icons-material/EditNote';
+import EventNoteIcon from '@mui/icons-material/EventNote';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { ShiftVarianceTable } from '@/components/statistics/ShiftVarianceTable';
+import { ManualCallout, ManualDefinitionList, ManualDemoFrame, ManualScreenHighlight, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
+
+type VarianceRow = {
+  id: string;
+  start: string;
+  end: string;
+  clientName: string;
+  staffNames: string;
+  actualStaffNames?: string;
+  plannedH: number | null;
+  actualH: number | null;
+  diffH: number | null;
+  flags?: string[];
+  details: Array<{ kind: 'planned' | 'actual'; label: string; hours: number; note: string }>;
+};
+
+const rows: VarianceRow[] = [
+  {
+    id: 'shift-1',
+    start: '7/4 09:00',
+    end: '7/4 10:30',
+    clientName: '山田 太郎',
+    staffNames: '佐藤 花子',
+    plannedH: 1.5,
+    actualH: 1.5,
+    diffH: 0,
+    details: [
+      { kind: 'planned', label: '予定', hours: 1.5, note: '重度訪問介護 09:00-10:30' },
+      { kind: 'actual', label: '実績', hours: 1.5, note: '記録作成済み・承認待ち' },
+    ],
+  },
+  {
+    id: 'shift-2',
+    start: '7/4 18:00',
+    end: '7/4 21:00',
+    clientName: '鈴木 花子',
+    staffNames: '田中 一郎',
+    actualStaffNames: '佐藤 花子',
+    plannedH: 3.0,
+    actualH: 2.5,
+    diffH: -0.5,
+    flags: ['担当不一致', '実績が30分短い'],
+    details: [
+      { kind: 'planned', label: '予定', hours: 3.0, note: '移動支援 18:00-21:00 / 予定担当: 田中 一郎' },
+      { kind: 'actual', label: '実績', hours: 2.5, note: '18:00-20:30 / 実績担当: 佐藤 花子' },
+    ],
+  },
+  {
+    id: 'shift-3',
+    start: '7/5 08:00',
+    end: '7/5 09:00',
+    clientName: '山田 太郎',
+    staffNames: '佐藤 花子',
+    plannedH: 1.0,
+    actualH: null,
+    diffH: null,
+    flags: ['実績なし'],
+    details: [
+      { kind: 'planned', label: '予定', hours: 1.0, note: '身体介護 08:00-09:00' },
+    ],
+  },
+];
+
+export default function StatisticsManual() {
+  return (
+    <Stack spacing={3}>
+      <ManualSection title="統計・予実管理の考え方" subtitle="シフト予定と記録実績を突き合わせ、未入力・時間差・担当違いを早く見つけるための章です。">
+        <Stack spacing={1.5}>
+          <ManualStep number={1} title="予定時間を基準にする" body="シフトの開始・終了から予定時間を計算し、同じシフトに紐付いた記録の実績時間と比較します。" />
+          <ManualStep number={2} title="実績がない予定を見つける" body="予定はあるのに記録がない場合は、差異表で「実績なし」として表示します。記録作成ボタンから不足分の入力へ進めます。" />
+          <ManualStep number={3} title="担当不一致を警告する" body="予定担当と記録作成者または実績担当が異なる場合、警告チップで表示します。代理対応や入力ミスの確認に使います。" />
+        </Stack>
+      </ManualSection>
+
+      <ManualSection title="差異が出たときの確認順">
+        <ManualDefinitionList
+          items={[
+            { term: '予定より短い', description: '訪問時間の短縮、早退、記録の終了時刻ミス、月跨ぎの片側だけ入力などを確認します。' },
+            { term: '予定より長い', description: '延長対応、開始時刻の前倒し、シフト未調整、複数記録の重複を確認します。' },
+            { term: '担当不一致', description: '実際に訪問したスタッフ名、代理対応、予定担当の修正漏れ、記録作成者の選択ミスを確認します。' },
+          ]}
+        />
+      </ManualSection>
+
+      <ShiftVarianceDemo />
+    </Stack>
+  );
+}
+
+function ShiftVarianceDemo() {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({ 'shift-2': true });
+  const totals = rows.reduce((acc, row) => ({
+    planned: acc.planned + (row.plannedH ?? 0),
+    actual: acc.actual + (row.actualH ?? 0),
+  }), { planned: 0, actual: 0 });
+  const diff = totals.actual - totals.planned;
+
+  return (
+    <ManualDemoFrame title="シフト差異合計と詳細表示">
+      <ManualScreenHighlight number={1} label="サマリーで全体差異を把握">
+        <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+          <Box sx={{ px: { xs: 1.5, sm: 2 }, py: 1.5, bgcolor: 'background.tint', borderBottom: 1, borderColor: 'divider' }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
+              <Typography variant="subtitle2" fontWeight={800}>シフト差異合計</Typography>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                <Chip size="small" variant="outlined" label={`予定 ${totals.planned.toFixed(1)}h`} />
+                <Chip size="small" color="primary" label={`実績 ${totals.actual.toFixed(1)}h`} />
+                <Chip size="small" color="warning" variant="outlined" label={`差異 ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}h`} />
+              </Stack>
+            </Stack>
+          </Box>
+
+          <ShiftVarianceTable>
+            <TableContainer sx={{ overflowX: 'auto' }}>
+              <Table size="small">
+                <TableHead sx={{ bgcolor: 'background.tint' }}>
+                  <TableRow>
+                    <TableCell />
+                    <TableCell sx={{ fontWeight: 800 }}>シフト日時</TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>利用者名</TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>担当職員</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800 }}>予定(h)</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800 }}>実績(h)</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800 }}>差異(h)</TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>操作</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {rows.map((row) => {
+                    const open = Boolean(expanded[row.id]);
+                    return (
+                      <TableRow key={row.id} hover>
+                        <TableCell padding="checkbox" sx={{ verticalAlign: 'top' }}>
+                          <IconButton size="small" onClick={() => setExpanded((current) => ({ ...current, [row.id]: !open }))}>
+                            {open ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                          </IconButton>
+                        </TableCell>
+                        <TableCell sx={{ verticalAlign: 'top' }}>{row.start} - {row.end}</TableCell>
+                        <TableCell sx={{ verticalAlign: 'top' }}>{row.clientName}</TableCell>
+                        <TableCell sx={{ verticalAlign: 'top' }}>
+                          <Stack spacing={0.75}>
+                            <Typography variant="body2">{row.staffNames}</Typography>
+                            <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+                              {row.flags?.map((flag) => (
+                                <Chip key={flag} label={flag === '担当不一致' && row.actualStaffNames ? `担当不一致 実績: ${row.actualStaffNames}` : flag} size="small" color="warning" variant="outlined" />
+                              ))}
+                            </Stack>
+                          </Stack>
+                        </TableCell>
+                        <TableCell align="right" sx={{ verticalAlign: 'top' }}>{row.plannedH?.toFixed(1) ?? '-'}</TableCell>
+                        <TableCell align="right" sx={{ verticalAlign: 'top' }}>{row.actualH?.toFixed(1) ?? '-'}</TableCell>
+                        <TableCell align="right" sx={{ verticalAlign: 'top', color: row.diffH != null && row.diffH < -0.1 ? 'error.main' : 'text.primary', fontWeight: row.diffH != null && row.diffH < -0.1 ? 800 : 400 }}>
+                          {row.diffH == null ? '-' : `${row.diffH >= 0 ? '+' : ''}${row.diffH.toFixed(1)}`}
+                        </TableCell>
+                        <TableCell sx={{ verticalAlign: 'top' }}>
+                          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                            {row.actualH == null ? (
+                              <Button size="small" variant="contained" startIcon={<EditNoteIcon />} onClick={() => undefined}>実績作成</Button>
+                            ) : (
+                              <Button size="small" variant="outlined" startIcon={<EditNoteIcon />} onClick={() => undefined}>実績確認</Button>
+                            )}
+                            <Button size="small" variant="outlined" color="inherit" startIcon={<EventNoteIcon />} onClick={() => undefined}>シフト確認</Button>
+                          </Stack>
+                          <Collapse in={open} timeout="auto" unmountOnExit>
+                            <Divider sx={{ my: 1.5 }} />
+                            <Stack spacing={1}>
+                              {row.details.map((detail) => (
+                                <Box key={`${row.id}-${detail.kind}`}>
+                                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                    <Chip size="small" label={detail.label} color={detail.kind === 'actual' ? 'primary' : 'default'} variant={detail.kind === 'actual' ? 'filled' : 'outlined'} />
+                                    <Typography variant="body2" fontWeight={800}>{detail.hours.toFixed(2)}h</Typography>
+                                  </Stack>
+                                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{detail.note}</Typography>
+                                </Box>
+                              ))}
+                            </Stack>
+                          </Collapse>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </ShiftVarianceTable>
+        </Paper>
+      </ManualScreenHighlight>
+      <ManualCallout title="運用で見る場所">
+        月末締め前に、差異が大きい行、実績なし、担当不一致、サービス不一致の順に確認すると、帳票や請求前の手戻りを減らせます。
+      </ManualCallout>
+    </ManualDemoFrame>
+  );
 }
 
 
