@@ -1,0 +1,6 @@
+src/app/favicon.ico	ignored file type
+supabase/.branches	ignored directory
+supabase/.gitignore	unsupported extension
+supabase/.temp	ignored directory
+supabase/migrations/old	ignored path
+supabase/supabase	ignored path

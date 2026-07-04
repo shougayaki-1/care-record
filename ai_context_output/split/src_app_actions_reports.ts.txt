@@ -387,6 +387,14 @@ export async function getReportsByShift(
   shiftId: string
 ): Promise<ReportWithSegment[]> {
   await assertOrgPermission(organizationId, 'reports');
+  const { data: shift, error: shiftError } = await supabaseAdmin
+    .from('shifts')
+    .select('id')
+    .eq('id', shiftId)
+    .eq('organization_id', organizationId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (shiftError || !shift) throw new Error('シフトにアクセスできません');
   const { data, error } = await supabaseAdmin
     .from('report_shifts')
     .select(`

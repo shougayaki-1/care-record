@@ -32,6 +32,14 @@ export type SaveSegmentInput = {
 
 export async function getShiftSegments(orgId: string, shiftId: string): Promise<ShiftSegment[]> {
   await assertOrgRole(orgId);
+  const { data: shift, error: shiftError } = await supabaseAdmin
+    .from('shifts')
+    .select('id')
+    .eq('id', shiftId)
+    .eq('organization_id', orgId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (shiftError || !shift) throw new Error('シフトにアクセスできません');
   const { data, error } = await supabaseAdmin
     .from('shift_segments')
     .select(`

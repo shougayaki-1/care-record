@@ -47,6 +47,16 @@ CREATE EXTENSION IF NOT EXISTS "supabase_vault" WITH SCHEMA "vault";
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA "extensions";
 
 
+INSERT INTO "storage"."buckets" ("id", "name", "public", "file_size_limit", "allowed_mime_types")
+VALUES
+  ('avatars', 'avatars', true, 2097152, ARRAY['image/jpeg', 'image/png', 'image/webp']),
+  ('report-images', 'report-images', false, 10485760, ARRAY['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+ON CONFLICT ("id") DO UPDATE SET
+  "public" = EXCLUDED."public",
+  "file_size_limit" = EXCLUDED."file_size_limit",
+  "allowed_mime_types" = EXCLUDED."allowed_mime_types";
+
+
 
 
 
@@ -55,9 +65,31 @@ CREATE OR REPLACE FUNCTION "private"."can_access_client"("p_client_id" "uuid") R
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO ''
     AS $$
-  SELECT EXISTS(SELECT 1 FROM public.clients c JOIN public.organization_members om ON om.organization_id=c.organization_id
-    WHERE c.id=p_client_id AND c.deleted_at IS NULL AND om.user_id=auth.uid()
-      AND (om.role IN('owner','manager') OR EXISTS(SELECT 1 FROM public.assignments a WHERE a.client_id=c.id AND a.helper_id=auth.uid())));
+  WITH target AS (
+    SELECT c.id, c.organization_id
+    FROM public.clients c
+    WHERE c.id = p_client_id
+      AND c.deleted_at IS NULL
+  ),
+  scope AS (
+    SELECT t.*, private.get_member_record_view_scope(t.organization_id, auth.uid()) AS value
+    FROM target t
+    WHERE EXISTS (
+      SELECT 1
+      FROM public.organization_members om
+      WHERE om.organization_id = t.organization_id
+        AND om.user_id = auth.uid()
+    )
+  )
+  SELECT EXISTS (
+    SELECT 1
+    FROM scope s
+    WHERE s.value = 'all'
+      OR (
+        s.value = 'assigned'
+        AND private.is_assigned_client_for_user(s.id, s.organization_id, auth.uid())
+      )
+  );
 $$;
 
 
@@ -80,8 +112,46 @@ CREATE OR REPLACE FUNCTION "private"."can_access_shift"("p_shift_id" "uuid") RET
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO ''
     AS $$
-  SELECT EXISTS(SELECT 1 FROM public.shifts s WHERE s.id=p_shift_id AND s.deleted_at IS NULL
-    AND private.is_org_member(s.organization_id));
+  WITH target AS (
+    SELECT s.id, s.organization_id, s.client_id
+    FROM public.shifts s
+    WHERE s.id = p_shift_id
+      AND s.deleted_at IS NULL
+  ),
+  scope AS (
+    SELECT t.*, private.get_member_shift_action_scope(t.organization_id, auth.uid(), 'view') AS value
+    FROM target t
+    WHERE EXISTS (
+      SELECT 1
+      FROM public.organization_members om
+      WHERE om.organization_id = t.organization_id
+        AND om.user_id = auth.uid()
+    )
+  )
+  SELECT EXISTS (
+    SELECT 1
+    FROM scope s
+    WHERE s.value = 'all'
+      OR (
+        s.value = 'assigned'
+        AND (
+          private.is_assigned_client_for_user(s.client_id, s.organization_id, auth.uid())
+          OR EXISTS (
+            SELECT 1
+            FROM public.shift_staffs ss
+            WHERE ss.shift_id = s.id
+              AND ss.staff_id = private.get_actor_staff_id(s.organization_id, auth.uid())
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM public.shift_segments seg
+            JOIN public.shift_segment_staffs sss ON sss.segment_id = seg.id
+            WHERE seg.shift_id = s.id
+              AND sss.staff_id = private.get_actor_staff_id(s.organization_id, auth.uid())
+          )
+        )
+      )
+  );
 $$;
 
 
@@ -370,7 +440,7 @@ CREATE OR REPLACE FUNCTION "private"."is_session_active"() RETURNS boolean
   SELECT EXISTS(
     SELECT 1 FROM public.user_session_activity usa
      WHERE usa.user_id=auth.uid() AND usa.auth_session_id=(auth.jwt()->>'session_id')
-       AND usa.revoked_at IS NULL AND usa.last_activity >= now()-interval '16 minutes'
+       AND usa.revoked_at IS NULL AND usa.last_activity >= now()-interval '24 hours'
        AND usa.absolute_expires_at > now()
   );
 $$;
@@ -421,11 +491,11 @@ BEGIN
     END LOOP;
   END IF;
 
-  -- 担当クライアント割り当て（jsonb から抽出する場合の安全なキャスト）
-  IF v_inv.target_client_ids IS NOT NULL AND jsonb_typeof(v_inv.target_client_ids) = 'array' THEN
+  -- 担当クライアント割り当て
+  IF v_inv.target_client_ids IS NOT NULL AND cardinality(v_inv.target_client_ids) > 0 THEN
     INSERT INTO public.assignments (client_id, helper_id)
-    SELECT elem::uuid, v_actor
-      FROM jsonb_array_elements_text(v_inv.target_client_ids) AS elem
+    SELECT elem, v_actor
+      FROM unnest(v_inv.target_client_ids) AS elem
     ON CONFLICT DO NOTHING;
   END IF;
 
@@ -496,6 +566,8 @@ DECLARE
   target_org_id uuid;
   next_version bigint;
 BEGIN
+  IF current_setting('care_record.skip_version', true) = 'on' THEN RETURN NEW; END IF;
+
   SELECT c.organization_id INTO target_org_id
     FROM public.reports r
     JOIN public.clients c ON c.id = r.client_id
@@ -536,6 +608,8 @@ DECLARE
   target_org_id uuid;
   next_version bigint;
 BEGIN
+  IF current_setting('care_record.skip_version', true) = 'on' THEN RETURN NEW; END IF;
+
   SELECT c.organization_id INTO target_org_id
     FROM public.clients c
    WHERE c.id = NEW.client_id;
@@ -595,8 +669,10 @@ declare
   org_id uuid;
 begin
   select organization_id into org_id
-  from public.profiles
-  where id = auth.uid();
+  from public.organization_members
+  where user_id = auth.uid()
+  order by created_at
+  limit 1;
   return org_id;
 end;
 $$;
@@ -611,13 +687,20 @@ CREATE OR REPLACE FUNCTION "public"."handle_new_user"() RETURNS "trigger"
     AS $$
 begin
   insert into public.profiles (id, name)
-  values (new.id, new.raw_user_meta_data->>'name');
+  values (
+    new.id,
+    COALESCE(NULLIF(new.raw_user_meta_data->>'name', ''), NULLIF(new.email, ''), '名前未設定')
+  )
+  on conflict (id) do nothing;
   return new;
 end;
 $$;
 
 
 ALTER FUNCTION "public"."handle_new_user"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE TRIGGER "on_auth_user_created" AFTER INSERT ON "auth"."users" FOR EACH ROW EXECUTE FUNCTION "public"."handle_new_user"();
 
 
 CREATE OR REPLACE FUNCTION "public"."is_org_admin"("_org_id" "uuid") RETURNS boolean
@@ -627,7 +710,7 @@ CREATE OR REPLACE FUNCTION "public"."is_org_admin"("_org_id" "uuid") RETURNS boo
 BEGIN
   RETURN EXISTS (
     SELECT 1 FROM organization_members
-    WHERE organization_id = _org_id AND user_id = auth.uid() AND role IN ('owner', 'manager')
+    WHERE organization_id = _org_id AND user_id = auth.uid() AND role = 'owner'
   );
 END;
 $$;
@@ -1405,7 +1488,9 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "agreed_at" timestamp with time zone,
     "avatar_url" "text",
     "deleted_at" timestamp with time zone,
-    "deletion_reason" "text"
+    "deletion_reason" "text",
+    "role" "text",
+    CONSTRAINT "profiles_role_check" CHECK ((("role" IS NULL) OR ("role" = 'super_admin'::"text")))
 );
 
 
@@ -2701,7 +2786,7 @@ CREATE POLICY "Allow delete for owners and managers" ON "public"."assignments" F
    FROM "public"."clients"
   WHERE (("clients"."id" = "assignments"."client_id") AND ("clients"."organization_id" IN ( SELECT "organization_members"."organization_id"
            FROM "public"."organization_members"
-          WHERE (("organization_members"."user_id" = "auth"."uid"()) AND ("organization_members"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"])))))))));
+          WHERE (("organization_members"."user_id" = "auth"."uid"()) AND ("organization_members"."role" = 'owner'::"text"))))))));
 
 
 
@@ -2709,7 +2794,7 @@ CREATE POLICY "Allow insert for owners and managers" ON "public"."assignments" F
    FROM "public"."clients"
   WHERE (("clients"."id" = "assignments"."client_id") AND ("clients"."organization_id" IN ( SELECT "organization_members"."organization_id"
            FROM "public"."organization_members"
-          WHERE (("organization_members"."user_id" = "auth"."uid"()) AND ("organization_members"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"])))))))));
+          WHERE (("organization_members"."user_id" = "auth"."uid"()) AND ("organization_members"."role" = 'owner'::"text"))))))));
 
 
 
@@ -2808,10 +2893,14 @@ CREATE POLICY "Delete reports" ON "public"."reports" FOR DELETE USING ((EXISTS (
 
 
 
-CREATE POLICY "Enable insert for admins" ON "public"."staffs" FOR INSERT WITH CHECK (("auth"."uid"() IN ( SELECT "organization_members"."user_id"
-   FROM "public"."organization_members"
-  WHERE (("organization_members"."organization_id" = "staffs"."organization_id") AND ("organization_members"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"]))))));
-
+CREATE POLICY "Enable insert for admins" ON "public"."staffs" FOR INSERT WITH CHECK (
+  auth.uid() IN (
+    SELECT organization_members.user_id
+    FROM public.organization_members
+    WHERE organization_members.organization_id = staffs.organization_id
+      AND organization_members.role = 'owner'::text
+  )
+);
 
 
 CREATE POLICY "Enable insert for staff" ON "public"."report_images" FOR INSERT WITH CHECK ((EXISTS ( SELECT 1
@@ -2860,7 +2949,7 @@ CREATE POLICY "Manage members" ON "public"."organization_members" USING ("public
 
 
 
-CREATE POLICY "Manage own profile" ON "public"."profiles" USING (("auth"."uid"() = "id"));
+CREATE POLICY "Manage own profile" ON "public"."profiles" USING (("auth"."uid"() = "id")) WITH CHECK ((("auth"."uid"() = "id") AND ("role" IS NULL)));
 
 
 
@@ -2902,9 +2991,8 @@ CREATE POLICY "Org members read premium types" ON "public"."labor_premium_types"
 
 
 CREATE POLICY "Org members read report actual staffs" ON "public"."report_actual_staffs" FOR SELECT USING ((EXISTS ( SELECT 1
-   FROM ("public"."reports" "r"
-     JOIN "public"."clients" "c" ON (("c"."id" = "r"."client_id")))
-  WHERE (("r"."id" = "report_actual_staffs"."report_id") AND ("r"."deleted_at" IS NULL) AND "private"."is_org_member"("c"."organization_id")))));
+   FROM "public"."reports" "r"
+  WHERE (("r"."id" = "report_actual_staffs"."report_id") AND ("r"."deleted_at" IS NULL) AND "private"."can_access_report"("r"."id")))));
 
 
 
@@ -2915,7 +3003,7 @@ CREATE POLICY "Org members read roles" ON "public"."organization_roles" FOR SELE
 CREATE POLICY "Org members read segment staffs" ON "public"."shift_segment_staffs" FOR SELECT USING ((EXISTS ( SELECT 1
    FROM ("public"."shift_segments" "ss"
      JOIN "public"."shifts" "s" ON (("s"."id" = "ss"."shift_id")))
-  WHERE (("ss"."id" = "shift_segment_staffs"."segment_id") AND "private"."is_org_member"("s"."organization_id")))));
+  WHERE (("ss"."id" = "shift_segment_staffs"."segment_id") AND "private"."can_access_shift"("s"."id")))));
 
 
 
@@ -2926,19 +3014,19 @@ CREATE POLICY "Org members read service types" ON "public"."service_types" FOR S
 CREATE POLICY "Org members read shift pattern segment staffs" ON "public"."shift_pattern_segment_staffs" FOR SELECT USING ((EXISTS ( SELECT 1
    FROM ("public"."shift_pattern_segments" "sps"
      JOIN "public"."shift_patterns" "sp" ON (("sp"."id" = "sps"."pattern_id")))
-  WHERE (("sps"."id" = "shift_pattern_segment_staffs"."segment_id") AND "private"."is_org_member"("sp"."organization_id")))));
+  WHERE (("sps"."id" = "shift_pattern_segment_staffs"."segment_id") AND "private"."can_access_shift_pattern"("sp"."id")))));
 
 
 
 CREATE POLICY "Org members read shift pattern segments" ON "public"."shift_pattern_segments" FOR SELECT USING ((EXISTS ( SELECT 1
    FROM "public"."shift_patterns" "sp"
-  WHERE (("sp"."id" = "shift_pattern_segments"."pattern_id") AND "private"."is_org_member"("sp"."organization_id")))));
+  WHERE (("sp"."id" = "shift_pattern_segments"."pattern_id") AND "private"."can_access_shift_pattern"("sp"."id")))));
 
 
 
 CREATE POLICY "Org members read shift segments" ON "public"."shift_segments" FOR SELECT USING ((EXISTS ( SELECT 1
    FROM "public"."shifts" "s"
-  WHERE (("s"."id" = "shift_segments"."shift_id") AND "private"."is_org_member"("s"."organization_id")))));
+  WHERE (("s"."id" = "shift_segments"."shift_id") AND "private"."can_access_shift"("s"."id")))));
 
 
 
@@ -3053,7 +3141,19 @@ CREATE POLICY "Require active server session" ON "public"."reports" AS RESTRICTI
 
 
 
+CREATE POLICY "Require active server session" ON "public"."report_actual_staffs" AS RESTRICTIVE FOR SELECT TO "authenticated" USING (( SELECT "private"."is_session_active"() AS "is_session_active"));
+
+
+
 CREATE POLICY "Require active server session" ON "public"."shift_pattern_staffs" AS RESTRICTIVE FOR SELECT TO "authenticated" USING (( SELECT "private"."is_session_active"() AS "is_session_active"));
+
+
+
+CREATE POLICY "Require active server session" ON "public"."shift_pattern_segment_staffs" AS RESTRICTIVE FOR SELECT TO "authenticated" USING (( SELECT "private"."is_session_active"() AS "is_session_active"));
+
+
+
+CREATE POLICY "Require active server session" ON "public"."shift_pattern_segments" AS RESTRICTIVE FOR SELECT TO "authenticated" USING (( SELECT "private"."is_session_active"() AS "is_session_active"));
 
 
 
@@ -3062,6 +3162,14 @@ CREATE POLICY "Require active server session" ON "public"."shift_patterns" AS RE
 
 
 CREATE POLICY "Require active server session" ON "public"."shift_staffs" AS RESTRICTIVE FOR SELECT TO "authenticated" USING (( SELECT "private"."is_session_active"() AS "is_session_active"));
+
+
+
+CREATE POLICY "Require active server session" ON "public"."shift_segment_staffs" AS RESTRICTIVE FOR SELECT TO "authenticated" USING (( SELECT "private"."is_session_active"() AS "is_session_active"));
+
+
+
+CREATE POLICY "Require active server session" ON "public"."shift_segments" AS RESTRICTIVE FOR SELECT TO "authenticated" USING (( SELECT "private"."is_session_active"() AS "is_session_active"));
 
 
 
@@ -3076,7 +3184,7 @@ CREATE POLICY "Require active server session" ON "public"."staffs" AS RESTRICTIV
 CREATE POLICY "Restrict deleted report visibility" ON "public"."reports" AS RESTRICTIVE FOR SELECT TO "authenticated" USING ((("deleted_at" IS NULL) OR (EXISTS ( SELECT 1
    FROM ("public"."clients" "c"
      JOIN "public"."organization_members" "om" ON (("om"."organization_id" = "c"."organization_id")))
-  WHERE (("c"."id" = "reports"."client_id") AND ("om"."user_id" = "auth"."uid"()) AND ("om"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"])))))));
+  WHERE (("c"."id" = "reports"."client_id") AND ("om"."user_id" = "auth"."uid"()) AND ("om"."role" = 'owner'::"text"))))));
 
 
 
@@ -3114,11 +3222,11 @@ CREATE POLICY "Tenant boundary reports" ON "public"."reports" AS RESTRICTIVE FOR
 
 CREATE POLICY "Tenant boundary shift pattern staffs" ON "public"."shift_pattern_staffs" AS RESTRICTIVE FOR SELECT TO "authenticated" USING ((EXISTS ( SELECT 1
    FROM "public"."shift_patterns" "sp"
-  WHERE (("sp"."id" = "shift_pattern_staffs"."pattern_id") AND ("sp"."deleted_at" IS NULL) AND "private"."is_org_member"("sp"."organization_id")))));
+  WHERE (("sp"."id" = "shift_pattern_staffs"."pattern_id") AND ("sp"."deleted_at" IS NULL) AND "private"."can_access_shift_pattern"("sp"."id")))));
 
 
 
-CREATE POLICY "Tenant boundary shift patterns" ON "public"."shift_patterns" AS RESTRICTIVE FOR SELECT TO "authenticated" USING ((( SELECT "private"."is_org_member"("shift_patterns"."organization_id") AS "is_org_member") AND ("deleted_at" IS NULL)));
+CREATE POLICY "Tenant boundary shift patterns" ON "public"."shift_patterns" AS RESTRICTIVE FOR SELECT TO "authenticated" USING ((( SELECT "private"."can_access_shift_pattern"("shift_patterns"."id") AS "can_access_shift_pattern") AND ("deleted_at" IS NULL)));
 
 
 
@@ -3126,7 +3234,7 @@ CREATE POLICY "Tenant boundary shift staffs" ON "public"."shift_staffs" AS RESTR
 
 
 
-CREATE POLICY "Tenant boundary shifts" ON "public"."shifts" AS RESTRICTIVE FOR SELECT TO "authenticated" USING ((( SELECT "private"."is_org_member"("shifts"."organization_id") AS "is_org_member") AND ("deleted_at" IS NULL)));
+CREATE POLICY "Tenant boundary shifts" ON "public"."shifts" AS RESTRICTIVE FOR SELECT TO "authenticated" USING ((( SELECT "private"."can_access_shift"("shifts"."id") AS "can_access_shift") AND ("deleted_at" IS NULL)));
 
 
 
@@ -3186,10 +3294,15 @@ CREATE POLICY "Users can view their own notifications" ON "public"."notification
 
 
 
-CREATE POLICY "View logs for managers" ON "public"."audit_logs" FOR SELECT USING ((EXISTS ( SELECT 1
-   FROM "public"."organization_members" "om"
-  WHERE (("om"."organization_id" = "audit_logs"."organization_id") AND ("om"."user_id" = "auth"."uid"()) AND ("om"."role" = ANY (ARRAY['owner'::"text", 'manager'::"text"]))))));
-
+CREATE POLICY "View logs for managers" ON "public"."audit_logs" FOR SELECT USING (
+  EXISTS (
+    SELECT 1 
+    FROM public.organization_members om 
+    WHERE om.organization_id = audit_logs.organization_id 
+      AND om.user_id = auth.uid() 
+      AND om.role = 'owner'::text
+  )
+);
 
 
 ALTER TABLE "public"."assignments" ENABLE ROW LEVEL SECURITY;
@@ -3887,19 +4000,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 
 
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" REVOKE ALL ON FUNCTIONS FROM PUBLIC;
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
