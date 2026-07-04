@@ -51,6 +51,9 @@ public/workbox-*.js.map
 # apple secret
 generate-apple-secret.js
 
+# local Claude Code instructions (personal environment notes)
+CLAUDE.local.md
+
 # Playwright
 node_modules/
 /test-results/
