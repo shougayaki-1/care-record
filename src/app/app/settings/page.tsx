@@ -6,7 +6,7 @@ import {
   Box, Typography, Alert, CircularProgress, LinearProgress, Stack, Divider,
   Chip, Tabs, Tab
 } from '@/components/ui/mui';
-import { AppButton, AppDialog, AppTextField, NumberField, PageBody, PageLayout } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, PageBody, PageLayout } from '@/components/ui';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
@@ -22,7 +22,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
-import { deleteOrganization, disconnectGoogleCalendar, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName, updateTravelCostSettings } from '@/app/actions/organization';
+import { deleteOrganization, disconnectGoogleCalendar, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName } from '@/app/actions/organization';
 import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -30,10 +30,12 @@ import { getGoogleAuthUrlAction } from '@/app/actions/google';
 import LaborPremiumSettings from '@/components/settings/LaborPremiumSettings';
 import ServiceTypeSettings from '@/components/settings/ServiceTypeSettings';
 import StaffRoleSettings from '@/components/settings/StaffRoleSettings';
+import OfficeManagementPanel from '@/components/settings/OfficeManagementPanel';
 import { getSettingsSectionsData } from '@/app/actions/settingsSections';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 import type { ServiceType } from '@/app/actions/serviceTypes';
 import type { StaffRole } from '@/app/actions/staffRoles';
+import type { Office } from '@/app/actions/offices';
 
 type GasResponse = {
     status: string;
@@ -58,8 +60,7 @@ function SettingsContent() {
     const [googleFolderId, setGoogleFolderId] = useState<string | null>(null);
     const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null);
     const [driveUrl, setDriveUrl] = useState('');
-    const [travelCostRate, setTravelCostRate] = useState('20');
-    
+
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [connectingCal, setConnectingCal] = useState(false);
@@ -78,6 +79,7 @@ function SettingsContent() {
         laborPremiumTypes: LaborPremiumType[];
         serviceTypes: ServiceType[];
         staffRoles: StaffRole[];
+        offices: Office[];
     } | null>(null);
     const canRepairCalendarSync = Boolean(
         currentOrg &&
@@ -89,15 +91,14 @@ function SettingsContent() {
         if (!currentOrg) return;
         const { data } = await supabase
             .from('organizations')
-            .select('name, google_folder_id, google_calendar_id, travel_cost_rate_yen_per_km')
+            .select('name, google_folder_id, google_calendar_id')
             .eq('id', currentOrg.id)
             .single();
-        
+
         if (data) {
             setOrgName(data.name);
             setGoogleFolderId(data.google_folder_id);
             setGoogleCalendarId(data.google_calendar_id);
-            setTravelCostRate(String(data.travel_cost_rate_yen_per_km ?? 20));
             if(data.google_folder_id) {
                 setDriveUrl(`https://drive.google.com/drive/folders/${data.google_folder_id}`);
             }
@@ -200,22 +201,6 @@ function SettingsContent() {
             setMessage({ type: 'error', text: '連携に失敗しました。GASの設定を確認してください。' });
         } finally {
             setConnecting(false);
-        }
-    };
-
-    const handleSaveTravelCost = async () => {
-        if (!currentOrg) return;
-        setSaving(true);
-        setMessage(null);
-        try {
-            await updateTravelCostSettings(currentOrg.id, Number(travelCostRate));
-            setMessage({ type: 'success', text: '交通費設定を保存しました' });
-            setTimeout(() => setMessage(null), 3000);
-        } catch (e) {
-            console.error(e);
-            setMessage({ type: 'error', text: e instanceof Error ? e.message : '保存失敗' });
-        } finally {
-            setSaving(false);
         }
     };
 
@@ -417,28 +402,6 @@ function SettingsContent() {
                                     )}
                                 </Stack>
                             </Box>
-
-                            {/* 交通費設定 */}
-                            {canEditOrganization && (
-                                <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
-                                    <Typography variant="h6" fontWeight="bold" gutterBottom>交通費設定</Typography>
-                                    <Typography variant="body2" color="text.secondary" mb={2}>
-                                        記録画面の交通費は、往復距離 × 1kmあたり単価で算出します。
-                                    </Typography>
-                                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                                        <NumberField
-                                            label="1kmあたり単価"
-                                            value={travelCostRate}
-                                            onChange={(e) => setTravelCostRate(e.target.value)}
-                                            sx={{ maxWidth: { sm: 240 } }}
-                                            slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">円/km</Typography> }, htmlInput: { inputMode: 'decimal', step: '1', min: 0 } }}
-                                        />
-                                        <AppButton startIcon={<SaveIcon />} onClick={handleSaveTravelCost} disabled={saving}>
-                                            保存
-                                        </AppButton>
-                                    </Stack>
-                                </Box>
-                            )}
                         </Stack>
                     )}
 
@@ -622,6 +585,18 @@ function SettingsContent() {
                                         シフト区間内でのスタッフの役割（例：正職員、パート、ボランティア）を管理します。無給フラグを設定することで給与計算から除外できます。
                                     </Typography>
                                     <StaffRoleSettings orgId={currentOrg.id} initialStaffRoles={settingsSectionsData?.staffRoles} />
+                                </Box>
+                            )}
+
+                            {/* 事業所 */}
+                            {canEditOrganization && (
+                                <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
+                                    <Typography variant="h6" fontWeight="bold" gutterBottom>事業所</Typography>
+                                    <Typography variant="body2" color="text.secondary" mb={2}>
+                                        利用者・スタッフの所属先と、事業所ごとの交通費単価（円/km）を管理します。
+                                        提供記録の交通費は担当スタッフの所属事業所の単価で算出されます。
+                                    </Typography>
+                                    <OfficeManagementPanel orgId={currentOrg.id} initialOffices={settingsSectionsData?.offices} />
                                 </Box>
                             )}
                         </Stack>

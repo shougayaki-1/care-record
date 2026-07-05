@@ -3,6 +3,7 @@ import { supabaseAdmin, assertOrgRole } from '@/utils/supabase/auth';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 import type { ServiceType } from '@/app/actions/serviceTypes';
 import type { StaffRole } from '@/app/actions/staffRoles';
+import type { Office } from '@/app/actions/offices';
 
 // settings ページの「労働時間ルール」「サービス種別」「スタッフ役割」の3セクションが
 // 同時にマウントされ、それぞれ独自に assertOrgRole + 単純な1テーブル取得を行っていたのを
@@ -13,10 +14,11 @@ export async function getSettingsSectionsData(orgId: string): Promise<{
   laborPremiumTypes: LaborPremiumType[];
   serviceTypes: ServiceType[];
   staffRoles: StaffRole[];
+  offices: Office[];
 }> {
   await assertOrgRole(orgId);
 
-  const [laborPremiumResult, serviceTypesResult, staffRolesResult] = await Promise.all([
+  const [laborPremiumResult, serviceTypesResult, staffRolesResult, officesResult] = await Promise.all([
     supabaseAdmin
       .from('labor_premium_types')
       .select('*')
@@ -34,15 +36,23 @@ export async function getSettingsSectionsData(orgId: string): Promise<{
       .eq('organization_id', orgId)
       .is('deleted_at', null)
       .order('sort_order'),
+    supabaseAdmin
+      .from('offices')
+      .select('*')
+      .eq('organization_id', orgId)
+      .is('archived_at', null)
+      .order('created_at', { ascending: true }),
   ]);
 
   if (laborPremiumResult.error) throw new Error('労働時間ルールを取得できませんでした');
   if (serviceTypesResult.error) throw new Error('サービス種別を取得できませんでした');
   if (staffRolesResult.error) throw new Error('スタッフ役割を取得できませんでした');
+  if (officesResult.error) throw new Error('事業所を取得できませんでした');
 
   return {
     laborPremiumTypes: (laborPremiumResult.data ?? []) as LaborPremiumType[],
     serviceTypes: (serviceTypesResult.data ?? []) as ServiceType[],
     staffRoles: (staffRolesResult.data ?? []) as StaffRole[],
+    offices: (officesResult.data ?? []) as Office[],
   };
 }
