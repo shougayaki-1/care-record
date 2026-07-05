@@ -1,10 +1,11 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(14);
+SELECT plan(15);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
 SELECT ok(NOT has_table_privilege('anon','public.invitations','SELECT'), 'anonymous cannot list invitations');
+SELECT ok(NOT has_table_privilege('anon','public.offices','SELECT'), 'anonymous cannot list offices');
 SELECT ok(NOT has_table_privilege('authenticated','public.invitations','INSERT'), 'clients cannot create invitations directly');
 SELECT ok(NOT has_table_privilege('authenticated','public.organization_members','INSERT'), 'clients cannot add organization members directly');
 SELECT ok(NOT has_table_privilege('authenticated','public.reports','UPDATE'), 'clients cannot update reports directly');

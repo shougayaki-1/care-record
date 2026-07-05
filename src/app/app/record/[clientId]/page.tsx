@@ -517,6 +517,7 @@ export default function RecordPage() {
         name: s.name,
         user_id: s.user_id,
         defaultRoundTripDistanceKm: distanceByStaffId.get(s.id) || 0,
+        // office_id が未設定、または所属事業所がアーカイブ済み（rateByOfficeIdに存在しない）の場合は20円/kmにフォールバック
         defaultTravelCostRateYenPerKm: (s.office_id && rateByOfficeId.get(s.office_id)) ?? 20,
       }));
       setSelectableStaffs(allStaffs);
