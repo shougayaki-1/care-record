@@ -14,14 +14,16 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { AppButton, AppDialog, AppTextField, DataTable, PageBody, PageHeader, PageLayout, StatusChip, SwitchField, TablePageSkeleton } from '@/components/ui';
-import { createClient, setClientArchived, softDeleteClient, updateClientName } from '@/app/actions/clients';
+import { AppButton, AppDialog, AppTextField, DataTable, PageBody, PageHeader, PageLayout, SelectField, StatusChip, SwitchField, TablePageSkeleton } from '@/components/ui';
+import { createClient, setClientArchived, softDeleteClient, updateClientName, updateClientOffice } from '@/app/actions/clients';
+import { getOffices, type Office } from '@/app/actions/offices';
 
 type Client = {
     id: string;
     name: string;
     created_at: string;
     archived_at: string | null;
+    office_id: string | null;
     assignments: { staff_id: string }[];
 };
 
@@ -41,6 +43,9 @@ export default function ClientsPage() {
   const [openEdit, setOpenEdit] = useState(false);
   const [editId, setEditId] = useState('');
   const [editName, setEditName] = useState('');
+  const [editOfficeId, setEditOfficeId] = useState<string>('none');
+
+  const [officeList, setOfficeList] = useState<Office[]>([]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -49,7 +54,7 @@ export default function ClientsPage() {
     try {
       let query = supabase
         .from('clients')
-        .select('id, name, created_at, archived_at, assignments(staff_id)')
+        .select('id, name, created_at, archived_at, office_id, assignments(staff_id)')
         .eq('organization_id', currentOrg.id)
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
@@ -71,12 +76,17 @@ export default function ClientsPage() {
 
   useEffect(() => { if (!wsLoading && currentOrg) fetchClients(); }, [wsLoading, currentOrg, fetchClients]);
 
+  useEffect(() => {
+    if (!currentOrg) return;
+    getOffices(currentOrg.id).then(setOfficeList).catch((e) => console.error(e));
+  }, [currentOrg]);
+
   const handleAddClient = async () => {
     if (!newName.trim() || !currentOrg) return;
     setIsSubmitting(true);
     try {
       const data = await createClient(currentOrg.id, newName);
-      setClients([{ ...data, assignments: [] }, ...clients]);
+      setClients([{ ...data, office_id: null, assignments: [] }, ...clients]);
       setOpenAdd(false);
       setNewName('');
       showToast('登録しました');
@@ -89,21 +99,23 @@ export default function ClientsPage() {
     }
   };
 
-  const handleOpenEdit = (client: Client) => { setEditId(client.id); setEditName(client.name); setOpenEdit(true); };
+  const handleOpenEdit = (client: Client) => { setEditId(client.id); setEditName(client.name); setEditOfficeId(client.office_id || 'none'); setOpenEdit(true); };
 
   const handleUpdateClient = async () => {
       if (!editName.trim()) return;
       setIsSubmitting(true);
       try {
           const result = await updateClientName(currentOrg!.id, editId, editName);
-          setClients(clients.map(c => c.id === editId ? { ...c, name: result.name } : c));
+          const officeIdToSave = editOfficeId === 'none' ? null : editOfficeId;
+          await updateClientOffice(currentOrg!.id, editId, officeIdToSave);
+          setClients(clients.map(c => c.id === editId ? { ...c, name: result.name, office_id: officeIdToSave } : c));
           setOpenEdit(false);
           showToast('更新しました');
-      } catch (error) { 
-          console.error(error); 
-          showToast('更新に失敗しました', 'error'); 
-      } finally { 
-          setIsSubmitting(false); 
+      } catch (error) {
+          console.error(error);
+          showToast('更新に失敗しました', 'error');
+      } finally {
+          setIsSubmitting(false);
       }
   };
 
@@ -221,7 +233,15 @@ export default function ClientsPage() {
       </AppDialog>
 
       <AppDialog open={openEdit} onClose={() => setOpenEdit(false)} title="利用者名の変更" actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenEdit(false)}>キャンセル</AppButton><AppButton loading={isSubmitting} onClick={handleUpdateClient}>保存</AppButton></>}>
-        <AppTextField autoFocus margin="dense" label="利用者氏名" value={editName} onChange={(e) => setEditName(e.target.value)} />
+        <Stack spacing={2} mt={1}>
+          <AppTextField autoFocus margin="dense" label="利用者氏名" value={editName} onChange={(e) => setEditName(e.target.value)} />
+          <SelectField
+              value={editOfficeId}
+              onChange={setEditOfficeId}
+              label="所属事業所"
+              options={[{ value: 'none', label: '未設定' }, ...officeList.map((office) => ({ value: office.id, label: office.name }))]}
+          />
+        </Stack>
       </AppDialog>
     </PageLayout>
   );

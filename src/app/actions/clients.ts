@@ -46,6 +46,19 @@ export async function updateClientName(organizationId: string, clientId: string,
   return { success: true, name: normalized };
 }
 
+export async function updateClientOffice(organizationId: string, clientId: string, officeId: string | null) {
+  const { userId } = await assertOrgPermission(organizationId, 'clients');
+  await assertClientOrg(clientId, organizationId);
+  if (officeId) {
+    const { data: office } = await supabaseAdmin.from('offices').select('id').eq('id', officeId).eq('organization_id', organizationId).is('archived_at', null).maybeSingle();
+    if (!office) throw new Error('選択された事業所が見つかりません');
+  }
+  const { error } = await supabaseAdmin.from('clients').update({ office_id: officeId }).eq('id', clientId);
+  if (error) throw sanitizeDbError(error, 'action.clients');
+  await recordAuditEvent({ organizationId, actorId: userId, action: 'client.update_office', resourceType: 'client', resourceId: clientId });
+  return { success: true };
+}
+
 export async function setClientArchived(organizationId: string, clientId: string, archived: boolean) {
   const { userId } = await assertOrgPermission(organizationId, 'clients');
   await assertClientOrg(clientId, organizationId);
