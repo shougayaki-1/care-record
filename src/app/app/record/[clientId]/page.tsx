@@ -43,7 +43,7 @@ type FormItem = {
 };
 
 type FormAnswers = Record<string, string | number | boolean | string[]>;
-type HelperProfile = { id: string; name: string; defaultRoundTripDistanceKm?: number };
+type HelperProfile = { id: string; name: string; defaultRoundTripDistanceKm?: number; defaultTravelCostRateYenPerKm?: number };
 type StaffRoleOption = { id: string; name: string };
 type ServiceTypeOption = { id: string; name: string };
 type ActualStaffInput = { staff_id: string; staff_role_id: string | null };
@@ -464,7 +464,7 @@ export default function RecordPage() {
         { data: tmpl },
         { data: staffsData },
         { data: assignmentRows },
-        { data: orgData },
+        { data: officesData },
         { data: serviceTypeData },
         { data: staffRoleData },
       ] = await Promise.all([
@@ -472,7 +472,7 @@ export default function RecordPage() {
         supabase.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle(),
         supabase
           .from('staffs')
-          .select('id, name, user_id')
+          .select('id, name, user_id, office_id')
           .eq('organization_id', currentOrg.id)
           .is('archived_at', null)
           .order('sort_order', { ascending: true, nullsFirst: false })
@@ -482,10 +482,10 @@ export default function RecordPage() {
           .select('staff_id, round_trip_distance_km')
           .eq('client_id', clientId),
         supabase
-          .from('organizations')
-          .select('travel_cost_rate_yen_per_km')
-          .eq('id', currentOrg.id)
-          .maybeSingle(),
+          .from('offices')
+          .select('id, travel_cost_rate_yen_per_km')
+          .eq('organization_id', currentOrg.id)
+          .is('archived_at', null),
         supabase
           .from('service_types')
           .select('id, name')
@@ -511,10 +511,16 @@ export default function RecordPage() {
       }
 
       const distanceByStaffId = new Map((assignmentRows || []).map((assignment) => [assignment.staff_id, Number(assignment.round_trip_distance_km || 0)]));
-      const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id, defaultRoundTripDistanceKm: distanceByStaffId.get(s.id) || 0 }));
+      const rateByOfficeId = new Map((officesData || []).map((office) => [office.id, Number(office.travel_cost_rate_yen_per_km)]));
+      const allStaffs = (staffsData || []).map(s => ({
+        id: s.id,
+        name: s.name,
+        user_id: s.user_id,
+        defaultRoundTripDistanceKm: distanceByStaffId.get(s.id) || 0,
+        defaultTravelCostRateYenPerKm: (s.office_id && rateByOfficeId.get(s.office_id)) ?? 20,
+      }));
       setSelectableStaffs(allStaffs);
 
-      setTravelCostRateYenPerKm(Number(orgData?.travel_cost_rate_yen_per_km ?? 20));
       setServiceTypes((serviceTypeData ?? []) as ServiceTypeOption[]);
       setStaffRoles((staffRoleData ?? []) as StaffRoleOption[]);
 
@@ -524,6 +530,7 @@ export default function RecordPage() {
             setSelectedHelpers([myStaffRecord.name]);
             setActualStaffs([{ staff_id: myStaffRecord.id, staff_role_id: null }]);
             setRoundTripDistanceKm(String(myStaffRecord.defaultRoundTripDistanceKm || 0));
+            setTravelCostRateYenPerKm(myStaffRecord.defaultTravelCostRateYenPerKm);
         }
       }
     } catch (error) { console.error('Error fetching base data:', error); }
@@ -614,8 +621,11 @@ export default function RecordPage() {
   useEffect(() => {
     if (currentReportId || distanceTouched || selectableStaffs.length === 0 || selectedHelpers.length === 0) return;
     const staff = selectableStaffs.find((helper) => helper.name === selectedHelpers[0]);
-    if (staff) setRoundTripDistanceKm(String(staff.defaultRoundTripDistanceKm || 0));
-  }, [currentReportId, distanceTouched, selectableStaffs, selectedHelpers, setRoundTripDistanceKm]);
+    if (staff) {
+      setRoundTripDistanceKm(String(staff.defaultRoundTripDistanceKm || 0));
+      setTravelCostRateYenPerKm(staff.defaultTravelCostRateYenPerKm ?? 20);
+    }
+  }, [currentReportId, distanceTouched, selectableStaffs, selectedHelpers, setRoundTripDistanceKm, setTravelCostRateYenPerKm]);
 
   useEffect(() => {
     const init = async () => {
@@ -966,7 +976,10 @@ export default function RecordPage() {
       }).filter((staff): staff is ActualStaffInput => Boolean(staff)));
       if (!currentReportId && !distanceTouched) {
           const staff = selectableStaffs.find((helper) => helper.name === value[0]);
-          if (staff) setRoundTripDistanceKm(String(staff.defaultRoundTripDistanceKm || 0));
+          if (staff) {
+            setRoundTripDistanceKm(String(staff.defaultRoundTripDistanceKm || 0));
+            setTravelCostRateYenPerKm(staff.defaultTravelCostRateYenPerKm ?? 20);
+          }
       }
       setIsDirty(true);
       if (errors.helpers) {
@@ -974,7 +987,7 @@ export default function RecordPage() {
           delete newErrors.helpers;
           setErrors(newErrors);
       }
-  }, [actualStaffs, currentReportId, distanceTouched, errors, selectableStaffs, setActualStaffs, setErrors, setIsDirty, setRoundTripDistanceKm, setSelectedHelpers]);
+  }, [actualStaffs, currentReportId, distanceTouched, errors, selectableStaffs, setActualStaffs, setErrors, setIsDirty, setRoundTripDistanceKm, setSelectedHelpers, setTravelCostRateYenPerKm]);
 
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}><CircularProgress /></Box>;
 
