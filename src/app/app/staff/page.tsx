@@ -34,6 +34,7 @@ import {
   softDeleteStaff,
   type StaffPositionPreset,
 } from '@/app/actions/staffs';
+import { getOffices, type Office } from '@/app/actions/offices';
 
 const EMPLOYMENT_TYPE_OPTIONS = ['常勤', '非常勤'] as const;
 const WORK_STYLE_OPTIONS = ['兼務', '専従'] as const;
@@ -49,6 +50,7 @@ type StaffData = {
   user_id: string | null;
   archived_at: string | null;
   sort_order: number | null;
+  office_id: string | null;
   profiles?: { name: string } | null;
 };
 type AccountData = { id: string; name: string; };
@@ -56,11 +58,13 @@ type StaffPageData = {
   staffList: StaffData[];
   accountList: AccountData[];
   positionPresets: StaffPositionPreset[];
+  officeList: Office[];
 };
 const initialStaffPageData: StaffPageData = {
   staffList: [],
   accountList: [],
   positionPresets: [],
+  officeList: [],
 };
 
 export default function StaffPage() {
@@ -79,6 +83,7 @@ export default function StaffPage() {
   const [employmentType, setEmploymentType] = useState<EmploymentType>('常勤');
   const [workStyle, setWorkStyle] = useState<WorkStyle>('兼務');
   const [linkedUserId, setLinkedUserId] = useState<string>('none');
+  const [officeId, setOfficeId] = useState<string>('none');
   const [showArchived, setShowArchived] = useState(false);
   const [openPositionDialog, setOpenPositionDialog] = useState(false);
   const [newPositionName, setNewPositionName] = useState('');
@@ -88,7 +93,7 @@ export default function StaffPage() {
       // 1. スタッフ一覧の取得
       const { data: staffsData, error: staffsError } = await supabase
         .from('staffs')
-        .select(`id, name, positions, employment_type, work_style, user_id, archived_at, sort_order, profiles:profiles!user_id(name)`)
+        .select(`id, name, positions, employment_type, work_style, user_id, archived_at, sort_order, office_id, profiles:profiles!user_id(name)`)
         .eq('organization_id', currentOrg.id)
         .order('sort_order', { ascending: true, nullsFirst: false })
         .order('name', { ascending: true });
@@ -119,6 +124,7 @@ export default function StaffPage() {
         staffList: (staffsData as unknown as StaffData[]) || [],
         accountList: accounts,
         positionPresets: await getStaffPositionPresets(currentOrg.id),
+        officeList: await getOffices(currentOrg.id),
       };
   }, [currentOrg]);
 
@@ -130,7 +136,7 @@ export default function StaffPage() {
   } = useFetchData(fetchStaffData, initialStaffPageData, !wsLoading && Boolean(currentOrg), (message) => {
     showToast(`データの取得に失敗しました: ${message}`, 'error');
   });
-  const { staffList, accountList, positionPresets } = staffPageData;
+  const { staffList, accountList, positionPresets, officeList } = staffPageData;
 
   const handleSave = async () => {
     if (!currentOrg || !staffName.trim()) return;
@@ -146,6 +152,7 @@ export default function StaffPage() {
           employmentType,
           workStyle,
           linkedUserId: finalUserId,
+          officeId: officeId === 'none' ? null : officeId,
         });
         showToast(editId ? '更新しました' : '追加しました');
         setModalOpen(false);
@@ -153,7 +160,7 @@ export default function StaffPage() {
     } catch (e) { console.error(e); showToast('保存に失敗しました', 'error'); }
   };
 
-  const handleOpenAdd = () => { setEditId(null); setStaffName(''); setStaffPositions([]); setEmploymentType('常勤'); setWorkStyle('兼務'); setLinkedUserId('none'); setModalOpen(true); };
+  const handleOpenAdd = () => { setEditId(null); setStaffName(''); setStaffPositions([]); setEmploymentType('常勤'); setWorkStyle('兼務'); setLinkedUserId('none'); setOfficeId('none'); setModalOpen(true); };
   const handleOpenEdit = (staff: StaffData) => {
     setEditId(staff.id);
     setStaffName(staff.name);
@@ -161,6 +168,7 @@ export default function StaffPage() {
     setEmploymentType(EMPLOYMENT_TYPE_OPTIONS.includes(staff.employment_type as EmploymentType) ? staff.employment_type as EmploymentType : '常勤');
     setWorkStyle(WORK_STYLE_OPTIONS.includes(staff.work_style as WorkStyle) ? staff.work_style as WorkStyle : '兼務');
     setLinkedUserId(staff.user_id || 'none');
+    setOfficeId(staff.office_id || 'none');
     setModalOpen(true);
   };
   const handleDelete = async (id: string, name: string) => {
@@ -412,6 +420,12 @@ export default function StaffPage() {
                 <AppTextField autoFocus label="スタッフ名 (表示用)" value={staffName} onChange={e => setStaffName(e.target.value)} required />
                 <SelectField value={employmentType} onChange={(value) => setEmploymentType(value as EmploymentType)} label="雇用形態" options={EMPLOYMENT_TYPE_OPTIONS.map((value) => ({ value, label: value }))} />
                 <SelectField value={workStyle} onChange={(value) => setWorkStyle(value as WorkStyle)} label="専従・兼務" options={WORK_STYLE_OPTIONS.map((value) => ({ value, label: value }))} />
+                <SelectField
+                    value={officeId}
+                    onChange={setOfficeId}
+                    label="所属事業所"
+                    options={[{ value: 'none', label: '未設定' }, ...officeList.map((office) => ({ value: office.id, label: office.name }))]}
+                />
                 <MultiSelectField
                     options={positionPresets.map((preset) => preset.name)}
                     value={staffPositions}

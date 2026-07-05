@@ -79,20 +79,26 @@ export async function saveStaff(
     employmentType: string;
     workStyle: string;
     linkedUserId?: string | null;
+    officeId?: string | null;
   },
 ) {
   const { userId } = await assertOrgPermission(organizationId, 'staffs');
   const normalized = await normalizeStaffInput(organizationId, values.name, values.positions, values.employmentType, values.workStyle);
   const linkedUserId = values.linkedUserId || null;
   await validateLinkedUser(organizationId, linkedUserId, values.staffId);
+  const officeId = values.officeId || null;
+  if (officeId) {
+    const { data: office } = await supabaseAdmin.from('offices').select('id').eq('id', officeId).eq('organization_id', organizationId).is('archived_at', null).maybeSingle();
+    if (!office) throw new Error('選択された事業所が見つかりません');
+  }
 
   let staffId = values.staffId || null;
   if (staffId) {
     await assertStaffOrg(staffId, organizationId);
-    const { error } = await supabaseAdmin.from('staffs').update({ ...normalized, user_id: linkedUserId }).eq('id', staffId);
+    const { error } = await supabaseAdmin.from('staffs').update({ ...normalized, user_id: linkedUserId, office_id: officeId }).eq('id', staffId);
     if (error) throw sanitizeDbError(error, 'action.staffs');
   } else {
-    const { data, error } = await supabaseAdmin.from('staffs').insert({ organization_id: organizationId, ...normalized, user_id: linkedUserId }).select('id').single();
+    const { data, error } = await supabaseAdmin.from('staffs').insert({ organization_id: organizationId, ...normalized, user_id: linkedUserId, office_id: officeId }).select('id').single();
     if (error || !data) throw new Error(error?.message || 'スタッフを作成できませんでした');
     staffId = data.id;
   }
