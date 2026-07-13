@@ -130,7 +130,7 @@ export default function MyShiftsPage() {
       setShifts(data);
     } catch (e) {
       console.error(e);
-      showToast('シフトの取得に失敗しました', 'error');
+      showToast(e instanceof Error ? e.message : 'シフトの取得に失敗しました', 'error');
     } finally {
       setLoading(false);
     }
@@ -228,12 +228,15 @@ export default function MyShiftsPage() {
           <ShiftCalendarViewer
             calendarRef={calendarRef}
             events={calendarEvents}
-            initialView="listMonth"
+            initialView="dayGridMonth"
+            initialDate={`${currentMonth}-01`}
             headerToolbar={{ left: 'prev,next today', center: 'title', right: 'listMonth,dayGridMonth' }}
             buttonText={{ listMonth: 'リスト', dayGridMonth: '月間' }}
             noEventsText="この月のシフトはありません"
             onDatesSet={(info) => {
-              const d = info.start;
+              // `info.start` is the active range and may be in the previous month.
+              // The visible month is `currentStart`.
+              const d = info.view.currentStart;
               const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
               setCurrentMonth(m);
             }}

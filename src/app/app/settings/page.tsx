@@ -26,7 +26,7 @@ import { deleteOrganization, disconnectGoogleCalendar, leaveOrganization, update
 import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { getGoogleAuthUrlAction } from '@/app/actions/google';
+import { getGoogleAuthUrlAction, getGoogleConnectionHealth, type GoogleConnectionState } from '@/app/actions/google';
 import LaborPremiumSettings from '@/components/settings/LaborPremiumSettings';
 import ServiceTypeSettings from '@/components/settings/ServiceTypeSettings';
 import StaffRoleSettings from '@/components/settings/StaffRoleSettings';
@@ -57,6 +57,7 @@ function SettingsContent() {
     const [orgName, setOrgName] = useState('');
     const [googleFolderId, setGoogleFolderId] = useState<string | null>(null);
     const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null);
+    const [googleConnectionState, setGoogleConnectionState] = useState<GoogleConnectionState>('disconnected');
     const [driveUrl, setDriveUrl] = useState('');
     const [travelCostRate, setTravelCostRate] = useState('20');
     
@@ -89,7 +90,7 @@ function SettingsContent() {
         if (!currentOrg) return;
         const { data } = await supabase
             .from('organizations')
-            .select('name, google_folder_id, google_calendar_id, travel_cost_rate_yen_per_km')
+            .select('name, google_folder_id, google_calendar_id, google_connection_status, travel_cost_rate_yen_per_km')
             .eq('id', currentOrg.id)
             .single();
         
@@ -97,12 +98,20 @@ function SettingsContent() {
             setOrgName(data.name);
             setGoogleFolderId(data.google_folder_id);
             setGoogleCalendarId(data.google_calendar_id);
+            setGoogleConnectionState((data.google_connection_status as GoogleConnectionState | null) || (data.google_calendar_id ? 'temporarily_unavailable' : 'disconnected'));
             setTravelCostRate(String(data.travel_cost_rate_yen_per_km ?? 20));
             if(data.google_folder_id) {
                 setDriveUrl(`https://drive.google.com/drive/folders/${data.google_folder_id}`);
             }
         }
     }, [currentOrg]);
+
+    useEffect(() => {
+        if (!currentOrg || !googleCalendarId || !checkManagementPermission(currentOrg.effectivePermissions, 'integrations')) return;
+        void getGoogleConnectionHealth(currentOrg.id)
+            .then(({ state }) => setGoogleConnectionState(state))
+            .catch(() => setGoogleConnectionState('temporarily_unavailable'));
+    }, [currentOrg, googleCalendarId]);
 
     useEffect(() => {
         if (!wsLoading && currentOrg) {
@@ -233,11 +242,11 @@ function SettingsContent() {
     };
 
     // OAuth認証によるカレンダー作成（Googleへ遷移）
-    const handleConnectCalendar = async () => {
+    const handleConnectCalendar = async (mode: 'connect' | 'reauthorize' = 'connect') => {
         if (!currentOrg) return;
         setConnectingCal(true);
         try {
-            const url = await getGoogleAuthUrlAction(currentOrg.id);
+            const url = await getGoogleAuthUrlAction(currentOrg.id, mode);
             // Googleのログイン画面へリダイレクト
             window.location.href = url;
         } catch (e) {
@@ -503,7 +512,13 @@ function SettingsContent() {
                                         <Typography variant="h6" fontWeight="bold">Googleカレンダー連携</Typography>
                                         <Typography variant="body2" color="text.secondary">事業所ごとの専用カレンダーを自動作成し、シフトを同期します（OAuth直接連携）</Typography>
                                     </Box>
-                                    <Chip label={googleCalendarId ? "連携済み" : "未連携"} color={googleCalendarId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: { sm: 'auto' } }} />
+                                    <Chip
+                                        label={googleCalendarId ? (googleConnectionState === 'healthy' ? '連携・正常' : googleConnectionState === 'reauth_required' ? '再認証が必要' : googleConnectionState === 'calendar_missing' ? 'カレンダー要確認' : '接続を確認中') : '未連携'}
+                                        color={googleCalendarId && googleConnectionState === 'healthy' ? 'success' : googleCalendarId ? 'warning' : 'default'}
+                                        size="small"
+                                        icon={<LinkIcon />}
+                                        sx={{ ml: { sm: 'auto' } }}
+                                    />
                                 </Stack>
                                 
                                 <Box sx={{ mt: 2, p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider', minWidth: 0 }}>
@@ -568,6 +583,14 @@ function SettingsContent() {
                                                     >
                                                         連携を解除
                                                     </AppButton>
+                                                    <AppButton
+                                                        variant="outlined"
+                                                        intent="warning"
+                                                        onClick={() => handleConnectCalendar('reauthorize')}
+                                                        disabled={connectingCal || repairingCal || resyncingCal}
+                                                    >
+                                                        {connectingCal ? 'Googleへ移動中...' : 'Googleを再認証'}
+                                                    </AppButton>
                                                 </Stack>
                                             </Stack>
                                         ) : (
@@ -575,7 +598,7 @@ function SettingsContent() {
                                                 <Alert severity="info">
                                                     ボタンを押すとGoogleの認証画面へ移動します。許可すると、あなたのアカウントに事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
                                                 </Alert>
-                                                <AppButton intent="success" onClick={handleConnectCalendar} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                                                <AppButton intent="success" onClick={() => handleConnectCalendar()} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                     {connectingCal ? 'Googleへ移動中...' : 'シフト用カレンダーを作成・連携する'}
                                                 </AppButton>
                                             </Stack>

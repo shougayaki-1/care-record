@@ -12,16 +12,15 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import HistoryIcon from '@mui/icons-material/History';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { CalendarPageSkeleton, InnerPageHeader, PageLayout } from '@/components/ui';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
+import { getMyReportHistory } from '@/app/actions/reports';
 
 type Report = {
-    id: string; start_at: string; status: 'pending' | 'approved' | 'remanded'; helper_id?: string | null;
+    id: string; start_at: string; status: 'pending' | 'approved' | 'remanded';
     client_id: string; clients: { name: string; } | null;
-    report_values?: { data: { _helpers?: string[] } }[] | null;
 };
 
 // 簡易カレンダーコンポーネント
@@ -85,7 +84,7 @@ const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month
 
 export default function HistoryPage() {
     const router = useRouter();
-    const { currentOrg, userId, loading: wsLoading } = useWorkspace();
+    const { currentOrg, loading: wsLoading } = useWorkspace();
     const [viewMode, setViewMode] = useState(0); // 0: List, 1: Calendar
     const [reports, setReports] = useState<Report[]>([]);
     const [filterDate, setFilterDate] = useState('');
@@ -94,46 +93,26 @@ export default function HistoryPage() {
     useEffect(() => {
         const fetchData = async () => {
             if (!currentOrg) return;
-            if (!userId) return;
-            const { data: myStaff } = await supabase
-                .from('staffs')
-                .select('name')
-                .eq('organization_id', currentOrg.id)
-                .eq('user_id', userId)
-                .is('deleted_at', null)
-                .maybeSingle();
-
-            let query = supabase.from('reports')
-                .select(`id, start_at, status, helper_id, client_id, clients!inner(name, organization_id), report_values(data)`)
-                .eq('clients.organization_id', currentOrg.id)
-                .is('deleted_at', null)
-                .neq('status', 'draft')
-                .order('start_at', { ascending: false });
-
+            let startAt: string | undefined;
+            let endAt: string | undefined;
             if (viewMode === 0 && filterDate) {
-                query = query.gte('start_at', `${filterDate}T00:00:00`).lte('start_at', `${filterDate}T23:59:59`);
+                startAt = `${filterDate}T00:00:00+09:00`;
+                endAt = `${filterDate}T23:59:59.999+09:00`;
             } else if (viewMode === 1) {
-                const start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
-                const end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59).toISOString();
-                query = query.gte('start_at', start).lte('start_at', end);
-            } else {
-                query = query.limit(100);
+                startAt = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
+                endAt = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1).toISOString();
             }
-
-            const { data } = await query;
-            if (data) {
-                const typedData = data as unknown as Report[];
-                const myName = myStaff?.name;
-                setReports(typedData.filter((report) => {
-                    if (report.helper_id === userId) return true;
-                    const helpers = report.report_values?.[0]?.data?._helpers;
-                    return Boolean(myName && Array.isArray(helpers) && helpers.includes(myName));
-                }));
+            try {
+                const result = await getMyReportHistory(currentOrg.id, { startAt, endAt, limit: 100 });
+                setReports(result.status === 'ok' ? result.items : []);
+            } catch (error) {
+                console.error('Failed to load own report history', error);
+                setReports([]);
             }
         };
 
         if (!wsLoading) fetchData();
-    }, [wsLoading, currentOrg, userId, filterDate, viewMode, currentMonth]);
+    }, [wsLoading, currentOrg, filterDate, viewMode, currentMonth]);
 
     const handleEdit = (report: Report) => router.push(`/app/record/${report.client_id}?reportId=${report.id}`);
 

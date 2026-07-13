@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useReducer, useMemo, useCallback } from 'react';
+import React, { useEffect, useReducer, useMemo, useCallback, useRef, useState } from 'react';
 import {
   Box, Button, Container, Typography, TextField,
   Stack, IconButton, CircularProgress,
@@ -25,8 +25,12 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import {
   auditReportView,
+  discardReportAutosave,
   getReportImages,
+  loadReportAutosave,
+  saveReportAutosave,
   saveReport as saveReportAction,
+  transitionReports,
   softDeleteReports,
   uploadReportImage,
 } from '@/app/actions/reports';
@@ -40,6 +44,7 @@ import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
 type FormItem = {
   id: string; label: string; type: 'text' | 'number' | 'checkbox' | 'time' | 'select' | 'section' | 'multicheckbox';
   options?: string; required: boolean; hasDetail?: boolean;
+  detailMode?: 'conditional' | 'always'; detailLabel?: string;
 };
 
 type FormAnswers = Record<string, string | number | boolean | string[]>;
@@ -237,6 +242,7 @@ const FormFieldItem = React.memo(function FormFieldItem({
   detailValue,
   error,
   isAiFilled,
+  disabled = false,
   onAnswerChange,
 }: {
   item: FormItem;
@@ -244,6 +250,7 @@ const FormFieldItem = React.memo(function FormFieldItem({
   detailValue: string;
   error?: string;
   isAiFilled: boolean;
+  disabled?: boolean;
   onAnswerChange: (id: string, value: FormAnswers[string]) => void;
 }) {
   const handleChange = useCallback((nextValue: FormAnswers[string]) => {
@@ -261,6 +268,7 @@ const FormFieldItem = React.memo(function FormFieldItem({
         value={value}
         detailValue={detailValue}
         error={error}
+        disabled={disabled}
         onChange={handleChange}
         onDetailChange={handleDetailChange}
       />
@@ -279,6 +287,10 @@ export default function RecordPage() {
   const paramReportId = searchParams.get('reportId');
   const shiftId = searchParams.get('shiftId');
   const segmentId = searchParams.get('segmentId');
+  const draftKeyRef = useRef<string>(searchParams.get('draftKey') || crypto.randomUUID());
+  const autosaveRestoredRef = useRef(false);
+  const autosaveRevisionRef = useRef(0);
+  const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const [formState, formDispatch] = useReducer(formReducer, formInitialState);
   const [uiState, uiDispatch] = useReducer(uiReducer, paramReportId, createUiInitialState);
@@ -363,6 +375,13 @@ export default function RecordPage() {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get('draftKey')) return;
+    const next = new URLSearchParams(searchParams.toString());
+    next.set('draftKey', draftKeyRef.current);
+    router.replace(`/app/record/${clientId}?${next.toString()}`);
+  }, [clientId, router, searchParams]);
 
   const formatTimeForLabel = (dateStr?: string) => {
       if (!dateStr) return '';
@@ -753,6 +772,75 @@ export default function RecordPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
+  // Recover private server-side work in progress. It is intentionally not kept
+  // in localStorage because this screen can contain sensitive care information.
+  useEffect(() => {
+    if (loading || !currentOrg || autosaveRestoredRef.current || currentStatus === 'approved') return;
+    autosaveRestoredRef.current = true;
+    void loadReportAutosave(currentOrg.id, draftKeyRef.current).then((saved) => {
+      if (!saved?.payload) return;
+      const payload = saved.payload as Partial<{
+        answers: FormAnswers;
+        selectedHelpers: string[];
+        actualStaffs: ActualStaffInput[];
+        actualServiceTypeId: string;
+        startDateTime: string;
+        endDateTime: string;
+        serviceTime: string;
+        travelTime: string;
+        roundTripDistanceKm: string;
+      }>;
+      if (payload.answers) setAnswers(payload.answers);
+      if (payload.selectedHelpers) setSelectedHelpers(payload.selectedHelpers);
+      if (payload.actualStaffs) setActualStaffs(payload.actualStaffs);
+      if (payload.actualServiceTypeId !== undefined) setActualServiceTypeId(payload.actualServiceTypeId);
+      if (payload.startDateTime) setStartDateTime(payload.startDateTime);
+      if (payload.endDateTime) setEndDateTime(payload.endDateTime);
+      if (payload.serviceTime !== undefined) setServiceTime(payload.serviceTime);
+      if (payload.travelTime !== undefined) setTravelTime(payload.travelTime);
+      if (payload.roundTripDistanceKm !== undefined) setRoundTripDistanceKm(payload.roundTripDistanceKm);
+      autosaveRevisionRef.current = saved.autosave_revision;
+      setIsDirty(true);
+      setAutosaveState('saved');
+      showToast('入力途中の内容を復元しました', 'info');
+    }).catch((error) => {
+      console.error('Failed to restore report autosave', error);
+    });
+  }, [autosaveRestoredRef, currentOrg, currentStatus, loading, setActualServiceTypeId, setActualStaffs, setAnswers, setEndDateTime, setIsDirty, setRoundTripDistanceKm, setSelectedHelpers, setServiceTime, setStartDateTime, setTravelTime, showToast]);
+
+  useEffect(() => {
+    if (!isDirty || loading || !currentOrg || currentStatus === 'approved') return;
+    const timer = window.setTimeout(() => {
+      const revision = autosaveRevisionRef.current + 1;
+      setAutosaveState('saving');
+      void saveReportAutosave({
+        organizationId: currentOrg.id,
+        clientId: clientId as string,
+        reportId: currentReportId,
+        draftKey: draftKeyRef.current,
+        autosaveRevision: revision,
+        payload: {
+          answers,
+          selectedHelpers,
+          actualStaffs,
+          actualServiceTypeId,
+          startDateTime,
+          endDateTime,
+          serviceTime,
+          travelTime,
+          roundTripDistanceKm,
+        },
+      }).then((result) => {
+        if (result.saved) autosaveRevisionRef.current = revision;
+        setAutosaveState('saved');
+      }).catch((error) => {
+        console.error('Report autosave failed', error);
+        setAutosaveState('error');
+      });
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, currentStatus, endDateTime, isDirty, loading, roundTripDistanceKm, selectedHelpers, serviceTime, startDateTime, travelTime]);
+
   useEffect(() => {
     if (!currentReportId || !currentOrg) return;
     void Promise.all([
@@ -858,6 +946,10 @@ export default function RecordPage() {
       if (!currentReportId) setCurrentReportId(targetReportId);
       if (status === 'draft') setHasAiDraftSource(false);
       setIsDirty(false);
+      void discardReportAutosave(currentOrg.id, draftKeyRef.current).catch((error) => {
+        console.error('Failed to discard committed autosave', error);
+      });
+      setAutosaveState('idle');
       
       if (!currentReportId && targetReportId) {
           const newUrl = `/app/record/${clientId}?reportId=${targetReportId}`;
@@ -874,22 +966,37 @@ export default function RecordPage() {
       if (!(await confirm({ title: '送信の確認', message: '記録を送信しますか？', confirmText: '送信する' }))) return;
       if (await saveReport('pending')) { showToast('記録を送信しました', 'success'); router.push('/app/record'); }
   }, [confirm, router, saveReport, showToast]);
+  const handlePendingSave = useCallback(async () => {
+      if (await saveReport('pending')) {
+        showToast('承認待ちのまま変更を保存しました', 'success');
+      }
+  }, [saveReport, showToast]);
   const executeApprove = useCallback(async () => {
-      if (await saveReport('approved')) {
+      if (!currentOrg || !currentReportId) return;
+      try {
+        await transitionReports(currentOrg.id, [currentReportId], 'approve');
           showToast('承認しました', 'success');
           router.push('/app/reports');
+      } catch (error) {
+          console.error(error);
+          showToast('承認に失敗しました', 'error');
       }
-  }, [router, saveReport, showToast]);
+  }, [currentOrg, currentReportId, router, showToast]);
   const handleApprove = useCallback(async () => {
       if (!(await confirm({ title: '承認の確認', message: 'この記録を承認しますか？', confirmText: '承認する', confirmColor: 'primary' }))) return;
       await executeApprove();
   }, [confirm, executeApprove]);
   const executeRemand = useCallback(async () => {
-      if (await saveReport('remanded')) {
+      if (!currentOrg || !currentReportId) return;
+      try {
+        await transitionReports(currentOrg.id, [currentReportId], 'remand');
           showToast('記録を差し戻しました', 'info');
           router.push('/app/reports');
+      } catch (error) {
+          console.error(error);
+          showToast('差し戻しに失敗しました', 'error');
       }
-  }, [router, saveReport, showToast]);
+  }, [currentOrg, currentReportId, router, showToast]);
   const handleRemand = useCallback(async () => {
       if (!(await confirm({ title: '承認取消の確認', message: '承認を取り消し、差し戻しますか？', confirmText: '差し戻す', confirmColor: 'warning' }))) return;
       await executeRemand();
@@ -951,6 +1058,7 @@ export default function RecordPage() {
   }, [template]);
 
   const isAdmin = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'approve', true));
+  const isReadOnly = currentStatus === 'approved';
   const canDeleteRecord = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'delete', true));
   const travelCostYen = Math.round((parseFloat(roundTripDistanceKm || '0') || 0) * travelCostRateYenPerKm);
   const requiresSegmentSelection = Boolean(shiftId && shiftSegments.length > 1 && !selectedSegmentId && !currentReportId);
@@ -989,9 +1097,19 @@ export default function RecordPage() {
                     <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
                 )}
                 
-                {isAdmin && currentStatus === 'pending' && <Button variant="contained" color="success" size="small" startIcon={<CheckCircleIcon />} onClick={handleApprove} disabled={submitting || requiresSegmentSelection}>承認</Button>}
+                {isAdmin && currentStatus === 'pending' && <Button variant="contained" color="success" size="small" startIcon={<CheckCircleIcon />} onClick={handleApprove} disabled={submitting || requiresSegmentSelection || isDirty}>承認</Button>}
                 {isAdmin && currentStatus === 'approved' && <Button variant="contained" color="warning" size="small" startIcon={<AssignmentReturnIcon />} onClick={handleRemand} disabled={submitting || requiresSegmentSelection}>承認取消</Button>}
-                {(!isAdmin || currentStatus !== 'pending') && currentStatus !== 'approved' && (
+                {isAdmin && currentStatus === 'pending' && (
+                    <Button variant="outlined" size="small" startIcon={<SaveIcon />} onClick={handlePendingSave} disabled={submitting || requiresSegmentSelection}>
+                        変更を保存
+                    </Button>
+                )}
+                {!isAdmin && currentStatus === 'pending' && (
+                    <Button variant="contained" size="small" startIcon={<SaveIcon />} onClick={handlePendingSave} disabled={submitting || requiresSegmentSelection}>
+                        変更を保存
+                    </Button>
+                )}
+                {currentStatus !== 'pending' && currentStatus !== 'approved' && (
                     <>
                         <Button variant="outlined" size="small" startIcon={<SaveIcon />} onClick={handleDraftSave} disabled={submitting || requiresSegmentSelection}>下書き</Button>
                         <Button variant="contained" size="small" startIcon={<SendIcon />} onClick={handleSubmit} disabled={submitting || requiresSegmentSelection} sx={{ fontWeight: 'bold' }}>送信</Button>
@@ -1004,6 +1122,11 @@ export default function RecordPage() {
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
         <Container maxWidth="md" disableGutters sx={{ width: '100%' }}>
             <Stack spacing={{ xs: 2.5, sm: 4 }}>
+            {currentStatus !== 'approved' && autosaveState !== 'idle' && (
+              <Alert severity={autosaveState === 'error' ? 'warning' : 'info'}>
+                {autosaveState === 'saving' ? '入力内容を保存中です…' : autosaveState === 'saved' ? '入力内容は自動保存されています' : '自動保存に失敗しました。通信を確認して入力を続けてください。'}
+              </Alert>
+            )}
             
             {/* 月末跨ぎの夜勤の場合のみ表示される分割選択タブコントロール */}
             {isSpanningMonth && (
@@ -1143,6 +1266,7 @@ export default function RecordPage() {
                             setActualServiceTypeId(e.target.value);
                             setIsDirty(true);
                         }}
+                        disabled={isReadOnly}
                         helperText="予定と異なる場合は実際に提供したサービス種別を選択してください"
                     >
                         <MenuItem value="">未設定</MenuItem>
@@ -1167,6 +1291,7 @@ export default function RecordPage() {
                         error={!!errors.helpers}
                         helperText={errors.helpers}
                         placeholder="スタッフ名簿から選択"
+                        disabled={isReadOnly}
                     />
                     {actualStaffs.length > 0 && (
                         <Stack spacing={1.5} mt={2}>
@@ -1191,6 +1316,7 @@ export default function RecordPage() {
                                                 )));
                                                 setIsDirty(true);
                                             }}
+                                            disabled={isReadOnly}
                                         >
                                             <MenuItem value="">未設定</MenuItem>
                                             {staffRoles.map((role) => (
@@ -1209,9 +1335,9 @@ export default function RecordPage() {
                         <CalendarTodayIcon fontSize="small" /> サービス日時
                     </Typography>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                    <DateTimeField value={startDateTime} onChange={e => handleChange(setStartDateTime, e.target.value)} />
+                    <DateTimeField value={startDateTime} onChange={e => handleChange(setStartDateTime, e.target.value)} disabled={isReadOnly} />
                     <Typography color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>～</Typography>
-                    <DateTimeField value={endDateTime} onChange={e => handleChange(setEndDateTime, e.target.value)} />
+                    <DateTimeField value={endDateTime} onChange={e => handleChange(setEndDateTime, e.target.value)} disabled={isReadOnly} />
                     </Stack>
                 </Box>
 
@@ -1220,8 +1346,8 @@ export default function RecordPage() {
                         <AccessTimeIcon fontSize="small" /> 提供時間 <Typography component="span" color="error">*</Typography>
                     </Typography>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                        <TextField label="サービス提供" type="number" fullWidth value={serviceTime} onChange={e => handleChange(setServiceTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} error={!!errors.serviceTime} slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
-                        <TextField label="移動" type="number" fullWidth value={travelTime} onChange={e => handleChange(setTravelTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} slotProps={{ input: { startAdornment: <DirectionsCarIcon color="action" fontSize="small" sx={{ mr: 1 }} />, endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
+                        <TextField label="サービス提供" type="number" fullWidth value={serviceTime} onChange={e => handleChange(setServiceTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} error={!!errors.serviceTime} disabled={isReadOnly} slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
+                        <TextField label="移動" type="number" fullWidth value={travelTime} onChange={e => handleChange(setTravelTime, e.target.value)} onWheel={e => (e.target as HTMLElement).blur()} disabled={isReadOnly} slotProps={{ input: { startAdornment: <DirectionsCarIcon color="action" fontSize="small" sx={{ mr: 1 }} />, endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
                     </Stack>
                 </Box>
                 <Box>
@@ -1235,6 +1361,7 @@ export default function RecordPage() {
                             fullWidth
                             value={roundTripDistanceKm}
                             onChange={e => { setDistanceTouched(true); handleChange(setRoundTripDistanceKm, e.target.value); }}
+                            disabled={isReadOnly}
                             onWheel={e => (e.target as HTMLElement).blur()}
                             slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">km</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.1' } }}
                         />
@@ -1259,6 +1386,7 @@ export default function RecordPage() {
                           detailValue={String(answers[`${item.id}_detail`] ?? '')}
                           error={errors[item.id]}
                           isAiFilled={aiFilledFields.has(item.id)}
+                          disabled={isReadOnly}
                           onAnswerChange={handleAnswerChange}
                         />
                     ))}
@@ -1272,8 +1400,8 @@ export default function RecordPage() {
                     {images.map(img => (
                         <Box key={img.id} component="img" src={img.url} sx={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 1 }} />
                     ))}
-                    <IconButton color="primary" component="label" sx={{ width: 100, height: 100, border: '1px dashed', borderColor: 'divider', borderRadius: 1, flexDirection: 'column' }}>
-                        <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!currentReportId} />
+                    <IconButton color="primary" component="label" disabled={!currentReportId || isReadOnly} sx={{ width: 100, height: 100, border: '1px dashed', borderColor: 'divider', borderRadius: 1, flexDirection: 'column' }}>
+                        <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!currentReportId || isReadOnly} />
                         <PhotoCamera />
                         {!currentReportId && <Typography variant="caption" sx={{ fontSize: 9 }}>未保存</Typography>}
                     </IconButton>

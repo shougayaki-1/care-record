@@ -35,7 +35,7 @@ export function classifyGoogleError(e: unknown): SyncError {
         code?: number | string;
         status?: number;
         // Google OAuth は error を文字列("invalid_grant")で、Calendar API は {message:string} で返す
-        response?: { status?: number; data?: { error?: string | { message?: string }; error_description?: string } };
+        response?: { status?: number; data?: { error?: string | { message?: string; errors?: Array<{ reason?: string }> }; error_description?: string } };
         message?: string;
     };
     // Gaxios(googleapis) は HTTP ステータスを response.status に持つ。code は文字列のこともあるため数値のみ採用。
@@ -56,7 +56,17 @@ export function classifyGoogleError(e: unknown): SyncError {
     if (typeof msg === 'string' && /invalid_grant|invalid_token|unauthorized/i.test(msg)) {
         return new SyncError(msg, 'auth', code);
     }
-    if (code === 401 || code === 403) return new SyncError(msg || 'auth error', 'auth', code);
+    const googleReason = typeof errorField === 'object' ? errorField?.errors?.[0]?.reason : undefined;
+    if (code === 401) return new SyncError(msg || 'auth error', 'auth', code);
+    if (code === 403) {
+        if (googleReason && /rateLimitExceeded|userRateLimitExceeded|quotaExceeded/i.test(googleReason)) {
+            return new SyncError(msg || googleReason, 'rate_limit', code);
+        }
+        if (googleReason && /dailyLimitExceeded/i.test(googleReason)) {
+            return new SyncError(msg || googleReason, 'rate_limit', code);
+        }
+        return new SyncError(msg || 'permission denied', 'auth', code);
+    }
     if (code === 429) return new SyncError(msg || 'rate limit', 'rate_limit', code);
     if (typeof code === 'number' && code >= 500) return new SyncError(msg || 'server error', 'transient', code);
     if (code === undefined) return new SyncError(msg || 'network error', 'transient'); // ネットワーク断などコード無しは一時障害扱い

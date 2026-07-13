@@ -220,6 +220,17 @@ async function saveShiftSegmentsFromPattern(
     occurrence: { year: number; month: number; day: number; parentStartTime: string; parentEndTime: string },
     fallbackStaffIds: string[],
 ) {
+    // Segment IDs can be referenced by care records. Never replace those
+    // segments during month regeneration; they are an exception that must be
+    // reviewed rather than silently detached from a record.
+    const { count: linkedReportCount, error: linkedReportError } = await supabaseAdmin
+        .from('reports')
+        .select('id', { count: 'exact', head: true })
+        .eq('shift_id', shiftId)
+        .is('deleted_at', null);
+    if (linkedReportError) throw linkedReportError;
+    if ((linkedReportCount ?? 0) > 0) return;
+
     const sourceSegments = (patternSegments && patternSegments.length > 0)
         ? patternSegments
         : [{
@@ -250,6 +261,7 @@ async function saveShiftSegmentsFromPattern(
         );
         return {
             shift_id: shiftId,
+            source_pattern_segment_id: segment.id || null,
             service_type_id: segment.service_type_id ?? null,
             start_at: startAt,
             end_at: endAt,
@@ -703,11 +715,25 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
         return { processed: 0, succeeded: 0, failed: 0, connected: false, errorKind: 'skipped' as SyncErrorKind, failedIds: [] as string[], ...emptyGoogleSyncStats() };
     }
 
-    const oauth2Client = getGoogleOAuthClient();
-    oauth2Client.setCredentials({ refresh_token: decryptGoogleToken(orgData.google_refresh_token) });
-    const calendarApi = google.calendar({ version: 'v3', auth: oauth2Client });
-
-    const allEvents = await listAllActiveGoogleEvents(calendarApi, orgData.google_calendar_id);
+    let calendarApi: GoogleCalendarClient;
+    let allEvents: calendar_v3.Schema$Event[];
+    try {
+        const oauth2Client = getGoogleOAuthClient();
+        oauth2Client.setCredentials({ refresh_token: decryptGoogleToken(orgData.google_refresh_token) });
+        calendarApi = google.calendar({ version: 'v3', auth: oauth2Client });
+        allEvents = await listAllActiveGoogleEvents(calendarApi, orgData.google_calendar_id);
+    } catch (e) {
+        const se = classifyGoogleError(e);
+        return {
+            processed: 0,
+            succeeded: 0,
+            failed: 0,
+            connected: true,
+            errorKind: se.kind,
+            failedIds: [] as string[],
+            ...emptyGoogleSyncStats(),
+        };
+    }
     const eventsByShiftId = new Map<string, calendar_v3.Schema$Event[]>();
     const legacyEventsBySignature = new Map<string, calendar_v3.Schema$Event[]>();
     for (const event of allEvents) {
@@ -1238,7 +1264,17 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
         });
 
         const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
-            *, shift_pattern_staffs(staff_id)
+            *,
+            shift_pattern_staffs(staff_id),
+            shift_pattern_segments(
+                id,
+                pattern_id,
+                service_type_id,
+                start_time,
+                end_time,
+                sort_order,
+                shift_pattern_segment_staffs(staff_id, staff_role_id)
+            )
         `).eq('organization_id', organizationId).is('deleted_at', null);
 
         if (!patterns || patterns.length === 0) return { success: true, count: 0 };
@@ -1260,7 +1296,18 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
 
                 const patternSegments = ((p.shift_pattern_segments ?? []) as PatternSegmentRow[])
                     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+                const fallbackStaffIds = (p.shift_pattern_staffs ?? [])
+                    .map((staff: { staff_id: string | null }) => staff.staff_id)
+                    .filter((staffId: string | null): staffId is string => Boolean(staffId));
                 const baseJstDateStr = jstDateStrFromOccurrence(dateJST);
+
+                // Pattern versions are effective on JST calendar dates. This
+                // prevents a future staff change from being regenerated into
+                // prior months.
+                if ((p.effective_from && baseJstDateStr < p.effective_from)
+                    || (p.effective_until && baseJstDateStr > p.effective_until)) {
+                    continue;
+                }
 
                 const { startAt, endAt } = computeOccurrenceDateTimes(yy, mm, dd, p.start_time, p.end_time);
 
@@ -1285,7 +1332,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                                 existNormal.id,
                                 patternSegments,
                                 { year: yy, month: mm, day: dd, parentStartTime: p.start_time, parentEndTime: p.end_time },
-                                [],
+                                fallbackStaffIds,
                             );
                         });
                         updatedCount++;
@@ -1299,7 +1346,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                             created.shiftId,
                             patternSegments,
                             { year: yy, month: mm, day: dd, parentStartTime: p.start_time, parentEndTime: p.end_time },
-                            [],
+                            fallbackStaffIds,
                         );
                     });
                     createdCount++;
@@ -1430,7 +1477,7 @@ export async function getMyShiftsWithStatus(
         .eq('user_id', user.id)
         .maybeSingle();
 
-    if (!staffRow) return [];
+    if (!staffRow) throw new Error('スタッフアカウントが紐付いていません。事業所設定を確認してください。');
 
     const { data: shifts, error } = await supabaseAdmin
         .from('shifts')

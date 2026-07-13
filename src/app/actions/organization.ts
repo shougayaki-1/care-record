@@ -65,7 +65,13 @@ export async function disconnectGoogleCalendar(orgId: string) {
             console.error('Google token revocation failed; local credentials will still be removed', error);
         }
     }
-    const { error } = await supabaseAdmin.from('organizations').update({ google_calendar_id: null, google_refresh_token: null }).eq('id', orgId);
+    const { error } = await supabaseAdmin.from('organizations').update({
+        google_calendar_id: null,
+        google_refresh_token: null,
+        google_connection_status: 'disconnected',
+        google_connection_checked_at: new Date().toISOString(),
+        google_connection_error_code: null,
+    }).eq('id', orgId);
     if (error) throw sanitizeDbError(error, 'action.organization');
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'integration.calendar.disconnect', resourceType: 'organization', resourceId: orgId, details: { providerRevoked: revoked } });
     return { success: true, providerRevoked: revoked };

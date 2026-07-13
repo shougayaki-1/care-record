@@ -3,13 +3,66 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertOrgPermission, assertRecordPermission, createSessionClient, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgPermission, assertOrgRole, assertRecordPermission, createSessionClient, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
 import { randomUUID } from 'crypto';
 import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
 import { MODEL_NAME } from '@/lib/ai/model';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
+
+export type MyReportHistoryResult = {
+  status: 'ok' | 'staff_mapping_missing';
+  items: Array<{
+    id: string;
+    start_at: string;
+    status: 'pending' | 'approved' | 'remanded';
+    client_id: string;
+    clients: { name: string } | null;
+  }>;
+};
+
+/** Returns only reports where the logged-in user is an actual service staff.
+ * `helper_id` is the report author, so it must not be used for this view. */
+export async function getMyReportHistory(
+  organizationId: string,
+  options: { startAt?: string; endAt?: string; limit?: number } = {},
+): Promise<MyReportHistoryResult> {
+  const { userId } = await assertOrgRole(organizationId);
+  const { data: staff, error: staffError } = await supabaseAdmin
+    .from('staffs')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('user_id', userId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (staffError) throw sanitizeDbError(staffError, 'action.reports');
+  if (!staff) return { status: 'staff_mapping_missing', items: [] };
+
+  let query = supabaseAdmin
+    .from('reports')
+    .select('id, start_at, status, client_id, clients!inner(name, organization_id), report_actual_staffs!inner(staff_id)')
+    .eq('clients.organization_id', organizationId)
+    .eq('report_actual_staffs.staff_id', staff.id)
+    .is('deleted_at', null)
+    .neq('status', 'draft')
+    .order('start_at', { ascending: false })
+    .limit(Math.min(Math.max(options.limit ?? 100, 1), 100));
+  if (options.startAt) query = query.gte('start_at', options.startAt);
+  if (options.endAt) query = query.lt('start_at', options.endAt);
+  const { data, error } = await query;
+  if (error) throw sanitizeDbError(error, 'action.reports');
+  return {
+    status: 'ok',
+    items: (data ?? []).map((report) => ({
+      id: report.id,
+      start_at: report.start_at,
+      status: report.status as 'pending' | 'approved' | 'remanded',
+      client_id: report.client_id,
+      clients: Array.isArray(report.clients) ? (report.clients[0] ?? null) : report.clients,
+    })),
+  };
+}
 
 export type SaveReportInput = {
   organizationId: string;
@@ -27,6 +80,82 @@ export type SaveReportInput = {
   auditModel?: string;
   auditFileCount?: number;
 };
+
+export type ReportAutosaveInput = {
+  organizationId: string;
+  clientId: string;
+  reportId?: string | null;
+  draftKey: string;
+  baseContentRevision?: number | null;
+  autosaveRevision: number;
+  payload: Record<string, unknown>;
+};
+
+/** Stores private, recoverable form state without changing a submitted report. */
+export async function saveReportAutosave(input: ReportAutosaveInput) {
+  const { userId } = await assertRecordPermission(input.organizationId, 'edit', {
+    clientId: input.clientId,
+    reportId: input.reportId || null,
+  });
+  if (!/^[0-9a-f-]{36}$/i.test(input.draftKey)) throw new Error('下書き識別子が不正です');
+  if (!Number.isInteger(input.autosaveRevision) || input.autosaveRevision < 0) throw new Error('自動保存の版番号が不正です');
+  if (JSON.stringify(input.payload).length > 1_000_000) throw new Error('自動保存の内容が大きすぎます');
+
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from('report_autosaves')
+    .select('autosave_revision')
+    .eq('draft_key', input.draftKey)
+    .eq('editor_user_id', userId)
+    .maybeSingle();
+  if (existingError) throw sanitizeDbError(existingError, 'action.reports');
+  if (existing && existing.autosave_revision >= input.autosaveRevision) {
+    return { saved: false, stale: true, savedAt: null };
+  }
+
+  const { error } = await supabaseAdmin.from('report_autosaves').upsert({
+    draft_key: input.draftKey,
+    organization_id: input.organizationId,
+    client_id: input.clientId,
+    report_id: input.reportId || null,
+    editor_user_id: userId,
+    base_content_revision: input.baseContentRevision ?? null,
+    autosave_revision: input.autosaveRevision,
+    payload: input.payload,
+    expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'draft_key' });
+  if (error) throw sanitizeDbError(error, 'action.reports');
+  return { saved: true, stale: false, savedAt: new Date().toISOString() };
+}
+
+export async function loadReportAutosave(organizationId: string, draftKey: string) {
+  const { userId } = await assertOrgRole(organizationId);
+  const { data, error } = await supabaseAdmin
+    .from('report_autosaves')
+    .select('payload, autosave_revision, report_id, client_id, base_content_revision, updated_at')
+    .eq('draft_key', draftKey)
+    .eq('organization_id', organizationId)
+    .eq('editor_user_id', userId)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle();
+  if (error) throw sanitizeDbError(error, 'action.reports');
+  if (data) {
+    await assertRecordPermission(organizationId, 'edit', { clientId: data.client_id, reportId: data.report_id });
+  }
+  return data;
+}
+
+export async function discardReportAutosave(organizationId: string, draftKey: string) {
+  const { userId } = await assertOrgRole(organizationId);
+  const { error } = await supabaseAdmin
+    .from('report_autosaves')
+    .delete()
+    .eq('draft_key', draftKey)
+    .eq('organization_id', organizationId)
+    .eq('editor_user_id', userId);
+  if (error) throw sanitizeDbError(error, 'action.reports');
+  return { success: true };
+}
 
 export async function saveReport(input: SaveReportInput) {
   const startAt = new Date(input.startAt);

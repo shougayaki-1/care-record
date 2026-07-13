@@ -108,37 +108,56 @@ export async function GET(request: NextRequest) {
         // 4. 事業所名の取得（カレンダー名に使うため）
         const { data: orgData, error: orgError } = await supabaseAdmin
             .from('organizations')
-            .select('name')
+            .select('name, google_calendar_id')
             .eq('id', organizationId)
             .single();
 
         if (orgError || !orgData) throw new Error('Organization not found');
 
-        // 5. Google Calendar API を使って新しいカレンダーを作成
+        // 5. Keep the existing calendar whenever reauthorization succeeds.
+        // Creating a new calendar silently makes existing event IDs point at the
+        // wrong remote calendar and falsely reports everything as synchronized.
         const calendarApi = google.calendar({ version: 'v3', auth: oauth2Client });
-        const calendarRes = await calendarApi.calendars.insert({
-            requestBody: {
-                summary: `CareRecord_${orgData.name}`,
-                timeZone: 'Asia/Tokyo',
+        let calendarId = orgData.google_calendar_id;
+        let connectionStatus = 'healthy';
+        if (calendarId) {
+            try {
+                await calendarApi.calendars.get({ calendarId });
+            } catch (calendarError) {
+                // Keep the old ID for an explicit, audited replacement flow.
+                // A different Google account must never create a replacement
+                // calendar implicitly during reauthorization.
+                console.warn('Existing Google calendar is not accessible after reauthorization', calendarError);
+                connectionStatus = 'calendar_missing';
             }
-        });
+        } else {
+            const calendarRes = await calendarApi.calendars.insert({
+                requestBody: {
+                    summary: `CareRecord_${orgData.name}`,
+                    timeZone: 'Asia/Tokyo',
+                }
+            });
+            calendarId = calendarRes.data.id || null;
+            if (!calendarId) throw new Error('Failed to create calendar');
+        }
 
-        const newCalendarId = calendarRes.data.id;
-        if (!newCalendarId) throw new Error('Failed to create calendar');
-
-        // 6. DBにリフレッシュトークンとカレンダーIDを保存
+        // 6. Persist the token and connection health. Calendar replacement is
+        // deliberately a separate explicit action.
         const { error: updateError } = await supabaseAdmin
             .from('organizations')
             .update({
                 google_refresh_token: encryptGoogleToken(tokens.refresh_token),
-                google_calendar_id: newCalendarId
+                google_calendar_id: calendarId,
+                google_connection_status: connectionStatus,
+                google_connection_checked_at: new Date().toISOString(),
+                google_connection_error_code: connectionStatus === 'healthy' ? null : 'calendar_missing',
             })
             .eq('id', organizationId);
 
         if (updateError) throw updateError;
 
         // 7. 成功したら設定画面へリダイレクト（使い捨て state Cookie を破棄）
-        const okResponse = NextResponse.redirect(`${redirectUrl}?success=calendar_connected`);
+        const okResponse = NextResponse.redirect(`${redirectUrl}?${connectionStatus === 'healthy' ? 'success=calendar_connected' : 'error=google_calendar_missing'}`);
         okResponse.cookies.delete(OAUTH_STATE_COOKIE);
         return okResponse;
 

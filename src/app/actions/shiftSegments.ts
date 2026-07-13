@@ -64,14 +64,44 @@ export async function saveShiftSegments(
 ): Promise<void> {
   await assertShiftPermission(orgId, 'edit', { shiftId });
 
-  // 既存区間を全削除してから再INSERT（シンプルで確実）
+  const { count: linkedSegmentReports, error: linkedReportError } = await supabaseAdmin
+    .from('reports')
+    .select('id', { count: 'exact', head: true })
+    .eq('shift_id', shiftId)
+    .not('segment_id', 'is', null)
+    .is('deleted_at', null);
+  if (linkedReportError) throw new Error('記録の確認に失敗しました');
+  if ((linkedSegmentReports ?? 0) > 0) {
+    throw new Error('記録に使用されている区間は編集できません。管理者へ確認してください。');
+  }
+
+  // Keep the parent shift protected from pattern regeneration and queued for Google
+  // synchronization whenever its staff assignment changes.
+  const { error: parentError } = await supabaseAdmin
+    .from('shifts')
+    .update({
+      is_modified: true,
+      google_sync_status: 'pending_upsert',
+      google_sync_error: null,
+      google_synced_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', shiftId)
+    .eq('organization_id', orgId);
+  if (parentError) throw new Error('シフトの更新に失敗しました');
+
+  // The migration maintains shift_staffs with a trigger. This implementation
+  // still derives it explicitly for installations that have not yet applied it.
   const { error: deleteError } = await supabaseAdmin
     .from('shift_segments')
     .delete()
     .eq('shift_id', shiftId);
   if (deleteError) throw new Error('区間の保存に失敗しました');
 
-  if (segments.length === 0) return;
+  if (segments.length === 0) {
+    await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
+    return;
+  }
 
   const { data: inserted, error: insertError } = await supabaseAdmin
     .from('shift_segments')

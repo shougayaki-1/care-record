@@ -11,6 +11,8 @@ export type DynamicFormItem = {
   options?: string;
   required?: boolean;
   hasDetail?: boolean;
+  detailMode?: 'conditional' | 'always';
+  detailLabel?: string;
 };
 
 export type DynamicFormValue = string | number | boolean | string[];
@@ -27,13 +29,13 @@ export interface DynamicFormFieldProps {
 
 const optionsFor = (item: DynamicFormItem) => (item.options ?? '').split(',').map((option) => option.trim()).filter(Boolean);
 const needsDetail = (item: DynamicFormItem, value: DynamicFormValue | undefined) =>
-  Boolean(item.hasDetail) && (value === true || (Array.isArray(value) ? value : [String(value ?? '')]).some((entry) => entry.includes('他')));
+  Boolean(item.hasDetail) && (item.detailMode === 'always' || value === true || (Array.isArray(value) ? value : [String(value ?? '')]).some((entry) => entry.includes('他')));
 
 export function DynamicFormField({ item, value, detailValue = '', error, disabled, onChange, onDetailChange }: DynamicFormFieldProps) {
   if (item.type === 'section') return null;
   const detailField = needsDetail(item, value) && onDetailChange && (
     <AppTextField
-      label="詳細・補足"
+      label={item.detailLabel || '詳細・補足'}
       value={detailValue}
       onChange={(event) => onDetailChange(event.target.value)}
       disabled={disabled}
@@ -97,7 +99,12 @@ export function DynamicFormField({ item, value, detailValue = '', error, disable
   }
 
   if (item.type === 'number') {
-    return <NumberField label={item.label} value={value === undefined ? '' : String(value)} onChange={(event) => onChange(event.target.value)} required={item.required} error={Boolean(error)} helperText={error} disabled={disabled} />;
+    return (
+      <Stack spacing={1.5}>
+        <NumberField label={item.label} value={value === undefined ? '' : String(value)} onChange={(event) => onChange(event.target.value)} required={item.required} error={Boolean(error)} helperText={error} disabled={disabled} />
+        {detailField}
+      </Stack>
+    );
   }
 
   return (
