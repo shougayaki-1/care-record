@@ -44,6 +44,14 @@
 6. **UI**: 新規UIは `src/components/ui` のセマンティックコンポーネントを使う。
    直接MUIを使ってよい例外は docs/ui-exceptions.md のみ。
 
+### Server Action の標準形
+
+- 公開アクション全体を `withSafeError('アクション名', async () => { ... })` で包む。
+- 内側は `assert*` → 入力検証 → DB/外部API（エラーは `sanitizeDbError`）→ `recordAuditEvent` の順にする。
+- 既存の検証文言・権限判定・監査イベントを、ラッパー導入だけを理由に変更しない。
+- 利用者に見せる検証・業務エラーは `UserFacingError`（`src/utils/errors.ts`）で throw する。
+  素の `Error` は `SAFE_MESSAGE_PATTERNS` に一致しない限り汎用メッセージに置換される。
+
 ## context7 の使い方
 
 - 外部ライブラリ・フレームワーク・SDK・API の使い方を確認するときは、学習データに
