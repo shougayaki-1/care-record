@@ -2,31 +2,18 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import {
-    Box, Button, Typography, Paper, Stack, TextField,
-    MenuItem, IconButton, Card, CardContent, Switch,
-    FormControlLabel, Alert, CircularProgress, Divider,
+    Box, Button, Typography, Paper, Stack,
+    IconButton, Alert, CircularProgress, Divider,
     Tabs, Tab, List, ListItem, ListItemButton, ListItemText, ListItemIcon,
-    Tooltip, Chip, Accordion, AccordionSummary, AccordionDetails
 } from '@/components/ui/mui';
-import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import AddCircleIcon from '@mui/icons-material/AddCircle';
 import SaveIcon from '@mui/icons-material/Save';
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import TitleIcon from '@mui/icons-material/Title';
-import CheckBoxIcon from '@mui/icons-material/CheckBox';
-import CommentIcon from '@mui/icons-material/Comment';
 import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
 import DescriptionIcon from '@mui/icons-material/Description';
 import FolderIcon from '@mui/icons-material/Folder';
 import ContentPasteIcon from '@mui/icons-material/ContentPaste';
 import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
 import PersonIcon from '@mui/icons-material/Person';
-import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import CopyAllIcon from '@mui/icons-material/CopyAll';
 
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -36,7 +23,7 @@ import { STANDARD_TEMPLATES, COMPREHENSIVE_TEMPLATE, FormItem } from '@/constant
 import { convertSchemaToReadable, FormItem as HelperFormItem } from '../../../../utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { AppButton, AppDialog, CheckboxGroupField, PageLayout } from '@/components/ui';
+import { AppButton, AppDialog, PageLayout } from '@/components/ui';
 import { useFetchData } from '@/hooks/useFetchData';
 import {
     getClientAssignmentPermissionHints,
@@ -45,6 +32,9 @@ import {
     updateClientGoogleLink,
     type AssignmentPermissionHint,
 } from '@/app/actions/clients';
+import { FormBuilderTab } from '@/components/clients/FormBuilderTab';
+import { IntegrationsTab } from '@/components/clients/IntegrationsTab';
+import { StaffAssignmentTab } from '@/components/clients/StaffAssignmentTab';
 
 type Staff = { id: string; name: string; userId: string | null };
 
@@ -441,289 +431,41 @@ export default function ClientSettingsPage() {
                 )}
 
                 {tabIndex === 0 && (
-                    <Box>
-                        <Box display="flex" justifyContent="flex-end" gap={1} mb={2} sx={{ flexWrap: 'wrap', '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
-                            <Button 
-                                variant="outlined" 
-                                startIcon={<ContentCopyIcon />} 
-                                onClick={() => { setOpenCopyDialog(true); setCopyTab(0); }}
-                            >
-                                テンプレート読込 / コピー
-                            </Button>
-                        </Box>
-                        <Stack spacing={2} pb={2}>
-                            {formItems.map((item, index) => (
-                                <Card key={item.id} sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid' : 'none', borderLeftColor: 'primary.main', bgcolor: item.type === 'section' ? 'background.tint' : 'background.paper' }}>
-                                    <CardContent sx={{ p: '16px !important' }}>
-                                        <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2}>
-                                            <Stack
-                                                direction={{ xs: 'row', md: 'column' }}
-                                                spacing={0.5}
-                                                sx={{
-                                                    width: { xs: '100%', md: 'auto' },
-                                                    justifyContent: { xs: 'space-between', md: 'flex-start' },
-                                                }}
-                                            >
-                                                <IconButton size="small" onClick={() => moveField(index, 'up')} disabled={index === 0}><ArrowUpwardIcon fontSize="small" /></IconButton>
-                                                <IconButton size="small" onClick={() => moveField(index, 'down')} disabled={index === formItems.length - 1}><ArrowDownwardIcon fontSize="small" /></IconButton>
-                                                <IconButton color="error" size="small" onClick={() => removeField(index)} sx={{ mt: { md: 1 } }}><DeleteIcon fontSize="small" /></IconButton>
-                                            </Stack>
-                                            <Box sx={{ flexGrow: 1, width: '100%' }}>
-                                                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} mb={1}>
-                                                    <TextField select label="種類" size="small" value={item.type} onChange={(e) => updateField(index, 'type', e.target.value as FormItem['type'])} sx={{ width: { xs: '100%', md: 'auto' }, minWidth: { md: 160 } }} slotProps={{ input: { startAdornment: item.type === 'section' ? <TitleIcon sx={{ mr: 1, color: 'primary.main' }} /> : null } }}>
-                                                        <MenuItem value="section" sx={{ fontWeight: 'bold', color: 'primary.main' }}>■ セクション見出し</MenuItem>
-                                                        <Divider /><MenuItem value="checkbox">チェック (ON/OFF)</MenuItem><MenuItem value="multicheckbox">複数選択</MenuItem><MenuItem value="text">テキスト入力</MenuItem><MenuItem value="number">数値入力</MenuItem><MenuItem value="select">1つ選択 (ラジオ)</MenuItem><MenuItem value="time">時間</MenuItem>
-                                                    </TextField>
-                                                    <TextField label={item.type === 'section' ? "セクション名" : "質問内容"} size="small" fullWidth value={item.label} onChange={(e) => updateField(index, 'label', e.target.value)} sx={{ '& .MuiInputBase-input': { fontWeight: item.type === 'section' ? 'bold' : 'normal', fontSize: item.type === 'section' ? '1.1rem' : '1rem' } }} />
-                                                    {item.type !== 'section' && <FormControlLabel control={<Switch size="small" checked={item.required} onChange={(e) => updateField(index, 'required', e.target.checked)} />} label="必須" sx={{ minWidth: 80, alignSelf: { xs: 'flex-start', md: 'center' } }} />}
-                                                </Stack>
-                                                {(item.type === 'checkbox' || item.type === 'multicheckbox' || item.type === 'select') && (
-                                                    <FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(e) => updateField(index, 'hasDetail', e.target.checked)} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />詳細入力を許可</Box>} sx={{ mb: 1, ml: { xs: 0, sm: 1 } }} />
-                                                )}
-                                                {(item.type === 'select' || item.type === 'multicheckbox') && (
-                                                    <Box sx={{ mt: 0.5 }}>
-                                                        <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" gap={0.5} sx={{ mb: 0.75 }}>
-                                                            <CheckBoxIcon sx={{ fontSize: 16 }} />選択肢
-                                                        </Typography>
-                                                        <Stack spacing={0.75}>
-                                                            {getOptionsArray(item.options).map((opt, optIndex, arr) => (
-                                                                <Stack key={optIndex} direction="row" spacing={0.5} alignItems="center">
-                                                                    <TextField
-                                                                        size="small"
-                                                                        fullWidth
-                                                                        value={opt}
-                                                                        placeholder={`選択肢 ${optIndex + 1}`}
-                                                                        onChange={(e) => updateOption(index, optIndex, e.target.value)}
-                                                                    />
-                                                                    <IconButton size="small" onClick={() => moveOption(index, optIndex, 'up')} disabled={optIndex === 0}><ArrowUpwardIcon fontSize="small" /></IconButton>
-                                                                    <IconButton size="small" onClick={() => moveOption(index, optIndex, 'down')} disabled={optIndex === arr.length - 1}><ArrowDownwardIcon fontSize="small" /></IconButton>
-                                                                    <IconButton size="small" color="error" onClick={() => removeOption(index, optIndex)}><DeleteIcon fontSize="small" /></IconButton>
-                                                                </Stack>
-                                                            ))}
-                                                            <Button size="small" startIcon={<AddCircleIcon />} onClick={() => addOption(index)} sx={{ alignSelf: 'flex-start' }}>
-                                                                選択肢を追加
-                                                            </Button>
-                                                        </Stack>
-                                                    </Box>
-                                                )}
-                                            </Box>
-                                        </Stack>
-                                    </CardContent>
-                                </Card>
-                            ))}
-                            <Button variant="outlined" startIcon={<AddCircleIcon />} onClick={addField} size="large" sx={{ border: '2px dashed', borderColor: 'divider', color: 'text.secondary', py: 2 }}>項目を追加する</Button>
-                        </Stack>
-                    </Box>
+                    <FormBuilderTab
+                        formItems={formItems}
+                        onOpenCopy={() => { setOpenCopyDialog(true); setCopyTab(0); }}
+                        onAddField={addField}
+                        onRemoveField={removeField}
+                        onUpdateField={updateField}
+                        onMoveField={moveField}
+                        getOptions={getOptionsArray}
+                        onUpdateOption={updateOption}
+                        onAddOption={addOption}
+                        onRemoveOption={removeOption}
+                        onMoveOption={moveOption}
+                    />
                 )}
-
                 {tabIndex === 1 && (
-                    <Card variant="outlined">
-                        <CardContent>
-                            <Typography variant="subtitle1" fontWeight="bold" gutterBottom>この利用者を担当するスタッフを選択してください</Typography>
-                            <Typography variant="body2" color="text.secondary" mb={3}>選択したスタッフのみが、記録入力画面の「担当ヘルパー」選択肢に表示されます。往復距離は記録作成時の初期値になります。</Typography>
-                            {permissionHints.some((hint) => hint.canCreateAllRecords && !assignedStaffIds.includes(hint.staffId)) && (
-                                <Alert severity="info" sx={{ mb: 2 }}>
-                                    <Typography variant="body2" fontWeight="bold" gutterBottom>
-                                        以下のスタッフは担当に入っていませんが、全体の記録作成権限を持つため記録を作成できます:
-                                    </Typography>
-                                    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
-                                        {allStaffs
-                                            .filter((staff) => !assignedStaffIds.includes(staff.id) && permissionHints.find((hint) => hint.staffId === staff.id)?.canCreateAllRecords)
-                                            .map((staff) => (
-                                                <Chip key={staff.id} label={staff.name} size="small" color="info" variant="outlined" />
-                                            ))}
-                                    </Stack>
-                                </Alert>
-                            )}
-                            <Stack spacing={3}>
-                                <CheckboxGroupField
-                                    label="メンバー（ログインユーザー）"
-                                    options={allStaffs.filter((staff) => staff.userId !== null)}
-                                    value={assignedStaffIds}
-                                    onChange={setAssignedStaffIds}
-                                    getOptionLabel={(staff) => staff.name}
-                                    getOptionValue={(staff) => staff.id}
-                                />
-                                <CheckboxGroupField
-                                    label="アカウントなし（転記用）"
-                                    options={allStaffs.filter((staff) => staff.userId === null)}
-                                    value={assignedStaffIds}
-                                    onChange={setAssignedStaffIds}
-                                    getOptionLabel={(staff) => staff.name}
-                                    getOptionValue={(staff) => staff.id}
-                                />
-                                {assignedStaffIds.length > 0 && (
-                                    <Box sx={{ p: 2, bgcolor: 'background.muted', borderTop: 1, borderBottom: 1, borderColor: 'divider' }}>
-                                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>スタッフ別 往復移動距離</Typography>
-                                        <Stack spacing={1.5}>
-                                            {allStaffs.filter((staff) => assignedStaffIds.includes(staff.id)).map((staff) => (
-                                                <Stack key={staff.id} direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                                                    <Box sx={{ minWidth: { sm: 180 } }}>
-                                                        <Typography sx={{ fontWeight: 'bold', overflowWrap: 'anywhere' }}>{staff.name}</Typography>
-                                                    </Box>
-                                                    <TextField
-                                                        label="往復距離"
-                                                        type="number"
-                                                        size="small"
-                                                        value={roundTripDistances[staff.id] ?? '0'}
-                                                        onChange={(e) => setRoundTripDistances(prev => ({ ...prev, [staff.id]: e.target.value }))}
-                                                        onWheel={e => (e.target as HTMLElement).blur()}
-                                                        sx={{ maxWidth: { sm: 220 } }}
-                                                        slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">km</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.1', min: 0 } }}
-                                                    />
-                                                </Stack>
-                                            ))}
-                                        </Stack>
-                                    </Box>
-                                )}
-                            </Stack>
-                        </CardContent>
-                    </Card>
+                    <StaffAssignmentTab
+                        allStaffs={allStaffs}
+                        assignedStaffIds={assignedStaffIds}
+                        setAssignedStaffIds={setAssignedStaffIds}
+                        roundTripDistances={roundTripDistances}
+                        setRoundTripDistances={setRoundTripDistances}
+                        permissionHints={permissionHints}
+                    />
                 )}
-
                 {tabIndex === 2 && (
-                    <Stack spacing={3}>
-                        <Card variant="outlined">
-                            <CardContent>
-                                <Stack direction="row" alignItems="center" gap={2} mb={2}>
-                                    <DescriptionIcon color="primary" fontSize="large" />
-                                    <Box>
-                                        <Typography variant="h6" fontWeight="bold">Googleドキュメント連携</Typography>
-                                        <Typography variant="body2" color="text.secondary">
-                                            帳票の雛形（テンプレート）を管理します。
-                                        </Typography>
-                                    </Box>
-                                </Stack>
-
-                                <Divider sx={{ my: 2 }} />
-
-                                <Box mb={4}>
-                                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
-                                        <AutoFixHighIcon color="secondary" fontSize="small" /> 1. テンプレートを作成・連携
-                                    </Typography>
-                                    <Typography variant="body2" color="text.secondary" paragraph>
-                                        マスターテンプレート（共通のひな形）をコピーして、この利用者専用のGoogleドキュメントを作成します。<br/>
-                                        作成後、下記リストから必要なタグをコピーしてドキュメントに貼り付け、レイアウトを調整してください。
-                                    </Typography>
-                                    
-                                    <Button 
-                                        variant="contained" 
-                                        color="secondary" 
-                                        onClick={handleCreateTemplate} 
-                                        disabled={isCreatingTemplate || formItems.length === 0}
-                                        startIcon={isCreatingTemplate ? <CircularProgress size={20} color="inherit" /> : <AddCircleIcon />}
-                                    >
-                                        {isCreatingTemplate ? '作成中...' : 'テンプレートを新規作成する'}
-                                    </Button>
-                                    
-                                    <Box mt={2}>
-                                        <Typography variant="caption" color="text.secondary">ID手動設定:</Typography>
-                                        <TextField 
-                                            size="small"
-                                            fullWidth
-                                            value={templateId} 
-                                            onChange={(e) => setTemplateId(e.target.value)} 
-                                            placeholder="作成済みのGoogleドキュメントIDがあればここに入力" 
-                                            sx={{ mt: 0.5 }}
-                                        />
-                                    </Box>
-                                </Box>
-
-                                <Divider />
-
-                                <Box mt={3}>
-                                    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
-                                        <Typography variant="subtitle2" fontWeight="bold" display="flex" alignItems="center" gap={1}>
-                                            <ContentPasteIcon color="primary" fontSize="small" /> 2. 利用可能な差し込みタグ一覧
-                                        </Typography>
-                                        <Button 
-                                            variant="outlined" 
-                                            size="small" 
-                                            startIcon={<CopyAllIcon />} 
-                                            onClick={handleCopyAllTags}
-                                        >
-                                            全てのタグをコピー
-                                        </Button>
-                                    </Stack>
-                                    <Alert severity="info" sx={{ mb: 2 }}>
-                                        クリックするとタグをコピーできます。Googleドキュメントの表の中に貼り付けてください。<br/>
-                                        データが存在する場合、タグの部分が ☑︎ やテキストに置き換わります。
-                                    </Alert>
-
-                                    {renderTagList().map((group, gIdx) => (
-                                        <Accordion key={gIdx} defaultExpanded={gIdx === 0}>
-                                            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: 'background.muted' }}>
-                                                <Typography fontWeight="bold">{group.title}</Typography>
-                                            </AccordionSummary>
-                                            <AccordionDetails>
-                                                <Box display="flex" flexWrap="wrap" gap={1}>
-                                                    {group.items.map(item => {
-                                                        if (['checkbox', 'text', 'number', 'time'].includes(item.type)) {
-                                                            const tag = `{{${item.id}}}`;
-                                                            const detailTag = item.hasDetail ? `{{${item.id}_詳細}}` : null;
-                                                            return (
-                                                                <Box key={item.id} display="flex" gap={1} alignItems="center">
-                                                                    <Tooltip title="クリックしてコピー">
-                                                                        <Chip label={`${item.label}: ${tag}`} onClick={() => copyTag(tag)} clickable />
-                                                                    </Tooltip>
-                                                                    {detailTag && (
-                                                                        <Tooltip title="詳細入力のタグ">
-                                                                            <Chip label={`詳細: ${detailTag}`} onClick={() => copyTag(detailTag)} clickable size="small" variant="outlined" />
-                                                                        </Tooltip>
-                                                                    )}
-                                                                </Box>
-                                                            );
-                                                        }
-                                                        if (['multicheckbox', 'select'].includes(item.type)) {
-                                                            const options = item.options?.split(',') || [];
-                                                            return (
-                                                                <Box key={item.id} width="100%" sx={{ p: 1, border: '1px dashed', borderColor: 'divider', borderRadius: 1 }}>
-                                                                    <Typography variant="caption" display="block" mb={0.5} fontWeight="bold">{item.label}</Typography>
-                                                                    <Box display="flex" flexWrap="wrap" gap={1}>
-                                                                        {options.map((opt: string) => {
-                                                                            const cleanOpt = opt.trim();
-                                                                            const tag = `{{${item.id}_${cleanOpt}}}`;
-                                                                            return (
-                                                                                <Tooltip key={cleanOpt} title="クリックしてコピー">
-                                                                                    {/* ★修正ポイント: ラベルの形式を変更 */}
-                                                                                    <Chip label={`${cleanOpt}: ${tag}`} onClick={() => copyTag(tag)} clickable size="small" />
-                                                                                </Tooltip>
-                                                                            );
-                                                                        })}
-                                                                        {item.hasDetail && (
-                                                                            <Tooltip title="詳細/その他のタグ">
-                                                                                <Chip label={`詳細: {{${item.id}_詳細}}`} onClick={() => copyTag(`{{${item.id}_詳細}}`)} clickable size="small" variant="outlined" />
-                                                                            </Tooltip>
-                                                                        )}
-                                                                    </Box>
-                                                                </Box>
-                                                            );
-                                                        }
-                                                        return null;
-                                                    })}
-                                                </Box>
-                                            </AccordionDetails>
-                                        </Accordion>
-                                    ))}
-                                    
-                                    <Accordion>
-                                        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: 'background.muted' }}>
-                                            <Typography fontWeight="bold">共通項目（日付・ヘルパー名など）</Typography>
-                                        </AccordionSummary>
-                                        <AccordionDetails>
-                                            <Box display="flex" flexWrap="wrap" gap={1}>
-                                                {['利用者名', '担当ヘルパー名', '開始日付', '開始時刻', '終了日付', '終了時刻', 'サービス時間', '移動時間'].map(key => (
-                                                    <Tooltip key={key} title="クリックしてコピー">
-                                                        <Chip label={`{{${key}}}`} onClick={() => copyTag(`{{${key}}}`)} clickable color="primary" variant="outlined" />
-                                                    </Tooltip>
-                                                ))}
-                                            </Box>
-                                        </AccordionDetails>
-                                    </Accordion>
-                                </Box>
-                            </CardContent>
-                        </Card>
-                    </Stack>
+                    <IntegrationsTab
+                        templateId={templateId}
+                        setTemplateId={setTemplateId}
+                        isCreatingTemplate={isCreatingTemplate}
+                        hasFormItems={formItems.length > 0}
+                        onCreateTemplate={handleCreateTemplate}
+                        onCopyAllTags={handleCopyAllTags}
+                        onCopyTag={copyTag}
+                        tagGroups={renderTagList()}
+                    />
                 )}
             </Box>
 
