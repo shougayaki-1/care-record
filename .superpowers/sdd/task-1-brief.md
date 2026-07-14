@@ -1,48 +1,95 @@
-## Task 1: `permission_alignment.sql` の内容検証
+### Task 1: `offices` テーブルのマイグレーション
 
 **Files:**
-- Read: `supabase/migrations/20260701000002_permission_alignment.sql`
+- Create: `supabase/migrations/20260705000000_offices.sql`
 
-検証ポイント（全て確認済みならチェック）：
+**Interfaces:**
+- Produces: テーブル `public.offices(id uuid, organization_id uuid, name text, travel_cost_rate_yen_per_km numeric(8,2), archived_at timestamptz, created_at timestamptz, updated_at timestamptz)`。カラム `public.clients.office_id uuid`、`public.staffs.office_id uuid`（共に `offices(id)` を参照、`ON DELETE RESTRICT`）。RLSポリシー `"Org members read offices"`（SELECT、`is_org_member(organization_id) AND archived_at IS NULL`）。
 
-- [ ] `private.has_management_permission` が owner と role JSONB の `management.*` 両方をカバーする
-- [ ] `private.can_access_client` が `records.view = 'all'` のユーザーと assignment ユーザー双方をカバーする
-- [ ] `private.get_member_internal_work_scope` が `'all'` / `'assigned'` / `'none'` を正しく返す
-- [ ] `Internal work visible by flexible role` ポリシーが古い `Internal work visible to org members` を DROP する
-- [ ] shifts 系ポリシーが `get_member_shift_action_scope` を使用する
-- [ ] clients / staffs / assignments / form_templates / organization_members / invitations / organizations の各ポリシーが `has_management_permission` を使用する
-- [ ] GRANT 文が `private.*` 関数に `authenticated` ロールへの EXECUTE を付与している
-
-**Step 1.1: `permission_alignment.sql` の確認**
-
-```bash
-cat supabase/migrations/20260701000002_permission_alignment.sql
-```
-
-期待：上記チェック項目がすべて含まれていること
-
-- [ ] **Step 1.2: `is_org_admin` が owner-only に戻っていることを確認**
-
-`permission_alignment.sql` 内の `is_org_admin` 定義が以下と一致すること：
+- [ ] **Step 1: マイグレーションファイルを作成する**
 
 ```sql
-CREATE OR REPLACE FUNCTION "public"."is_org_admin"("_org_id" "uuid") RETURNS boolean
-    LANGUAGE "sql" STABLE SECURITY DEFINER
-    SET "search_path" TO ''
-    AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.organization_members om
-    WHERE om.organization_id = _org_id
-      AND om.user_id = auth.uid()
-      AND om.role = 'owner'
-  );
-$$;
+-- supabase/migrations/20260705000000_offices.sql
+
+CREATE TABLE IF NOT EXISTS "public"."offices" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "travel_cost_rate_yen_per_km" numeric(8,2) DEFAULT 20 NOT NULL,
+    "archived_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "offices_travel_cost_rate_yen_per_km_check"
+        CHECK ((("travel_cost_rate_yen_per_km" >= (0)::numeric) AND ("travel_cost_rate_yen_per_km" <= (10000)::numeric)))
+);
+
+ALTER TABLE "public"."offices" OWNER TO "postgres";
+
+ALTER TABLE ONLY "public"."offices"
+    ADD CONSTRAINT "offices_pkey" PRIMARY KEY ("id");
+
+ALTER TABLE ONLY "public"."offices"
+    ADD CONSTRAINT "offices_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE CASCADE;
+
+ALTER TABLE "public"."offices" ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Org members read offices" ON "public"."offices"
+    FOR SELECT TO "authenticated"
+    USING (("private"."is_org_member"("organization_id") AND ("archived_at" IS NULL)));
+
+GRANT SELECT ON TABLE "public"."offices" TO "authenticated";
+GRANT ALL ON TABLE "public"."offices" TO "service_role";
+
+-- 利用者・スタッフの所属事業所（タグ）。権限境界ではなく交通費単価の参照先として使う。
+ALTER TABLE "public"."clients" ADD COLUMN "office_id" "uuid";
+ALTER TABLE "public"."staffs" ADD COLUMN "office_id" "uuid";
+
+ALTER TABLE ONLY "public"."clients"
+    ADD CONSTRAINT "clients_office_id_fkey" FOREIGN KEY ("office_id") REFERENCES "public"."offices"("id") ON DELETE RESTRICT;
+ALTER TABLE ONLY "public"."staffs"
+    ADD CONSTRAINT "staffs_office_id_fkey" FOREIGN KEY ("office_id") REFERENCES "public"."offices"("id") ON DELETE RESTRICT;
+
+-- バックフィル: 各organizationに現行の交通費単価を引き継いだデフォルト事業所を1件作成し、
+-- 既存の全client/staffをそこに割り当てる。
+DO $$
+DECLARE
+    org RECORD;
+    new_office_id uuid;
+BEGIN
+    FOR org IN SELECT "id", "name", "travel_cost_rate_yen_per_km" FROM "public"."organizations" WHERE "deleted_at" IS NULL LOOP
+        INSERT INTO "public"."offices" ("organization_id", "name", "travel_cost_rate_yen_per_km")
+        VALUES (org."id", org."name", org."travel_cost_rate_yen_per_km")
+        RETURNING "id" INTO new_office_id;
+
+        UPDATE "public"."clients" SET "office_id" = new_office_id
+        WHERE "organization_id" = org."id" AND "office_id" IS NULL;
+
+        UPDATE "public"."staffs" SET "office_id" = new_office_id
+        WHERE "organization_id" = org."id" AND "office_id" IS NULL;
+    END LOOP;
+END $$;
 ```
 
-- [ ] **Step 1.3: `can_access_client` が `management.reports` もカバーすることを確認**
+- [ ] **Step 2: ローカルSupabaseに適用する**
 
-`can_access_client` 内に `has_management_permission(..., 'reports')` 呼び出しがあること
+Run: `supabase migration up`
+Expected: マイグレーションが `Applying migration 20260705000000_offices.sql...` のように出力され、エラーなく完了する。
+
+- [ ] **Step 3: バックフィルを確認する**
+
+Run: `supabase db execute --sql "select count(*) from offices; select count(*) from staffs where office_id is null; select count(*) from clients where office_id is null;"` （ローカルSupabaseに既存の組織・スタッフ・利用者データがある場合）
+Expected: `offices` の件数が organizations の件数と一致し、`office_id is null` の件数がどちらも0。
+
+- [ ] **Step 4: `supabase/tests/security_hardening.test.sql` の更新要否を確認する**
+
+`supabase/tests/security_hardening.test.sql` を読み、`offices` テーブルの読み取りRLS（組織外ユーザーから見えないこと）を検証するテストケースの追加が既存パターンに沿って必要か判断する。既存ファイルの他テーブルの検証パターン（例: `staff_roles` があれば流用）に倣って同等のケースを追加する。
+
+- [ ] **Step 5: コミット**
+
+```bash
+git add supabase/migrations/20260705000000_offices.sql supabase/tests/security_hardening.test.sql
+git commit -m "feat: add offices table with per-office travel cost rate and client/staff office_id"
+```
 
 ---
 

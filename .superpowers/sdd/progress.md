@@ -1,15 +1,13 @@
-# SDD Progress Ledger — Plan: RLS × 柔軟ロール 権限整合
+# Progress Ledger: office-travel-cost
 
-## Tasks
-- [ ] Task 1: permission_alignment.sql の内容検証
-- [ ] Task 2: permission_alignment.sql を Supabase DB に適用
-- [ ] Task 3: report 系 RLS ポリシーの修正（新規マイグレーション作成）
-- [ ] Task 4: 本番 DB への適用確認
+Plan: docs/superpowers/plans/2026-07-05-office-travel-cost.md
+Worktree: /Users/shoug/Documents/GitHub/care-record/.claude/worktrees/office-travel-cost (branch worktree-office-travel-cost)
 
-## Log
-Base commit: dcb7b11
-Task 1: complete (no code changes — verification only; Minor: can_access_client GRANT missing, will add in Task 3 migration)
-Task 2: complete (local DB push applied — all new policies confirmed in local DB dump)
-Task 3: complete (commits dcb7b11..a54d73f, review clean — Minor: GRANT comment misleading but idempotent/harmless)
-Task 4: complete (supabase migration list confirms 20260701000002 + 20260701000003 applied to remote)
-Fix: GRANT EXECUTE for get_member_record_action_scope/view_scope added (commit 54882a0) — final review Important finding resolved
+Task 1: complete (commits 79a919f..7323b50, review clean; minor notes: backfill leaves office_id null for soft-deleted orgs' clients/staffs — acceptable, nullable field)
+Task 2: complete (commits 7323b50..2ddebc6, review clean; added vitest.config.ts @ alias, justified pre-existing gap)
+Task 3: complete (commits 2ddebc6..c5d7a9e, review clean)
+Task 4: complete (commits c5d7a9e..63d643b, review clean)
+Task 5: complete (commits 63d643b..015b455, review clean)
+Task 6: complete (commits 015b455..23af060, review clean; both defaultRoundTripDistanceKm effects correctly updated)
+Task 7: complete (final verification — typecheck clean, lint 33 baseline unchanged, 159/159 unit tests pass, pgTAP security_hardening.test.sql pre-existing failure test#13 confirmed unrelated to offices; organizations.travel_cost_rate_yen_per_km intentionally left in place, no new permission area added, permissions.ts unchanged)
+Final whole-branch review: complete (Ready to merge: With fixes -> fixes applied in b36fef3: offices RLS test, rate-fallback comment, spec reconciliation)
