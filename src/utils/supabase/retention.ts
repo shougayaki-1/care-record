@@ -48,7 +48,7 @@ export async function purgeExpiredRecords(dryRun = false): Promise<PurgeSummary>
   // 1) 期限切れの論理削除済みレポート: 画像実体 → 子レコード → 本体 の順で消す。
   const { data: reports } = await supabaseAdmin
     .from('reports')
-    .select('id, client_id')
+    .select('id, client_id, clients!inner(organization_id)')
     .not('deleted_at', 'is', null)
     .is('legal_hold_at', null)
     .lte('retention_until', nowIso)
@@ -69,7 +69,8 @@ export async function purgeExpiredRecords(dryRun = false): Promise<PurgeSummary>
       await supabaseAdmin.from('report_images').delete().eq('report_id', report.id);
       await supabaseAdmin.from('report_values').delete().eq('report_id', report.id);
       await supabaseAdmin.from('reports').delete().eq('id', report.id);
-      await recordPurgeAudit(null, 'report.purge', 'report', report.id, { images: paths.length });
+      const client = Array.isArray(report.clients) ? report.clients[0] : report.clients;
+      await recordPurgeAudit(client?.organization_id ?? null, 'report.purge', 'report', report.id, { images: paths.length });
     }
     summary.reports += 1;
     summary.storageObjects += paths.length;

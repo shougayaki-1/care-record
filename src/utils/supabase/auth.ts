@@ -6,6 +6,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
+import { sanitizeDbError } from '@/utils/errors';
 import { decodeJwtSessionId } from '@/utils/jwt';
 import {
   mergePermissions,
@@ -102,7 +103,7 @@ export async function registerSessionActivity(session: Session): Promise<string>
             if (!existingError && existing) return authSessionId;
         }
         console.error('[auth] registerSessionActivity failed:', error.message, 'authSessionId:', authSessionId, 'userId:', session.user.id);
-        throw new Error(`セッションを登録できませんでした: ${error.message}`);
+        throw sanitizeDbError(error, 'auth.register-session');
     }
     console.log('[auth] Session activity registered. authSessionId:', authSessionId, 'userId:', session.user.id);
     return authSessionId;

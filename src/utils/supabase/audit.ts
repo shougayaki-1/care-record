@@ -3,6 +3,7 @@ import 'server-only';
 import { createHash } from 'crypto';
 import { headers } from 'next/headers';
 import { supabaseAdmin } from './auth';
+import { sanitizeDbError } from '@/utils/errors';
 
 export type AuditEventInput = {
   // 認証イベント（ログイン/ログアウト）は組織コンテキスト未確定でも記録するため null を許容する。
@@ -49,6 +50,6 @@ export async function recordAuditEvent(input: AuditEventInput): Promise<void> {
   });
 
   if (error) {
-    throw new Error(`監査ログの保存に失敗しました: ${error.message}`);
+    throw sanitizeDbError(error, 'audit.record');
   }
 }

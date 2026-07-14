@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { sanitizeDbError, UserFacingError, withSafeError } from './errors';
+import { getSafeExternalErrorDetails, logExternalError, sanitizeDbError, UserFacingError, withSafeError } from './errors';
 
 const GENERIC_MESSAGE = '処理に失敗しました。時間をおいて再度お試しください。';
 
@@ -67,5 +67,27 @@ describe('withSafeError', () => {
       throw originalError;
     })).rejects.toThrow(GENERIC_MESSAGE);
     expect(consoleError).toHaveBeenCalledWith('[action:nonError]', originalError);
+  });
+});
+
+describe('external error logging', () => {
+  it('keeps safe scalars and excludes request headers and tokens', () => {
+    const error = Object.assign(new Error('Request failed with status 401 Bearer message-secret?access_token=query-secret'), {
+      code: 'AUTH_FAILED',
+      response: { status: 401, data: { access_token: 'response-secret' } },
+      config: { headers: { Authorization: 'Bearer header-secret' } },
+    });
+
+    expect(getSafeExternalErrorDetails(error)).toEqual({
+      name: 'Error', message: 'Request failed with status 401 Bearer [REDACTED]?access_token=[REDACTED]', code: 'AUTH_FAILED', status: 401,
+    });
+    expect(JSON.stringify(getSafeExternalErrorDetails(error))).not.toContain('secret');
+  });
+
+  it('logs only the sanitized projection', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const error = Object.assign(new Error('failure'), { config: { headers: { Authorization: 'Bearer secret' } } });
+    logExternalError('calendar', error);
+    expect(consoleError).toHaveBeenCalledWith('[external:calendar]', { name: 'Error', message: 'failure' });
   });
 });

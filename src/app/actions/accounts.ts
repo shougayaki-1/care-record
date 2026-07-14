@@ -5,13 +5,8 @@ import { sanitizeDbError } from '@/utils/errors';
 import { randomUUID } from 'crypto';
 import { supabaseAdmin, getAuthedUser, assertOrgRole, assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertRoleManagerRemains } from '@/utils/supabase/roleSafety';
+import { assertRoleManagerRemains, isDangerousPermissions } from '@/utils/supabase/roleSafety';
 import type { RolePermissions } from '@/utils/permissions';
-
-function isDangerousPermissions(permissions: RolePermissions): boolean {
-  const { accounts, roles, organizationDelete, ownerTransfer } = permissions.management;
-  return accounts || roles || organizationDelete || ownerTransfer;
-}
 
 async function assertDangerousRoleOwnerCheck(
   orgId: string,

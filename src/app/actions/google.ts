@@ -9,17 +9,19 @@ import { supabaseAdmin } from '@/utils/supabase/auth';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { google } from 'googleapis';
 import { classifyGoogleError } from '@/utils/googleSync';
+import { sanitizeDbError, withSafeError } from '@/utils/errors';
 
 export type GoogleConnectionState = 'disconnected' | 'healthy' | 'reauth_required' | 'calendar_missing' | 'forbidden' | 'misconfigured' | 'temporarily_unavailable';
 
 export async function getGoogleConnectionHealth(organizationId: string): Promise<{ state: GoogleConnectionState }> {
+    return withSafeError('getGoogleConnectionHealth', async () => {
     await assertOrgPermission(organizationId, 'integrations');
     const { data: org, error } = await supabaseAdmin
         .from('organizations')
         .select('google_calendar_id, google_refresh_token')
         .eq('id', organizationId)
         .single();
-    if (error) throw error;
+    if (error) throw sanitizeDbError(error, 'action.google.health');
     if (!org?.google_calendar_id || !org.google_refresh_token) return { state: 'disconnected' };
     let state: GoogleConnectionState = 'healthy';
     try {
@@ -33,15 +35,18 @@ export async function getGoogleConnectionHealth(organizationId: string): Promise
             : classified.code === 404 ? 'calendar_missing'
             : 'misconfigured';
     }
-    await supabaseAdmin.from('organizations').update({
+    const { error: updateError } = await supabaseAdmin.from('organizations').update({
         google_connection_status: state,
         google_connection_checked_at: new Date().toISOString(),
         google_connection_error_code: state === 'healthy' ? null : state,
     }).eq('id', organizationId);
+    if (updateError) throw sanitizeDbError(updateError, 'action.google.health-update');
     return { state };
+    });
 }
 
 export async function getGoogleAuthUrlAction(organizationId: string, mode: 'connect' | 'reauthorize' = 'connect') {
+    return withSafeError('getGoogleAuthUrlAction', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'integrations');
 
     // CSRF 対策: 推測不能な nonce を生成し、orgId と紐づけて httpOnly Cookie に保存。
@@ -72,4 +77,5 @@ export async function getGoogleAuthUrlAction(organizationId: string, mode: 'conn
     });
 
     return url;
+    });
 }

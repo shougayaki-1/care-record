@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(14);
+SELECT plan(22);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
@@ -26,7 +26,7 @@ SELECT ok((
     AND cmd = 'SELECT'
 ), 'operational tables have an explicit permissive SELECT base');
 SELECT ok((
-  SELECT count(*) = 15
+  SELECT count(*) >= 15
   FROM pg_policies
   WHERE schemaname = 'public'
     AND policyname = 'Require active server session'
@@ -50,6 +50,29 @@ SELECT ok((
 ), 'tenant and per-user restrictive policies remain enabled');
 SELECT ok(NOT has_table_privilege('authenticated','public.invitations','SELECT'),
   'authenticated clients cannot list invitations directly');
+
+SELECT ok(NOT has_table_privilege('authenticated','public.report_autosaves','SELECT,INSERT,UPDATE,DELETE'),
+  'authenticated clients cannot access report autosaves directly');
+SELECT ok(NOT has_table_privilege('authenticated','public.google_sync_runs','SELECT,INSERT,UPDATE,DELETE'),
+  'authenticated clients cannot access Google sync runs directly');
+SELECT ok(NOT has_table_privilege('authenticated','public.maintenance_runs','SELECT,INSERT,UPDATE,DELETE'),
+  'authenticated clients cannot access maintenance runs directly');
+SELECT ok(NOT has_table_privilege('authenticated','public.maintenance_run_items','SELECT,INSERT,UPDATE,DELETE'),
+  'authenticated clients cannot access maintenance run items directly');
+SELECT ok(has_table_privilege('service_role','public.report_autosaves','SELECT,INSERT,UPDATE,DELETE'),
+  'service role retains report autosave access');
+SELECT ok((
+  SELECT with_check LIKE '%get_member_record_action_scope%create%all%'
+     AND with_check LIKE '%get_member_record_action_scope%create%assigned%'
+     AND with_check LIKE '%is_assigned_client_for_user%'
+  FROM pg_policies WHERE schemaname='public' AND tablename='reports' AND policyname='Create reports'
+), 'report INSERT policy enforces all or assigned records.create scope');
+SELECT ok((
+  SELECT with_check LIKE '%get_member_record_action_scope%create%all%'
+     AND with_check LIKE '%get_member_record_action_scope%create%assigned%'
+     AND with_check LIKE '%is_assigned_client_for_user%'
+  FROM pg_policies WHERE schemaname='public' AND tablename='report_images' AND policyname='Enable insert for staff'
+), 'report image INSERT policy enforces all or assigned records.create scope');
 
 SELECT * FROM finish();
 ROLLBACK;

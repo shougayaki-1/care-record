@@ -1,6 +1,6 @@
 'use server';
 
-import { sanitizeDbError } from '@/utils/errors';
+import { logExternalError, sanitizeDbError } from '@/utils/errors';
 
 import { supabaseAdmin, getAuthedUser, assertOrgRole, assertOrgPermission, assertOwner } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
@@ -62,7 +62,7 @@ export async function disconnectGoogleCalendar(orgId: string) {
             await getGoogleOAuthClient().revokeToken(decryptGoogleToken(org.google_refresh_token));
             revoked = true;
         } catch (error) {
-            console.error('Google token revocation failed; local credentials will still be removed', error);
+            logExternalError('google.token-revocation', error);
         }
     }
     const { error } = await supabaseAdmin.from('organizations').update({

@@ -1,4 +1,4 @@
-import { mergePermissions, type RolePermissions } from '@/utils/permissions';
+import { mergePermissions, normalizePermissions, type RolePermissions } from '@/utils/permissions';
 import { supabaseAdmin } from '@/utils/supabase/auth';
 
 type RoleRow = { id: string; permissions: RolePermissions };
@@ -11,6 +11,17 @@ type RoleSafetyPatch = {
   replacedMemberRoles?: { userId: string; roleIds: string[] };
   removedMemberId?: string;
 };
+
+export function isDangerousPermissions(permissions: RolePermissions): boolean {
+  const { accounts, roles, organizationDelete, ownerTransfer } = normalizePermissions(permissions).management;
+  return accounts || roles || organizationDelete || ownerTransfer;
+}
+
+export function assertOwnerForDangerousPermissions(permissions: RolePermissions, isOwner: boolean): void {
+  if (isDangerousPermissions(permissions) && !isOwner) {
+    throw new Error('危険な権限を含むロールの変更はオーナーのみ実行できます');
+  }
+}
 
 export async function assertRoleManagerRemains(
   organizationId: string,

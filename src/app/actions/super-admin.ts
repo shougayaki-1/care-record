@@ -4,6 +4,7 @@
 import { sanitizeDbError } from '@/utils/errors';
 
 import { supabaseAdmin, assertSuperAdmin } from '@/utils/supabase/auth';
+import { recordAuditEvent } from '@/utils/supabase/audit';
 
 // 全事業所の一覧を取得
 export async function getAllOrganizations() {
@@ -48,11 +49,26 @@ export async function deleteOrganization(orgId: string) {
         .select('retention_years')
         .eq('id', orgId)
         .single();
-    if (readError) throw new Error(readError.message);
+    if (readError) throw sanitizeDbError(readError, 'action.super-admin.read');
+
+    const { count: memberCount, error: memberCountError } = await supabaseAdmin
+        .from('organization_members')
+        .select('user_id', { count: 'exact', head: true })
+        .eq('organization_id', orgId);
+    if (memberCountError) throw sanitizeDbError(memberCountError, 'action.super-admin.member-count');
 
     const deletedAt = new Date();
     const retentionUntil = new Date(deletedAt);
     retentionUntil.setUTCFullYear(retentionUntil.getUTCFullYear() + (organization.retention_years || 5));
+
+    await recordAuditEvent({
+        organizationId: orgId,
+        actorId: userId,
+        action: 'super_admin.organization.delete',
+        resourceType: 'organization',
+        resourceId: orgId,
+        details: { organizationId: orgId, removedMembers: memberCount ?? 0, retentionUntil: retentionUntil.toISOString() },
+    });
     const { error } = await supabaseAdmin
         .from('organizations')
         .update({
@@ -64,7 +80,9 @@ export async function deleteOrganization(orgId: string) {
         .is('deleted_at', null);
 
     if (error) throw sanitizeDbError(error, 'action.super-admin');
-    await supabaseAdmin.from('profiles').update({ last_organization_id: null }).eq('last_organization_id', orgId);
-    await supabaseAdmin.from('organization_members').delete().eq('organization_id', orgId);
+    const { error: profileError } = await supabaseAdmin.from('profiles').update({ last_organization_id: null }).eq('last_organization_id', orgId);
+    if (profileError) throw sanitizeDbError(profileError, 'action.super-admin.clear-profiles');
+    const { error: memberError } = await supabaseAdmin.from('organization_members').delete().eq('organization_id', orgId);
+    if (memberError) throw sanitizeDbError(memberError, 'action.super-admin.remove-members');
     return { success: true };
 }

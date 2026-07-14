@@ -2,7 +2,7 @@
 
 import { type calendar_v3, google } from 'googleapis';
 
-import { withSafeError } from '@/utils/errors';
+import { logExternalError, sanitizeExternalError, withSafeError } from '@/utils/errors';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import {
@@ -19,6 +19,7 @@ import {
   type SyncErrorKind,
 } from '@/utils/googleSync';
 import { assertShiftPermission, supabaseAdmin } from '@/utils/supabase/auth';
+import { recordAuditEvent } from '@/utils/supabase/audit';
 
 import {
   deleteDuplicateGoogleEvents,
@@ -70,6 +71,7 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
           throw new Error('同期件数が不正です');
       }
+      const actor = await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
       const status = await getSyncStatus(organizationId);
       if (!status.connected) {
           return { processed: 0, succeeded: 0, failed: 0, remaining: status.unsynced, errorKind: 'skipped' as SyncErrorKind, connected: false };
@@ -88,6 +90,11 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
       }
 
       const outcome = await processShiftsSequential(organizationId, shifts, 'sync');
+
+      await recordAuditEvent({
+          organizationId, actorId: actor.userId, action: 'integration.calendar.sync', resourceType: 'organization', resourceId: organizationId,
+          details: { mode: 'unsynced_batch', processed: shifts.length, succeeded: outcome.succeeded, failed: outcome.failed },
+      });
 
       // 同期後の残件数を再取得（成功分は google_event_id が埋まり減る）
       const { count: remaining } = await supabaseAdmin
@@ -119,6 +126,7 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
       if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
           throw new Error('同期件数が不正です');
       }
+      const actor = await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
       const status = await getSyncStatus(organizationId);
       if (!status.connected) {
           return { processed: 0, succeeded: 0, failed: 0, nextCursor: cursor, remaining: 0, errorKind: 'skipped' as SyncErrorKind, connected: false };
@@ -140,6 +148,10 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
       }
 
       const outcome = await processShiftsSequential(organizationId, shifts, 'sync');
+      await recordAuditEvent({
+          organizationId, actorId: actor.userId, action: 'integration.calendar.sync', resourceType: 'organization', resourceId: organizationId,
+          details: { mode: 'force_batch', processed: shifts.length, succeeded: outcome.succeeded, failed: outcome.failed },
+      });
       const nextCursor = shifts[shifts.length - 1].id;
 
       const { count: remaining } = await supabaseAdmin
@@ -164,7 +176,7 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
 
 export async function repairGoogleCalendarSync(organizationId: string, options: RepairGoogleCalendarSyncOptions = {}) {
   return withSafeError('repairGoogleCalendarSync', async () => {
-      await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
+      const actor = await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
       const limit = options.limit && Number.isInteger(options.limit) ? Math.min(Math.max(options.limit, 1), 5000) : 5000;
 
       const { data: orgData } = await supabaseAdmin
@@ -277,13 +289,17 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
               succeeded++;
           } catch (e) {
               const se = classifyGoogleError(e);
-              await markShiftGoogleSync(shift.id, 'failed', { error: se.message }).catch(console.error);
+              await markShiftGoogleSync(shift.id, 'failed', { error: se.message }).catch((error) => logExternalError('google.sync.mark-failed', error));
               failedIds.push(shift.id);
               errorKind = se.kind;
               if (se.kind === 'auth') break;
           }
       }
 
+      await recordAuditEvent({
+          organizationId, actorId: actor.userId, action: 'integration.calendar.sync', resourceType: 'organization', resourceId: organizationId,
+          details: { mode: 'repair', processed, succeeded, failed: failedIds.length },
+      });
       return {
           processed,
           succeeded,
@@ -298,13 +314,16 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
 
 export async function syncSingleShift(organizationId: string, shiftId: string, action: 'sync' | 'delete' = 'sync') {
   return withSafeError('syncSingleShift', async () => {
-      await assertShiftPermission(organizationId, action === 'delete' ? 'delete' : 'edit', { shiftId });
+      const actor = await assertShiftPermission(organizationId, action === 'delete' ? 'delete' : 'edit', { shiftId });
       try {
           await syncToGoogleCalendarDirect(organizationId, shiftId, action);
+          await recordAuditEvent({
+              organizationId, actorId: actor.userId, action: 'integration.calendar.sync', resourceType: 'shift', resourceId: shiftId,
+              details: { mode: action === 'delete' ? 'single_delete' : 'single_sync', processed: 1, succeeded: 1, failed: 0 },
+          });
           return { success: true };
       } catch (error) {
-          console.error('Sync Single Shift Action Error:', error);
-          throw error;
+          throw sanitizeExternalError(error, 'google.sync.single');
       }
   });
 }

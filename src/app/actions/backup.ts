@@ -5,6 +5,8 @@ import { isGcsBackupConfigured, listGCSFiles, readGCSFile, uploadToGCS } from '@
 import { exportReportsAsCsv } from '@/utils/gcs/export';
 import { generateBackupHtml } from '@/utils/gcs/html';
 import { convertDataToReadable, type FormItem, type FormValue } from '@/utils/templateHelper';
+import { sanitizeDbError, sanitizeExternalError, withSafeError } from '@/utils/errors';
+import { recordAuditEvent } from '@/utils/supabase/audit';
 
 const DAILY_BUCKET = 'care-record-search-daily';
 
@@ -40,6 +42,7 @@ export type LastBackupRun = {
 
 /** 直近の自動バックアップcron実行状況を監査ログから取得する（cron側で action: 'backup.cron_run' として記録） */
 export async function getLastBackupRun(orgId: string): Promise<LastBackupRun> {
+  return withSafeError('getLastBackupRun', async () => {
   await assertOrgPermission(orgId, 'auditLogs');
 
   const { data, error } = await supabaseAdmin
@@ -51,7 +54,7 @@ export async function getLastBackupRun(orgId: string): Promise<LastBackupRun> {
     .limit(1)
     .maybeSingle();
 
-  if (error) throw new Error(`最終バックアップ実行状況の取得に失敗しました: ${error.message}`);
+  if (error) throw sanitizeDbError(error, 'action.backup.last-run');
   if (!data) return null;
 
   return {
@@ -59,15 +62,17 @@ export async function getLastBackupRun(orgId: string): Promise<LastBackupRun> {
     outcome: (data.outcome as 'success' | 'failure') ?? 'success',
     details: (data.details as Record<string, unknown> | null) ?? null,
   };
+  });
 }
 
 export async function listDailyBackups(orgId: string): Promise<ListDailyBackupsResult> {
+  return withSafeError('listDailyBackups', async () => {
   await assertOrgPermission(orgId, 'auditLogs');
 
   if (!isGcsBackupConfigured()) return { configured: false };
 
   const prefix = `daily/${orgId}/`;
-  const files = await listGCSFiles(DAILY_BUCKET, prefix);
+  const files = await listGCSFiles(DAILY_BUCKET, prefix).catch((error) => { throw sanitizeExternalError(error, 'gcs.backup.list'); });
 
   return {
     configured: true,
@@ -88,20 +93,25 @@ export async function listDailyBackups(orgId: string): Promise<ListDailyBackupsR
       })
       .sort((a, b) => b.updated.localeCompare(a.updated)),
   };
+  });
 }
 
 export async function getBackupRecords(orgId: string, filePath: string): Promise<BackupRecord[]> {
-  await assertOrgPermission(orgId, 'auditLogs');
+  return withSafeError('getBackupRecords', async () => {
+  const { userId } = await assertOrgPermission(orgId, 'auditLogs');
   if (!isGcsBackupConfigured()) throw new Error('GCS_NOT_CONFIGURED');
 
   const path = resolveBackupFilePath(orgId, filePath);
-  const csv = await readGCSFile(DAILY_BUCKET, path);
+  const csv = await readGCSFile(DAILY_BUCKET, path).catch((error) => { throw sanitizeExternalError(error, 'gcs.backup.read'); });
   const schemaByClientName = await getSchemaByUniqueClientName(orgId);
 
   const lines = csv.split('\n');
-  if (lines.length < 2) return [];
+  if (lines.length < 2) {
+    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'backup.view', resourceType: 'backup', resourceId: path, details: { records: 0 } });
+    return [];
+  }
 
-  return lines.slice(1).flatMap((line) => {
+  const records = lines.slice(1).flatMap((line) => {
     if (!line.trim()) return [];
     const cols = parseCsvLine(line);
     const clientName = cols[1] ?? '';
@@ -118,10 +128,14 @@ export async function getBackupRecords(orgId: string, filePath: string): Promise
       updatedAt: cols[8] ?? '',
     }];
   });
+  await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'backup.view', resourceType: 'backup', resourceId: path, details: { records: records.length } });
+  return records;
+  });
 }
 
 export async function triggerDailyBackup(orgId: string): Promise<{ date: string; path: string; records: number }> {
-  await assertOrgPermission(orgId, 'auditLogs');
+  return withSafeError('triggerDailyBackup', async () => {
+  const { userId } = await assertOrgPermission(orgId, 'auditLogs');
   if (!isGcsBackupConfigured()) throw new Error('GCS_NOT_CONFIGURED');
 
   const now = new Date();
@@ -142,9 +156,11 @@ export async function triggerDailyBackup(orgId: string): Promise<{ date: string;
   await Promise.all([
     uploadToGCS(DAILY_BUCKET, csvPath, csv),
     uploadToGCS(DAILY_BUCKET, htmlPath, html),
-  ]);
+  ]).catch((error) => { throw sanitizeExternalError(error, 'gcs.backup.upload'); });
 
+  await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'backup.manual_trigger', resourceType: 'backup', resourceId: csvPath, details: { records: rows.length, htmlPath } });
   return { date, path: csvPath, records: rows.length };
+  });
 }
 
 function resolveBackupFilePath(orgId: string, input: string): string {
@@ -174,7 +190,7 @@ async function getSchemaByUniqueClientName(orgId: string): Promise<Map<string, F
     .select('id, name')
     .eq('organization_id', orgId)
     .is('deleted_at', null);
-  if (clientError) throw new Error(`利用者一覧の取得に失敗しました: ${clientError.message}`);
+  if (clientError) throw sanitizeDbError(clientError, 'action.backup.clients');
 
   const clientRows = (clients ?? []) as { id: string; name: string }[];
   const clientIds = clientRows.map((client) => client.id);
@@ -184,7 +200,7 @@ async function getSchemaByUniqueClientName(orgId: string): Promise<Map<string, F
     .from('form_templates')
     .select('client_id, schema')
     .in('client_id', clientIds);
-  if (templateError) throw new Error(`フォーム設定の取得に失敗しました: ${templateError.message}`);
+  if (templateError) throw sanitizeDbError(templateError, 'action.backup.templates');
 
   const nameCounts = new Map<string, number>();
   clientRows.forEach((client) => nameCounts.set(client.name, (nameCounts.get(client.name) ?? 0) + 1));

@@ -9,6 +9,7 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   test: {
     alias: {
+      '@': path.join(dirname, 'src'),
       'server-only': path.join(dirname, 'src/test/server-only.ts'),
     },
     projects: [

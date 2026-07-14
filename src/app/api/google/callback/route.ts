@@ -6,6 +6,8 @@ import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar
 import { encryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { consumeOAuthNonce } from '@/utils/supabase/oauthNonce';
 import { mergePermissions, type RolePermissions } from '@/utils/permissions';
+import { recordAuditEvent } from '@/utils/supabase/audit';
+import { logExternalError } from '@/utils/errors';
 
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
@@ -127,7 +129,7 @@ export async function GET(request: NextRequest) {
                 // Keep the old ID for an explicit, audited replacement flow.
                 // A different Google account must never create a replacement
                 // calendar implicitly during reauthorization.
-                console.warn('Existing Google calendar is not accessible after reauthorization', calendarError);
+                logExternalError('google.callback.calendar-check', calendarError);
                 connectionStatus = 'calendar_missing';
             }
         } else {
@@ -156,13 +158,22 @@ export async function GET(request: NextRequest) {
 
         if (updateError) throw updateError;
 
+        await recordAuditEvent({
+            organizationId,
+            actorId: user.id,
+            action: 'integration.calendar.connect',
+            resourceType: 'organization',
+            resourceId: organizationId,
+            details: { connectionStatus, reusedCalendar: Boolean(orgData.google_calendar_id) },
+        });
+
         // 7. 成功したら設定画面へリダイレクト（使い捨て state Cookie を破棄）
         const okResponse = NextResponse.redirect(`${redirectUrl}?${connectionStatus === 'healthy' ? 'success=calendar_connected' : 'error=google_calendar_missing'}`);
         okResponse.cookies.delete(OAUTH_STATE_COOKIE);
         return okResponse;
 
     } catch (err) {
-        console.error('Google Callback Error:', err);
+        logExternalError('google.callback', err);
         const errResponse = NextResponse.redirect(`${redirectUrl}?error=calendar_setup_failed`);
         errResponse.cookies.delete(OAUTH_STATE_COOKIE);
         return errResponse;

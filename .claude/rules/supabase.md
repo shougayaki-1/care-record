@@ -6,6 +6,8 @@
   差分がないことを変更内容に明記する（逆方向、permissions.ts変更時も同様）。
 - 新規テーブルには RLS 有効化・組織スコープ（`organization_id`等）・監査対象かどうかの
   判断を必ず含める。
+- 新規テーブルごとに `anon` / `authenticated` / `service_role` の必要権限を確認し、
+  デフォルト権限に依存せず明示的な `GRANT` / `REVOKE` を同じマイグレーションへ記載する。
 - 関数を追加したら `GRANT EXECUTE ... TO authenticated` の要否を確認する
   （過去に付与漏れバグあり: `20260701000004_fix_function_grants.sql`）。
 - 物理DELETEを書かない。削除は論理削除 + 保持期間purge（`src/utils/supabase/retention.ts`）の

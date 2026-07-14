@@ -2,6 +2,7 @@
 
 import { createHash } from 'crypto';
 import { assertShiftPermission, supabaseAdmin } from '@/utils/supabase/auth';
+import { sanitizeDbError, withSafeError } from '@/utils/errors';
 
 type RepairItem = {
   shiftId: string;
@@ -24,6 +25,7 @@ function monthRange(yearMonth: string) {
 /** Safe first-stage repair: never recreates segments. It only identifies rows
  * and rebuilds the denormalized shift_staffs table from existing segment staff. */
 export async function previewShiftStaffRepair(organizationId: string, yearMonth: string) {
+  return withSafeError('previewShiftStaffRepair', async () => {
   await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
   const { start, end } = monthRange(yearMonth);
   const { data: shifts, error } = await supabaseAdmin
@@ -33,7 +35,7 @@ export async function previewShiftStaffRepair(organizationId: string, yearMonth:
     .is('deleted_at', null)
     .gte('start_at', start)
     .lt('start_at', end);
-  if (error) throw error;
+  if (error) throw sanitizeDbError(error, 'action.shift-repair.preview');
 
   const items: RepairItem[] = (shifts ?? []).map((shift) => {
     const segments = (shift.shift_segments ?? []) as Array<{ id: string; shift_segment_staffs?: Array<{ staff_id: string }> }>;
@@ -59,9 +61,11 @@ export async function previewShiftStaffRepair(organizationId: string, yearMonth:
     refreshable: items.filter((item) => item.action === 'refresh_derived_staffs').length,
     reviewRequired: items.filter((item) => item.action === 'review_required' && !item.hasSegmentStaffs).length,
   };
+  });
 }
 
 export async function applyShiftStaffRepair(organizationId: string, yearMonth: string) {
+  return withSafeError('applyShiftStaffRepair', async () => {
   const actor = await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
   const preview = await previewShiftStaffRepair(organizationId, yearMonth);
   const { data: run, error: runError } = await supabaseAdmin.from('maintenance_runs').insert({
@@ -72,14 +76,15 @@ export async function applyShiftStaffRepair(organizationId: string, yearMonth: s
     requested_by: actor.userId,
     summary: { refreshable: preview.refreshable, reviewRequired: preview.reviewRequired },
   }).select('id').single();
-  if (runError || !run) throw runError || new Error('修復実行を作成できませんでした');
+  if (runError) throw sanitizeDbError(runError, 'action.shift-repair.create-run');
+  if (!run) throw new Error('修復実行を作成できませんでした');
 
   let applied = 0;
   for (const item of preview.items.filter((entry) => entry.action === 'refresh_derived_staffs')) {
     const before = { hasSegments: item.hasSegments, hasSegmentStaffs: item.hasSegmentStaffs, hasDerivedStaffs: item.hasDerivedStaffs };
     const { error } = await supabaseAdmin.rpc('refresh_shift_staffs', { p_shift_id: item.shiftId });
     const afterHash = createHash('sha256').update(JSON.stringify({ shiftId: item.shiftId, repaired: true })).digest('hex');
-    await supabaseAdmin.from('maintenance_run_items').insert({
+    const { error: itemError } = await supabaseAdmin.from('maintenance_run_items').insert({
       run_id: run.id,
       resource_type: 'shift',
       resource_id: item.shiftId,
@@ -88,9 +93,12 @@ export async function applyShiftStaffRepair(organizationId: string, yearMonth: s
       after_hash: afterHash,
       result: error ? 'failed' : 'applied',
     });
-    if (error) throw error;
+    if (itemError) throw sanitizeDbError(itemError, 'action.shift-repair.create-item');
+    if (error) throw sanitizeDbError(error, 'action.shift-repair.refresh');
     applied++;
   }
-  await supabaseAdmin.from('maintenance_runs').update({ status: 'applied', applied_at: new Date().toISOString() }).eq('id', run.id);
+  const { error: updateError } = await supabaseAdmin.from('maintenance_runs').update({ status: 'applied', applied_at: new Date().toISOString() }).eq('id', run.id);
+  if (updateError) throw sanitizeDbError(updateError, 'action.shift-repair.complete-run');
   return { runId: run.id, applied, reviewRequired: preview.reviewRequired };
+  });
 }
