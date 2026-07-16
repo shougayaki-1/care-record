@@ -3,20 +3,21 @@
 import { randomBytes } from 'crypto';
 import { cookies } from 'next/headers';
 import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar';
-import { assertOrgPermission } from '@/utils/supabase/auth';
+import { assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { storeOAuthNonce } from '@/utils/supabase/oauthNonce';
-import { supabaseAdmin } from '@/utils/supabase/auth';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { google } from 'googleapis';
 import { classifyGoogleError } from '@/utils/googleSync';
 import { sanitizeDbError, withSafeError } from '@/utils/errors';
+import { consumeReauthGrant } from '@/utils/supabase/reauth';
 
 export type GoogleConnectionState = 'disconnected' | 'healthy' | 'reauth_required' | 'calendar_missing' | 'forbidden' | 'misconfigured' | 'temporarily_unavailable';
 
 export async function getGoogleConnectionHealth(organizationId: string): Promise<{ state: GoogleConnectionState }> {
     return withSafeError('getGoogleConnectionHealth', async () => {
     await assertOrgPermission(organizationId, 'integrations');
-    const { data: org, error } = await supabaseAdmin
+    const supabase = await createSessionClient();
+    const { data: org, error } = await supabase
         .from('organizations')
         .select('google_calendar_id, google_refresh_token')
         .eq('id', organizationId)
@@ -35,19 +36,23 @@ export async function getGoogleConnectionHealth(organizationId: string): Promise
             : classified.code === 404 ? 'calendar_missing'
             : 'misconfigured';
     }
-    const { error: updateError } = await supabaseAdmin.from('organizations').update({
-        google_connection_status: state,
-        google_connection_checked_at: new Date().toISOString(),
-        google_connection_error_code: state === 'healthy' ? null : state,
-    }).eq('id', organizationId);
+    const { error: updateError } = await supabase.rpc('update_google_connection_health', {
+        p_org_id: organizationId, p_status: state, p_error_code: state === 'healthy' ? null : state,
+    });
     if (updateError) throw sanitizeDbError(updateError, 'action.google.health-update');
     return { state };
     });
 }
 
-export async function getGoogleAuthUrlAction(organizationId: string, mode: 'connect' | 'reauthorize' = 'connect') {
+export async function getGoogleAuthUrlAction(
+    organizationId: string,
+    mode: 'connect' | 'reauthorize',
+    reauthToken: string,
+) {
     return withSafeError('getGoogleAuthUrlAction', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'integrations');
+    const reauth = await consumeReauthGrant('external_secret_change', reauthToken);
+    if (reauth.userId !== userId) throw new Error('再認証した利用者が一致しません');
 
     // CSRF 対策: 推測不能な nonce を生成し、orgId と紐づけて httpOnly Cookie に保存。
     // コールバック時に state(nonce) と Cookie を突合し、orgId は Cookie 側を信頼する。

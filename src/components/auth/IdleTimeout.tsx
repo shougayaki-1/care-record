@@ -11,9 +11,10 @@ import { heartbeatSession } from '@/app/actions/auth';
 import { logoutCurrentUser } from '@/utils/clientLogout';
 import { AppDialog } from '@/components/ui/AppDialog';
 import { AppButton } from '@/components/ui/AppButton';
+import { SESSION_IDLE_MS } from '@/utils/authConstants';
 
 // 無操作からタイムアウト警告までの時間（ミリ秒）。既定24時間。
-const IDLE_LIMIT_MS = 24 * 60 * 60 * 1000;
+const IDLE_LIMIT_MS = SESSION_IDLE_MS;
 // 警告表示から自動ログアウトまでの猶予（ミリ秒）。
 const WARNING_GRACE_MS = 60 * 1000;
 const HEARTBEAT_INTERVAL_MS = 60 * 1000;

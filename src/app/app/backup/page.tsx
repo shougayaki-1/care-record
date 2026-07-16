@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Alert, Box, Typography, CircularProgress, Stack, TextField, MenuItem, Select, InputAdornment,
 } from '@/components/ui/mui';
@@ -97,7 +97,7 @@ export default function BackupPage() {
 
   useEffect(() => {
     if (!wsLoading && currentOrg) {
-      if (!checkManagementPermission(currentOrg.effectivePermissions, 'auditLogs')) {
+      if (!checkManagementPermission(currentOrg.effectivePermissions, 'backupStatus')) {
         router.push('/app');
       }
     }
@@ -139,7 +139,7 @@ export default function BackupPage() {
 
   useEffect(() => {
     if (!currentOrg) return;
-    refreshFiles(currentOrg.id);
+    queueMicrotask(() => void refreshFiles(currentOrg.id));
   }, [currentOrg, refreshFiles]);
 
   const handleTriggerBackup = async () => {
@@ -174,15 +174,20 @@ export default function BackupPage() {
   }, []);
 
   useEffect(() => {
-    if (currentOrg && selectedBackupPath) {
-      loadRecords(currentOrg.id, selectedBackupPath);
-    } else {
-      setRecords([]);
-      setSelectedRecord(null);
-    }
+    queueMicrotask(() => {
+      if (currentOrg && selectedBackupPath) {
+        void loadRecords(currentOrg.id, selectedBackupPath);
+      } else {
+        setRecords([]);
+        setSelectedRecord(null);
+      }
+    });
   }, [currentOrg, selectedBackupPath, loadRecords]);
 
-  const dateFiles = files.filter((file) => file.date === selectedDate);
+  const dateFiles = useMemo(
+    () => files.filter((file) => file.date === selectedDate),
+    [files, selectedDate],
+  );
   const availableDates = uniqueOptions(files.map((file) => file.date)).sort((a, b) => b.localeCompare(a));
   const clientOptions = uniqueOptions(records.map((record) => record.clientName));
   const helperOptions = uniqueOptions(records.map((record) => record.helperName));
@@ -192,7 +197,9 @@ export default function BackupPage() {
     const nextPath = dateFiles.some((file) => file.path === selectedBackupPath)
       ? selectedBackupPath
       : dateFiles[0]?.path ?? '';
-    if (nextPath !== selectedBackupPath) setSelectedBackupPath(nextPath);
+    if (nextPath !== selectedBackupPath) {
+      queueMicrotask(() => setSelectedBackupPath(nextPath));
+    }
   }, [dateFiles, selectedBackupPath, selectedDate]);
 
   const filtered = records.filter((r) => {

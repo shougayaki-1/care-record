@@ -3,6 +3,18 @@ import 'server-only';
 import sharp from 'sharp';
 
 const MAX_PIXELS = 40_000_000;
+const MAX_EDGE = 4096;
+const ACCEPTED_MIME_BY_FORMAT = {
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+} as const;
+
+function signatureMatches(bytes: Buffer, format: keyof typeof ACCEPTED_MIME_BY_FORMAT): boolean {
+  if (format === 'jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (format === 'png') return bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  return bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+}
 
 async function malwareScan(bytes: Buffer): Promise<void> {
   const url = process.env.MALWARE_SCAN_URL;
@@ -40,8 +52,10 @@ export async function sanitizeUploadedImage(file: File): Promise<{ bytes: Buffer
   try {
     const image = sharp(original, { failOn: 'error', limitInputPixels: MAX_PIXELS });
     const metadata = await image.metadata();
-    if (!['jpeg', 'png', 'webp'].includes(metadata.format || '')) throw new Error('unsupported');
-    if (!metadata.width || !metadata.height || metadata.width * metadata.height > MAX_PIXELS) throw new Error('too_large');
+    const format = metadata.format as keyof typeof ACCEPTED_MIME_BY_FORMAT;
+    if (!(format in ACCEPTED_MIME_BY_FORMAT)) throw new Error('unsupported');
+    if (file.type !== ACCEPTED_MIME_BY_FORMAT[format] || !signatureMatches(original, format)) throw new Error('mime_mismatch');
+    if (!metadata.width || !metadata.height || metadata.width > MAX_EDGE || metadata.height > MAX_EDGE || metadata.width * metadata.height > MAX_PIXELS) throw new Error('too_large');
     const bytes = await image.rotate().webp({ quality: 90, effort: 4 }).toBuffer();
     return { bytes, contentType: 'image/webp', extension: 'webp' };
   } catch {

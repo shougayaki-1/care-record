@@ -1,5 +1,5 @@
 'use server';
-import { supabaseAdmin, assertOrgRole } from '@/utils/supabase/auth';
+import { assertOrgRole, createSessionClient } from '@/utils/supabase/auth';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 import type { ServiceType } from '@/app/actions/serviceTypes';
 import type { StaffRole } from '@/app/actions/staffRoles';
@@ -15,20 +15,21 @@ export async function getSettingsSectionsData(orgId: string): Promise<{
   staffRoles: StaffRole[];
 }> {
   await assertOrgRole(orgId);
+  const supabase = await createSessionClient();
 
   const [laborPremiumResult, serviceTypesResult, staffRolesResult] = await Promise.all([
-    supabaseAdmin
+    supabase
       .from('labor_premium_types')
       .select('*')
       .eq('organization_id', orgId)
       .order('display_order'),
-    supabaseAdmin
+    supabase
       .from('service_types')
       .select('*')
       .eq('organization_id', orgId)
       .is('deleted_at', null)
       .order('sort_order'),
-    supabaseAdmin
+    supabase
       .from('staff_roles')
       .select('*')
       .eq('organization_id', orgId)

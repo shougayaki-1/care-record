@@ -233,6 +233,7 @@ export function useRecordForm() {
   const draftKeyRef = useRef<string>(searchParams.get('draftKey') || crypto.randomUUID());
   const autosaveRestoredRef = useRef(false);
   const autosaveRevisionRef = useRef(0);
+  const contentVersionRef = useRef(0);
   const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const [formState, formDispatch] = useReducer(formReducer, formInitialState);
@@ -503,6 +504,7 @@ export function useRecordForm() {
       setStartDateTime(formatDatetimeLocal(new Date(r.start_at)));
       setEndDateTime(formatDatetimeLocal(new Date(r.end_at)));
       setCurrentStatus(r.status);
+      contentVersionRef.current = Number(r.current_version ?? 0);
       setSelectedSegmentId(r.segment_id ?? null);
       setActualServiceTypeId(r.actual_service_type_id ?? '');
       setIsDirty(false);
@@ -881,11 +883,14 @@ export function useRecordForm() {
         actualServiceTypeId: actualServiceTypeId || null,
         actualStaffs,
         values: finalData,
+        expectedVersion: contentVersionRef.current,
+        idempotencyKey: crypto.randomUUID(),
         ...(status === 'draft' && hasAiDraftSource
           ? { auditSource: 'ai_import' as const, auditFileCount: 1 }
           : {}),
       });
       const targetReportId = result.reportId;
+      contentVersionRef.current = result.version;
       if (!currentReportId) setCurrentReportId(targetReportId);
       if (status === 'draft') setHasAiDraftSource(false);
       setIsDirty(false);
@@ -900,7 +905,14 @@ export function useRecordForm() {
       }
 
       return true;
-    } catch (e) { console.error(e); showToast('エラーが発生しました', 'error'); return false; } 
+    } catch (e) {
+      console.error(e);
+      const message = e instanceof Error && e.message.startsWith('REPORT_VERSION_CONFLICT:')
+        ? '他の利用者がこの記録を更新しました。入力内容は保持しています。再読み込みして差分を確認してください。'
+        : 'エラーが発生しました';
+      showToast(message, 'error');
+      return false;
+    }
     finally { setSubmitting(false); }
   }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, endDateTime, hasAiDraftSource, roundTripDistanceKm, router, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setSubmitting, shiftId, shiftSegments.length, showToast, startDateTime, travelCostRateYenPerKm, travelTime, validate]);
 

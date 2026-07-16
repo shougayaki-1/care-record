@@ -1,0 +1,64 @@
+name: External health monitor
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment to monitor
+        type: choice
+        required: true
+        default: staging
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-health-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    env:
+      APP_ENV: ${{ github.event.inputs.environment || 'production' }}
+      HEALTHCHECK_URL: ${{ vars.HEALTHCHECK_URL }}
+      DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+      EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe the non-PII health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${HEALTHCHECK_URL:?HEALTHCHECK_URL is required}"
+          endpoint="${HEALTHCHECK_URL%/}/api/health"
+          status="$(curl --silent --show-error --location --max-time 20 \
+            --retry 2 --retry-all-errors --output health-response.json \
+            --write-out '%{http_code}' "$endpoint")"
+          test "$status" = '200'
+          jq -e '.ok == true and .service == "care-record" and
+            (.database.capacity | IN("normal", "warning", "restricted", "critical"))' \
+            health-response.json >/dev/null
+      - name: Notify when database capacity crosses a threshold
+        shell: bash
+        run: |
+          set -euo pipefail
+          level="$(jq -r '.database.capacity' health-response.json)"
+          case "$level" in
+            normal) exit 0 ;;
+            warning) severity='Warning' ;;
+            restricted) severity='High' ;;
+            critical) severity='Critical' ;;
+            *) exit 1 ;;
+          esac
+          scripts/backup/notify-discord.sh "$severity" "database_capacity_${level}" "$EVIDENCE_URL"
+      - name: Notify when the external probe fails
+        if: ${{ failure() }}
+        run: scripts/backup/notify-discord.sh Critical external_health_failed "$EVIDENCE_URL"

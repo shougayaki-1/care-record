@@ -1,5 +1,5 @@
 'use server';
-import { supabaseAdmin, assertShiftPermission, assertOrgRole } from '@/utils/supabase/auth';
+import { createSessionClient, assertShiftPermission, assertOrgRole } from '@/utils/supabase/auth';
 
 export type ShiftSegmentStaff = {
   id: string;
@@ -32,7 +32,8 @@ export type SaveSegmentInput = {
 
 export async function getShiftSegments(orgId: string, shiftId: string): Promise<ShiftSegment[]> {
   await assertOrgRole(orgId);
-  const { data: shift, error: shiftError } = await supabaseAdmin
+  const supabase = await createSessionClient();
+  const { data: shift, error: shiftError } = await supabase
     .from('shifts')
     .select('id')
     .eq('id', shiftId)
@@ -40,7 +41,7 @@ export async function getShiftSegments(orgId: string, shiftId: string): Promise<
     .is('deleted_at', null)
     .maybeSingle();
   if (shiftError || !shift) throw new Error('シフトにアクセスできません');
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from('shift_segments')
     .select(`
       *,
@@ -63,95 +64,18 @@ export async function saveShiftSegments(
   segments: SaveSegmentInput[]
 ): Promise<void> {
   await assertShiftPermission(orgId, 'edit', { shiftId });
-
-  const { count: linkedSegmentReports, error: linkedReportError } = await supabaseAdmin
-    .from('reports')
-    .select('id', { count: 'exact', head: true })
-    .eq('shift_id', shiftId)
-    .not('segment_id', 'is', null)
-    .is('deleted_at', null);
-  if (linkedReportError) throw new Error('記録の確認に失敗しました');
-  if ((linkedSegmentReports ?? 0) > 0) {
-    throw new Error('記録に使用されている区間は編集できません。管理者へ確認してください。');
-  }
-
-  // Keep the parent shift protected from pattern regeneration and queued for Google
-  // synchronization whenever its staff assignment changes.
-  const { error: parentError } = await supabaseAdmin
-    .from('shifts')
-    .update({
-      is_modified: true,
-      google_sync_status: 'pending_upsert',
-      google_sync_error: null,
-      google_synced_at: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', shiftId)
-    .eq('organization_id', orgId);
-  if (parentError) throw new Error('シフトの更新に失敗しました');
-
-  // The migration maintains shift_staffs with a trigger. This implementation
-  // still derives it explicitly for installations that have not yet applied it.
-  const { error: deleteError } = await supabaseAdmin
-    .from('shift_segments')
-    .delete()
-    .eq('shift_id', shiftId);
-  if (deleteError) throw new Error('区間の保存に失敗しました');
-
-  if (segments.length === 0) {
-    await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
-    return;
-  }
-
-  const { data: inserted, error: insertError } = await supabaseAdmin
-    .from('shift_segments')
-    .insert(
-      segments.map((s, i) => ({
-        shift_id: shiftId,
-        service_type_id: s.service_type_id ?? null,
-        start_at: s.start_at,
-        end_at: s.end_at,
-        sort_order: i,
-      }))
-    )
-    .select('id');
-  if (insertError || !inserted) throw new Error('区間の保存に失敗しました');
-
-  const staffRows = inserted.flatMap((seg, i) =>
-    (segments[i].staffs ?? []).map((staff) => ({
-      segment_id: seg.id,
-      staff_id: staff.staff_id,
-      staff_role_id: staff.staff_role_id ?? null,
-    }))
-  );
-
-  if (staffRows.length > 0) {
-    const { error: staffError } = await supabaseAdmin
-      .from('shift_segment_staffs')
-      .insert(staffRows);
-    if (staffError) throw new Error('スタッフ割当の保存に失敗しました');
-  }
-
-  // Derive shift_staffs from segment staffs (shift_staffs is now a read-only denorm)
-  const segmentIds = inserted.map((s) => s.id);
-  let uniqueStaffIds: string[] = [];
-  if (segmentIds.length > 0) {
-    const { data: segStaffs } = await supabaseAdmin
-      .from('shift_segment_staffs')
-      .select('staff_id')
-      .in('segment_id', segmentIds);
-    uniqueStaffIds = [...new Set((segStaffs ?? []).map((r) => r.staff_id))];
-  }
-  await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
-  if (uniqueStaffIds.length > 0) {
-    await supabaseAdmin.from('shift_staffs').insert(
-      uniqueStaffIds.map((staff_id) => ({ shift_id: shiftId, staff_id }))
-    );
-  }
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('replace_shift_segments', {
+    p_org_id: orgId,
+    p_shift_id: shiftId,
+    p_segments: segments,
+  });
+  if (error) throw new Error(error.message || '区間の保存に失敗しました');
 }
 
 export async function deleteShiftSegment(orgId: string, segmentId: string): Promise<void> {
-  const { data: seg } = await supabaseAdmin
+  const supabase = await createSessionClient();
+  const { data: seg } = await supabase
     .from('shift_segments')
     .select('shift_id')
     .eq('id', segmentId)
@@ -159,32 +83,9 @@ export async function deleteShiftSegment(orgId: string, segmentId: string): Prom
   if (!seg) throw new Error('区間が見つかりません');
   await assertShiftPermission(orgId, 'edit', { shiftId: seg.shift_id });
 
-  const { error } = await supabaseAdmin
-    .from('shift_segments')
-    .delete()
-    .eq('id', segmentId);
-  if (error) throw new Error('区間の削除に失敗しました');
-
-  // 削除後に残るセグメントから shift_staffs を再導出する
-  const shiftId = seg.shift_id;
-  const { data: remainingSegments } = await supabaseAdmin
-    .from('shift_segments')
-    .select('id')
-    .eq('shift_id', shiftId);
-
-  const remainingSegmentIds = (remainingSegments ?? []).map((s) => s.id);
-  let uniqueStaffIds: string[] = [];
-  if (remainingSegmentIds.length > 0) {
-    const { data: segStaffs } = await supabaseAdmin
-      .from('shift_segment_staffs')
-      .select('staff_id')
-      .in('segment_id', remainingSegmentIds);
-    uniqueStaffIds = [...new Set((segStaffs ?? []).map((r) => r.staff_id))];
-  }
-  await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
-  if (uniqueStaffIds.length > 0) {
-    await supabaseAdmin.from('shift_staffs').insert(
-      uniqueStaffIds.map((staff_id) => ({ shift_id: shiftId, staff_id }))
-    );
-  }
+  const { error } = await supabase.rpc('delete_shift_segment_atomic', {
+    p_org_id: orgId,
+    p_segment_id: segmentId,
+  });
+  if (error) throw new Error(error.message || '区間の削除に失敗しました');
 }

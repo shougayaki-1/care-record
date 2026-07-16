@@ -1,12 +1,15 @@
 'use server';
 
-import { assertOrgPermission, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgPermission } from '@/utils/supabase/auth';
+import { serviceRoleForBackup } from '@/utils/supabase/serviceRole';
 import { isGcsBackupConfigured, listGCSFiles, readGCSFile, uploadToGCS } from '@/utils/gcs/upload';
 import { exportReportsAsCsv } from '@/utils/gcs/export';
 import { generateBackupHtml } from '@/utils/gcs/html';
 import { convertDataToReadable, type FormItem, type FormValue } from '@/utils/templateHelper';
 import { sanitizeDbError, sanitizeExternalError, withSafeError } from '@/utils/errors';
 import { recordAuditEvent } from '@/utils/supabase/audit';
+
+const supabaseAdmin = serviceRoleForBackup();
 
 const DAILY_BUCKET = 'care-record-search-daily';
 
@@ -43,7 +46,7 @@ export type LastBackupRun = {
 /** 直近の自動バックアップcron実行状況を監査ログから取得する（cron側で action: 'backup.cron_run' として記録） */
 export async function getLastBackupRun(orgId: string): Promise<LastBackupRun> {
   return withSafeError('getLastBackupRun', async () => {
-  await assertOrgPermission(orgId, 'auditLogs');
+  await assertOrgPermission(orgId, 'backupStatus');
 
   const { data, error } = await supabaseAdmin
     .from('audit_events')
@@ -67,7 +70,7 @@ export async function getLastBackupRun(orgId: string): Promise<LastBackupRun> {
 
 export async function listDailyBackups(orgId: string): Promise<ListDailyBackupsResult> {
   return withSafeError('listDailyBackups', async () => {
-  await assertOrgPermission(orgId, 'auditLogs');
+  await assertOrgPermission(orgId, 'backupStatus');
 
   if (!isGcsBackupConfigured()) return { configured: false };
 
@@ -98,7 +101,7 @@ export async function listDailyBackups(orgId: string): Promise<ListDailyBackupsR
 
 export async function getBackupRecords(orgId: string, filePath: string): Promise<BackupRecord[]> {
   return withSafeError('getBackupRecords', async () => {
-  const { userId } = await assertOrgPermission(orgId, 'auditLogs');
+  const { userId } = await assertOrgPermission(orgId, 'backupStatus');
   if (!isGcsBackupConfigured()) throw new Error('GCS_NOT_CONFIGURED');
 
   const path = resolveBackupFilePath(orgId, filePath);
@@ -135,7 +138,7 @@ export async function getBackupRecords(orgId: string, filePath: string): Promise
 
 export async function triggerDailyBackup(orgId: string): Promise<{ date: string; path: string; records: number }> {
   return withSafeError('triggerDailyBackup', async () => {
-  const { userId } = await assertOrgPermission(orgId, 'auditLogs');
+  const { userId } = await assertOrgPermission(orgId, 'backupStatus');
   if (!isGcsBackupConfigured()) throw new Error('GCS_NOT_CONFIGURED');
 
   const now = new Date();

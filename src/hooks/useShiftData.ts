@@ -238,34 +238,30 @@ export const useShiftData = ({
     }, [currentOrg, showToast, calendarRef, fetchPatterns, getShiftFilter, fetchUnsyncedCount]);
 
     useEffect(() => {
-        if (rawShifts.length === 0) {
-            setEvents([]);
-            return;
-        }
+        queueMicrotask(() => {
+            if (rawShifts.length === 0 || (activeTab === 'myShift' && !currentStaffId)) {
+                setEvents([]);
+                return;
+            }
 
-        if (activeTab === 'myShift' && !currentStaffId) {
-            setEvents([]);
-            return;
-        }
+            const filtered = rawShifts.filter(shift => {
+                if (activeTab === 'myShift') {
+                    return shift.shift_staffs.some(s => s.staff_id === currentStaffId);
+                }
+                if (activeTab === 'byStaff') {
+                    if (selectedStaffId === 'all') return true;
+                    return shift.shift_staffs.some(s => s.staff_id === selectedStaffId);
+                }
+                if (activeTab === 'byClient') {
+                    if (selectedClientId === 'all') return true;
+                    return shift.client_id === selectedClientId;
+                }
+                return true;
+            });
 
-        const filtered = rawShifts.filter(shift => {
-            if (activeTab === 'myShift') {
-                if (!currentStaffId) return false;
-                return shift.shift_staffs.some(s => s.staff_id === currentStaffId);
-            }
-            if (activeTab === 'byStaff') {
-                if (selectedStaffId === 'all') return true;
-                return shift.shift_staffs.some(s => s.staff_id === selectedStaffId);
-            }
-            if (activeTab === 'byClient') {
-                if (selectedClientId === 'all') return true;
-                return shift.client_id === selectedClientId;
-            }
-            return true;
+            const isEditable = Boolean(currentOrg && activeTab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true));
+            setEvents(convertToCalendarEvents(filtered, !isEditable));
         });
-
-        const isEditable = Boolean(currentOrg && activeTab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true));
-        setEvents(convertToCalendarEvents(filtered, !isEditable));
     }, [rawShifts, activeTab, selectedStaffId, selectedClientId, currentStaffId, currentOrg]);
 
     return {

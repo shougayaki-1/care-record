@@ -19,23 +19,9 @@ import {
   type SyncErrorKind,
 } from '@/utils/googleSync';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
-import { supabaseAdmin } from '@/utils/supabase/auth';
+import { createSessionClient } from '@/utils/supabase/auth';
 
 export type GoogleCalendarClient = ReturnType<typeof google.calendar>;
-
-type ShiftUpdateData = {
-  title?: string;
-  start_at?: string;
-  end_at?: string;
-  status?: 'published' | 'cancelled';
-  cancel_reason?: string | null;
-  updated_at?: string;
-  google_event_id?: string | null;
-  google_sync_status?: GoogleSyncStatus;
-  google_sync_error?: string | null;
-  google_synced_at?: string | null;
-  is_modified?: boolean;
-};
 
 export type BatchOutcome = {
   succeeded: number;
@@ -143,13 +129,15 @@ export async function markShiftGoogleSync(
   status: GoogleSyncStatus,
   options: { eventId?: string | null; error?: string | null } = {},
 ) {
-  const updateData: ShiftUpdateData = {
-    google_sync_status: status,
-    google_sync_error: options.error ?? null,
-    google_synced_at: status === 'synced' ? new Date().toISOString() : null,
-  };
-  if ('eventId' in options) updateData.google_event_id = options.eventId ?? null;
-  await supabaseAdmin.from('shifts').update(updateData).eq('id', shiftId);
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('mark_shift_google_sync', {
+    p_shift_id: shiftId,
+    p_status: status,
+    p_event_id: 'eventId' in options ? options.eventId ?? null : null,
+    p_set_event_id: 'eventId' in options,
+    p_error: options.error ?? null,
+  });
+  if (error) throw error;
 }
 
 export async function syncToGoogleCalendarDirect(
@@ -158,20 +146,21 @@ export async function syncToGoogleCalendarDirect(
   action: 'sync' | 'delete',
 ): Promise<GoogleSyncStats> {
   const stats = emptyGoogleSyncStats();
-  const { data: orgData } = await supabaseAdmin
-    .from('organizations')
-    .select('google_calendar_id, google_refresh_token')
-    .eq('id', organizationId)
-    .single();
+  const supabase = await createSessionClient();
+  const { data: context, error: contextError } = await supabase.rpc('get_google_sync_target', {
+    p_org_id: organizationId, p_shift_id: shiftId,
+  });
+  if (contextError) throw contextError;
+  const syncContext = context as unknown as {
+    organization: { google_calendar_id: string | null; google_refresh_token: string | null };
+    shift: ShiftForGoogle | null;
+  } | null;
+  const orgData = syncContext?.organization;
   if (!orgData?.google_calendar_id || !orgData?.google_refresh_token) {
     throw new SyncError('Google calendar not connected', 'skipped');
   }
 
-  const { data: shiftData } = await supabaseAdmin
-    .from('shifts')
-    .select('id, title, start_at, end_at, status, cancel_reason, google_event_id, deleted_at, shift_staffs(staff_id)')
-    .eq('id', shiftId)
-    .single();
+  const shiftData = syncContext?.shift;
   if (!shiftData) throw new SyncError('Shift not found', 'skipped');
 
   const oauth2Client = getGoogleOAuthClient();

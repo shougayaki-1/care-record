@@ -12,12 +12,10 @@ import {
   jstDateStrFromStartAt,
   patternDateKey,
 } from '@/utils/shiftRecurrence';
-import { assertShiftPermission, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
 
 import {
-  createShiftInternal,
-  saveShiftSegmentsFromPattern,
-  updateShiftInternal,
+  saveGeneratedShiftAtomic,
   type PatternSegmentRow,
 } from './internal';
 
@@ -27,6 +25,7 @@ import {
 export async function previewShiftsForMonth(organizationId: string, yearMonth: string) {
   return withSafeError('previewShiftsForMonth', async () => {
       await assertShiftPermission(organizationId, 'view', { requireAllScope: true });
+      const supabase = await createSessionClient();
       const [year, month] = yearMonth.split('-').map(Number);
       const lastDayNum = new Date(year, month, 0).getDate();
 
@@ -34,7 +33,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
       const endDateJST = buildFloatingDate(year, month, lastDayNum, 23, 59);
 
       try {
-          const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
+          const { data: patterns } = await supabase.from('shift_patterns').select(`
               *,
               shift_pattern_staffs(staff_id),
               shift_pattern_segments(
@@ -90,6 +89,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
 export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
   return withSafeError('generateShiftsForMonth', async () => {
       await assertShiftPermission(organizationId, 'create', { requireAllScope: true });
+      const supabase = await createSessionClient();
       const [year, month] = yearMonth.split('-').map(Number);
       const lastDayNum = new Date(year, month, 0).getDate();
 
@@ -102,7 +102,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
           endSearchDate.setDate(endSearchDate.getDate() + 2);
           const endSearchISO = endSearchDate.toISOString();
 
-          const { data: existingShifts } = await supabaseAdmin.from('shifts')
+          const { data: existingShifts } = await supabase.from('shifts')
               .select('id, pattern_id, start_at, is_modified')
               .eq('organization_id', organizationId)
               .is('deleted_at', null)
@@ -116,7 +116,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
               existingMap.set(key, { id: s.id, is_modified: s.is_modified || false });
           });
 
-          const { data: patterns } = await supabaseAdmin.from('shift_patterns').select(`
+          const { data: patterns } = await supabase.from('shift_patterns').select(`
               *,
               shift_pattern_staffs(staff_id),
               shift_pattern_segments(
@@ -180,9 +180,8 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                       if (!existNormal.is_modified) {
                           // org は冒頭で検証済みのため内部実装を直接呼ぶ（多数回の getUser を回避）
                           tasks.push(async () => {
-                              await updateShiftInternal(existNormal.id, payload, 'skip');
-                              await saveShiftSegmentsFromPattern(
-                                  existNormal.id,
+                              await saveGeneratedShiftAtomic(
+                                  existNormal.id, payload,
                                   patternSegments,
                                   { year: yy, month: mm, day: dd, parentStartTime: p.start_time, parentEndTime: p.end_time },
                                   fallbackStaffIds,
@@ -194,9 +193,8 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                       }
                   } else {
                       tasks.push(async () => {
-                          const created = await createShiftInternal({ ...payload, patternId: p.id }, 'skip');
-                          await saveShiftSegmentsFromPattern(
-                              created.shiftId,
+                          await saveGeneratedShiftAtomic(
+                              null, { ...payload, patternId: p.id },
                               patternSegments,
                               { year: yy, month: mm, day: dd, parentStartTime: p.start_time, parentEndTime: p.end_time },
                               fallbackStaffIds,

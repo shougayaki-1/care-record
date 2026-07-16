@@ -31,16 +31,17 @@ export default function SetupPage() {
     // 入力値
     const [userName, setUserName] = useState('');
     const [orgName, setOrgName] = useState('');
-    const [inviteCode, setInviteCode] = useState('');
+    const [inviteCode, setInviteCode] = useState(paramInviteCode ?? '');
 
     // 招待プレビュー（コードが URL から来た場合に取得）
     const [invitePreview, setInvitePreview] = useState<InvitationPreview | null>(null);
 
     useEffect(() => {
         if (paramInviteCode) {
-            setInviteCode(paramInviteCode);
-            // 招待詳細を非同期で取得
-            getInvitationPreview(paramInviteCode).then(setInvitePreview).catch(() => {});
+            queueMicrotask(() => {
+                setInviteCode(paramInviteCode);
+                void getInvitationPreview(paramInviteCode).then(setInvitePreview).catch(() => {});
+            });
         }
     }, [paramInviteCode]);
 

@@ -1,17 +1,14 @@
 // app/super-admin/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
     Box, Typography, Paper, Table, TableBody, TableCell,
     TableContainer, TableHead, TableRow, Button, Chip,
-    IconButton, Tooltip, CircularProgress, Alert
+    CircularProgress, Alert
 } from '@/components/ui/mui';
-import DeleteIcon from '@mui/icons-material/Delete';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { getAllOrganizations, deleteOrganization } from '@/app/actions/super-admin';
-import { useToast } from '@/components/ui/ToastProvider';
-import { useConfirm } from '@/components/ui/ConfirmProvider';
+import { getAllOrganizations } from '@/app/actions/super-admin';
 
 type Organization = {
     id: string;
@@ -22,17 +19,11 @@ type Organization = {
 };
 
 export default function SuperAdminDashboard() {
-    const { showToast } = useToast();
-    const confirm = useConfirm();
     const [orgs, setOrgs] = useState<Organization[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    useEffect(() => {
-        fetchData();
-    }, []);
-
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true);
         setError('');
         try {
@@ -44,27 +35,11 @@ export default function SuperAdminDashboard() {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const handleDelete = async (id: string, name: string) => {
-        const ok = await confirm({
-            title: '【警告】事業所の完全削除',
-            message: `本当に事業所「${name}」を削除しますか？\n\n所属するスタッフ、利用者、記録データなど、全ての関連データが永久に削除されます。この操作は取り消せません。\n\n確認のため、事業所名「${name}」を入力してください。`,
-            requireText: name,
-            confirmText: '完全に削除する',
-            confirmColor: 'error',
-        });
-        if (!ok) return;
-
-        try {
-            await deleteOrganization(id);
-            showToast('削除しました');
-            fetchData();
-        } catch (error) {
-            console.error(error);
-            showToast('削除に失敗しました', 'error');
-        }
-    };
+    useEffect(() => {
+        queueMicrotask(() => void fetchData());
+    }, [fetchData]);
 
     return (
         <Box>
@@ -92,7 +67,7 @@ export default function SuperAdminDashboard() {
                                     <TableCell align="center" sx={{ fontWeight: 'bold' }}>スタッフ数</TableCell>
                                     <TableCell align="center" sx={{ fontWeight: 'bold' }}>利用者数</TableCell>
                                     <TableCell align="center" sx={{ fontWeight: 'bold' }}>状態</TableCell>
-                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>操作</TableCell>
+                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>顧客データ</TableCell>
                                 </TableRow>
                             </TableHead>
                             <TableBody>
@@ -117,11 +92,7 @@ export default function SuperAdminDashboard() {
                                                 <Chip label="稼働中" color="success" size="small" variant="outlined" />
                                             </TableCell>
                                             <TableCell align="center">
-                                                <Tooltip title="事業所データを完全削除">
-                                                    <IconButton color="error" onClick={() => handleDelete(org.id, org.name)}>
-                                                        <DeleteIcon />
-                                                    </IconButton>
-                                                </Tooltip>
+                                                <Chip label="アクセス不可" size="small" variant="outlined" />
                                             </TableCell>
                                         </TableRow>
                                     ))

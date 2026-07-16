@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Box, Stack, CircularProgress, Alert,
   Table, TableBody, TableCell, TableHead, TableRow,
@@ -33,7 +33,7 @@ export default function ServiceTypeSettings({
   const [deleteTarget, setDeleteTarget] = useState<ServiceType | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -43,13 +43,12 @@ export default function ServiceTypeSettings({
     } finally {
       setLoading(false);
     }
-  };
+  }, [orgId]);
 
   useEffect(() => {
     if (initialServiceTypes !== undefined) return;
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId]);
+    queueMicrotask(() => void load());
+  }, [initialServiceTypes, load]);
 
   const handleToggleActive = async (row: ServiceType) => {
     try {

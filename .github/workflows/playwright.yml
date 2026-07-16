@@ -1,23 +1,51 @@
 name: Playwright Tests
 on:
   pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    if: false
+    name: Dedicated environment E2E
+    environment: e2e
     timeout-minutes: 60
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: test
+      AI_IMPORT_ENABLED: 'false'
+      E2E_TEST_ENV: 'true'
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-node@v4
       with:
-        node-version: lts/*
+        node-version: 22
+        cache: npm
     - name: Install dependencies
-      run: npm install
+      run: npm ci
     - name: Install Playwright Browsers
-      run: npx playwright install --with-deps
+      run: npx playwright install --with-deps chromium
+    - name: Start application
+      run: |
+        npm run dev > /tmp/care-record-e2e.log 2>&1 &
+        for _ in {1..60}; do
+          if curl --fail --silent http://localhost:3000 > /dev/null; then
+            exit 0
+          fi
+          sleep 2
+        done
+        cat /tmp/care-record-e2e.log
+        exit 1
     - name: Run Playwright tests
-      run: npx playwright test
+      run: npm run test:e2e -- --project=chromium
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:

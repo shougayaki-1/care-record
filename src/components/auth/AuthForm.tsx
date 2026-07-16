@@ -42,15 +42,14 @@ export const AuthForm = () => {
     const [tabIndex, setTabIndex] = useState(registerParam === '1' ? 1 : 0);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info', text: string } | null>(null);
-    const [origin, setOrigin] = useState('');
+    const [origin] = useState(() => typeof window === 'undefined' ? '' : window.location.origin);
     const oauthInFlight = useRef(false);
 
     const isRegisterMode = tabIndex === 1;
 
     useEffect(() => {
-        setOrigin(window.location.origin);
         if (errorParam === 'auth_callback_failed') {
-            setMessage({ type: 'error', text: 'ログイン処理に失敗しました。もう一度お試しください。' });
+            queueMicrotask(() => setMessage({ type: 'error', text: 'ログイン処理に失敗しました。もう一度お試しください。' }));
         }
     }, [errorParam]);
 

@@ -10,7 +10,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { getShiftSegments, saveShiftSegments, type ShiftSegment, type SaveSegmentInput } from '@/app/actions/shiftSegments';
 import { getServiceTypes, type ServiceType } from '@/app/actions/serviceTypes';
 import { getStaffRoles, type StaffRole } from '@/app/actions/staffRoles';
-import { DateTimeField, MultiSelectField } from '@/components/ui';
+import { DateTimeField } from '@/components/ui';
 
 type StaffData = { id: string; name: string };
 
@@ -75,7 +75,9 @@ export default function ShiftSegmentEditor({ orgId, shiftId, shiftStartAt, shift
     }
   }, [orgId, shiftId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    queueMicrotask(() => void loadData());
+  }, [loadData]);
 
   const addSegment = () => {
     setSegments(prev => [
@@ -198,7 +200,6 @@ export default function ShiftSegmentEditor({ orgId, shiftId, shiftStartAt, shift
                 </Typography>
                 <Stack spacing={1}>
                   {seg.staffs.map((ss, sidx) => {
-                    const staffObj = allStaffs.find(s => s.id === ss.staff_id);
                     return (
                       <Stack key={sidx} direction="row" spacing={1} alignItems="center">
                         <FormControl size="small" sx={{ minWidth: 140, flex: 1 }}>

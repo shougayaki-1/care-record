@@ -1,7 +1,7 @@
 'use server';
 
 import { UserFacingError, withSafeError } from '@/utils/errors';
-import { getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
+import { createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 
 import type { MyShiftItem } from './types';
 
@@ -12,8 +12,9 @@ export async function getMyShiftsWithStatus(
 ): Promise<MyShiftItem[]> {
   return withSafeError('getMyShiftsWithStatus', async () => {
       const user = await getAuthedUser();
+      const supabase = await createSessionClient();
 
-      const { data: staffRow } = await supabaseAdmin
+      const { data: staffRow } = await supabase
           .from('staffs')
           .select('id')
           .eq('organization_id', organizationId)
@@ -22,7 +23,7 @@ export async function getMyShiftsWithStatus(
 
       if (!staffRow) throw new UserFacingError('スタッフアカウントが紐付いていません。事業所設定を確認してください。');
 
-      const { data: shifts, error } = await supabaseAdmin
+      const { data: shifts, error } = await supabase
           .from('shifts')
           .select(`
               id,
@@ -47,7 +48,7 @@ export async function getMyShiftsWithStatus(
       if (!shifts || shifts.length === 0) return [];
 
       const shiftIds = shifts.map(s => s.id);
-      const { data: reports } = await supabaseAdmin
+      const { data: reports } = await supabase
           .from('reports')
           .select('id, shift_id, status')
           .in('shift_id', shiftIds)

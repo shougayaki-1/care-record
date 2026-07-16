@@ -1,7 +1,7 @@
 'use server';
 
 import { sanitizeDbError } from '@/utils/errors';
-import { assertOrgRole, assertOrgPermission, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgRole, assertOrgPermission, createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 import type { InternalWorkAction } from '@/utils/permissions';
 import { normalizePermissions } from '@/utils/permissions';
 
@@ -37,25 +37,13 @@ export type SaveInternalWorkInput = {
   note?: string;
 };
 
-async function getMyStaffId(organizationId: string, userId: string): Promise<string> {
-  const { data, error } = await supabaseAdmin
-    .from('staffs')
-    .select('id')
-    .eq('organization_id', organizationId)
-    .eq('user_id', userId)
-    .is('deleted_at', null)
-    .maybeSingle();
-  if (error) throw sanitizeDbError(error, 'action.internalWork');
-  if (!data?.id) throw new Error('ログイン中のアカウントに紐づくスタッフが見つかりません');
-  return data.id;
-}
-
 async function getInternalWorkPermission(
   organizationId: string,
   userId: string,
   action: InternalWorkAction,
 ): Promise<{ scope: 'all' | 'assigned' | 'none'; ownStaffId: string | null }> {
-  const { data: member, error } = await supabaseAdmin
+  const sessionClient = await createSessionClient();
+  const { data: member, error } = await sessionClient
     .from('organization_members')
     .select('role')
     .eq('organization_id', organizationId)
@@ -66,7 +54,7 @@ async function getInternalWorkPermission(
     return { scope: 'all', ownStaffId: await getOptionalMyStaffId(organizationId, userId) };
   }
 
-  const { data: roleLinks, error: roleError } = await supabaseAdmin
+  const { data: roleLinks, error: roleError } = await sessionClient
     .from('organization_member_roles')
     .select('organization_roles(permissions)')
     .eq('organization_id', organizationId)
@@ -83,7 +71,8 @@ async function getInternalWorkPermission(
 }
 
 async function getOptionalMyStaffId(organizationId: string, userId: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
+  const sessionClient = await createSessionClient();
+  const { data, error } = await sessionClient
     .from('staffs')
     .select('id')
     .eq('organization_id', organizationId)
@@ -95,7 +84,8 @@ async function getOptionalMyStaffId(organizationId: string, userId: string): Pro
 }
 
 async function assertStaffInOrg(organizationId: string, staffId: string): Promise<void> {
-  const { data, error } = await supabaseAdmin
+  const sessionClient = await createSessionClient();
+  const { data, error } = await sessionClient
     .from('staffs')
     .select('id')
     .eq('id', staffId)
@@ -132,7 +122,8 @@ export async function saveInternalWork(input: SaveInternalWorkInput) {
     throw new Error('内勤時間を0より大きく24以下で入力してください');
   }
 
-  const { data, error } = await supabaseAdmin
+  const sessionClient = await createSessionClient();
+  const { data, error } = await sessionClient
     .from('internal_work_records')
     .insert({
       organization_id: input.organizationId,
@@ -168,7 +159,8 @@ export async function listInternalWorkRecords(
   if (permission.scope !== 'all' && !targetStaffId) return [];
   if (targetStaffId) await assertStaffInOrg(organizationId, targetStaffId);
 
-  let query = supabaseAdmin
+  const sessionClient = await createSessionClient();
+  let query = sessionClient
     .from('internal_work_records')
     .select('id, organization_id, staff_id, title, work_type, start_at, end_at, work_hours, status, note, staffs(name)')
     .eq('organization_id', organizationId)
@@ -202,7 +194,8 @@ export async function getInternalWorkPageData(
       if (permission.scope !== 'all' && !targetStaffId) return [];
       if (targetStaffId) await assertStaffInOrg(organizationId, targetStaffId);
 
-      let query = supabaseAdmin
+      const sessionClient = await createSessionClient();
+      let query = sessionClient
         .from('internal_work_records')
         .select('id, organization_id, staff_id, title, work_type, start_at, end_at, work_hours, status, note, staffs(name)')
         .eq('organization_id', organizationId)
@@ -221,7 +214,8 @@ export async function getInternalWorkPageData(
       const permission = await getInternalWorkPermission(organizationId, user.id, 'create');
       if (permission.scope === 'none') return [];
 
-      let query = supabaseAdmin
+      const sessionClient = await createSessionClient();
+      let query = sessionClient
         .from('staffs')
         .select('id, name')
         .eq('organization_id', organizationId)
@@ -257,7 +251,8 @@ export async function listInternalWorkStaffOptions(organizationId: string): Prom
   const permission = await getInternalWorkPermission(organizationId, user.id, 'create');
   if (permission.scope === 'none') return [];
 
-  let query = supabaseAdmin
+  const sessionClient = await createSessionClient();
+  let query = sessionClient
     .from('staffs')
     .select('id, name')
     .eq('organization_id', organizationId)
@@ -282,7 +277,8 @@ export async function listInternalWorkRecordsForStatistics(
 ): Promise<InternalWorkRecord[]> {
   await assertOrgPermission(organizationId, 'reports');
 
-  const { data, error } = await supabaseAdmin
+  const sessionClient = await createSessionClient();
+  const { data, error } = await sessionClient
     .from('internal_work_records')
     .select('id, organization_id, staff_id, title, work_type, start_at, end_at, work_hours, status, note, staffs(name)')
     .eq('organization_id', organizationId)

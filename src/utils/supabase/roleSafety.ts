@@ -1,5 +1,5 @@
 import { mergePermissions, normalizePermissions, type RolePermissions } from '@/utils/permissions';
-import { supabaseAdmin } from '@/utils/supabase/auth';
+import { createSessionClient } from '@/utils/supabase/auth';
 
 type RoleRow = { id: string; permissions: RolePermissions };
 type MemberRow = { user_id: string };
@@ -27,16 +27,17 @@ export async function assertRoleManagerRemains(
   organizationId: string,
   patch: RoleSafetyPatch = {},
 ): Promise<void> {
+  const supabase = await createSessionClient();
   const [{ data: roles, error: rolesError }, { data: members, error: membersError }, { data: links, error: linksError }] = await Promise.all([
-    supabaseAdmin
+    supabase
       .from('organization_roles')
       .select('id, permissions')
       .eq('organization_id', organizationId),
-    supabaseAdmin
+    supabase
       .from('organization_members')
       .select('user_id')
       .eq('organization_id', organizationId),
-    supabaseAdmin
+    supabase
       .from('organization_member_roles')
       .select('user_id, role_id')
       .eq('organization_id', organizationId),

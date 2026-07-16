@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import { decodeJwtPayload, decodeJwtSessionId } from '@/utils/jwt';
+import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from '@/utils/authConstants';
 
 type MiddlewareDatabase = {
     public: {
@@ -81,8 +82,11 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
         },
     });
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-supabase-url.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'your-supabase-anon-key';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error('Supabase middleware environment is not configured');
+    }
 
     const supabase = createServerClient(
         supabaseUrl,
@@ -142,7 +146,7 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
     if (isProtected && user) {
         const { data: { session } } = await supabase.auth.getSession();
         const sessionId = session?.access_token ? authSessionId(session.access_token) : null;
-        const idleCutoff = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+        const idleCutoff = new Date(Date.now() - SESSION_IDLE_MS).toISOString();
         const now = new Date().toISOString();
 
         // user と sessionId は直前に Auth サーバーで検証済み。
@@ -195,7 +199,7 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
                 url.search = 'reason=idle_timeout';
                 return redirectWithSession(url);
             }
-            const absoluteExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+            const absoluteExpiresAt = new Date(Date.now() + SESSION_ABSOLUTE_MS).toISOString();
             const { error: bootstrapError } = await supabaseAdmin.from('user_session_activity').insert({
                 session_hash: await hashAccessToken(session.access_token),
                 auth_session_id: sessionId,

@@ -1,8 +1,11 @@
 'use server';
 
 import { createHash } from 'crypto';
-import { assertShiftPermission, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertShiftPermission } from '@/utils/supabase/auth';
+import { serviceRoleForIncidentResponse } from '@/utils/supabase/serviceRole';
 import { sanitizeDbError, withSafeError } from '@/utils/errors';
+
+const supabaseAdmin = serviceRoleForIncidentResponse();
 
 type RepairItem = {
   shiftId: string;

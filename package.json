@@ -14,7 +14,8 @@
     "test:unit": "vitest run --project unit",
     "test:e2e": "playwright test",
     "security:audit": "npm audit --omit=dev --audit-level=high",
-    "security:sbom": "npm sbom --omit=dev --sbom-format=cyclonedx"
+    "security:service-role": "node scripts/security/check-service-role-usage.mjs",
+    "security:sbom": "npm sbom --package-lock-only --omit=dev --sbom-format=cyclonedx"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

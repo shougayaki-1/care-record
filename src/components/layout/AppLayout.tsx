@@ -42,6 +42,7 @@ import { markNotificationRead } from '@/app/actions/user';
 import { logoutCurrentUser } from '@/utils/clientLogout';
 import IdleTimeout from '@/components/auth/IdleTimeout';
 import { checkManagementPermission, checkShiftPermission, type ManagementArea } from '@/utils/permissions';
+import { FeatureFlagsProvider } from '@/context/FeatureFlagsContext';
 
 const SIDEBAR_WIDTH = 256;
 const SIDEBAR_COLLAPSED_WIDTH = 72;
@@ -54,7 +55,7 @@ const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; area: ManagementArea 
   { prefix: '/app/reports', area: 'reports' },
   { prefix: '/app/statistics', area: 'reports' },
   { prefix: '/app/logs', area: 'auditLogs' },
-  { prefix: '/app/backup', area: 'auditLogs' },
+  { prefix: '/app/backup', area: 'backupStatus' },
 ];
 
 type Notification = {
@@ -338,11 +339,13 @@ const NavDrawer = React.memo(function NavDrawer({
   onClose,
   sidebarOpen = true,
   onToggle,
+  aiImportEnabled,
 }: {
   currentOrg: Workspace | null,
   onClose?: () => void,
   sidebarOpen?: boolean,
   onToggle?: () => void,
+  aiImportEnabled: boolean,
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -440,7 +443,7 @@ const NavDrawer = React.memo(function NavDrawer({
         <Typography sx={categoryStyle}>記録</Typography>
         <List disablePadding>
           {navButton('記録を作成', <EditNoteIcon fontSize="small" />, '/app/record')}
-          {navButton('AI一括取込', <AutoFixHighIcon fontSize="small" />, '/app/ai-import')}
+          {aiImportEnabled && navButton('AI一括取込', <AutoFixHighIcon fontSize="small" />, '/app/ai-import')}
           {navButton('内勤を記録', <WorkHistoryIcon fontSize="small" />, '/app/internal-work')}
           {navButton('自分の履歴', <HistoryIcon fontSize="small" />, '/app/history')}
         </List>
@@ -521,7 +524,7 @@ const NavDrawer = React.memo(function NavDrawer({
   );
 });
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default function AppLayout({ children, aiImportEnabled }: { children: React.ReactNode; aiImportEnabled: boolean }) {
   const theme = useTheme();
   const router = useRouter();
   const pathname = usePathname();
@@ -560,6 +563,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 
   return (
+    <FeatureFlagsProvider flags={{ aiImportEnabled }}>
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', bgcolor: 'background.default' }}>
       <IdleTimeout />
       <TopAppBar
@@ -582,7 +586,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           height: '100%',
           transition: 'width 0.2s ease',
         }}>
-          <NavDrawer currentOrg={currentOrg} sidebarOpen={sidebarOpen} onToggle={handleSidebarToggle} />
+          <NavDrawer currentOrg={currentOrg} sidebarOpen={sidebarOpen} onToggle={handleSidebarToggle} aiImportEnabled={aiImportEnabled} />
         </Box>
 
         {/* モバイル：一時的なドロワー */}
@@ -593,7 +597,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           ModalProps={{ keepMounted: true }}
           sx={{ display: { xs: 'block', md: 'none' }, '& .MuiDrawer-paper': { width: SIDEBAR_WIDTH } }}
         >
-          <NavDrawer currentOrg={currentOrg} onClose={handleMobileClose} />
+          <NavDrawer currentOrg={currentOrg} onClose={handleMobileClose} aiImportEnabled={aiImportEnabled} />
         </Drawer>
 
         <Box
@@ -617,5 +621,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </Box>
       </Box>
     </Box>
+    </FeatureFlagsProvider>
   );
 }

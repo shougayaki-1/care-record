@@ -15,7 +15,9 @@ import { RecordDynamicSections } from '@/components/record/RecordDynamicSections
 import { RecordMetaForm } from '@/components/record/RecordMetaForm';
 import { ShiftSuggestions } from '@/components/record/ShiftSuggestions';
 import { useRecordForm } from '@/hooks/useRecordForm';
+import { useFeatureFlags } from '@/context/FeatureFlagsContext';
 export default function RecordPage() {
+  const { aiImportEnabled } = useFeatureFlags();
   const {
     router, showToast, currentOrg, clientId, shiftId, segmentId,
     autosaveState, clientName, template, answers, selectableStaffs, staffRoles, serviceTypes,
@@ -127,7 +129,7 @@ export default function RecordPage() {
               onError={(message) => showToast(message, 'error')}
             />
 
-            {currentStatus !== 'approved' && (
+            {aiImportEnabled && currentStatus !== 'approved' && (
               <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <AiImportButton
                   organizationId={currentOrg?.id ?? ''}

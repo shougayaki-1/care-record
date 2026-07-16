@@ -138,7 +138,7 @@ export default function MyShiftsPage() {
 
   useEffect(() => {
     if (!wsLoading && currentOrg) {
-      void fetchShifts(currentMonth);
+      queueMicrotask(() => void fetchShifts(currentMonth));
     }
   }, [wsLoading, currentOrg, currentMonth, fetchShifts]);
 

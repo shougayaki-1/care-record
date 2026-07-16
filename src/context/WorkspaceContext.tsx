@@ -159,12 +159,14 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   useEffect(() => {
     if (!shouldLoadWorkspace) {
       fetchSeq.current += 1;
-      setCurrentOrg(null);
-      setOrgList([]);
-      setUserId(null);
-      setLoading(false);
-      setStatus('session_expired');
-      setErrorMessage(null);
+      queueMicrotask(() => {
+        setCurrentOrg(null);
+        setOrgList([]);
+        setUserId(null);
+        setLoading(false);
+        setStatus('session_expired');
+        setErrorMessage(null);
+      });
       return;
     }
 

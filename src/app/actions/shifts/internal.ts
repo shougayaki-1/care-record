@@ -1,16 +1,13 @@
 import 'server-only';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
-import { assertShiftPermission, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
 import { computeOccurrenceSegmentDateTimes } from '@/utils/shiftRecurrence';
 
 import { normalizeTimeForDb } from './helpers';
 import { trySyncSilently } from './googleSyncInternal';
 import type { ShiftPatternSegmentInput, ShiftPayload, ShiftUpdateData } from './types';
-
-type ShiftStaffInsert = { shift_id: string; staff_id: string };
-type PatternStaffInsert = { pattern_id: string; staff_id: string };
 
 export type PatternSegmentRow = {
   id: string;
@@ -27,7 +24,8 @@ export type PatternSegmentRow = {
 
 export async function assertShiftsAccessible(shiftIds: string[]): Promise<void> {
   if (!shiftIds || shiftIds.length === 0) return;
-  const { data, error } = await supabaseAdmin
+  const supabase = await createSessionClient();
+  const { data, error } = await supabase
     .from('shifts')
     .select('id, organization_id')
     .in('id', shiftIds);
@@ -51,15 +49,11 @@ export async function softDeleteShiftIds(
   if (shiftIds.length === 0) return;
   const actor = await assertShiftPermission(organizationId, 'delete', { shiftIds });
   const policy = await getRetentionPolicy(organizationId, 'shift');
-  const { error } = await supabaseAdmin.from('shifts').update({
-    deleted_at: new Date().toISOString(),
-    deleted_by: actor.userId,
-    deletion_reason: reason,
-    retention_until: retentionDeadline(policy.years),
-    google_sync_status: 'synced',
-    google_sync_error: null,
-    google_synced_at: new Date().toISOString(),
-  }).eq('organization_id', organizationId).in('id', shiftIds).is('deleted_at', null);
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('soft_delete_shifts_atomic', {
+    p_org_id: organizationId, p_shift_ids: shiftIds, p_reason: reason,
+    p_retention_until: retentionDeadline(policy.years), p_sync_status: 'synced',
+  });
   if (error) throw error;
   await recordAuditEvent({
     organizationId,
@@ -76,43 +70,23 @@ export async function upsertAssignmentsForStaffs(
   clientId: string,
   staffIds: string[],
 ) {
-  const { data: staffRows, error: staffError } = await supabaseAdmin
-    .from('staffs')
-    .select('id, user_id')
-    .eq('organization_id', organizationId)
-    .in('id', staffIds)
-    .is('deleted_at', null);
-  if (staffError) throw staffError;
-  if (!staffRows || staffRows.length === 0) return;
-  const { error: upsertError } = await supabaseAdmin.from('assignments').upsert(
-    staffRows.map((staff) => ({
-      client_id: clientId,
-      staff_id: staff.id,
-      helper_id: staff.user_id ?? null,
-    })),
-    { onConflict: 'client_id,staff_id', ignoreDuplicates: true },
-  );
-  if (upsertError) throw upsertError;
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('upsert_shift_assignments_atomic', {
+    p_org_id: organizationId, p_client_id: clientId, p_staff_ids: staffIds,
+  });
+  if (error) throw error;
 }
 
 export async function replacePatternStaffs(patternId: string, staffIds: string[]) {
-  await supabaseAdmin.from('shift_pattern_staffs').delete().eq('pattern_id', patternId);
-  if (staffIds.length > 0) {
-    const inserts: PatternStaffInsert[] = staffIds
-      .map((staffId) => ({ pattern_id: patternId, staff_id: staffId }));
-    const { error } = await supabaseAdmin.from('shift_pattern_staffs').insert(inserts);
-    if (error) throw error;
-  }
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('replace_pattern_staffs_atomic', { p_pattern_id: patternId, p_staff_ids: staffIds });
+  if (error) throw error;
 }
 
 export async function replaceShiftStaffs(shiftId: string, staffIds: string[]) {
-  await supabaseAdmin.from('shift_staffs').delete().eq('shift_id', shiftId);
-  if (staffIds.length > 0) {
-    const staffInserts: ShiftStaffInsert[] = staffIds
-      .map((staffId) => ({ shift_id: shiftId, staff_id: staffId }));
-    const { error } = await supabaseAdmin.from('shift_staffs').insert(staffInserts);
-    if (error) throw error;
-  }
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('replace_shift_staffs_atomic', { p_shift_id: shiftId, p_staff_ids: staffIds });
+  if (error) throw error;
 }
 
 export async function savePatternSegments(
@@ -126,40 +100,9 @@ export async function savePatternSegments(
     sort_order: index,
   }));
 
-  const { error: deleteError } = await supabaseAdmin
-    .from('shift_pattern_segments')
-    .delete()
-    .eq('pattern_id', patternId);
-  if (deleteError) throw deleteError;
-  if (normalizedSegments.length === 0) return;
-
-  const { data: inserted, error: insertError } = await supabaseAdmin
-    .from('shift_pattern_segments')
-    .insert(normalizedSegments.map((segment) => ({
-      pattern_id: patternId,
-      service_type_id: segment.service_type_id || null,
-      start_time: segment.start_time,
-      end_time: segment.end_time,
-      sort_order: segment.sort_order ?? 0,
-    })))
-    .select('id');
-  if (insertError || !inserted) throw insertError;
-
-  const staffRows = inserted.flatMap((segment, index) => (
-    (normalizedSegments[index].staffs ?? [])
-      .filter((staff) => Boolean(staff.staff_id))
-      .map((staff) => ({
-        segment_id: segment.id,
-        staff_id: staff.staff_id,
-        staff_role_id: staff.staff_role_id || null,
-      }))
-  ));
-  if (staffRows.length > 0) {
-    const { error: staffError } = await supabaseAdmin
-      .from('shift_pattern_segment_staffs')
-      .insert(staffRows);
-    if (staffError) throw staffError;
-  }
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('replace_pattern_segments_atomic', { p_pattern_id: patternId, p_segments: normalizedSegments });
+  if (error) throw error;
 }
 
 export async function saveShiftSegmentsFromPattern(
@@ -174,14 +117,6 @@ export async function saveShiftSegmentsFromPattern(
   },
   fallbackStaffIds: string[],
 ) {
-  const { count: linkedReportCount, error: linkedReportError } = await supabaseAdmin
-    .from('reports')
-    .select('id', { count: 'exact', head: true })
-    .eq('shift_id', shiftId)
-    .is('deleted_at', null);
-  if (linkedReportError) throw linkedReportError;
-  if ((linkedReportCount ?? 0) > 0) return;
-
   const sourceSegments = patternSegments && patternSegments.length > 0
     ? patternSegments
     : [{
@@ -195,12 +130,6 @@ export async function saveShiftSegmentsFromPattern(
         .map((staffId) => ({ staff_id: staffId, staff_role_id: null })),
     }];
 
-  const { error: deleteError } = await supabaseAdmin
-    .from('shift_segments')
-    .delete()
-    .eq('shift_id', shiftId);
-  if (deleteError) throw deleteError;
-
   const segmentRows = sourceSegments.map((segment, index) => {
     const { startAt, endAt } = computeOccurrenceSegmentDateTimes(
       occurrence.year,
@@ -212,36 +141,19 @@ export async function saveShiftSegmentsFromPattern(
       segment.end_time,
     );
     return {
-      shift_id: shiftId,
       source_pattern_segment_id: segment.id || null,
       service_type_id: segment.service_type_id ?? null,
       start_at: startAt,
       end_at: endAt,
       sort_order: index,
+      staffs: (segment.shift_pattern_segment_staffs ?? []).map((staff) => ({
+        staff_id: staff.staff_id, staff_role_id: staff.staff_role_id ?? null,
+      })),
     };
   });
-
-  const { data: inserted, error: insertError } = await supabaseAdmin
-    .from('shift_segments')
-    .insert(segmentRows)
-    .select('id');
-  if (insertError || !inserted) throw insertError;
-
-  const staffRows = inserted.flatMap((segment, index) => (
-    (sourceSegments[index].shift_pattern_segment_staffs ?? [])
-      .filter((staff) => Boolean(staff.staff_id))
-      .map((staff) => ({
-        segment_id: segment.id,
-        staff_id: staff.staff_id,
-        staff_role_id: staff.staff_role_id ?? null,
-      }))
-  ));
-  if (staffRows.length > 0) {
-    const { error: staffError } = await supabaseAdmin
-      .from('shift_segment_staffs')
-      .insert(staffRows);
-    if (staffError) throw staffError;
-  }
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('replace_generated_shift_segments_atomic', { p_shift_id: shiftId, p_segments: segmentRows });
+  if (error) throw error;
 }
 
 export async function createShiftInternal(
@@ -249,7 +161,8 @@ export async function createShiftInternal(
   awaitSync: boolean | 'skip' = true,
 ) {
   try {
-    const { data: shift, error: shiftError } = await supabaseAdmin.from('shifts').insert({
+    const supabase = await createSessionClient();
+    const { data: shift, error: shiftError } = await supabase.from('shifts').insert({
       organization_id: payload.organizationId,
       client_id: payload.clientId,
       title: payload.title,
@@ -285,6 +198,7 @@ export async function updateShiftInternal(
   awaitSync: boolean | 'skip' = true,
 ) {
   try {
+    const supabase = await createSessionClient();
     const updateData: ShiftUpdateData = {};
     if (payload.title !== undefined) updateData.title = payload.title;
     if (payload.startAt !== undefined) updateData.start_at = payload.startAt;
@@ -298,11 +212,12 @@ export async function updateShiftInternal(
       updateData.google_sync_status = 'pending_upsert';
       updateData.google_sync_error = null;
       updateData.google_synced_at = null;
-      await supabaseAdmin.from('shifts').update(updateData).eq('id', shiftId);
+      const { error } = await supabase.from('shifts').update(updateData).eq('id', shiftId);
+      if (error) throw error;
     }
 
     const targetOrgId = payload.organizationId
-      || (await supabaseAdmin.from('shifts').select('organization_id').eq('id', shiftId).single())
+      || (await supabase.from('shifts').select('organization_id').eq('id', shiftId).single())
         .data?.organization_id;
     if (targetOrgId) {
       if (awaitSync === 'skip') {
@@ -318,4 +233,36 @@ export async function updateShiftInternal(
     console.error(error);
     throw error;
   }
+}
+
+export async function saveGeneratedShiftAtomic(
+  shiftId: string | null,
+  payload: ShiftPayload,
+  patternSegments: PatternSegmentRow[] | null | undefined,
+  occurrence: { year: number; month: number; day: number; parentStartTime: string; parentEndTime: string },
+  fallbackStaffIds: string[],
+) {
+  const sourceSegments = patternSegments && patternSegments.length > 0
+    ? patternSegments
+    : [{ id: '', pattern_id: '', service_type_id: null, start_time: occurrence.parentStartTime,
+        end_time: occurrence.parentEndTime, sort_order: 0,
+        shift_pattern_segment_staffs: fallbackStaffIds.map((staffId) => ({ staff_id: staffId, staff_role_id: null })) }];
+  const segments = sourceSegments.map((segment, index) => {
+    const { startAt, endAt } = computeOccurrenceSegmentDateTimes(
+      occurrence.year, occurrence.month, occurrence.day, occurrence.parentStartTime,
+      occurrence.parentEndTime, segment.start_time, segment.end_time,
+    );
+    return { source_pattern_segment_id: segment.id || null, service_type_id: segment.service_type_id,
+      start_at: startAt, end_at: endAt, sort_order: index,
+      staffs: (segment.shift_pattern_segment_staffs ?? []).map((staff) => ({ staff_id: staff.staff_id, staff_role_id: staff.staff_role_id })) };
+  });
+  const supabase = await createSessionClient();
+  const { data, error } = await supabase.rpc('save_generated_shift_atomic', {
+    p_shift_id: shiftId, p_org_id: payload.organizationId,
+    p_payload: { client_id: payload.clientId, title: payload.title, start_at: payload.startAt,
+      end_at: payload.endAt, status: payload.status ?? 'published', pattern_id: payload.patternId ?? null,
+      is_modified: payload.isModified ?? false, segments },
+  });
+  if (error) throw error;
+  return { success: true, shiftId: data as string };
 }

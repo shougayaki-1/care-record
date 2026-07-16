@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Chip, Divider, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, Tabs, TextField, Typography,
 } from '@/components/ui/mui';
@@ -87,12 +87,15 @@ export default function LogsPage() {
     }
   };
 
+  const fetchActiveTab = useEffectEvent(() => {
+    if (tab === 'audit') return fetchAudit();
+    return fetchCloud();
+  });
+
   // タブが開かれたタイミングで自動的に絞り込みボタンを押した状態にする(手動クリック不要)
   useEffect(() => {
     if (!currentOrg || !canView) return;
-    if (tab === 'audit') void fetchAudit();
-    else void fetchCloud();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    queueMicrotask(() => void fetchActiveTab());
   }, [tab, currentOrg, canView]);
 
   const handleExport = async () => {

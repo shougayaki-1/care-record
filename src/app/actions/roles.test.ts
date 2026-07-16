@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   assertOrgPermission: vi.fn(),
   from: vi.fn(),
+  rpc: vi.fn(),
   recordAuditEvent: vi.fn(),
   assertRoleManagerRemains: vi.fn(),
 }));
 
 vi.mock('@/utils/supabase/auth', () => ({
   assertOrgPermission: mocks.assertOrgPermission,
+  createSessionClient: vi.fn(async () => ({ from: mocks.from, rpc: mocks.rpc })),
   supabaseAdmin: { from: mocks.from },
 }));
 vi.mock('@/utils/supabase/audit', () => ({ recordAuditEvent: mocks.recordAuditEvent }));
@@ -34,10 +36,7 @@ describe('role action security', () => {
 
   it('allows an owner to create a dangerous role and records the permission change', async () => {
     mocks.assertOrgPermission.mockResolvedValue({ userId: 'owner-1', isOwner: true });
-    const single = vi.fn().mockResolvedValue({ data: { id: 'role-1' }, error: null });
-    const select = vi.fn(() => ({ single }));
-    const insert = vi.fn(() => ({ select }));
-    mocks.from.mockReturnValue({ insert });
+    mocks.rpc.mockResolvedValue({ data: 'role-1', error: null });
 
     await expect(createOrgRole('org-1', '管理ロール', '#fff', FULL_PERMISSIONS)).resolves.toEqual({ id: 'role-1' });
     expect(mocks.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
@@ -62,8 +61,7 @@ describe('role action security', () => {
 
   it('allows a non-owner to create a role without dangerous management permissions', async () => {
     mocks.assertOrgPermission.mockResolvedValue({ userId: 'user-1', isOwner: false });
-    const single = vi.fn().mockResolvedValue({ data: { id: 'role-safe' }, error: null });
-    mocks.from.mockReturnValue({ insert: vi.fn(() => ({ select: vi.fn(() => ({ single })) })) });
+    mocks.rpc.mockResolvedValue({ data: 'role-safe', error: null });
     await expect(createOrgRole('org-1', '通常管理者', null, PRESET_MANAGER_PERMISSIONS)).resolves.toEqual({ id: 'role-safe' });
   });
 });

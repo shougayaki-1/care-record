@@ -10,11 +10,17 @@ import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 import type { FormItem, PromptCandidate } from '@/lib/ai/extractPrompt';
 import { formatSseEvent } from './sseUtils';
 import { buildProcessingGroups, validateFileCount, validateFile } from './validation';
+import { isAiImportEnabled } from '@/lib/env/server';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
+  // Feature flag is checked before authentication, body parsing, or Vertex client creation.
+  if (!isAiImportEnabled()) {
+    return new Response('Not Found', { status: 404 });
+  }
+
   // 1. 組織境界チェック（認証 + 所属確認）— FormData解析前に実施してDoSを防ぐ
   // organizationId はURLパラメータで受け取る（body解析前にチェック可能にするため）
   const organizationId = request.nextUrl.searchParams.get('organizationId');

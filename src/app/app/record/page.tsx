@@ -87,7 +87,11 @@ export default function RecordSelectPage() {
         } catch (e) { console.error(e); } finally { setLoading(false); }
     }, [currentOrg, userId]);
 
-    useEffect(() => { if (!wsLoading && currentOrg) fetchData(); }, [wsLoading, currentOrg, fetchData]);
+    useEffect(() => {
+        if (!wsLoading && currentOrg) {
+            queueMicrotask(() => void fetchData());
+        }
+    }, [wsLoading, currentOrg, fetchData]);
 
     const formatTime = (dateStr: string) => {
         if (!dateStr) return '';

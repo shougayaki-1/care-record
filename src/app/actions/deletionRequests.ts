@@ -2,9 +2,9 @@
 
 // 削除承認ワークフロー（3省2ガイドライン: 内部統制 / 申請と承認の分離）。
 // 直接削除（softDeleteReports）に加え、申請→owner承認→論理削除の経路を提供する。
-// deletion_requests は service_role のみアクセス可（RLSで REVOKE 済み）。
+// deletion_requests は caller JWT とDB側の事業所・権限検証を必須とする。
 
-import { assertOrgPermission, assertOrgRole, assertRecordPermission, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgPermission, assertOrgRole, assertRecordPermission, createSessionClient } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { sanitizeDbError } from '@/utils/errors';
 
@@ -15,7 +15,8 @@ function normalizeReason(reason: string): string {
 }
 
 async function assertReportInOrg(reportId: string, organizationId: string): Promise<void> {
-  const { data, error } = await supabaseAdmin
+  const sessionClient = await createSessionClient();
+  const { data, error } = await sessionClient
     .from('reports')
     .select('id, clients!inner(organization_id)')
     .eq('id', reportId)
@@ -31,35 +32,28 @@ export async function requestReportDeletion(organizationId: string, reportId: st
   const normalized = normalizeReason(reason);
   await assertReportInOrg(reportId, organizationId);
 
-  const { data, error } = await supabaseAdmin
-    .from('deletion_requests')
-    .insert({
-      organization_id: organizationId,
-      resource_type: 'report',
-      resource_id: reportId,
-      requested_by: userId,
-      reason: normalized,
-      status: 'requested',
-    })
-    .select('id')
-    .single();
-  if (error || !data) throw sanitizeDbError(error, 'deletionRequests.request');
+  const sessionClient = await createSessionClient();
+  const { data: requestId, error } = await sessionClient.rpc('request_report_deletion', {
+    p_org_id: organizationId, p_report_id: reportId, p_reason: normalized,
+  });
+  if (error || !requestId) throw sanitizeDbError(error, 'deletionRequests.request');
 
   await recordAuditEvent({
     organizationId,
     actorId: userId,
     action: 'deletion_request.create',
     resourceType: 'deletion_request',
-    resourceId: data.id,
+    resourceId: String(requestId),
     details: { resourceType: 'report', resourceId: reportId, reason: normalized },
   });
-  return { success: true, requestId: data.id };
+  return { success: true, requestId: String(requestId) };
 }
 
 /** 承認待ち（およびそれ以外）の削除申請を一覧する（owner/manager）。 */
 export async function listDeletionRequests(organizationId: string, status: 'requested' | 'approved' | 'rejected' | 'completed' | 'all' = 'requested') {
-  await assertOrgRole(organizationId, ['owner', 'member']);
-  let query = supabaseAdmin
+  await assertOrgPermission(organizationId, 'reports');
+  const sessionClient = await createSessionClient();
+  let query = sessionClient
     .from('deletion_requests')
     .select('*, requester:requested_by(name)')
     .eq('organization_id', organizationId);
@@ -73,7 +67,8 @@ export async function listDeletionRequests(organizationId: string, status: 'requ
 export async function approveDeletionRequest(organizationId: string, requestId: string) {
   const { userId } = await assertOrgPermission(organizationId, 'reports');
 
-  const { data: req, error: reqError } = await supabaseAdmin
+  const sessionClient = await createSessionClient();
+  const { data: req, error: reqError } = await sessionClient
     .from('deletion_requests')
     .select('id, resource_type, resource_id, status, reason')
     .eq('id', requestId)
@@ -86,33 +81,11 @@ export async function approveDeletionRequest(organizationId: string, requestId: 
   await assertReportInOrg(req.resource_id, organizationId);
   await assertRecordPermission(organizationId, 'delete', { reportId: req.resource_id });
 
-  // 保持期間を解決して論理削除する。
-  const { data: org, error: orgError } = await supabaseAdmin
-    .from('organizations').select('retention_years').eq('id', organizationId).single();
-  if (orgError || !org) throw sanitizeDbError(orgError, 'deletionRequests.approve');
-
-  const deletedAt = new Date();
-  const retentionUntil = new Date(deletedAt);
-  retentionUntil.setUTCFullYear(retentionUntil.getUTCFullYear() + (org.retention_years || 5));
-
-  const { error: delError } = await supabaseAdmin
-    .from('reports')
-    .update({
-      deleted_at: deletedAt.toISOString(),
-      deleted_by: userId,
-      deletion_reason: req.reason,
-      retention_until: retentionUntil.toISOString(),
-      updated_at: deletedAt.toISOString(),
-    })
-    .eq('id', req.resource_id)
-    .is('deleted_at', null);
-  if (delError) throw sanitizeDbError(delError, 'deletionRequests.approve');
-
-  const { error: updError } = await supabaseAdmin
-    .from('deletion_requests')
-    .update({ status: 'completed', approved_by: userId, decided_at: deletedAt.toISOString(), completed_at: deletedAt.toISOString() })
-    .eq('id', requestId);
-  if (updError) throw sanitizeDbError(updError, 'deletionRequests.approve');
+  const { data: result, error: decisionError } = await sessionClient.rpc('decide_report_deletion', {
+    p_org_id: organizationId, p_request_id: requestId, p_decision: 'approve',
+  });
+  if (decisionError) throw sanitizeDbError(decisionError, 'deletionRequests.approve');
+  const retentionUntil = (result as { retentionUntil?: string } | null)?.retentionUntil;
 
   await recordAuditEvent({
     organizationId,
@@ -120,7 +93,7 @@ export async function approveDeletionRequest(organizationId: string, requestId: 
     action: 'deletion_request.approve',
     resourceType: 'report',
     resourceId: req.resource_id,
-    details: { requestId, retentionUntil: retentionUntil.toISOString() },
+    details: { requestId, retentionUntil },
   });
   return { success: true };
 }
@@ -130,7 +103,8 @@ export async function rejectDeletionRequest(organizationId: string, requestId: s
   const { userId } = await assertOrgPermission(organizationId, 'reports');
   const normalized = normalizeReason(reason);
 
-  const { data: req, error: reqError } = await supabaseAdmin
+  const sessionClient = await createSessionClient();
+  const { data: req, error: reqError } = await sessionClient
     .from('deletion_requests')
     .select('id, status, resource_id')
     .eq('id', requestId)
@@ -139,10 +113,9 @@ export async function rejectDeletionRequest(organizationId: string, requestId: s
   if (reqError || !req) throw new Error('削除申請が見つかりません');
   if (req.status !== 'requested') throw new Error('この申請は既に処理済みです');
 
-  const { error } = await supabaseAdmin
-    .from('deletion_requests')
-    .update({ status: 'rejected', approved_by: userId, decided_at: new Date().toISOString() })
-    .eq('id', requestId);
+  const { error } = await sessionClient.rpc('decide_report_deletion', {
+    p_org_id: organizationId, p_request_id: requestId, p_decision: 'reject',
+  });
   if (error) throw sanitizeDbError(error, 'deletionRequests.reject');
 
   await recordAuditEvent({

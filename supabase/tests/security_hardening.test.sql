@@ -1,12 +1,23 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(22);
+SELECT plan(33);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
 SELECT ok(NOT has_table_privilege('anon','public.invitations','SELECT'), 'anonymous cannot list invitations');
-SELECT ok(NOT has_table_privilege('authenticated','public.invitations','INSERT'), 'clients cannot create invitations directly');
-SELECT ok(NOT has_table_privilege('authenticated','public.organization_members','INSERT'), 'clients cannot add organization members directly');
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated","session_id":"test-session"}', true);
+SELECT throws_ok(
+  $$ INSERT INTO public.invitations (organization_id, code, email, target_name, expires_at)
+     VALUES ('00000000-0000-0000-0000-000000000002', 'blocked1', 'blocked@example.invalid', 'blocked', now() + interval '1 hour') $$,
+  '42501', 'new row violates row-level security policy for table "invitations"',
+  'clients without an active authorized tenant session cannot create invitations directly');
+SELECT throws_ok(
+  $$ INSERT INTO public.organization_members (organization_id, user_id, role)
+     VALUES ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'member') $$,
+  '42501', 'new row violates row-level security policy for table "organization_members"',
+  'clients without an active authorized tenant session cannot add organization members directly');
+RESET ROLE;
 SELECT ok(NOT has_table_privilege('authenticated','public.reports','UPDATE'), 'clients cannot update reports directly');
 SELECT ok(NOT has_table_privilege('authenticated','public.shifts','DELETE'), 'clients cannot hard-delete shifts');
 SELECT ok(has_function_privilege('authenticated','public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text,uuid,jsonb)','EXECUTE'),
@@ -48,8 +59,11 @@ SELECT ok((
       'Own notifications only', 'Profile directory boundary'
     )
 ), 'tenant and per-user restrictive policies remain enabled');
-SELECT ok(NOT has_table_privilege('authenticated','public.invitations','SELECT'),
-  'authenticated clients cannot list invitations directly');
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated","session_id":"test-session"}', true);
+SELECT is((SELECT count(*)::bigint FROM public.invitations), 0::bigint,
+  'authenticated clients without an active tenant session cannot list invitations');
+RESET ROLE;
 
 SELECT ok(NOT has_table_privilege('authenticated','public.report_autosaves','SELECT,INSERT,UPDATE,DELETE'),
   'authenticated clients cannot access report autosaves directly');
@@ -73,6 +87,33 @@ SELECT ok((
      AND with_check LIKE '%is_assigned_client_for_user%'
   FROM pg_policies WHERE schemaname='public' AND tablename='report_images' AND policyname='Enable insert for staff'
 ), 'report image INSERT policy enforces all or assigned records.create scope');
+
+SELECT is(private.database_capacity_status(299 * 1024 * 1024)->>'level', 'normal',
+  'database capacity is normal below 300 MiB');
+SELECT is(private.database_capacity_status(300 * 1024 * 1024)->>'level', 'warning',
+  'database capacity warns at 300 MiB');
+SELECT is(private.database_capacity_status(400 * 1024 * 1024)->>'level', 'restricted',
+  'database capacity restricts organization creation and bulk imports at 400 MiB');
+SELECT is(private.database_capacity_status(450 * 1024 * 1024)->>'level', 'critical',
+  'database capacity is critical at 450 MiB');
+SELECT ok((private.database_capacity_status(399 * 1024 * 1024)->>'allowNewOrganizations')::boolean,
+  'new organizations remain allowed below 400 MiB');
+SELECT ok(NOT (private.database_capacity_status(400 * 1024 * 1024)->>'allowNewOrganizations')::boolean,
+  'new organizations are blocked at 400 MiB');
+SELECT ok((private.database_capacity_status(449 * 1024 * 1024)->>'allowNewReports')::boolean,
+  'new reports remain allowed below 450 MiB');
+SELECT ok(NOT (private.database_capacity_status(450 * 1024 * 1024)->>'allowNewReports')::boolean,
+  'new reports are blocked at 450 MiB');
+SELECT throws_ok(
+  $$ SELECT private.enforce_database_capacity('new_organization', 400 * 1024 * 1024) $$,
+  'P0001', 'database_capacity_blocks_new_organization',
+  'organization capacity guard rejects writes at 400 MiB');
+SELECT throws_ok(
+  $$ SELECT private.enforce_database_capacity('new_report', 450 * 1024 * 1024) $$,
+  'P0001', 'database_capacity_blocks_new_report',
+  'new report capacity guard rejects writes at 450 MiB');
+SELECT ok(NOT has_function_privilege('authenticated','public.get_database_capacity_status()','EXECUTE'),
+  'database capacity details are not exposed to authenticated clients');
 
 SELECT * FROM finish();
 ROLLBACK;
