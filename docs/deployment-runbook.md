@@ -47,14 +47,16 @@ and every bucket name contains the correct environment marker.
 
 ## Staging sequence
 
-1. Run CI and the dedicated E2E workflow.
-2. Dispatch `Deploy database and application` with `environment=staging` and the
+1. Initialize Terraform with the versioned GCS state bucket and the
+   `backup/staging` prefix. Confirm `enable_bucket_lock=false` and save the plan.
+2. Run CI and the dedicated E2E workflow.
+3. Dispatch `Deploy database and application` with `environment=staging` and the
    release branch ref.
-3. Confirm the migration dry-run, final migration artifact, deployment URL, and
+4. Confirm the migration dry-run, final migration artifact, deployment URL, and
    `/api/health` artifact.
-4. Dispatch `Full logical backup` for Staging.
-5. Dispatch `Backup freshness` for Staging and verify the Discord failure path.
-6. Restore that generation into a disposable isolated project with email,
+5. Dispatch `Full logical backup` for Staging.
+6. Dispatch `Backup freshness` for Staging and verify the Discord failure path.
+7. Restore that generation into a disposable isolated project with email,
    Google sync, and AI forced off. Attach `restore-evidence.json`.
 
 ## Production sequence

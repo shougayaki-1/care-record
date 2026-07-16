@@ -5,6 +5,7 @@ locals {
 
 resource "google_project_service" "required" {
   for_each = toset([
+    "cloudresourcemanager.googleapis.com",
     "iamcredentials.googleapis.com",
     "sts.googleapis.com",
     "storage.googleapis.com",
@@ -160,7 +161,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.ref"              = "assertion.ref"
   }
 
-  attribute_condition = "assertion.repository == '${var.github_repository}' && assertion.ref == '${var.github_ref}'"
+  attribute_condition = "assertion.repository == '${var.github_repository}' && assertion.ref in ${jsonencode(sort(tolist(var.github_refs)))}"
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"

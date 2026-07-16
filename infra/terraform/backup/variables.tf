@@ -23,14 +23,17 @@ variable "github_repository" {
   }
 }
 
-variable "github_ref" {
-  description = "Only this Git ref can exchange an OIDC token."
-  type        = string
-  default     = "refs/heads/main"
+variable "github_refs" {
+  description = "Finite allowlist of Git refs that can exchange an OIDC token."
+  type        = set(string)
+  default     = ["refs/heads/main"]
 
   validation {
-    condition     = can(regex("^refs/(heads|tags)/[A-Za-z0-9._/-]+$", var.github_ref))
-    error_message = "github_ref must be a full, safe heads or tags ref."
+    condition = (
+      length(var.github_refs) > 0 &&
+      alltrue([for ref in var.github_refs : can(regex("^refs/(heads|tags)/[A-Za-z0-9._/-]+$", ref))])
+    )
+    error_message = "github_refs must contain one or more full, safe heads or tags refs."
   }
 }
 
