@@ -18,25 +18,33 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
   await page.getByLabel('パスワード').fill(user.password);
   await page.getByRole('button', { name: 'アカウントを作成' }).click();
 
-  // 利用規約同意はレイアウトのモーダルとしてセットアップ画面より先に表示される。
-  // モーダルが出た場合は先に同意してから、セットアップの初期ステップを検証する。
+  // 利用規約同意はレイアウトのモーダルとしてセットアップ画面より先に（または遅れて）表示される。
+  // handle_new_user トリガーで profiles.name に email が入るため、新規ユーザーでも
+  // 「ようこそ！」をスキップして「事業所の設定」から始まることがある。
+  // モーダルとセットアップ画面が同時に見えることがあるため .first() で strict mode 違反を避ける。
   const termsDialog = page.getByRole('dialog', { name: '利用規約への同意' });
   const welcome = page.getByText('ようこそ！');
   const choice = page.getByText('事業所の設定');
-  await expect(termsDialog.or(welcome).or(choice)).toBeVisible({ timeout: 15000 });
-  if (await termsDialog.isVisible()) {
-    await termsDialog.getByRole('checkbox').check();
-    await termsDialog.getByRole('button', { name: '同意してサービスを利用する' }).click();
-    await expect(termsDialog).toBeHidden();
-  }
+  const acceptTermsIfShown = async () => {
+    if (await termsDialog.isVisible()) {
+      await termsDialog.getByRole('checkbox').check();
+      await termsDialog.getByRole('button', { name: '同意してサービスを利用する' }).click();
+      await expect(termsDialog).toBeHidden();
+    }
+  };
 
-  await expect(welcome.or(choice)).toBeVisible({ timeout: 15000 });
+  await expect(termsDialog.or(welcome).or(choice).first()).toBeVisible({ timeout: 30000 });
+  await acceptTermsIfShown();
+
+  await expect(welcome.or(choice).first()).toBeVisible({ timeout: 30000 });
   if (await welcome.isVisible()) {
     await page.getByLabel('氏名').fill(user.name);
     await page.getByRole('button', { name: '次へ進む' }).click();
   }
 
   await expect(page.getByText('事業所の設定')).toBeVisible();
+  // モーダルが遅れて開いた場合、クリックがオーバーレイに遮られるため直前に再確認する。
+  await acceptTermsIfShown();
   await page.getByText('新しい事業所を作成する').click();
   
   await expect(page.getByText('事業所の作成')).toBeVisible();

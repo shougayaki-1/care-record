@@ -16,6 +16,11 @@ export default defineConfig({
   reporter: 'html',
   timeout: 60 * 1000,
 
+  // CI（リモートSupabase）ではデフォルト5秒のexpectタイムアウトが不足しがち
+  expect: {
+    timeout: 15 * 1000,
+  },
+
   use: {
     baseURL: 'http://localhost:3000',
     actionTimeout: 15 * 1000,
