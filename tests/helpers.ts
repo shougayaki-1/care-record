@@ -21,16 +21,20 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
   // 利用規約同意はレイアウトのモーダルとしてセットアップ画面より先に表示される。
   // モーダルが出た場合は先に同意してから、セットアップの初期ステップを検証する。
   const termsDialog = page.getByRole('dialog', { name: '利用規約への同意' });
-  if (await termsDialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+  const welcome = page.getByText('ようこそ！');
+  const choice = page.getByText('事業所の設定');
+  await expect(termsDialog.or(welcome).or(choice)).toBeVisible({ timeout: 15000 });
+  if (await termsDialog.isVisible()) {
     await termsDialog.getByRole('checkbox').check();
     await termsDialog.getByRole('button', { name: '同意してサービスを利用する' }).click();
     await expect(termsDialog).toBeHidden();
   }
 
-  await expect(page.getByText('ようこそ！')).toBeVisible({ timeout: 15000 });
-  
-  await page.getByLabel('氏名').fill(user.name);
-  await page.getByRole('button', { name: '次へ進む' }).click();
+  await expect(welcome.or(choice)).toBeVisible({ timeout: 15000 });
+  if (await welcome.isVisible()) {
+    await page.getByLabel('氏名').fill(user.name);
+    await page.getByRole('button', { name: '次へ進む' }).click();
+  }
 
   await expect(page.getByText('事業所の設定')).toBeVisible();
   await page.getByText('新しい事業所を作成する').click();
