@@ -29,7 +29,7 @@ test.describe('認証フォームのテスト', () => {
     await page.getByLabel('パスワード').fill('123'); // 短い
 
     // HelperTextが表示されるか確認
-    await expect(page.getByText('6文字以上で設定してください')).toBeVisible();
+    await expect(page.getByText('8文字以上で設定してください')).toBeVisible();
   });
 
 });
