@@ -1,19 +1,20 @@
 'use server';
 
-import { sanitizeDbError } from '@/utils/errors';
+import { logExternalError, sanitizeDbError } from '@/utils/errors';
 
-import { supabaseAdmin, getAuthedUser, assertOrgRole, assertOrgPermission, assertOwner } from '@/utils/supabase/auth';
+import { createSessionClient, assertOrgRole, assertOrgPermission, assertOwner } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
-import { assertRoleManagerRemains } from '@/utils/supabase/roleSafety';
 import { google } from 'googleapis';
+import { consumeReauthGrant } from '@/utils/supabase/reauth';
 
 export async function updateOrganizationName(orgId: string, name: string) {
     const { userId } = await assertOrgPermission(orgId, 'organization');
     const normalized = name.trim();
     if (normalized.length < 1 || normalized.length > 100) throw new Error('事業所名は1〜100文字で入力してください');
-    const { error } = await supabaseAdmin.from('organizations').update({ name: normalized }).eq('id', orgId).is('deleted_at', null);
+    const sessionClient = await createSessionClient();
+    const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'name', p_value: normalized });
     if (error) throw sanitizeDbError(error, 'action.organization');
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'organization.update', resourceType: 'organization', resourceId: orgId, details: { fields: ['name'] } });
     return { success: true };
@@ -23,7 +24,8 @@ export async function updateOrganizationDriveFolder(orgId: string, folderId: str
     const { userId } = await assertOrgPermission(orgId, 'integrations');
     const normalized = folderId?.trim() || null;
     if (normalized && normalized.length > 255) throw new Error('フォルダIDが不正です');
-    const { error } = await supabaseAdmin.from('organizations').update({ google_folder_id: normalized }).eq('id', orgId).is('deleted_at', null);
+    const sessionClient = await createSessionClient();
+    const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'drive_folder', p_value: normalized ?? '' });
     if (error) throw sanitizeDbError(error, 'action.organization');
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: normalized ? 'integration.drive.connect' : 'integration.drive.disconnect', resourceType: 'organization', resourceId: orgId });
     return { success: true };
@@ -35,11 +37,8 @@ export async function updateTravelCostSettings(orgId: string, rateYenPerKm: numb
     if (!Number.isFinite(rate) || rate < 0 || rate > 10000) {
         throw new Error('交通費単価は0〜10000円で入力してください');
     }
-    const { error } = await supabaseAdmin
-        .from('organizations')
-        .update({ travel_cost_rate_yen_per_km: rate })
-        .eq('id', orgId)
-        .is('deleted_at', null);
+    const sessionClient = await createSessionClient();
+    const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'travel_rate', p_value: String(rate) });
     if (error) throw sanitizeDbError(error, 'action.organization');
     await recordAuditEvent({
         organizationId: orgId,
@@ -52,9 +51,12 @@ export async function updateTravelCostSettings(orgId: string, rateYenPerKm: numb
     return { success: true, rateYenPerKm: rate };
 }
 
-export async function disconnectGoogleCalendar(orgId: string) {
+export async function disconnectGoogleCalendar(orgId: string, reauthToken: string) {
     const { userId } = await assertOrgPermission(orgId, 'integrations');
-    const { data: org, error: readError } = await supabaseAdmin.from('organizations').select('google_refresh_token').eq('id', orgId).single();
+    const reauth = await consumeReauthGrant('external_secret_change', reauthToken);
+    if (reauth.userId !== userId) throw new Error('再認証した利用者が一致しません');
+    const sessionClient = await createSessionClient();
+    const { data: org, error: readError } = await sessionClient.from('organizations').select('google_refresh_token').eq('id', orgId).single();
     if (readError) throw new Error(readError.message);
     let revoked = false;
     if (org.google_refresh_token) {
@@ -62,100 +64,51 @@ export async function disconnectGoogleCalendar(orgId: string) {
             await getGoogleOAuthClient().revokeToken(decryptGoogleToken(org.google_refresh_token));
             revoked = true;
         } catch (error) {
-            console.error('Google token revocation failed; local credentials will still be removed', error);
+            logExternalError('google.token-revocation', error);
         }
     }
-    const { error } = await supabaseAdmin.from('organizations').update({ google_calendar_id: null, google_refresh_token: null }).eq('id', orgId);
+    const { error } = await sessionClient.rpc('update_organization_setting', {
+        p_org_id: orgId, p_setting: 'calendar_disconnect', p_value: '',
+    });
     if (error) throw sanitizeDbError(error, 'action.organization');
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'integration.calendar.disconnect', resourceType: 'organization', resourceId: orgId, details: { providerRevoked: revoked } });
     return { success: true, providerRevoked: revoked };
 }
 
-export async function deleteOrganization(orgId: string) {
+export async function deleteOrganization(orgId: string, reauthToken: string) {
     // 権限チェック: owner かつ organizationDelete 権限が必要
     const { userId, isOwner } = await assertOrgPermission(orgId, 'organizationDelete');
     if (!isOwner) throw new Error('事業所の削除はオーナーのみ実行できます');
+    const reauth = await consumeReauthGrant('organization_delete', reauthToken);
+    if (reauth.userId !== userId) throw new Error('再認証した利用者が一致しません');
 
-    const { data: organization, error: orgReadError } = await supabaseAdmin
-        .from('organizations')
-        .select('retention_years')
-        .eq('id', orgId)
-        .single();
-    if (orgReadError) throw new Error(orgReadError.message);
-    const deletedAt = new Date();
-    const retentionUntil = new Date(deletedAt);
-    retentionUntil.setUTCFullYear(retentionUntil.getUTCFullYear() + (organization.retention_years || 5));
-
-    await recordAuditEvent({
-        organizationId: orgId,
-        actorId: userId,
-        action: 'organization.soft_delete',
-        resourceType: 'organization',
-        resourceId: orgId,
-        details: { retentionUntil: retentionUntil.toISOString() },
-    });
-
-    // 安全策: この事業所を「最後に開いた事業所」にしているユーザーの設定をクリア
-    await supabaseAdmin.from('profiles')
-        .update({ last_organization_id: null })
-        .eq('last_organization_id', orgId);
-
-    // 記録保持のため物理削除せず、利用不能化して全メンバーを外す。
-    const { error } = await supabaseAdmin.from('organizations').update({
-        deleted_at: deletedAt.toISOString(),
-        deleted_by: userId,
-        retention_until: retentionUntil.toISOString(),
-    }).eq('id', orgId).is('deleted_at', null);
+    const sessionClient = await createSessionClient();
+    const { error } = await sessionClient.rpc('soft_delete_organization', { p_org_id: orgId });
     if (error) throw sanitizeDbError(error, 'action.organization');
-
-    const { error: memberError } = await supabaseAdmin
-        .from('organization_members')
-        .delete()
-        .eq('organization_id', orgId);
-    if (memberError) throw new Error(memberError.message);
     
     return { success: true };
 }
 
 export async function leaveOrganization(orgId: string) {
-    // 脱退できるのは本人のみ。userId はセッションから取得する
-    const { id: userId } = await getAuthedUser();
-
-    const { data: members } = await supabaseAdmin.from('organization_members')
-        .select('role, user_id').eq('organization_id', orgId);
-
-    const me = members?.find(m => m.user_id === userId);
-    if (!me) throw new Error('この事業所のメンバーではありません');
-
-    const owners = members?.filter(m => m.role === 'owner') || [];
-
-    if (me?.role === 'owner' && owners.length <= 1 && (members?.length || 0) > 1) {
-        throw new Error('あなたが唯一のオーナーです。脱退する前に他のメンバーにオーナー権限を譲渡するか、事業所を削除してください。');
-    }
-    await assertRoleManagerRemains(orgId, { removedMemberId: userId });
-
-    const { error } = await supabaseAdmin.from('organization_members')
-        .delete().eq('organization_id', orgId).eq('user_id', userId);
-    
+    // 脱退対象はRPC内で auth.uid() から解決する。
+    const sessionClient = await createSessionClient();
+    const { error } = await sessionClient.rpc('leave_organization_atomic', { p_org_id: orgId });
     if (error) throw sanitizeDbError(error, 'action.organization');
-    
-    // プロフィールのlast_organization_idもクリア
-    await supabaseAdmin.from('profiles')
-        .update({ last_organization_id: null })
-        .eq('id', userId)
-        .eq('last_organization_id', orgId);
 
     return { success: true };
 }
 
-export async function transferOwner(orgId: string, newOwnerId: string) {
+export async function transferOwner(orgId: string, newOwnerId: string, reauthToken: string) {
     // 譲渡できるのは現 owner 本人のみ。現 owner はセッションから取得する
     const { userId: currentOwnerId } = await assertOwner(orgId);
     await assertOrgPermission(orgId, 'ownerTransfer');
+    const reauth = await consumeReauthGrant('owner_transfer', reauthToken);
+    if (reauth.userId !== currentOwnerId) throw new Error('再認証した利用者が一致しません');
 
     // 両方の UPDATE を単一トランザクション内で原子的に実行する RPC を使用
     // 分割 UPDATE だと1件目成功・2件目失敗で2オーナー状態になりうるため
-    const { error } = await supabaseAdmin.rpc('transfer_owner_atomic', {
+    const sessionClient = await createSessionClient();
+    const { error } = await sessionClient.rpc('transfer_owner_atomic', {
         p_org_id: orgId,
         p_new_owner_id: newOwnerId,
         p_current_owner_id: currentOwnerId,
@@ -193,7 +146,8 @@ export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {})
     const limit = Math.min(Math.max(filters.limit ?? 100, 1), 200);
     const offset = Math.max(filters.offset ?? 0, 0);
     // SQLで profiles への FK を貼ったので結合可能になります
-    let query = supabaseAdmin
+    const sessionClient = await createSessionClient();
+    let query = sessionClient
         .from('audit_events')
         .select('*, profiles:actor_id(name)')
         .eq('organization_id', orgId);
@@ -210,7 +164,8 @@ export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {})
 export async function exportAuditLogsCsv(orgId: string, filters: AuditLogFilters = {}): Promise<{ filename: string; csv: string }> {
     const { userId } = await assertOrgPermission(orgId, 'auditLogs');
     const EXPORT_CAP = 10000;
-    let query = supabaseAdmin
+    const sessionClient = await createSessionClient();
+    let query = sessionClient
         .from('audit_events')
         .select('created_at, action_type, resource_type, resource_id, outcome, actor_id, ip_hash, profiles:actor_id(name)')
         .eq('organization_id', orgId);

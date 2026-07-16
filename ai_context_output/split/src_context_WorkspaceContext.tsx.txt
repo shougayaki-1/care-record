@@ -66,11 +66,12 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         return;
       }
 
-      // デプロイ前ログインのセッションが user_session_activity に未登録の場合に備えて登録する。
-      // getAuthedUser が呼ばれる前に完了させる必要があるため await する。
-      await ensureSessionActivity(session.access_token);
-      if (!isCurrent()) return;
-      setUserId(session.user.id);
+      // セッション活動記録は補助的な監査処理であり、workspace取得をブロックさせない。
+      // ルート遷移直後はServer Actionのリクエストがキャンセルされることがあるため、
+      // RLSクエリとは分離して失敗を記録する。
+      void ensureSessionActivity(session.access_token).catch((error) => {
+        console.warn('session activity registration skipped:', error);
+      });
 
       // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
       // organization_member_roles を JOIN することで 3RTT → 2RTT に削減。
@@ -85,6 +86,9 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
           .eq('id', session.user.id)
           .maybeSingle(),
       ]);
+
+      if (!isCurrent()) return;
+      setUserId(session.user.id);
 
       if (memberError || profileError) {
         if (!isCurrent()) return;
@@ -157,12 +161,14 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   useEffect(() => {
     if (!shouldLoadWorkspace) {
       fetchSeq.current += 1;
-      setCurrentOrg(null);
-      setOrgList([]);
-      setUserId(null);
-      setLoading(false);
-      setStatus('session_expired');
-      setErrorMessage(null);
+      queueMicrotask(() => {
+        setCurrentOrg(null);
+        setOrgList([]);
+        setUserId(null);
+        setLoading(false);
+        setStatus('session_expired');
+        setErrorMessage(null);
+      });
       return;
     }
 

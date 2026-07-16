@@ -89,6 +89,35 @@ const reviewRows: ReviewRow[] = [
     helperId: null,
     status: 'pending',
   },
+  {
+    id: 'review-3',
+    fileIndex: 2,
+    fileName: 'FAX記録_夜勤_0731.jpg',
+    fileType: 'image/jpeg',
+    previewUrl: null,
+    fileCount: 1,
+    result: {
+      meta: {
+        date: '2026-07-31',
+        start_at: '22:00',
+        end_at: '09:00',
+        client_name: '鈴木 一郎',
+        helper_names: ['田中 一郎'],
+        client_id_candidate: null,
+        helper_id_candidates: ['helper-tanaka'],
+      },
+      values: { condition: '夜間見守り。バイタル36.5℃。', medicine: true },
+      confidence: 'low',
+      warnings: ['利用者名が帳票と一致しません', '予定担当: 佐藤 花子 / 読み取り担当: 田中 一郎'],
+    },
+    errorMessage: '担当不一致の可能性があります',
+    date: '2026-07-31',
+    startAt: '22:00',
+    endAt: '09:00',
+    clientId: null,
+    helperId: 'helper-tanaka',
+    status: 'pending',
+  },
 ];
 
 export default function RecordAndAiManual() {
@@ -104,12 +133,23 @@ export default function RecordAndAiManual() {
 
       <RecordDemo />
 
+      <ManualSection title="月末跨ぎ夜勤を24:00で分割する理由" subtitle="22:00-翌09:00のような夜勤は、現場では1回の勤務でも請求・月次集計では月ごとの実績に分ける必要があります。">
+        <ManualDefinitionList
+          items={[
+            { term: '請求月を正しく分ける', description: '7月31日22:00-8月1日09:00の勤務は、7月分と8月分の実績に分割して集計できるようにします。' },
+            { term: '現場入力は迷わせない', description: '前半/後半タブで入力対象を明示し、同じ夜勤の中でどちらの月の記録を書いているかを画面上で分かるようにします。' },
+            { term: '予実差異の原因を減らす', description: '月末の片側だけ未入力になると統計に差異が出ます。分割UIにより、前半・後半の入力漏れを発見しやすくします。' },
+          ]}
+        />
+      </ManualSection>
+
       <ManualSection title="AI一括取込の確認ポイント" subtitle="紙・PDFから作った候補は、保存前に必ず人がレビューします。">
         <ManualDefinitionList
           items={[
             { term: 'アップロード', description: 'PDF、JPEG、PNG、WebPを選択します。複数画像は1件の記録としてグループ化する運用も説明します。' },
             { term: '黄色背景', description: 'AIが自動入力した項目は background.aiHighlight の黄色背景で示され、手入力との違いが分かります。' },
             { term: 'レビュー', description: '利用者、スタッフ、日付、開始・終了、信頼度、警告を確認し、問題ない行だけ下書き保存します。' },
+            { term: 'ペーパーレス化の効果', description: '紙記録の回収、スキャン後の手入力、帳票への再転記を減らし、管理者は警告行の確認に集中できます。' },
           ]}
         />
       </ManualSection>

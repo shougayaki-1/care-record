@@ -51,6 +51,40 @@ export function sanitizeDbError(error: unknown, context = 'db'): Error {
   return new Error(GENERIC_MESSAGE);
 }
 
+export type SafeExternalErrorDetails = {
+  name: string;
+  message: string;
+  code?: string | number;
+  status?: number;
+};
+
+/** 外部SDKエラーから認証情報・request/response本文を除外したログ項目だけを取り出す。 */
+export function getSafeExternalErrorDetails(error: unknown): SafeExternalErrorDetails {
+  if (!(error instanceof Error)) return { name: 'UnknownError', message: 'Unknown external error' };
+  const candidate = error as Error & { code?: unknown; status?: unknown; response?: { status?: unknown } };
+  const code = typeof candidate.code === 'string' || typeof candidate.code === 'number' ? candidate.code : undefined;
+  const rawStatus = candidate.status ?? candidate.response?.status;
+  const status = typeof rawStatus === 'number' ? rawStatus : undefined;
+  return {
+    name: error.name || 'Error',
+    message: error.message
+      .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
+      .replace(/([?&](?:access_token|refresh_token|id_token)=)[^&\s]+/gi, '$1[REDACTED]')
+      .slice(0, 500),
+    ...(code !== undefined ? { code } : {}),
+    ...(status !== undefined ? { status } : {}),
+  };
+}
+
+export function logExternalError(context: string, error: unknown): void {
+  console.error(`[external:${context}]`, getSafeExternalErrorDetails(error));
+}
+
+export function sanitizeExternalError(error: unknown, context: string): Error {
+  logExternalError(context, error);
+  return new Error(GENERIC_MESSAGE);
+}
+
 export async function withSafeError<T>(context: string, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();

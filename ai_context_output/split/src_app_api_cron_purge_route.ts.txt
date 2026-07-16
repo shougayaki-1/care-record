@@ -3,7 +3,7 @@ import { purgeExpiredRecords } from '@/utils/supabase/retention';
 
 // 保持期間切れデータの物理消去ジョブ（日次）。
 // Vercel Cron からは Authorization: Bearer <CRON_SECRET> が付与される。
-// 手動ドライラン: GET /api/cron/purge?dryRun=1  (件数のみ集計、削除しない)
+// このCronは常に件数確認のみを行う。クエリやHTTP methodで物理削除へ切り替えることはできない。
 export const dynamic = 'force-dynamic';
 // Vercel Hobby の関数実行時間上限（最大60秒）まで引き上げる。
 // 1回あたりの処理件数は retention.ts 側で上限を設けているため、これで収まる。
@@ -20,9 +20,8 @@ async function handle(request: NextRequest) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
-  const dryRun = request.nextUrl.searchParams.get('dryRun') === '1';
   try {
-    const summary = await purgeExpiredRecords(dryRun);
+    const summary = await purgeExpiredRecords();
     return NextResponse.json({ ok: true, summary });
   } catch (err) {
     console.error('[cron:purge]', err);

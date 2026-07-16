@@ -22,7 +22,10 @@ import EditNoteIcon from '@mui/icons-material/EditNote';
 import EventNoteIcon from '@mui/icons-material/EventNote';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import PublishedWithChangesIcon from '@mui/icons-material/PublishedWithChanges';
 import { ShiftVarianceTable } from '@/components/statistics/ShiftVarianceTable';
+import { AppButton, DataTable, StatusChip } from '@/components/ui';
 import { ManualCallout, ManualDefinitionList, ManualDemoFrame, ManualScreenHighlight, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
 
 type VarianceRow = {
@@ -108,6 +111,7 @@ export default function StatisticsManual() {
       </ManualSection>
 
       <ShiftVarianceDemo />
+      <MonthEndWorkflowDemo />
     </Stack>
   );
 }
@@ -214,5 +218,62 @@ function ShiftVarianceDemo() {
         月末締め前に、差異が大きい行、実績なし、担当不一致、サービス不一致の順に確認すると、帳票や請求前の手戻りを減らせます。
       </ManualCallout>
     </ManualDemoFrame>
+  );
+}
+
+function MonthEndWorkflowDemo() {
+  const reportRows = [
+    { id: 'r1', date: '2026/07/04', client: '山田 太郎', staff: '佐藤 花子', status: '未承認', issue: '差異なし' },
+    { id: 'r2', date: '2026/07/04', client: '鈴木 花子', staff: '佐藤 花子', status: '差戻し', issue: '担当不一致を確認中' },
+    { id: 'r3', date: '2026/07/05', client: '山田 太郎', staff: '-', status: '未作成', issue: '実績入力忘れ' },
+  ];
+
+  return (
+    <ManualDemoFrame title="月末業務フロー：差異確認から帳票出力まで">
+      <Stack spacing={2.5}>
+        <ManualScreenHighlight number={2} label="管理者の月末チェックリスト">
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 1.5 }}>
+            <WorkflowCard step="1" title="統計で差異・エラー潰し" body="早退・延長、担当不一致、実績なしを確認し、必要な記録作成や修正依頼を行います。" />
+            <WorkflowCard step="2" title="提供記録一覧で一括承認" body="未承認・差戻しを絞り込み、内容確認後に承認します。承認済みを帳票対象にします。" />
+            <WorkflowCard step="3" title="GAS連携でPDF一括生成" body="Googleドライブのテンプレートへ差し込み、利用者別・月別のPDFをまとめて保存します。" />
+          </Box>
+        </ManualScreenHighlight>
+
+        <ManualScreenHighlight number={3} label="提供記録一覧・帳票出力の疑似デモ">
+          <Stack spacing={2}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="flex-end">
+              <AppButton variant="outlined" startIcon={<PublishedWithChangesIcon />} onClick={() => undefined}>選択行を一括承認</AppButton>
+              <AppButton startIcon={<PictureAsPdfIcon />} onClick={() => undefined}>PDF一括生成</AppButton>
+            </Stack>
+            <DataTable
+              rows={reportRows}
+              getRowKey={(row) => row.id}
+              columns={[
+                { key: 'date', header: '日付', render: (row) => row.date },
+                { key: 'client', header: '利用者', render: (row) => <Typography fontWeight={800}>{row.client}</Typography> },
+                { key: 'staff', header: '実績担当', render: (row) => row.staff === '-' ? <Typography color="error.main" fontWeight={800}>未入力</Typography> : row.staff },
+                { key: 'status', header: '状態', render: (row) => <StatusChip label={row.status} tone={row.status === '未承認' ? 'warning' : row.status === '差戻し' ? 'error' : 'default'} /> },
+                { key: 'issue', header: '確認事項', render: (row) => <Chip label={row.issue} color={row.issue === '差異なし' ? 'default' : 'warning'} variant="outlined" /> },
+              ]}
+            />
+          </Stack>
+        </ManualScreenHighlight>
+      </Stack>
+      <ManualCallout tone="success" title="提案ポイント">
+        Excel運用では、予定表、実績表、承認状況、PDF作成が分かれがちです。CareRecordでは月末の確認順を画面上でつなげ、差異を潰してから承認・帳票生成へ進めます。
+      </ManualCallout>
+    </ManualDemoFrame>
+  );
+}
+
+function WorkflowCard({ step, title, body }: { step: string; title: string; body: string }) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      <Stack spacing={1}>
+        <Chip label={`STEP ${step}`} color="primary" sx={{ alignSelf: 'flex-start' }} />
+        <Typography fontWeight={800}>{title}</Typography>
+        <Typography variant="body2" color="text.secondary">{body}</Typography>
+      </Stack>
+    </Paper>
   );
 }

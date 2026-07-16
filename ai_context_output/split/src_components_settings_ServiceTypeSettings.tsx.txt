@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Box, Stack, CircularProgress, Alert,
   Table, TableBody, TableCell, TableHead, TableRow,
@@ -11,9 +11,15 @@ import {
   type ServiceType,
 } from '@/app/actions/serviceTypes';
 
-export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
-  const [rows, setRows] = useState<ServiceType[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function ServiceTypeSettings({
+  orgId,
+  initialServiceTypes,
+}: {
+  orgId: string;
+  initialServiceTypes?: ServiceType[];
+}) {
+  const [rows, setRows] = useState<ServiceType[]>(initialServiceTypes ?? []);
+  const [loading, setLoading] = useState(initialServiceTypes === undefined);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -27,7 +33,7 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
   const [deleteTarget, setDeleteTarget] = useState<ServiceType | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -37,9 +43,12 @@ export default function ServiceTypeSettings({ orgId }: { orgId: string }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [orgId]);
 
-  useEffect(() => { load(); }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (initialServiceTypes !== undefined) return;
+    queueMicrotask(() => void load());
+  }, [initialServiceTypes, load]);
 
   const handleToggleActive = async (row: ServiceType) => {
     try {

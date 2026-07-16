@@ -7,6 +7,8 @@ export type FormItem = {
   options?: string;
   required: boolean;
   hasDetail?: boolean;
+  detailMode?: 'conditional' | 'always';
+  detailLabel?: string;
   [key: string]: unknown; // 柔軟なプロパティ拡張に対応可能にする
 };
 
@@ -18,7 +20,7 @@ export const DEFAULT_TEMPLATE: FormItem[] = [
   { id: 'water_supply', label: '水分補給', type: 'checkbox', required: false },
   { id: 'medication', label: '服薬介助', type: 'checkbox', required: false },
   { id: 'excretion', label: '排泄介助', type: 'checkbox', required: false, hasDetail: true },
-  { id: 'urine_disposal', label: '排尿：尿破棄 (ml)', type: 'number', required: false },
+  { id: 'urine_disposal', label: '排尿：尿破棄 (ml)', type: 'number', required: false, hasDetail: true, detailMode: 'always', detailLabel: '補足（色・状態など）' },
   { id: 'oral_care', label: '口腔ケア', type: 'checkbox', required: false },
   { id: 'body_cleaning', label: '清拭・整容介助', type: 'multicheckbox', options: '全身,顔,上肢,下肢,手,足,背,陰部,頭部,臀部,整髪,耳掃除,爪切り,髭剃り,その他', required: false, hasDetail: true },
   { id: 'partial_bath', label: '部分浴', type: 'multicheckbox', options: '手,足,洗髪,陰部洗浄', required: false },

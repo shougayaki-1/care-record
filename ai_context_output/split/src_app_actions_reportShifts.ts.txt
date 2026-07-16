@@ -1,5 +1,5 @@
 'use server';
-import { supabaseAdmin, assertRecordPermission, assertShiftPermission } from '@/utils/supabase/auth';
+import { createSessionClient, assertRecordPermission, assertShiftPermission } from '@/utils/supabase/auth';
 
 /** Returns candidate shifts to suggest linking: same client, overlapping time, not already linked. */
 export async function getShiftSuggestions(
@@ -7,9 +7,10 @@ export async function getShiftSuggestions(
   reportId: string
 ): Promise<Array<{ id: string; title: string | null; start_at: string; end_at: string; staffName: string | null }>> {
   await assertRecordPermission(orgId, 'view', { reportId });
+  const supabase = await createSessionClient();
 
   // Get primary shift of the report
-  const { data: primaryLink } = await supabaseAdmin
+  const { data: primaryLink } = await supabase
     .from('report_shifts')
     .select('shift_id, shifts(start_at, end_at, client_id)')
     .eq('report_id', reportId)
@@ -22,11 +23,11 @@ export async function getShiftSuggestions(
   await assertShiftPermission(orgId, 'view', { clientId: primary.client_id });
 
   // Get already-linked shift IDs
-  const { data: existing } = await supabaseAdmin.from('report_shifts').select('shift_id').eq('report_id', reportId);
+  const { data: existing } = await supabase.from('report_shifts').select('shift_id').eq('report_id', reportId);
   const linkedIds = new Set((existing ?? []).map((r: { shift_id: string }) => r.shift_id));
 
   // Find overlapping candidate shifts
-  const { data: candidates } = await supabaseAdmin
+  const { data: candidates } = await supabase
     .from('shifts')
     .select('id, title, start_at, end_at, shift_staffs(staffs(name))')
     .eq('client_id', primary.client_id)
@@ -51,12 +52,8 @@ export async function getShiftSuggestions(
 export async function addShiftLink(orgId: string, reportId: string, shiftId: string): Promise<void> {
   await assertRecordPermission(orgId, 'edit', { reportId });
   await assertShiftPermission(orgId, 'view', { shiftId });
-
-  const { data: report } = await supabaseAdmin.from('reports').select('status').eq('id', reportId).single();
-  if (!report) throw new Error('記録が見つかりません');
-  if (!['draft', 'remanded'].includes(report.status)) throw new Error('承認済みの記録にはシフトを追加できません');
-
-  const { error } = await supabaseAdmin.from('report_shifts').insert({ report_id: reportId, shift_id: shiftId, is_primary: false });
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('add_report_shift_link', { p_org_id: orgId, p_report_id: reportId, p_shift_id: shiftId });
   if (error) throw new Error('シフトの紐付けに失敗しました');
 }
 
@@ -64,17 +61,15 @@ export async function addShiftLink(orgId: string, reportId: string, shiftId: str
 export async function removeShiftLink(orgId: string, reportId: string, shiftId: string): Promise<void> {
   await assertRecordPermission(orgId, 'edit', { reportId });
   await assertShiftPermission(orgId, 'view', { shiftId });
-
-  const { data: link } = await supabaseAdmin.from('report_shifts').select('is_primary').eq('report_id', reportId).eq('shift_id', shiftId).maybeSingle();
-  if (link?.is_primary) throw new Error('主シフトは解除できません');
-
-  const { error } = await supabaseAdmin.from('report_shifts').delete().eq('report_id', reportId).eq('shift_id', shiftId);
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('remove_report_shift_link', { p_org_id: orgId, p_report_id: reportId, p_shift_id: shiftId });
   if (error) throw new Error('シフトの解除に失敗しました');
 }
 
 /** Returns all shifts linked to a report. */
 export async function getLinkedShifts(reportId: string): Promise<unknown[]> {
-  const { data: report } = await supabaseAdmin
+  const supabase = await createSessionClient();
+  const { data: report } = await supabase
     .from('reports')
     .select('id, clients!inner(organization_id)')
     .eq('id', reportId)
@@ -83,7 +78,7 @@ export async function getLinkedShifts(reportId: string): Promise<unknown[]> {
   const organizationId = Array.isArray(orgId) ? orgId[0]?.organization_id : orgId?.organization_id;
   if (!organizationId) throw new Error('記録にアクセスできません');
   await assertRecordPermission(organizationId, 'view', { reportId });
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from('report_shifts')
     .select('shift_id, is_primary, shifts(id, title, start_at, end_at, shift_staffs(staffs(name)))')
     .eq('report_id', reportId);

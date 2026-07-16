@@ -6,7 +6,9 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
+import { sanitizeDbError } from '@/utils/errors';
 import { decodeJwtSessionId } from '@/utils/jwt';
+import { SESSION_ABSOLUTE_HOURS, SESSION_IDLE_MINUTES } from '@/utils/authConstants';
 import {
   mergePermissions,
   FULL_PERMISSIONS,
@@ -14,18 +16,17 @@ import {
 } from '@/utils/permissions';
 
 export type OrgRole = 'owner' | 'member';
-export const SESSION_IDLE_MINUTES = 1440;
-export const SESSION_ABSOLUTE_HOURS = 24;
+export { SESSION_IDLE_MINUTES, SESSION_ABSOLUTE_HOURS } from '@/utils/authConstants';
 
-// RLS をバイパスする管理クライアント（検証通過後の実処理用に共有）
-// フォールバック値により、環境変数未設定でもモジュール初期化時に throw しない。
-// 未設定の場合は各 Server Action 内の try-catch が 401/network エラーを捕捉する。
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error('[auth] SUPABASE_SERVICE_ROLE_KEY is not set. All admin operations will fail.');
+// 認可済みの基盤操作だけで使う管理クライアント。欠落時はダミー接続せず即座停止する。
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
 }
 export const supabaseAdmin: SupabaseClient = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://missing-supabase-url.supabase.co',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || 'missing-service-role-key',
+    supabaseUrl,
+    serviceRoleKey,
     { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
@@ -34,10 +35,12 @@ export const supabaseAdmin: SupabaseClient = createClient(
  * Server Action からは cookies() が利用できる。
  */
 export async function createSessionClient(): Promise<SupabaseClient> {
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !anonKey) throw new Error('Supabase session environment is not configured');
     const cookieStore = await cookies();
     return createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        supabaseUrl,
+        anonKey,
         {
             cookies: {
                 getAll: () => cookieStore.getAll(),
@@ -102,7 +105,7 @@ export async function registerSessionActivity(session: Session): Promise<string>
             if (!existingError && existing) return authSessionId;
         }
         console.error('[auth] registerSessionActivity failed:', error.message, 'authSessionId:', authSessionId, 'userId:', session.user.id);
-        throw new Error(`セッションを登録できませんでした: ${error.message}`);
+        throw sanitizeDbError(error, 'auth.register-session');
     }
     console.log('[auth] Session activity registered. authSessionId:', authSessionId, 'userId:', session.user.id);
     return authSessionId;

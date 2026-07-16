@@ -14,7 +14,6 @@ import ShiftSegmentEditor from './ShiftSegmentEditor';
 import { ShiftPayload } from '@/app/actions/shift';
 import type { SaveSegmentInput } from '@/app/actions/shiftSegments';
 import { getServiceTypes, type ServiceType } from '@/app/actions/serviceTypes';
-import { getStaffRoles, type StaffRole } from '@/app/actions/staffRoles';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, AppTextField, DateTimeField, MultiSelectField, SelectField } from '@/components/ui';
@@ -75,53 +74,49 @@ export const ShiftFormModal = ({
 
     const [segments, setSegments] = useState<SegmentDraft[]>([]);
     const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const [staffRoles, setStaffRoles] = useState<StaffRole[]>([]);
 
     useEffect(() => {
         if (!open) return;
 
         // Load master data for the inline segment editor
-        Promise.all([
-            getServiceTypes(organizationId),
-            getStaffRoles(organizationId),
-        ]).then(([types, roles]) => {
+        getServiceTypes(organizationId).then((types) => {
             setServiceTypes(types);
-            setStaffRoles(roles);
         });
 
-        if (initialData) {
-            setClientId(initialData.client_id || '');
+        queueMicrotask(() => {
             const formatDatetime = (isoStr: string) => {
                 if (!isoStr) return '';
                 const d = new Date(isoStr);
                 const pad = (n: number) => String(n).padStart(2, '0');
                 return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
             };
-            setStartAt(formatDatetime(initialData.start_at));
-            setEndAt(formatDatetime(initialData.end_at));
-            setCancelReason(initialData.cancel_reason || '');
-            setSegments([]); // EDIT mode: ShiftSegmentEditor handles loading from server
-        } else {
-            setClientId('');
-            setSegments([]);
-            setStartAt('');
-            setEndAt('');
-            setCancelReason('');
-            setAutoAssign(true);
-        }
+            if (initialData) {
+                setClientId(initialData.client_id || '');
+                setStartAt(formatDatetime(initialData.start_at));
+                setEndAt(formatDatetime(initialData.end_at));
+                setCancelReason(initialData.cancel_reason || '');
+                setSegments([]); // EDIT mode: ShiftSegmentEditor handles loading from server
+            } else {
+                setClientId('');
+                setSegments([]);
+                setStartAt('');
+                setEndAt('');
+                setCancelReason('');
+                setAutoAssign(true);
+            }
+        });
     }, [open, initialData, organizationId]);
 
     // Seed one blank segment when start/end time are set (CREATE mode only)
     useEffect(() => {
         if (initialData || segments.length > 0) return;
         if (!startAt || !endAt) return;
-        setSegments([{
-            service_type_id: '',
-            start_at: startAt,
-            end_at: endAt,
-            staffs: [],
-        }]);
+        queueMicrotask(() => setSegments([{
+                service_type_id: '',
+                start_at: startAt,
+                end_at: endAt,
+                staffs: [],
+            }]));
     }, [startAt, endAt, initialData, segments.length]);
 
     const handleSave = async () => {

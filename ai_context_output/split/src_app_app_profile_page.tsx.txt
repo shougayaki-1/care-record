@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
     Box, Typography, TextField, Button, Alert, Stack, Divider,
     Chip, CircularProgress, Avatar, IconButton
@@ -50,9 +50,7 @@ export default function ProfilePage() {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
-    useEffect(() => { fetchProfile(); }, []);
-
-    const fetchProfile = async () => {
+    const fetchProfile = useCallback(async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
@@ -71,7 +69,11 @@ export default function ProfilePage() {
         } finally { 
             setLoading(false); 
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        queueMicrotask(() => void fetchProfile());
+    }, [fetchProfile]);
 
     // ★修正: error handlingの型をunknownにし、明示的にキャスト
     const handleUpdateProfile = async () => {

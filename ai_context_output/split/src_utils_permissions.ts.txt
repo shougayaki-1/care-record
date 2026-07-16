@@ -12,6 +12,7 @@ export type ManagementArea =
   | 'organization'
   | 'integrations'
   | 'auditLogs'
+  | 'backupStatus'
   | 'reports'
   | 'roles'
   | 'organizationDelete'
@@ -37,6 +38,7 @@ export const EMPTY_PERMISSIONS: RolePermissions = {
     organization: false,
     integrations: false,
     auditLogs: false,
+    backupStatus: false,
     reports: false,
     roles: false,
     organizationDelete: false,
@@ -55,6 +57,7 @@ export const FULL_PERMISSIONS: RolePermissions = {
     organization: true,
     integrations: true,
     auditLogs: true,
+    backupStatus: true,
     reports: true,
     roles: true,
     organizationDelete: true,
@@ -74,6 +77,7 @@ export const PRESET_MANAGER_PERMISSIONS: RolePermissions = {
     organization: false,
     integrations: false,
     auditLogs: true,
+    backupStatus: true,
     reports: true,
     roles: false,
     organizationDelete: false,
@@ -93,6 +97,7 @@ export const PRESET_STAFF_PERMISSIONS: RolePermissions = {
     organization: false,
     integrations: false,
     auditLogs: false,
+    backupStatus: false,
     reports: false,
     roles: false,
     organizationDelete: false,

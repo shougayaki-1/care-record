@@ -110,6 +110,16 @@ describe('classifyGoogleError', () => {
             expect(se.code).toBe(429);
         });
 
+        it('403 の userRateLimitExceeded は認証切れではなく rate_limit に分類する', () => {
+            const se = classifyGoogleError({
+                response: {
+                    status: 403,
+                    data: { error: { message: 'Quota exceeded', errors: [{ reason: 'userRateLimitExceeded' }] } },
+                },
+            });
+            expect(se.kind).toBe('rate_limit');
+        });
+
         it('文字列の code は無視し、response.status / status を見る', () => {
             // Node の "ECONNRESET" のような文字列 code は数値として採用しない
             const se = classifyGoogleError({ code: 'ECONNRESET', status: 503 });

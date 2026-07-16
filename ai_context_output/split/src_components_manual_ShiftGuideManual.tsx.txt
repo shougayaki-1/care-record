@@ -1,357 +1,193 @@
 'use client';
 
-import React, { ReactNode } from 'react';
+import dynamic from 'next/dynamic';
+import type { EventInput } from '@fullcalendar/core';
+import { useMemo, useState } from 'react';
 import {
-    Box, Typography, Paper, Stack, TextField, Card, CardContent,
-    Alert, Button, Chip,
-    Table, TableHead, TableBody, TableRow, TableCell, IconButton, List, ListItem, ListItemButton, ListItemIcon, ListItemText
+  Alert,
+  Box,
+  Chip,
+  LinearProgress,
+  Paper,
+  Stack,
+  Tab,
+  Tabs,
+  Typography,
 } from '@/components/ui/mui';
-import DeleteIcon from '@mui/icons-material/Delete';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import GridOnIcon from '@mui/icons-material/GridOn';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import PeopleIcon from '@mui/icons-material/People';
-import EditNoteIcon from '@mui/icons-material/EditNote';
-import Avatar from '@mui/material/Avatar';
-import AddIcon from '@mui/icons-material/Add';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import LockIcon from '@mui/icons-material/Lock';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import SyncIcon from '@mui/icons-material/Sync';
+import UpdateIcon from '@mui/icons-material/Update';
+import { AppButton, DataTable, DateTimeField, PageHeader, StatusChip } from '@/components/ui';
+import { ManualCallout, ManualDefinitionList, ManualDemoFrame, ManualScreenHighlight, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
 
-/* =========================================================================
-   体験用モックコンポーネント群 ( ShiftGuide専用 )
-========================================================================= */
-
-const NumberBadge = ({ number }: { number: number }) => (
-    <Box
-        sx={{
-            position: 'absolute',
-            top: -12,
-            left: -12,
-            width: 26,
-            height: 26,
-            borderRadius: '50%',
-            bgcolor: '#ff1744',
-            color: 'white',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 'bold',
-            fontSize: '14px',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
-            zIndex: 20,
-            border: '2px solid white'
-        }}
-    >
-        {number}
-    </Box>
+const ShiftCalendarViewer = dynamic(
+  () => import('@/components/shifts/ShiftCalendarViewer').then((mod) => mod.ShiftCalendarViewer),
+  { ssr: false },
 );
 
-const ShiftManageScreenMock = () => {
-    return (
-        <Box sx={{ display: 'flex', height: 480, border: '1px solid #ddd', borderRadius: 3, overflow: 'hidden', bgcolor: '#f4f5f7', pointerEvents: 'none', userSelect: 'none' }}>
-            {/* 1. 左端レール */}
-            <Box sx={{ width: 55, bgcolor: '#E3E5E8', display: 'flex', flexDirection: 'column', alignItems: 'center', py: 1.5, gap: 1.5, borderRight: '1px solid #d0d0d0' }}>
-                <Avatar sx={{ bgcolor: 'primary.main', width: 35, height: 35, fontSize: '0.8rem' }}>社</Avatar>
-                <Avatar sx={{ bgcolor: 'background.paper', color: '#23A559', width: 35, height: 35 }}><AddIcon fontSize="small" /></Avatar>
-            </Box>
+const calendarEvents: EventInput[] = [
+  {
+    id: 'shift-overnight',
+    title: '鈴木 一郎 様',
+    start: '2026-07-05T22:00:00',
+    end: '2026-07-06T09:00:00',
+    backgroundColor: '#2255CC',
+    borderColor: '#2255CC',
+    extendedProps: { staffNames: '佐藤 花子', reportStatuses: [] },
+  },
+  {
+    id: 'shift-day',
+    title: '山田 太郎 様',
+    start: '2026-07-07T09:00:00',
+    end: '2026-07-07T10:30:00',
+    backgroundColor: '#0F766E',
+    borderColor: '#0F766E',
+    extendedProps: { staffNames: '田中 一郎', reportStatuses: [{ id: 'r1', status: 'approved', is_primary: true }] },
+  },
+  {
+    id: 'shift-mobile',
+    title: '高橋 健 様',
+    start: '2026-07-09T14:00:00',
+    end: '2026-07-09T16:00:00',
+    backgroundColor: '#7C3AED',
+    borderColor: '#7C3AED',
+    extendedProps: { staffNames: '佐藤 花子', reportStatuses: [{ id: 'r2', status: 'rejected', is_primary: true }] },
+  },
+];
 
-            {/* 2. サイドバー */}
-            <Box sx={{ width: 200, bgcolor: '#F2F3F5', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e0e0e0' }}>
-                <Box p={1.5} borderBottom="1px solid #e0e0e0"><Typography variant="caption" fontWeight="bold" sx={{ fontSize: '0.75rem' }}>一般社団法人ケアワーク</Typography></Box>
-                <Box flexGrow={1} py={0.5}>
-                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: 'text.secondary', fontWeight: 'bold', fontSize: '0.65rem' }}>記録</Typography>
-                    <List dense disablePadding>
-                        <ListItem disablePadding><ListItemButton sx={{ py: 0.4 }}><ListItemIcon sx={{ minWidth: 28 }}><EditNoteIcon fontSize="small" /></ListItemIcon><ListItemText primary="記録を作成" primaryTypographyProps={{ fontSize: '0.75rem' }} /></ListItemButton></ListItem>
-                    </List>
-
-                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: 'text.secondary', fontWeight: 'bold', display: 'block', mt: 1, fontSize: '0.65rem' }}>シフト</Typography>
-                    <List dense disablePadding>
-                        <Box sx={{ position: 'relative', mx: 0.8 }}>
-                            <NumberBadge number={1} />
-                            <Box sx={{ border: '3px solid #ff1744', borderRadius: 1, bgcolor: 'rgba(255, 23, 68, 0.05)' }}>
-                                <ListItemButton selected sx={{ borderRadius: 1, pl: 1, py: 0.4 }}>
-                                    <ListItemIcon sx={{ minWidth: 28 }}><CalendarMonthIcon fontSize="small" color="primary" /></ListItemIcon>
-                                    <ListItemText primary={<Typography fontWeight="bold" color="primary.main" fontSize="0.75rem">シフト管理</Typography>} />
-                                </ListItemButton>
-                            </Box>
-                        </Box>
-                    </List>
-
-                    <Typography variant="caption" sx={{ px: 2, py: 0.5, color: 'text.secondary', fontWeight: 'bold', display: 'block', mt: 1, fontSize: '0.65rem' }}>管理</Typography>
-                    <List dense disablePadding>
-                        <ListItem disablePadding><ListItemButton sx={{ py: 0.4 }}><ListItemIcon sx={{ minWidth: 28 }}><PeopleIcon fontSize="small" /></ListItemIcon><ListItemText primary="利用者管理" primaryTypographyProps={{ fontSize: '0.75rem' }} /></ListItemButton></ListItem>
-                    </List>
-                </Box>
-            </Box>
-
-            {/* 3. メインエリア */}
-            <Box sx={{ flexGrow: 1, bgcolor: 'background.paper', display: 'flex', flexDirection: 'column' }}>
-                <Box sx={{ px: 2, pt: 1.5, borderBottom: '1px solid #eee', bgcolor: 'background.paper' }}>
-                    <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1 }}>シフト管理・カレンダー</Typography>
-
-                    <Box sx={{ display: 'flex', borderBottom: '2px solid #ddd', pb: '1px', gap: 2, position: 'relative' }}>
-                        <Typography sx={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'primary.main', borderBottom: '2px solid #2255CC', pb: 1 }}>基本パターン(ひな形)</Typography>
-                        <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', pb: 1 }}>全体カレンダー</Typography>
-                        <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', pb: 1 }}>自分のシフト</Typography>
-                        <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', pb: 1 }}>スタッフ別</Typography>
-                        <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', pb: 1 }}>利用者別</Typography>
-                    </Box>
-                </Box>
-
-                <Box sx={{ p: 2, bgcolor: '#f9f9f9', flexGrow: 1 }}>
-                    <Box sx={{ position: 'relative', p: 1.5, mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2, bgcolor: 'background.tint', border: '1px solid #D0E0FF' }}>
-                        <NumberBadge number={2} />
-                        <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>ひな形から指定月のカレンダーへシフトを一括展開します。</Typography>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                            <TextField type="month" size="small" defaultValue="2025-06" sx={{ bgcolor: 'background.paper', '& .MuiInputBase-input': { fontSize: '0.7rem', py: 0.5 } }} />
-                            <Box sx={{ border: '3px solid #ff1744', borderRadius: 1 }}>
-                                <Button variant="contained" color="secondary" size="small" startIcon={<PlayArrowIcon fontSize="small" />} sx={{ fontSize: '0.7rem', py: 0.2, boxShadow: 'none' }}>一括自動展開</Button>
-                            </Box>
-                        </Stack>
-                    </Box>
-
-                    <Paper variant="outlined" sx={{ borderRadius: 2 }}>
-                        <Table size="small">
-                            <TableHead sx={{ bgcolor: 'background.subtle' }}>
-                                <TableRow>
-                                    <TableCell sx={{ fontSize: '0.7rem', py: 0.5 }}>対象の利用者</TableCell>
-                                    <TableCell sx={{ fontSize: '0.7rem', py: 0.5 }}>サイクル</TableCell>
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                <TableRow>
-                                    <TableCell sx={{ fontSize: '0.75rem', fontWeight: 'bold' }}>山田 太郎 様</TableCell>
-                                    <TableCell sx={{ fontSize: '0.7rem' }}><Chip label="毎週日曜日" size="small" variant="outlined" color="primary" sx={{ height: 16, fontSize: '0.6rem' }} /></TableCell>
-                                </TableRow>
-                            </TableBody>
-                        </Table>
-                    </Paper>
-                </Box>
-            </Box>
-        </Box>
-    );
-};
-
-const PatternCardMock = () => (
-    <Card variant="outlined" sx={{ borderRadius: 2, bgcolor: 'background.paper', border: '1px solid #ddd' }}>
-        <Box sx={{ p: 1.5, borderBottom: '1px solid #eee', bgcolor: '#fbfbfb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="subtitle2" fontWeight="bold" fontSize="0.8rem">【ひな形】山田 太郎 様 (毎週日曜・夜勤)</Typography>
-            <Chip label="毎週日曜日" size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
-        </Box>
-        <CardContent sx={{ p: 1.5, py: 1 }}>
-            <Stack spacing={1}>
-                <Box display="flex" justifyContent="space-between"><Typography variant="caption" color="text.secondary">時間帯:</Typography><Typography variant="caption" fontWeight="bold">20:00 〜 翌09:00 (泊まり)</Typography></Box>
-                <Box display="flex" justifyContent="space-between"><Typography variant="caption" color="text.secondary">デフォルト担当:</Typography><Typography variant="caption">佐藤 花子</Typography></Box>
-            </Stack>
-        </CardContent>
-    </Card>
-);
-
-const PreviewDialogMock = () => (
-    <Paper elevation={3} sx={{ width: '100%', maxWidth: 450, borderRadius: 2, overflow: 'hidden', bgcolor: 'background.paper', border: '1px solid #ccc', mx: 'auto' }}>
-        <Box sx={{ p: 1.5, px: 2, bgcolor: 'background.default' }}><Typography variant="subtitle2" fontWeight="bold">2025年6月 シフト展開の確認</Typography></Box>
-        <Box sx={{ p: 2 }}>
-            <Alert severity="info" sx={{ mb: 1.5, py: 0, fontSize: '0.75rem' }}>既存の未編集シフトは自動更新され、手動調整済みのシフトは保護されます。</Alert>
-            <Box p={1.5} bgcolor="#F0F5FF" borderRadius={2} border="1px solid #D0E0FF" mb={1.5}>
-                <Typography variant="caption" fontWeight="bold" color="primary">展開予定の総シフト数： 42 件</Typography>
-            </Box>
-            <Typography variant="caption" fontWeight="bold" display="block" mb={0.5}>展開予定内訳:</Typography>
-            <Stack spacing={0.5} sx={{ p: 1, border: '1px solid #eee', borderRadius: 1.5, bgcolor: '#fcfcfc', maxHeight: 80, overflowY: 'auto' }}>
-                <Box display="flex" justifyContent="space-between"><Typography variant="caption" fontSize="0.7rem">山田 太郎 様 (佐藤 花子)</Typography><Typography variant="caption" fontSize="0.7rem" color="text.secondary">8件 (泊まり分割)</Typography></Box>
-            </Stack>
-        </Box>
-    </Paper>
-);
-
-const ShiftFormModalMock = () => (
-    <Paper elevation={3} sx={{ width: '100%', maxWidth: 450, borderRadius: 2, overflow: 'hidden', bgcolor: 'background.paper', border: '1px solid #ccc', mx: 'auto' }}>
-        <Box sx={{ p: 1.5, px: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee' }}>
-            <Typography variant="subtitle2" fontWeight="bold">単発シフトの編集・詳細</Typography>
-            <IconButton size="small" color="error"><DeleteIcon fontSize="small" /></IconButton>
-        </Box>
-        <Box sx={{ p: 2 }}>
-            <Stack spacing={2}>
-                <Box p={1.5} bgcolor="#ffebee" borderRadius={1.5} border="1px solid #ffcdd2">
-                    <Typography color="error" fontWeight="bold" variant="caption" display="block">⚠ この予定はキャンセル（お休み）に設定されています</Typography>
-                    <Typography variant="caption" color="text.secondary">キャンセル理由: ご本人様が入院されたため</Typography>
-                </Box>
-                <TextField label="利用者" value="山田 太郎 様" size="small" fullWidth />
-            </Stack>
-        </Box>
-    </Paper>
-);
-
-const CalendarGridMock = () => (
-    <Box sx={{ border: '1px solid #ddd', borderRadius: 2, overflow: 'hidden', bgcolor: 'background.paper', maxWidth: 500, width: '100%', mx: 'auto' }}>
-        <Table size="small" sx={{ tableLayout: 'fixed' }}>
-            <TableHead>
-                <TableRow sx={{ bgcolor: 'background.default', height: 32 }}>
-                    <TableCell align="center" sx={{ fontWeight: 'bold', fontSize: '0.85rem', borderRight: '1px solid #ddd', p: 0.5 }}>日</TableCell>
-                    <TableCell align="center" sx={{ fontWeight: 'bold', fontSize: '0.85rem', p: 0.5 }}>月</TableCell>
-                </TableRow>
-            </TableHead>
-            <TableBody>
-                <TableRow sx={{ height: 120 }}>
-                    <TableCell valign="top" sx={{ borderRight: '1px solid #ddd', p: 0.5, position: 'relative' }}>
-                        <Typography align="right" variant="caption" color="text.secondary" sx={{ fontWeight: 'bold', display: 'block' }}>26</Typography>
-                        <Box sx={{ mt: 0.5, p: 0.8, bgcolor: '#E6F0FF', borderLeft: '3px solid #2255CC', borderRadius: '4px' }}>
-                            <Typography variant="caption" color="primary" fontWeight="bold" sx={{ fontSize: '0.7rem', display: 'block' }}>20:00 - 09:00</Typography>
-                            <Typography variant="caption" fontWeight="bold" color="text.primary" display="block">山田 太郎 様</Typography>
-                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>(佐藤 花子)</Typography>
-                        </Box>
-                    </TableCell>
-                    <TableCell valign="top" sx={{ p: 0.5 }}>
-                        <Typography align="right" variant="caption" color="text.secondary" sx={{ fontWeight: 'bold', display: 'block' }}>27</Typography>
-                        <Box sx={{ mt: 0.5, p: 0.8, bgcolor: '#E6F0FF', borderLeft: '3px solid #2255CC', borderRadius: '4px' }}>
-                            <Typography variant="caption" color="primary" fontWeight="bold" sx={{ fontSize: '0.7rem', display: 'block' }}>08:00 - 17:00</Typography>
-                            <Typography variant="caption" fontWeight="bold" color="text.primary" display="block">鈴木 一郎 様</Typography>
-                        </Box>
-                    </TableCell>
-                </TableRow>
-            </TableBody>
-        </Table>
-    </Box>
-);
-
-const PdfCalendarSplitMock = () => (
-    <Box sx={{ border: '2px solid #2255CC', borderRadius: 2, p: 1.5, bgcolor: 'background.subtle', maxWidth: 500, width: '100%', mx: 'auto' }}>
-        <Box display="flex" justifyContent="space-between" mb={0.5} borderBottom="1px solid #ccc" pb={0.5}>
-            <Typography variant="caption" color="primary" fontWeight="bold" fontSize="0.7rem">カレンダー型PDF出力レイアウト（日またぎ自動分割表示）</Typography>
-        </Box>
-        <Table size="small" sx={{ tableLayout: 'fixed', border: '1px solid #ccc' }}>
-            <TableHead>
-                <TableRow sx={{ bgcolor: 'background.tint', height: 20 }}>
-                    <TableCell align="center" sx={{ fontSize: 8, p: 0.3, borderRight: '1px solid #ccc' }}>26 (日)</TableCell>
-                    <TableCell align="center" sx={{ fontSize: 8, p: 0.3 }}>27 (月)</TableCell>
-                </TableRow>
-            </TableHead>
-            <TableBody>
-                <TableRow sx={{ height: 60 }}>
-                    <TableCell valign="top" sx={{ borderRight: '1px solid #ccc', p: 0.3 }}>
-                        <Box sx={{ bgcolor: '#E6F0FF', p: 0.4, borderRadius: 0.5 }}>
-                            <Typography sx={{ fontSize: 7, fontWeight: 'bold', color: 'primary.main' }}>20:00〜00:00</Typography>
-                            <Typography sx={{ fontSize: 7, fontWeight: 'bold' }}>山田 太郎 様</Typography>
-                        </Box>
-                    </TableCell>
-                    <TableCell valign="top" sx={{ p: 0.3 }}>
-                        <Box sx={{ bgcolor: '#E6F0FF', p: 0.4, borderRadius: 0.5, borderLeft: '2px solid #ff9800' }}>
-                            <Typography sx={{ fontSize: 7, fontWeight: 'bold', color: '#ff9800' }}>00:00〜09:00</Typography>
-                            <Typography sx={{ fontSize: 7, fontWeight: 'bold' }}>山田 太郎 様</Typography>
-                        </Box>
-                    </TableCell>
-                </TableRow>
-            </TableBody>
-        </Table>
-    </Box>
-);
-
-const StepBlock = ({ title, desc, children }: { title: ReactNode, desc?: ReactNode, children: ReactNode }) => (
-    <Box mb={8}>
-        <Typography variant="h5" fontWeight="bold" color="primary.main" gutterBottom sx={{ borderBottom: '3px solid', borderColor: 'primary.main', pb: 1, display: 'inline-block' }}>{title}</Typography>
-        {desc && <Typography variant="body1" paragraph sx={{ mt: 1.5, mb: 2.5, lineHeight: 1.8 }}>{desc}</Typography>}
-        <Box mt={2.5}>{children}</Box>
-    </Box>
-);
+const patternRows = [
+  { id: 'p1', client: '鈴木 一郎 様', service: '重度訪問介護', cycle: '毎週日曜', time: '22:00-翌09:00', staff: '佐藤 花子', status: '展開対象' },
+  { id: 'p2', client: '山田 太郎 様', service: '身体介護', cycle: '毎週火曜', time: '09:00-10:30', staff: '田中 一郎', status: '展開対象' },
+  { id: 'p3', client: '高橋 健 様', service: '移動支援', cycle: '第2・第4木曜', time: '14:00-16:00', staff: '佐藤 花子', status: '手動調整あり' },
+];
 
 export default function ShiftGuideManual() {
-    return (
-        <Box>
-            <Box sx={{ mb: 5, borderBottom: '2px solid #eee', pb: 3 }}>
-                <Chip label="管理者・一般スタッフ共通" color="secondary" size="small" sx={{ mb: 1, fontWeight: 'bold' }} />
-                <Typography variant="h4" fontWeight="bold" color="text.primary">シフト管理・Web閲覧・PDF出力ガイド</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    繰り返しのひな形登録、カレンダー自動展開プレビュー、および日またぎ対応カレンダーPDF出力について解説します。
-                </Typography>
+  return (
+    <Stack spacing={3}>
+      <ManualSection title="シフト管理が解決すること" subtitle="紙の月間表やExcelで起きやすい転記漏れ、担当共有漏れ、上書き事故を防ぎます。">
+        <Stack spacing={1.5}>
+          <ManualStep number={1} title="ひな形から月次予定を作る" body="毎週・隔週などの繰り返しパターンを登録し、対象月へ一括展開します。毎月同じ予定を手入力する時間を削減できます。" />
+          <ManualStep number={2} title="現場には必要な予定だけ見せる" body="管理者は全体、スタッフは担当のみを表示できます。利用者情報を必要以上に広げない運用にできます。" />
+          <ManualStep number={3} title="手動修正を保護する" body="展開後に個別修正したシフトは is_modified として扱い、次回の自動展開で意図せず上書きしない安全設計です。" />
+        </Stack>
+      </ManualSection>
+
+      <CalendarComparisonDemo />
+      <MonthlyExpansionDemo />
+    </Stack>
+  );
+}
+
+function CalendarComparisonDemo() {
+  const [tab, setTab] = useState<'all' | 'mine'>('all');
+  const mineEvents = useMemo(() => calendarEvents.filter((event) => String(event.extendedProps?.staffNames ?? '').includes('佐藤')), []);
+
+  return (
+    <ManualDemoFrame title="シフトカレンダー：全体権限と担当のみ権限の比較">
+      <ManualScreenHighlight number={1} label="同じ事業所でもロールで見える範囲が変わる">
+        <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mb: 2 }}>
+          <Tab value="all" label="管理者: 全体権限" />
+          <Tab value="mine" label="スタッフ: 担当のみ" />
+        </Tabs>
+        <Stack spacing={1.5}>
+          <Alert severity={tab === 'all' ? 'info' : 'warning'}>
+            {tab === 'all'
+              ? '管理者は全利用者・全スタッフの予定、記録ステータス、未作成シフトを俯瞰できます。'
+              : '担当のみ権限では、自分が担当に入っている予定だけが表示されます。'}
+          </Alert>
+          <Box sx={{ '& .fc-toolbar-title': { fontSize: '0.95rem !important' }, '& .fc-button': { minHeight: '30px !important' } }}>
+            <ShiftCalendarViewer
+              events={tab === 'all' ? calendarEvents : mineEvents}
+              initialView="dayGridMonth"
+              headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listWeek' }}
+              buttonText={{ today: '今日', month: '月', week: '週', list: '一覧' }}
+              selectable={false}
+              editable={false}
+              onEventClick={() => undefined}
+              onDateSelect={() => undefined}
+              noEventsText="表示できるシフトはありません"
+            />
+          </Box>
+        </Stack>
+      </ManualScreenHighlight>
+    </ManualDemoFrame>
+  );
+}
+
+function MonthlyExpansionDemo() {
+  const [expanded, setExpanded] = useState(false);
+  const progress = expanded ? 100 : 0;
+
+  return (
+    <ManualDemoFrame title="ひな形からの月次一括展開フロー">
+      <Stack spacing={2.5}>
+        <ManualScreenHighlight number={2} label="基本パターンを月へ展開">
+          <PageHeader
+            title={<Stack direction="row" alignItems="center" spacing={1}><CalendarMonthIcon color="action" />シフト基本パターン</Stack>}
+            description="繰り返し予定を登録しておくと、月初作業を一括化できます。"
+            actions={<AppButton startIcon={<AutoAwesomeIcon />} onClick={() => setExpanded(true)}>2026年7月へ一括自動展開</AppButton>}
+          />
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+            <DateTimeField kind="month" label="展開対象月" value="2026-07" slotProps={{ input: { readOnly: true } }} />
+            <AppButton variant="outlined" startIcon={<PictureAsPdfIcon />} onClick={() => undefined}>月間PDFプレビュー</AppButton>
+            <AppButton variant="outlined" startIcon={<SyncIcon />} onClick={() => undefined}>Googleカレンダー同期</AppButton>
+          </Stack>
+          <DataTable
+            rows={patternRows}
+            getRowKey={(row) => row.id}
+            columns={[
+              { key: 'client', header: '利用者', render: (row) => <Typography fontWeight={800}>{row.client}</Typography> },
+              { key: 'service', header: 'サービス', render: (row) => row.service },
+              { key: 'cycle', header: 'サイクル', render: (row) => <Chip label={row.cycle} variant="outlined" /> },
+              { key: 'time', header: '時間', render: (row) => row.time },
+              { key: 'staff', header: '既定担当', render: (row) => row.staff },
+              { key: 'status', header: '状態', render: (row) => row.status === '手動調整あり' ? <StatusChip label="上書き保護" tone="warning" /> : <StatusChip label="展開対象" tone="success" /> },
+            ]}
+          />
+        </ManualScreenHighlight>
+
+        <ManualScreenHighlight number={3} label="自動展開後の安全設計">
+          <Stack spacing={2}>
+            <Box>
+              <LinearProgress variant="determinate" value={progress} sx={{ height: 8, borderRadius: 1 }} />
+              <Typography variant="caption" color="text.secondary">{expanded ? '42件のシフトを作成、手動調整済み3件は保護しました。' : '一括自動展開を押すと、対象月のシフト候補を作成します。'}</Typography>
             </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 1.5 }}>
+              <SafetyCard icon={<AutoAwesomeIcon color="primary" />} title="一括作成" body="ひな形から日付を計算し、月内の予定をまとめて作成します。" />
+              <SafetyCard icon={<LockIcon color="warning" />} title="上書き保護" body="現場都合で時間変更した予定は is_modified として保護し、再展開で消しません。" />
+              <SafetyCard icon={<UpdateIcon color="success" />} title="同期修復" body="Google側の認証切れや未同期があっても、未同期を同期・同期を修復から復旧できます。" />
+            </Box>
+          </Stack>
+        </ManualScreenHighlight>
+      </Stack>
 
-            {/* 0. シフト管理カレンダーの画面構成 */}
-            <StepBlock
-                title="0. シフト管理の画面構成と全体の流れ"
-                desc="新しく統合された「シフト管理」画面の全体像と操作動線です。"
-            >
-                <Typography variant="body2" color="text.secondary" mb={2}>
-                    目次メニューから <span style={{ color: '#ff1744', fontWeight: 'bold' }}>① 「シフト管理」</span> を開くと、統合カレンダー画面が立ち上がります。<br />
-                    管理者が今月分のひな形を一括反映させたい場合は、<span style={{ color: '#ff1744', fontWeight: 'bold' }}>② コントロールパネルの「一括自動展開」</span> ボタンをクリックして、展開プレビューを実行します。
-                </Typography>
-                <Box sx={{ p: { xs: 1.5, md: 3 }, bgcolor: 'background.tint', borderRadius: 3, border: '1px solid #d0d0d0', pointerEvents: 'none', userSelect: 'none' }}>
-                    <ShiftManageScreenMock />
-                </Box>
-            </StepBlock>
+      <ManualDefinitionList
+        items={[
+          { term: '月次作業の短縮', description: '毎月のExcelコピー、日付変更、担当者への共有をCareRecord上の展開と同期に集約します。' },
+          { term: '日跨ぎ夜勤', description: '22:00-翌09:00のような予定もカレンダー上に表示し、記録作成時には月末跨ぎの分割入力へつなげます。' },
+          { term: '記録との連動', description: 'シフトに記録ステータスが紐付くため、月末に未作成・差戻し・承認済みを確認しやすくなります。' },
+        ]}
+      />
+      <ManualCallout tone="success" title="提案ポイント">
+        CareRecordのシフトは「予定表」だけで終わらず、記録作成、予実管理、帳票、Googleカレンダー同期までつながる業務の起点になります。
+      </ManualCallout>
+    </ManualDemoFrame>
+  );
+}
 
-            {/* 1. シフトひな形（基本パターン）の作成 */}
-            <StepBlock
-                title="1. 【管理者】シフトひな形（基本パターン）の作成"
-                desc="毎月のシフト作成を迅速化するために、まずは利用者の「毎週の基本リズム（ひな形パターン）」を登録します。"
-            >
-                <Typography variant="body2" color="text.secondary" mb={3}>
-                    「ひな形を追加」ボタンから、曜日・時間・デフォルトの担当ヘルパーを設定します。<br />
-                    2週間に1回（隔週）などの特殊なスケジュールロジック（INTERVAL）も指定可能です。
-                </Typography>
-                <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: '#f0f2f5', borderRadius: 3, border: '1px solid #e0e0e0', pointerEvents: 'none' }}>
-                    <PatternCardMock />
-                </Box>
-            </StepBlock>
-
-            {/* 2. 管理者向け：カレンダーへの月次一括展開と安全プレビュー */}
-            <StepBlock
-                title="2. 【管理者】カレンダーへの一括自動展開（プレビュー機能）"
-                desc="登録されたひな形データから、指定した対象月へ、一気にカレンダーシフトを実体化させます。"
-            >
-                <Typography variant="body2" color="text.secondary" mb={3}>
-                    展開ボタンを押すと、すぐにDBに保存されるのではなく「展開プレビュー確認ダイアログ」が立ち上がります。<br />
-                    展開件数の内訳を事前に確認することで、誤った月への上書きミスを未然に防止します。
-                </Typography>
-                <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: '#f0f2f5', borderRadius: 3, border: '1px solid #e0e0e0', pointerEvents: 'none' }}>
-                    <PreviewDialogMock />
-                </Box>
-            </StepBlock>
-
-            {/* 3. 管理者向け：単発シフトの追加・微調整・キャンセルの管理 */}
-            <StepBlock
-                title="3. 【管理者】単発シフトの調整・キャンセル（お休み）管理"
-                desc="展開された予定の微調整（担当ヘルパーの変更や時間の微調整）や、急なキャンセル発生時の管理手順です。"
-            >
-                <Typography variant="body2" color="text.secondary" mb={3}>
-                    間違えて作成したシフトはヘッダー右上の「ゴミ箱」から完全削除できます。<br />
-                    急な入院や都合によるお休みの場合は、履歴を残すために「お休みにする」ボタンを使用し、理由を添えてステータスをキャンセル（休）に変更します。
-                </Typography>
-                <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: '#f0f2f5', borderRadius: 3, border: '1px solid #e0e0e0', pointerEvents: 'none' }}>
-                    <ShiftFormModalMock />
-                </Box>
-            </StepBlock>
-
-            {/* 4. 一般・管理者共通：Webでの快適なシフト閲覧 */}
-            <StepBlock
-                title="4. 【全ユーザー】Webカレンダー・リストでのシフト閲覧"
-                desc="現場ヘルパーおよび管理者は、統合カレンダー画面から直観的なカレンダービューでスケジュールを一覧確認できます。"
-            >
-                <Typography variant="body2" color="text.secondary" mb={3}>
-                    スマホやPC of の画面サイズに合わせてレスポンシブに調整され、表示形式（月間・週間・リスト）をタブやボタンで瞬時に切り替えられます。<br />
-                    予定ブロックをクリックすることで、そのまま「サービス提供記録票」の入力画面へとダイレクトに遷移できます。
-                </Typography>
-                <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: '#f0f2f5', borderRadius: 3, border: '1px solid #e0e0e0', pointerEvents: 'none' }}>
-                    <CalendarGridMock />
-                </Box>
-            </StepBlock>
-
-            {/* 5. 一般・管理者共通：高度なシフトPDF出力（日またぎ対応） */}
-            <StepBlock
-                title="5. 【全ユーザー】日またぎシフトに対応した高度なPDF出力"
-                desc="夜勤や宿直など「日を跨ぐシフト」が入っている場合、翌日のカレンダーセルにも自動的に予定が分割マッピングされて印刷・エクスポートされます。"
-            >
-                <Typography variant="body2" color="text.secondary" mb={3}>
-                    「表示中の形式でPDF出力」ボタンを押すと、紙面での夜勤帯の確認・把握漏れを防ぐために、開始日の『20:00〜00:00』と翌日の『00:00〜09:00』の両方に予定が表示されるカレンダーPDFが自動生成されます。<br />
-                    また、管理者側ではスタッフ全員の横断シフトを一目で把握できる「全体マトリックスPDF」の印刷出力も可能です。
-                </Typography>
-                <Box sx={{ p: { xs: 2, md: 4 }, bgcolor: '#f0f2f5', borderRadius: 3, border: '1px solid #e0e0e0', pointerEvents: 'none' }}>
-                    <Stack spacing={4}>
-                        <PdfCalendarSplitMock />
-                        <Box display="flex" justifyContent="center" gap={2}>
-                            <Button variant="outlined" color="secondary" startIcon={<PictureAsPdfIcon />}>表示中の形式でPDF出力</Button>
-                            <Button variant="outlined" color="primary" startIcon={<GridOnIcon />}>全体マトリックスPDF</Button>
-                        </Box>
-                    </Stack>
-                </Box>
-            </StepBlock>
-        </Box>
-    );
+function SafetyCard({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      <Stack spacing={1}>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          {icon}
+          <Typography fontWeight={800}>{title}</Typography>
+        </Stack>
+        <Typography variant="body2" color="text.secondary">{body}</Typography>
+      </Stack>
+    </Paper>
+  );
 }

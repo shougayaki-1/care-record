@@ -24,16 +24,22 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { supabase } from '@/lib/supabase';
 import type { PdfReportData } from '@/components/pdf/ServiceRecordDocument';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { auditReportExport, softDeleteReports, transitionReports } from '@/app/actions/reports';
 import { updateClientGoogleLink } from '@/app/actions/clients';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { InnerPageHeader, PageBody, PageLayout } from '@/components/ui';
+import { InnerPageHeader, PageBody, PageLayout, TablePageSkeleton } from '@/components/ui';
 import { checkRecordPermission } from '@/utils/permissions';
 import { getReportStatusChipColor, getReportStatusLabel, type ReportStatus } from '@/utils/reportStatus';
+import {
+  buildReportsCsv,
+  getReportData,
+  getReportHelperNames as getHelperNames,
+} from '@/utils/reportsExport';
+import { useReportFilters } from '@/hooks/useReportFilters';
 
 type ReportValuesData = Record<string, FormValue>;
 
@@ -47,11 +53,9 @@ type Report = {
   report_values: { data: ReportValuesData } | { data: ReportValuesData }[];
 };
 type ClientData = { id: string; name: string };
-type CsvColumnDef = { header: string; key: string; type: 'value' | 'bool' | 'option'; matchValue?: string; };
 
 export default function ReportsClientPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const confirm = useConfirm();
@@ -62,37 +66,28 @@ export default function ReportsClientPage() {
   const [clients, setClients] = useState<ClientData[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [filterClientId, setFilterClientId] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [startDate, setStartDate] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  });
-  const [endDate, setEndDate] = useState('');
-  const [onlyPending, setOnlyPending] = useState(false);
-  const [filterShiftId, setFilterShiftId] = useState<string | null>(null);
-  
-  const [order, setOrder] = useState<'asc' | 'desc'>('desc');
-  const [orderBy, setOrderBy] = useState<string>('start_at');
+  const {
+    filterClientId,
+    setFilterClientId,
+    filterStatus,
+    setFilterStatus,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
+    onlyPending,
+    setOnlyPending,
+    filterShiftId,
+    order,
+    setOrder,
+    orderBy,
+    setOrderBy,
+    isCurrentMonth,
+  } = useReportFilters();
   const [selected, setSelected] = useState<readonly string[]>([]);
   
   const [processing, setProcessing] = useState(false);
   const [gasProgress, setGasProgress] = useState<{ total: number, current: number, currentName: string } | null>(null);
-
-  useEffect(() => {
-      const statusParam = searchParams.get('status');
-      const periodParam = searchParams.get('period');
-      const shiftParam = searchParams.get('shiftId');
-      if (statusParam === 'unapproved') setOnlyPending(true); else setOnlyPending(false);
-      if (periodParam === 'current_month') {
-          const now = new Date();
-          const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-          const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-          const formatDate = (d: Date) => d.toISOString().split('T')[0];
-          setStartDate(formatDate(firstDay)); setEndDate(formatDate(lastDay));
-      }
-      setFilterShiftId(shiftParam || null);
-  }, [searchParams]);
 
   const fetchClients = useCallback(async () => {
     if (!currentOrg) return;
@@ -143,7 +138,13 @@ export default function ReportsClientPage() {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order, filterShiftId]);
 
-  useEffect(() => { if (!wsLoading && currentOrg) { fetchClients(); fetchReports(); } }, [wsLoading, currentOrg, fetchClients, fetchReports]);
+  useEffect(() => {
+    if (!wsLoading && currentOrg) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Workspace/filter changes are the external data source for this page.
+      fetchClients();
+      fetchReports();
+    }
+  }, [wsLoading, currentOrg, fetchClients, fetchReports]);
 
   const handleSelectAllClick = (event: React.ChangeEvent<HTMLInputElement>) => { if (event.target.checked) { setSelected(reports.map(n => n.id)); return; } setSelected([]); };
   const handleClick = (event: React.MouseEvent<unknown>, id: string) => {
@@ -207,21 +208,6 @@ export default function ReportsClientPage() {
     } finally { setProcessing(false); }
   };
 
-  const getReportData = (report: Report): ReportValuesData | null => {
-      if (!report.report_values) return null;
-      if (Array.isArray(report.report_values)) return report.report_values[0]?.data;
-      return (report.report_values as { data: ReportValuesData }).data;
-  };
-  
-  const getHelperNames = (report: Report): string => {
-      const data = getReportData(report);
-      const helpers = (data?._helpers as string[]) || [];
-      if (helpers.length > 0) return helpers.join(', ');
-      
-      const fbName = Array.isArray(report.helper) ? report.helper[0]?.name : report.helper?.name;
-      return fbName || '不明'; 
-  };
-
   const getTargetReports = () => selected.length > 0 ? reports.filter(r => selected.includes(r.id)) : reports;
 
   const formatReportDateTime = (d: Date) => {
@@ -245,74 +231,12 @@ export default function ReportsClientPage() {
         const clientIds = Array.from(new Set(targetReports.map(r => r.clients.id)));
         const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
 
-        const dynamicColumns: CsvColumnDef[] = [];
-        const seenHeaders = new Set<string>();
-
-        templates?.forEach(tmpl => {
-            const schema = tmpl.schema as HelperFormItem[];
-            if (!schema) return;
-            schema.forEach(item => {
-                if (item.type === 'section') return;
-                if (['multicheckbox', 'select'].includes(item.type) && item.options) {
-                    const options = item.options.split(',');
-                    options.forEach((opt: string) => {
-                        const cleanOpt = opt.trim();
-                        const header = `${item.label}_${cleanOpt}`;
-                        if (!seenHeaders.has(header)) { dynamicColumns.push({ header: header, key: item.id, type: 'option', matchValue: cleanOpt }); seenHeaders.add(header); }
-                    });
-                } else if (item.type === 'checkbox') {
-                    const header = item.label;
-                    if (!seenHeaders.has(header)) { dynamicColumns.push({ header: header, key: item.id, type: 'bool' }); seenHeaders.add(header); }
-                } else {
-                    const header = item.label;
-                    if (!seenHeaders.has(header)) { dynamicColumns.push({ header: header, key: item.id, type: 'value' }); seenHeaders.add(header); }
-                }
-                if (item.hasDetail) {
-                    const header = `${item.label}_詳細`;
-                    if (!seenHeaders.has(header)) { dynamicColumns.push({ header: header, key: `${item.id}_detail`, type: 'value' }); seenHeaders.add(header); }
-                }
-            });
-        });
-
-        const fixedHeader = ['記録ID', 'ステータス', '利用者ID', '利用者名', '実施ヘルパー', '入力者名', '開始日付', '開始時刻', '終了日付', '終了時刻', 'サービス時間(h)', '移動時間(h)', '往復距離(km)', '交通費(円)', '承認者名', '承認日時', '作成日時', '更新日時'];
-        const headerRow = [...fixedHeader, ...dynamicColumns.map(c => c.header)];
-        
-        const rows = targetReports.map(r => {
-            const data = getReportData(r) || {};
-            const start = new Date(r.start_at);
-            const end = new Date(r.end_at);
-            const formatDate = (d: Date) => `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
-            const formatTime = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-            const statusText = getReportStatusLabel(r.status, r.status);
-
-            const fbInputter = Array.isArray(r.helper) ? r.helper[0]?.name : r.helper?.name;
-
-            const row = [
-                r.id, statusText, r.clients.id, r.clients.name, getHelperNames(r), fbInputter || '不明',
-                formatDate(start), formatTime(start), formatDate(end), formatTime(end),
-                data.service_time || '0', data.travel_time || '0',
-                data.round_trip_distance_km || '0', data.travel_cost_yen || '0',
-                r.approved_by_user?.name || '', r.approved_at ? new Date(r.approved_at).toLocaleString() : '',
-                new Date(r.created_at).toLocaleString(), new Date(r.updated_at).toLocaleString()
-            ];
-
-            dynamicColumns.forEach(col => {
-                const rawVal = data[col.key];
-                if (col.type === 'bool') { row.push(rawVal ? '○' : ''); } 
-                else if (col.type === 'option') {
-                    let isMatch = false;
-                    if (Array.isArray(rawVal)) isMatch = rawVal.includes(col.matchValue || '');
-                    else if (typeof rawVal === 'string') isMatch = rawVal === col.matchValue;
-                    row.push(isMatch ? '○' : '');
-                } else {
-                    if (rawVal === null || rawVal === undefined) row.push('');
-                    else { const strVal = Array.isArray(rawVal) ? rawVal.join(' ') : String(rawVal); row.push(`"${strVal.replace(/"/g, '""')}"`); }
-                }
-            });
-            return row.join(',');
-        });
-
-        const csvContent = '\uFEFF' + [headerRow.join(','), ...rows].join('\n'); 
+        const csvContent = buildReportsCsv(
+          targetReports,
+          (templates ?? []).map((template) => ({
+            schema: template.schema as HelperFormItem[] | null,
+          })),
+        );
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -543,10 +467,10 @@ export default function ReportsClientPage() {
   const handleOpenDetail = (report: Report) => { router.push(`/app/record/${report.clients.id}?reportId=${report.id}`); };
   let headerTitle = "全件表示";
   if (onlyPending) headerTitle = "未承認・差戻し";
-  if (searchParams.get('period') === 'current_month') headerTitle = "今月の記録";
+  if (isCurrentMonth) headerTitle = "今月の記録";
   if (filterShiftId) headerTitle = "シフト内の記録";
 
-  if (wsLoading || !currentOrg) return null;
+  if (wsLoading || !currentOrg) return <TablePageSkeleton />;
   const canApproveRecords = checkRecordPermission(currentOrg.effectivePermissions, 'approve', true);
   const canDeleteRecords = checkRecordPermission(currentOrg.effectivePermissions, 'delete', true);
 

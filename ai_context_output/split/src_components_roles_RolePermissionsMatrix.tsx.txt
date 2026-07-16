@@ -76,6 +76,7 @@ const MGMT_ITEMS: Array<{ label: string; key: keyof RolePermissions['management'
   { label: '事業所設定', key: 'organization', description: '事業所名、交通費、労働時間ルールなどを変更できます。' },
   { label: '連携設定', key: 'integrations', description: 'Googleドライブ、Googleカレンダーなどの外部連携を変更できます。' },
   { label: '操作ログ', key: 'auditLogs', description: '監査ログと過去ログを閲覧・エクスポートできます。' },
+  { label: 'バックアップ状況', key: 'backupStatus', description: 'バックアップの成否と退避データを閲覧できます。復元権限は含みません。' },
   { label: '予実・記録一覧', key: 'reports', description: '記録一覧、承認、予実管理、集計画面にアクセスできます。' },
   { label: 'ロール管理', key: 'roles', description: '業務ロールの作成、編集、削除ができます。' },
   { label: '事業所削除', key: 'organizationDelete', description: '事業所を削除状態にできます。通常は付与しないでください。' },

@@ -1,7 +1,7 @@
 'use server';
 
 import { sanitizeDbError } from '@/utils/errors';
-import { assertOrgPermission, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { listInternalWorkRecordsForStatistics } from '@/app/actions/internalWork';
 
 export type StatisticsData = {
@@ -18,9 +18,10 @@ export async function getStatisticsData(
   endAt: string,
 ): Promise<StatisticsData> {
   await assertOrgPermission(organizationId, 'reports');
+  const sessionClient = await createSessionClient();
 
   const [{ data: shiftsWithLinks, error: shiftsError }, { data: reports, error: reportsError }, { data: premiumTypes, error: premiumTypesError }, internalWorkRecords] = await Promise.all([
-    supabaseAdmin
+    sessionClient
       .from('shifts')
       .select(`
         id, start_at, end_at, status, client_id,
@@ -39,7 +40,7 @@ export async function getStatisticsData(
       .is('deleted_at', null)
       .gte('end_at', startAt)
       .lte('start_at', endAt),
-    supabaseAdmin
+    sessionClient
       .from('reports')
       .select(`
         id, start_at, end_at, status, client_id, segment_id, actual_service_type_id,
@@ -55,7 +56,7 @@ export async function getStatisticsData(
       .in('status', ['pending', 'approved', 'remanded'])
       .gte('end_at', startAt)
       .lte('start_at', endAt),
-    supabaseAdmin
+    sessionClient
       .from('labor_premium_types')
       .select('*')
       .eq('organization_id', organizationId)
