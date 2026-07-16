@@ -43,7 +43,11 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
   await page.getByLabel('事業所名').fill(user.orgName);
   await page.getByRole('button', { name: '作成して開始' }).click();
 
-  await page.waitForURL('**/app/record', { timeout: 30000 });
+  await page.waitForURL(/\/app(?:\/record)?/, { timeout: 30000 });
+  if (new URL(page.url()).pathname === '/app') {
+    await page.getByRole('link', { name: '記録を作成', exact: true }).click();
+    await page.waitForURL('**/app/record', { timeout: 30000 });
+  }
   await expect(page.getByText(user.orgName).first()).toBeVisible();
 
   // ★追加: 利用規約モーダルが表示されていたら同意して閉じる
@@ -59,7 +63,7 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
 
   // ★修正: 重複エラー回避のため、可視状態の要素のみを対象にする
   // locator('text=... >> visible=true') という書き方でフィルタリングできます
-  await expect(page.locator('text=記録を作成 >> visible=true')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole('link', { name: '記録を作成', exact: true })).toBeVisible({ timeout: 10000 });
 };
 
 // メニューをクリックするヘルパー（モバイル対応）
@@ -70,6 +74,5 @@ export const clickMenu = async (page: Page, name: string) => {
   }
   
   // ★修正: ここも同様に可視要素のみをクリック対象にする
-  const menuItem = page.locator(`text=${name} >> visible=true`);
-  await menuItem.click();
+  await page.getByRole('link', { name, exact: true }).click();
 };

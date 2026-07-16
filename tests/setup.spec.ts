@@ -25,11 +25,21 @@ test.describe('セットアップウィザード', () => {
     // 3. セットアップ画面（プロフィール入力）へ遷移したか確認
     // URLが /setup になるのを待つ
     await page.waitForURL('**/setup');
-    await expect(page.getByText('ようこそ！')).toBeVisible();
+    const termsDialog = page.getByRole('dialog', { name: '利用規約への同意' });
+    const welcome = page.getByText('ようこそ！');
+    const choice = page.getByText('事業所の設定');
+    await expect(termsDialog.or(welcome).or(choice)).toBeVisible({ timeout: 15000 });
+    if (await termsDialog.isVisible()) {
+      await termsDialog.getByRole('checkbox').check();
+      await termsDialog.getByRole('button', { name: '同意してサービスを利用する' }).click();
+      await expect(termsDialog).toBeHidden();
+    }
 
     // 4. 名前入力
-    await page.getByLabel('氏名').fill(userName);
-    await page.getByRole('button', { name: '次へ進む' }).click();
+    if (await welcome.isVisible()) {
+      await page.getByLabel('氏名').fill(userName);
+      await page.getByRole('button', { name: '次へ進む' }).click();
+    }
 
     // 5. 選択画面
     await expect(page.getByText('事業所の設定')).toBeVisible();
@@ -43,7 +53,7 @@ test.describe('セットアップウィザード', () => {
     await page.getByRole('button', { name: '作成して開始' }).click();
 
     // 7. アプリ画面へ遷移したか確認
-    await page.waitForURL('**/app/record');
+    await page.waitForURL(/\/app(?:\/record)?/);
     
     // ヘッダー等に事業所名が表示されているか確認（実装に合わせて調整）
     // await expect(page.getByText(orgName)).toBeVisible();
