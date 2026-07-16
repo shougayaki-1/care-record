@@ -10,77 +10,105 @@ export const generateUser = () => {
   };
 };
 
+/**
+ * 利用規約モーダルはルートレイアウトのマウント時チェックで非同期に開くため、
+ * どの操作中に現れてもクリックを遮る可能性がある。
+ * addLocatorHandler で「表示されて操作を遮ったら同意して閉じる」を自動化する。
+ */
+export const registerTermsHandler = async (page: Page) => {
+  const dialog = page.getByRole('dialog', { name: '利用規約への同意' });
+  await page.addLocatorHandler(dialog, async () => {
+    await dialog.getByRole('checkbox').check();
+    await dialog.getByRole('button', { name: '同意してサービスを利用する' }).click();
+    await expect(dialog).toBeHidden();
+  });
+};
+
+/** 新規登録タブからアカウントを作成し、/setup へ遷移するまで待つ */
+export const signUp = async (page: Page, email: string, password: string) => {
+  await page.getByRole('tab', { name: '新規登録' }).click();
+  await page.getByLabel('メールアドレス').fill(email);
+  await page.getByLabel('パスワード').fill(password);
+  await page.getByRole('button', { name: 'アカウントを作成' }).click();
+  await page.waitForURL('**/setup**', { timeout: 30000 });
+};
+
 export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUser>) => {
   await page.goto('http://localhost:3000');
-  
-  await page.getByRole('tab', { name: '新規登録' }).click();
-  await page.getByLabel('メールアドレス').fill(user.email);
-  await page.getByLabel('パスワード').fill(user.password);
-  await page.getByRole('button', { name: 'アカウントを作成' }).click();
+  await registerTermsHandler(page);
+  await signUp(page, user.email, user.password);
 
-  // 利用規約同意はレイアウトのモーダルとしてセットアップ画面より先に（または遅れて）表示される。
-  // handle_new_user トリガーで profiles.name に email が入るため、新規ユーザーでも
-  // 「ようこそ！」をスキップして「事業所の設定」から始まることがある。
-  // モーダルとセットアップ画面が同時に見えることがあるため .first() で strict mode 違反を避ける。
-  const termsDialog = page.getByRole('dialog', { name: '利用規約への同意' });
+  // handle_new_user トリガーで profiles.name にメールアドレスが入るため、
+  // 通常「ようこそ！」(氏名入力) はスキップされて「事業所の設定」から始まる。
   const welcome = page.getByText('ようこそ！');
   const choice = page.getByText('事業所の設定');
-  const acceptTermsIfShown = async () => {
-    if (await termsDialog.isVisible()) {
-      await termsDialog.getByRole('checkbox').check();
-      await termsDialog.getByRole('button', { name: '同意してサービスを利用する' }).click();
-      await expect(termsDialog).toBeHidden();
-    }
-  };
-
-  await expect(termsDialog.or(welcome).or(choice).first()).toBeVisible({ timeout: 30000 });
-  await acceptTermsIfShown();
-
   await expect(welcome.or(choice).first()).toBeVisible({ timeout: 30000 });
   if (await welcome.isVisible()) {
     await page.getByLabel('氏名').fill(user.name);
     await page.getByRole('button', { name: '次へ進む' }).click();
+    await expect(choice).toBeVisible();
   }
 
-  await expect(page.getByText('事業所の設定')).toBeVisible();
-  // モーダルが遅れて開いた場合、クリックがオーバーレイに遮られるため直前に再確認する。
-  await acceptTermsIfShown();
   await page.getByText('新しい事業所を作成する').click();
-  
   await expect(page.getByText('事業所の作成')).toBeVisible();
   await page.getByLabel('事業所名').fill(user.orgName);
   await page.getByRole('button', { name: '作成して開始' }).click();
 
-  await page.waitForURL(/\/app(?:\/record)?/, { timeout: 30000 });
-  if (new URL(page.url()).pathname === '/app') {
-    await page.getByRole('link', { name: '記録を作成', exact: true }).click();
-    await page.waitForURL('**/app/record', { timeout: 30000 });
-  }
-  await expect(page.getByText(user.orgName).first()).toBeVisible();
-
-  // ★追加: 利用規約モーダルが表示されていたら同意して閉じる
-  const agreeButton = page.getByRole('button', { name: '同意してサービスを利用する' });
-  if (await agreeButton.isVisible()) {
-    const checkbox = page.getByRole('checkbox');
-    if (await checkbox.isVisible()) {
-        await checkbox.check();
-    }
-    await agreeButton.click();
-    await expect(agreeButton).toBeHidden();
-  }
-
-  // ★修正: 重複エラー回避のため、可視状態の要素のみを対象にする
-  // locator('text=... >> visible=true') という書き方でフィルタリングできます
-  await expect(page.getByRole('link', { name: '記録を作成', exact: true })).toBeVisible({ timeout: 10000 });
+  // /app はワークスペース解決後 /app/record へ自動リダイレクトされる
+  await page.waitForURL('**/app/record', { timeout: 30000 });
+  await expect(page.getByRole('button', { name: user.orgName })).toBeVisible({ timeout: 15000 });
 };
 
-// メニューをクリックするヘルパー（モバイル対応）
+// サイドバーのメニューをクリックするヘルパー（モバイル対応）
 export const clickMenu = async (page: Page, name: string) => {
-  const menuButton = page.getByRole('button', { name: 'CareRecord' }).locator('..').getByRole('button').first();
+  const menuButton = page.getByRole('button', { name: 'メニューを開く' });
   if (await menuButton.isVisible()) {
     await menuButton.click();
   }
-  
-  // ★修正: ここも同様に可視要素のみをクリック対象にする
   await page.getByRole('link', { name, exact: true }).click();
+};
+
+/** ヘッダーのアカウントメニューからログアウトし、ログイン画面へ戻るまで待つ */
+export const logout = async (page: Page) => {
+  await page.getByRole('button', { name: 'アカウント' }).click();
+  await page.getByRole('menuitem', { name: 'ログアウト' }).click();
+  await expect(page.getByRole('button', { name: 'ログイン', exact: true })).toBeVisible({ timeout: 20000 });
+};
+
+/** ログイン画面から既存アカウントでログインし、記録作成ページに入るまで待つ */
+export const login = async (page: Page, email: string, password: string) => {
+  await page.getByLabel('メールアドレス').fill(email);
+  await page.getByLabel('パスワード').fill(password);
+  await page.getByRole('button', { name: 'ログイン', exact: true }).click();
+  await page.waitForURL('**/app/record', { timeout: 30000 });
+};
+
+/**
+ * 利用者を新規登録する。
+ * 登録成功でアプリは詳細設定ページ(/app/clients/{id}?setup=1)へ自動遷移する。
+ */
+export const registerClient = async (page: Page, name: string) => {
+  await clickMenu(page, '利用者管理');
+  await expect(page.getByRole('heading', { name: '利用者管理' })).toBeVisible();
+  await page.getByRole('button', { name: '新規登録' }).click();
+  await page.getByLabel('利用者氏名').fill(name);
+  await page.getByRole('button', { name: '登録', exact: true }).click();
+  await page.waitForURL(/\/app\/clients\/[^/?]+\?setup=1/, { timeout: 20000 });
+  await expect(page.getByText(`${name} 様`)).toBeVisible();
+};
+
+/** スタッフ(名簿)管理でスタッフを追加する。accountLabel を渡すとアカウント紐付けも行う */
+export const registerStaff = async (page: Page, staffName: string, accountLabel?: string) => {
+  await clickMenu(page, 'スタッフ(名簿)管理');
+  await expect(page.getByText('現場スタッフ名簿')).toBeVisible();
+  await page.getByRole('button', { name: 'スタッフを追加' }).click();
+  const dialog = page.getByRole('dialog', { name: 'スタッフの追加' });
+  await dialog.getByLabel('スタッフ名 (表示用)').fill(staffName);
+  if (accountLabel) {
+    await dialog.getByLabel('紐付けるアカウント (任意)').click();
+    await page.getByRole('option', { name: accountLabel }).click();
+  }
+  await dialog.getByRole('button', { name: '保存' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText(staffName).first()).toBeVisible({ timeout: 15000 });
 };

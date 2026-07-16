@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path TO public, extensions;
-SELECT plan(37);
+SELECT plan(42);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
@@ -145,6 +145,49 @@ SELECT throws_ok(
   'new report capacity guard rejects writes at 450 MiB');
 SELECT ok(NOT has_function_privilege('authenticated','public.get_database_capacity_status()','EXECUTE'),
   'database capacity details are not exposed to authenticated clients');
+
+-- 20260716000019: authenticated の INSERT ... RETURNING（supabase-js の .insert().select()）が
+-- 自己参照 RESTRICTIVE ポリシーで拒否されない回帰テスト。テナント境界は維持されること。
+INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
+VALUES
+  ('e2e00000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'rls-owner@example.invalid', 'x', now(), now(), now()),
+  ('e2e00000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'rls-outsider@example.invalid', 'x', now(), now(), now());
+INSERT INTO public.profiles (id, name) VALUES
+  ('e2e00000-0000-0000-0000-000000000001', 'RLS Owner'),
+  ('e2e00000-0000-0000-0000-000000000002', 'RLS Outsider')
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
+INSERT INTO public.organizations (id, name) VALUES ('e2e00000-0000-0000-0000-00000000000a', 'RLS Fixture Org');
+INSERT INTO public.organization_members (organization_id, user_id, role)
+VALUES ('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-000000000001', 'owner');
+INSERT INTO public.user_session_activity (session_hash, auth_session_id, user_id, last_activity, absolute_expires_at) VALUES
+  ('rls-owner-hash', 'rls-owner-session', 'e2e00000-0000-0000-0000-000000000001', now(), now() + interval '1 hour'),
+  ('rls-outsider-hash', 'rls-outsider-session', 'e2e00000-0000-0000-0000-000000000002', now(), now() + interval '1 hour');
+INSERT INTO public.clients (id, organization_id, name)
+VALUES ('e2e00000-0000-0000-0000-00000000000b', 'e2e00000-0000-0000-0000-00000000000a', 'RLS Fixture Client');
+
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000001","role":"authenticated","session_id":"rls-owner-session"}', true);
+SELECT lives_ok(
+  $$ INSERT INTO public.clients (organization_id, name)
+     VALUES ('e2e00000-0000-0000-0000-00000000000a', 'RETURNING Client')
+     RETURNING id, name $$,
+  'org owner can INSERT clients with RETURNING (insert().select())');
+SELECT lives_ok(
+  $$ INSERT INTO public.shifts (organization_id, client_id, title, start_at, end_at, status)
+     VALUES ('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-00000000000b', 'RETURNING Shift', now(), now() + interval '1 hour', 'published')
+     RETURNING id $$,
+  'org owner can INSERT shifts with RETURNING (insert().select())');
+SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000002","role":"authenticated","session_id":"rls-outsider-session"}', true);
+SELECT is((SELECT count(*)::bigint FROM public.clients WHERE organization_id = 'e2e00000-0000-0000-0000-00000000000a'), 0::bigint,
+  'non-members still cannot read another org''s clients');
+SELECT is((SELECT count(*)::bigint FROM public.shifts WHERE organization_id = 'e2e00000-0000-0000-0000-00000000000a'), 0::bigint,
+  'non-members still cannot read another org''s shifts');
+SELECT throws_ok(
+  $$ INSERT INTO public.clients (organization_id, name)
+     VALUES ('e2e00000-0000-0000-0000-00000000000a', 'Intruder Client') $$,
+  '42501', 'new row violates row-level security policy for table "clients"',
+  'non-members still cannot INSERT clients into another org');
+RESET ROLE;
 
 SELECT * FROM finish();
 ROLLBACK;
