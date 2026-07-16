@@ -35,6 +35,9 @@ jobs:
       run: npx playwright install --with-deps chromium
     - name: Build application
       run: npm run build
+      env:
+        # 型チェックワーカーがデフォルトの約2GBヒープでOOMになるため拡張する
+        NODE_OPTIONS: --max-old-space-size=6144
     - name: Start application
       run: |
         npm run start > /tmp/care-record-e2e.log 2>&1 &
