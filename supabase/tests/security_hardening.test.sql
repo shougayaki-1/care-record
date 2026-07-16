@@ -1,10 +1,41 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(33);
+SET search_path TO public, extensions;
+SELECT plan(37);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
 SELECT ok(NOT has_table_privilege('anon','public.invitations','SELECT'), 'anonymous cannot list invitations');
+SELECT is((
+  SELECT count(*)::bigint
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public'
+    AND c.relkind IN ('r', 'p')
+    AND (
+      has_table_privilege('anon', c.oid, 'SELECT')
+      OR has_table_privilege('anon', c.oid, 'INSERT')
+      OR has_table_privilege('anon', c.oid, 'UPDATE')
+      OR has_table_privilege('anon', c.oid, 'DELETE')
+    )
+), 0::bigint, 'anonymous has no direct DML privilege on public tables');
+SELECT is((
+  SELECT count(*)::bigint
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public'
+    AND p.proname <> 'get_invitation_preview'
+    AND has_function_privilege('anon', p.oid, 'EXECUTE')
+), 0::bigint, 'anonymous cannot execute public RPCs other than invitation preview');
+SELECT ok(has_function_privilege('anon','public.get_invitation_preview(text)','EXECUTE'),
+  'anonymous may execute only the bounded invitation preview RPC');
+SELECT is((
+  SELECT count(*)::bigint
+  FROM information_schema.role_table_grants
+  WHERE table_schema = 'public'
+    AND grantee = 'authenticated'
+    AND privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER')
+), 0::bigint, 'authenticated clients have no maintenance or DDL-adjacent table privileges');
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated","session_id":"test-session"}', true);
 SELECT throws_ok(
