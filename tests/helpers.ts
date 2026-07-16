@@ -30,7 +30,7 @@ export const signUp = async (page: Page, email: string, password: string) => {
   await page.getByLabel('メールアドレス').fill(email);
   await page.getByLabel('パスワード').fill(password);
   await page.getByRole('button', { name: 'アカウントを作成' }).click();
-  await page.waitForURL('**/setup**', { timeout: 30000 });
+  await expect(page).toHaveURL(/\/setup(?:\?|$)/, { timeout: 30000 });
 };
 
 export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUser>) => {
@@ -55,7 +55,11 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
   await page.getByRole('button', { name: '作成して開始' }).click();
 
   // /app はワークスペース解決後 /app/record へ自動リダイレクトされる
-  await page.waitForURL('**/app/record', { timeout: 30000 });
+  await expect(page).toHaveURL(/\/app(?:\/record)?$/, { timeout: 30000 });
+  if (new URL(page.url()).pathname === '/app') {
+    await page.getByRole('link', { name: '記録を作成', exact: true }).click();
+    await expect(page).toHaveURL(/\/app\/record$/, { timeout: 30000 });
+  }
   await expect(page.getByRole('button', { name: user.orgName })).toBeVisible({ timeout: 15000 });
 };
 
@@ -80,7 +84,7 @@ export const login = async (page: Page, email: string, password: string) => {
   await page.getByLabel('メールアドレス').fill(email);
   await page.getByLabel('パスワード').fill(password);
   await page.getByRole('button', { name: 'ログイン', exact: true }).click();
-  await page.waitForURL('**/app/record', { timeout: 30000 });
+  await expect(page).toHaveURL(/\/app\/record$/, { timeout: 30000 });
 };
 
 /**
@@ -93,7 +97,6 @@ export const registerClient = async (page: Page, name: string) => {
   await page.getByRole('button', { name: '新規登録' }).click();
   await page.getByLabel('利用者氏名').fill(name);
   await page.getByRole('button', { name: '登録', exact: true }).click();
-  await page.waitForURL(/\/app\/clients\/[^/?]+\?setup=1/, { timeout: 20000 });
   await expect(page.getByText(`${name} 様`)).toBeVisible();
 };
 

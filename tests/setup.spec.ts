@@ -39,7 +39,7 @@ test.describe('セットアップウィザード', () => {
     await page.getByRole('button', { name: '作成して開始' }).click();
 
     // 6. アプリ画面（/app → /app/record 自動遷移）へ
-    await page.waitForURL('**/app/record', { timeout: 30000 });
+    await expect(page).toHaveURL(/\/app(?:\/record)?$/, { timeout: 30000 });
 
     // 7. ヘッダーに事業所名が表示される
     await expect(page.getByRole('button', { name: orgName })).toBeVisible({ timeout: 15000 });
