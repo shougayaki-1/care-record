@@ -132,6 +132,19 @@ export type ShiftVarianceRow = {
   isMonthClipped: boolean;
 };
 
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+function getJstMonthBounds(targetMonth: string): { monthStart: Date; monthEnd: Date } {
+  const [yearStr, monthStr] = targetMonth.split('-');
+  const year = parseInt(yearStr, 10);
+  const monthIndex = parseInt(monthStr, 10) - 1;
+
+  return {
+    monthStart: new Date(Date.UTC(year, monthIndex, 1) - JST_OFFSET_MS),
+    monthEnd: new Date(Date.UTC(year, monthIndex + 1, 1) - JST_OFFSET_MS),
+  };
+}
+
 export function getOverlappingHours(start: Date, end: Date, monthStart: Date, monthEnd: Date): number {
   const overlapStart = start > monthStart ? start : monthStart;
   const overlapEnd = end < monthEnd ? end : monthEnd;
@@ -225,9 +238,7 @@ export function aggregateByTab({
       };
     }
 
-    const [yearStr, monthStr] = targetMonth.split('-');
-    const monthStart = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, 1, 0, 0, 0);
-    const monthEnd = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10), 0, 23, 59, 59, 999);
+    const { monthStart, monthEnd } = getJstMonthBounds(targetMonth);
 
     const statsMap: Record<string, AggregatedRow> = {};
     const staffShiftsMap: Record<string, Array<{ start_at: string; end_at: string }>> = {};
@@ -456,9 +467,7 @@ export function buildShiftVarianceRows({
   targetMonth: string;
 }): ShiftVarianceRow[] {
   if (!targetMonth) return [];
-  const [yearStr, monthStr] = targetMonth.split('-');
-  const monthStart = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, 1, 0, 0, 0);
-  const monthEnd = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10), 0, 23, 59, 59, 999);
+  const { monthStart, monthEnd } = getJstMonthBounds(targetMonth);
   const linkedReportIds = new Set<string>();
   const rows = rawShiftsWithLinks.flatMap<ShiftVarianceRow>((shift) => {
     const fallbackStaffNames = (shift.shift_staffs ?? [])

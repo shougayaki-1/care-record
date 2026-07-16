@@ -1,8 +1,28 @@
-import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const allowlistPath = new URL('./service-role-allowlist.txt', import.meta.url);
 const operationsPath = new URL('./service-role-operations.json', import.meta.url);
+const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
+const sourceRoot = join(repositoryRoot, 'src');
+
+function listSourceFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const absolutePath = join(directory, entry.name);
+    if (entry.isDirectory()) return listSourceFiles(absolutePath);
+    if (!entry.isFile()) return [];
+
+    const repositoryPath = relative(repositoryRoot, absolutePath).split(sep).join('/');
+    return repositoryPath.includes('.test.') ? [] : [repositoryPath];
+  });
+}
+
+const sourceFiles = listSourceFiles(sourceRoot);
+const sourceByPath = new Map(
+  sourceFiles.map((file) => [file, readFileSync(join(repositoryRoot, file), 'utf8')]),
+);
+const filesMatching = (pattern) => sourceFiles.filter((file) => pattern.test(sourceByPath.get(file)));
 const allowed = new Set(
   readFileSync(allowlistPath, 'utf8')
     .split(/\r?\n/u)
@@ -11,14 +31,7 @@ const allowed = new Set(
 );
 const operations = JSON.parse(readFileSync(operationsPath, 'utf8'));
 
-const output = execFileSync('rg', [
-  '-l',
-  'import .*supabaseAdmin',
-  'src',
-  '--glob',
-  '!**/*.test.*',
-], { encoding: 'utf8' }).trim();
-const actual = new Set(output ? output.split(/\r?\n/u) : []);
+const actual = new Set(filesMatching(/import .*supabaseAdmin/u));
 const unregistered = [...actual].filter((file) => !allowed.has(file)).sort();
 const stale = [...allowed].filter((file) => !actual.has(file)).sort();
 
@@ -32,10 +45,7 @@ if (unregistered.length > 0 || stale.length > 0) {
   process.exit(1);
 }
 
-const keyOutput = execFileSync('rg', [
-  '-l', 'SUPABASE_SERVICE_ROLE_KEY', 'src', '--glob', '!**/*.test.*',
-], { encoding: 'utf8' }).trim();
-const keyUsers = new Set(keyOutput ? keyOutput.split(/\r?\n/u) : []);
+const keyUsers = new Set(filesMatching(/SUPABASE_SERVICE_ROLE_KEY/u));
 const allowedKeyUsers = new Set([
   'src/lib/env/schema.ts',
   'src/utils/supabase/auth.ts',
@@ -67,8 +77,9 @@ for (const entry of operations) {
   }
 }
 const registeredConsumers = new Map(operations.flatMap((entry) => entry.consumers.map((consumer) => [`${entry.accessor}:${consumer}`, true])));
-const usageOutput = execFileSync('rg', ['-l', 'serviceRoleFor[A-Za-z]+', 'src', '--glob', '!src/utils/supabase/serviceRole.ts', '--glob', '!**/*.test.*'], { encoding: 'utf8' }).trim();
-for (const consumer of usageOutput.split(/\r?\n/u).filter(Boolean)) {
+const wrapperPath = 'src/utils/supabase/serviceRole.ts';
+const usageFiles = filesMatching(/serviceRoleFor[A-Za-z]+/u).filter((file) => file !== wrapperPath);
+for (const consumer of usageFiles) {
   const source = readFileSync(new URL(`../../${consumer}`, import.meta.url), 'utf8');
   for (const match of source.matchAll(/serviceRoleFor[A-Za-z]+/gu)) {
     if (!registeredConsumers.has(`${match[0]}:${consumer}`)) ledgerErrors.push(`unregistered consumer ${match[0]} in ${consumer}`);

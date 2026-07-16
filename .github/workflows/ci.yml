@@ -64,9 +64,7 @@ jobs:
       - name: Run database security tests
         run: supabase test db
       - name: Lint database functions and schema
-        run: |
-          supabase db lint --local --level warning | tee /tmp/db-lint-output.txt
-          tail -n 1 /tmp/db-lint-output.txt | jq -e '.results | length == 0'
+        run: supabase db lint --local --level warning --fail-on warning
       - name: Stop local Supabase
         if: ${{ always() }}
         run: supabase stop --no-backup
