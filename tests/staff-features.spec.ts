@@ -10,8 +10,9 @@ test.describe('スタッフ機能（記録作成）', () => {
 
     // 事前準備1: 自分のアカウントに紐付いたスタッフを名簿へ登録する
     // （記録の担当スタッフはスタッフ名簿から選択されるため）
-    // アカウント選択肢はプロフィールに設定された表示名を使う
-    await registerStaff(page, user.name, user.name);
+    // アカウント選択肢はプロフィールの表示名を使うが、handle_new_userトリガーにより
+    // 新規登録直後のprofiles.nameはメールアドレスのまま（setupNewOrgのコメント参照）
+    await registerStaff(page, user.name, user.email);
 
     // 事前準備2: 利用者を登録（詳細設定ページへ自動遷移する）
     await registerClient(page, '鈴木 花子');
