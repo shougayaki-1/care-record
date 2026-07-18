@@ -53,7 +53,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run security:service-role
-      - run: npm run build
+      - name: npm run build
+        run: npm run build
+        env:
+          # 型チェックワーカーがデフォルトの約2GBヒープでOOMになるため拡張する
+          NODE_OPTIONS: --max-old-space-size=6144
 
   migrate:
     name: Apply Supabase migrations
