@@ -104,6 +104,7 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -118,6 +119,7 @@ jobs:
           test -n "$VERCEL_TOKEN"
           test -n "$VERCEL_ORG_ID"
           test -n "$VERCEL_PROJECT_ID"
+          test -n "$VERCEL_AUTOMATION_BYPASS_SECRET"
       - name: Pull Vercel environment
         run: npx --yes vercel@54.18.6 pull --yes --environment=${{ inputs.environment == 'production' && 'production' || 'preview' }} --token="$VERCEL_TOKEN"
       - name: Build Vercel output
@@ -134,9 +136,13 @@ jobs:
       - name: Verify non-PII health endpoint
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error "$DEPLOYMENT_URL/api/health" > health.json; then
+            # Preview/staging デプロイは Vercel の Deployment Protection (SSO) がかかり、
+            # 素の curl だと /api/health が SSO へリダイレクトされ JSON が返らない。
+            # Protection Bypass for Automation のヘッダーで無認証アクセスを許可する。
+            if curl --fail --silent --show-error -H "x-vercel-protection-bypass: $BYPASS_SECRET" "$DEPLOYMENT_URL/api/health" > health.json; then
               jq -e '.ok == true and (.database.capacity | type == "string")' health.json
               exit 0
             fi
