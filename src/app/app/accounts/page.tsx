@@ -460,8 +460,8 @@ export default function AccountsPage() {
             <b>{selectedAccount?.name}</b> さんの権限を変更します。
           </Typography>
           <FormControl fullWidth size="small">
-            <InputLabel>システム権限</InputLabel>
-            <Select value={editRole} onChange={(e) => setEditRole(e.target.value)} label="システム権限">
+            <InputLabel id="edit-system-role-label">システム権限</InputLabel>
+            <Select labelId="edit-system-role-label" value={editRole} onChange={(e) => setEditRole(e.target.value)} label="システム権限">
               <MenuItem value="member">メンバー - 権限はロールで管理</MenuItem>
               {selectedAccount?.status === 'active' && (
                 <MenuItem value="owner">オーナー - 所有者</MenuItem>
@@ -545,8 +545,8 @@ export default function AccountsPage() {
                     <TextField label="招待する人の名前" placeholder="例: 山田 太郎" size="small" fullWidth required value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} helperText="招待された人の表示名として使われます" />
                     <TextField label="招待先メールアドレス" type="email" size="small" fullWidth required value={newInviteEmail} onChange={(e) => setNewInviteEmail(e.target.value)} helperText="このメールアドレスでログインした人だけが72時間以内に利用できます" />
                     <FormControl fullWidth size="small">
-                      <InputLabel>スタッフ名簿との紐付け</InputLabel>
-                      <Select value={selectedInviteStaffId} onChange={(e) => setSelectedInviteStaffId(e.target.value)} label="スタッフ名簿との紐付け">
+                      <InputLabel id="invite-staff-link-label">スタッフ名簿との紐付け</InputLabel>
+                      <Select labelId="invite-staff-link-label" value={selectedInviteStaffId} onChange={(e) => setSelectedInviteStaffId(e.target.value)} label="スタッフ名簿との紐付け">
                         <MenuItem value="none">紐付けない</MenuItem>
                         {inviteStaffCandidates.map((staff) => (
                           <MenuItem key={staff.id} value={staff.id}>
