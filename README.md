@@ -1,5 +1,11 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Release readiness
+
+- [Approved system decisions](docs/system-decisions.md)
+- [Release readiness checklist](docs/release-readiness-checklist.md)
+- [Implementation gap plan](docs/implementation-gap-plan.md)
+
 ## Getting Started
 
 First, run the development server:

@@ -1,0 +1,74 @@
+[
+  {
+    "accessor": "serviceRoleForAuthManagement",
+    "purpose": "Supabase Auth user directory and self-deletion ban",
+    "targets": ["auth.users"],
+    "authorization": "Authenticated account manager or the current user; tenant IDs are resolved before Auth lookup",
+    "audit": "account listing is read-only; user deletion emits user.deletion_request",
+    "consumers": ["src/app/actions/accounts.ts", "src/app/actions/user.ts"]
+  },
+  {
+    "accessor": "serviceRoleForBackup",
+    "purpose": "Authorized backup generation and export",
+    "targets": ["backup_runs", "reports", "clients", "form_templates"],
+    "authorization": "management.backupStatus is checked for every organization input",
+    "audit": "backup view and generation actions emit organization-scoped audit events",
+    "consumers": ["src/app/actions/backup.ts", "src/utils/gcs/export.ts"]
+  },
+  {
+    "accessor": "serviceRoleForIncidentResponse",
+    "purpose": "Non-PII health capacity probe and approved shift repair",
+    "targets": ["database capacity RPC", "maintenance_runs", "shift derived rows"],
+    "authorization": "Health returns only capacity state; repair requires shift repair permission and explicit plan hash",
+    "audit": "GitHub/Discord health evidence and maintenance run/item records",
+    "consumers": ["src/app/actions/shiftRepair.ts", "src/app/api/health/route.ts"]
+  },
+  {
+    "accessor": "serviceRoleForPlatformMetadata",
+    "purpose": "Super-admin platform metadata without customer record or file access",
+    "targets": ["organization identifiers and aggregate counts"],
+    "authorization": "assertSuperAdmin; content retrieval actions are absent/rejected",
+    "audit": "Infrastructure access follows the WORM audit procedure",
+    "consumers": ["src/app/actions/super-admin.ts"]
+  },
+  {
+    "accessor": "serviceRoleForAuditPreservation",
+    "purpose": "Append-only audit event write and archive checkpoint",
+    "targets": ["audit_events", "audit_archive_checkpoints"],
+    "authorization": "Server-derived actor/session context or CRON_SECRET",
+    "audit": "Hash-chained events and archive checkpoint/receipt",
+    "consumers": ["src/utils/supabase/audit.ts", "src/app/api/cron/archive-audit/route.ts"]
+  },
+  {
+    "accessor": "serviceRoleForLoginSecurity",
+    "purpose": "Login attempt throttling",
+    "targets": ["login_attempts"],
+    "authorization": "Server-derived account hash and network hash",
+    "audit": "Every success/failure is recorded without plaintext credentials",
+    "consumers": ["src/utils/supabase/loginAttempts.ts"]
+  },
+  {
+    "accessor": "serviceRoleForOAuthNonce",
+    "purpose": "Single-use OAuth state storage",
+    "targets": ["oauth_nonces"],
+    "authorization": "Authenticated user, organization, provider and hashed nonce are fixed at issue time",
+    "audit": "Connection completion emits integration audit events",
+    "consumers": ["src/utils/supabase/oauthNonce.ts"]
+  },
+  {
+    "accessor": "serviceRoleForServerSessions",
+    "purpose": "Server-managed session activity and one-time reauthentication grants",
+    "targets": ["user_session_activity", "reauth_grants"],
+    "authorization": "Verified user ID, auth session ID, purpose, expiry and token hash",
+    "audit": "Authentication and protected operations emit purpose-specific audit events",
+    "consumers": ["src/app/actions/auth.ts", "src/utils/supabase/reauth.ts"]
+  },
+  {
+    "accessor": "serviceRoleForRetentionDryRun",
+    "purpose": "Retention candidate inventory only",
+    "targets": ["logically deleted retention candidates"],
+    "authorization": "CRON_SECRET; physical deletion path throws unconditionally",
+    "audit": "Dry-run counts only; no object or row deletion is possible",
+    "consumers": ["src/utils/supabase/retention.ts"]
+  }
+]

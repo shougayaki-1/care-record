@@ -69,7 +69,11 @@ export default function ClientsPage() {
     }
   }, [currentOrg, showArchived]);
 
-  useEffect(() => { if (!wsLoading && currentOrg) fetchClients(); }, [wsLoading, currentOrg, fetchClients]);
+  useEffect(() => {
+    if (!wsLoading && currentOrg) {
+      queueMicrotask(() => void fetchClients());
+    }
+  }, [wsLoading, currentOrg, fetchClients]);
 
   const handleAddClient = async () => {
     if (!newName.trim() || !currentOrg) return;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Box, Stack, CircularProgress, Alert, Chip,
   Table, TableBody, TableCell, TableHead, TableRow,
@@ -11,9 +11,15 @@ import {
   type StaffRole,
 } from '@/app/actions/staffRoles';
 
-export default function StaffRoleSettings({ orgId }: { orgId: string }) {
-  const [rows, setRows] = useState<StaffRole[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function StaffRoleSettings({
+  orgId,
+  initialStaffRoles,
+}: {
+  orgId: string;
+  initialStaffRoles?: StaffRole[];
+}) {
+  const [rows, setRows] = useState<StaffRole[]>(initialStaffRoles ?? []);
+  const [loading, setLoading] = useState(initialStaffRoles === undefined);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -29,7 +35,7 @@ export default function StaffRoleSettings({ orgId }: { orgId: string }) {
   const [deleteTarget, setDeleteTarget] = useState<StaffRole | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -39,9 +45,12 @@ export default function StaffRoleSettings({ orgId }: { orgId: string }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [orgId]);
 
-  useEffect(() => { load(); }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (initialStaffRoles !== undefined) return;
+    queueMicrotask(() => void load());
+  }, [initialStaffRoles, load]);
 
   const handleToggleActive = async (row: StaffRole) => {
     try {

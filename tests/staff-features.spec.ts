@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { generateUser, setupNewOrg, clickMenu } from './helpers';
+import { generateUser, setupNewOrg, clickMenu, registerClient, registerStaff } from './helpers';
 
 test.describe('スタッフ機能（記録作成）', () => {
   test.slow();
@@ -8,41 +8,38 @@ test.describe('スタッフ機能（記録作成）', () => {
     const user = generateUser();
     await setupNewOrg(page, user);
 
-    // 事前準備：利用者作成
-    await clickMenu(page, '利用者管理');
-    await expect(page.getByRole('heading', { name: '利用者管理' })).toBeVisible();
+    // 事前準備1: 自分のアカウントに紐付いたスタッフを名簿へ登録する
+    // （記録の担当スタッフはスタッフ名簿から選択されるため）
+    // アカウント選択肢はプロフィールの表示名を使うが、handle_new_userトリガーにより
+    // 新規登録直後のprofiles.nameはメールアドレスのまま（setupNewOrgのコメント参照）
+    await registerStaff(page, user.name, user.email);
 
-    await page.getByRole('button', { name: '新規登録' }).click();
-    await page.getByLabel('利用者氏名').fill('鈴木 花子');
-    await page.getByRole('button', { name: '登録', exact: true }).click();
-    
-    await expect(page.getByText('鈴木 花子')).toBeVisible({ timeout: 20000 });
+    // 事前準備2: 利用者を登録（詳細設定ページへ自動遷移する）
+    await registerClient(page, '鈴木 花子');
 
     // 1. 記録作成ページへ
     await clickMenu(page, '記録を作成');
-    await expect(page.getByText('記録を作成する利用者を選択')).toBeVisible();
-    
+    await expect(page.getByText('利用者を選択')).toBeVisible();
     await page.getByText('鈴木 花子 様').click();
     await expect(page.getByRole('heading', { name: '鈴木 花子 様' })).toBeVisible();
 
-    // 2. 記録入力
-    // ★修正: デフォルトで自分が選択されていることを確認する
-    // （プレースホルダーによる検索やクリック操作を削除）
-    await expect(page.getByText(user.name).first()).toBeVisible();
+    // 2. 担当スタッフに自分（紐付けたスタッフ）がデフォルトで選択されている
+    await expect(page.getByText(user.name).first()).toBeVisible({ timeout: 15000 });
 
-    await page.getByLabel('サービス(h)').fill('1.5');
-    await page.getByLabel('移動(h)').fill('0.5');
+    // 3. 記録を入力
+    await page.getByLabel('サービス提供').fill('1.5');
+    await page.getByLabel('移動', { exact: true }).fill('0.5');
+    // チェック項目はSwitchFieldで描画される（環境によりrole=checkbox/switchのどちらにもなる）
+    await page.getByRole('checkbox', { name: '水分補給' }).or(page.getByRole('switch', { name: '水分補給' })).first().check();
 
-    await page.locator('input[type="checkbox"]').first().check();
-
-    // 3. 送信
+    // 4. 送信（確認ダイアログあり）
     await page.getByRole('button', { name: '送信' }).click();
-    await expect(page.getByText('記録を送信しました')).toBeVisible();
+    await page.getByRole('button', { name: '送信する' }).click();
+    await expect(page.getByText('記録を送信しました')).toBeVisible({ timeout: 20000 });
 
-    // 4. 履歴ページへの遷移を確認
+    // 5. 自分の履歴に承認待ちの記録が表示される
     await clickMenu(page, '自分の履歴');
-    
-    await expect(page.getByText('鈴木 花子').first()).toBeVisible({ timeout: 20000 });
-    await expect(page.getByText('未承認').first()).toBeVisible();
+    await expect(page.getByText('鈴木 花子 様').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText('承認待ち').first()).toBeVisible();
   });
 });

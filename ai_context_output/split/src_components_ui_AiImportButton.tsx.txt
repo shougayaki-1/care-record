@@ -149,7 +149,7 @@ export function AiImportButton({
         onClick={openWizard}
         disabled={disabled}
       >
-        {hasExistingValues ? '紙で上書き補完' : '紙から入力'}
+        {hasExistingValues ? 'AIで読み取り（上書き）' : 'AIで読み取り'}
       </Button>
 
       {/* ウィザードダイアログ */}

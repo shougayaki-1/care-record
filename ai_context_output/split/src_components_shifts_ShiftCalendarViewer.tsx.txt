@@ -22,6 +22,7 @@ type Props = {
     calendarRef?: React.Ref<FullCalendar>;
     events: EventInput[];
     initialView: string;
+    initialDate?: string | Date;
     headerToolbar: HeaderToolbarConfig;
     buttonText?: Record<string, string>;
     selectable?: boolean;
@@ -41,7 +42,7 @@ type ReportStatus = {
 };
 
 export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
-    calendarRef, events, initialView, headerToolbar, buttonText, selectable = false, editable = false,
+    calendarRef, events, initialView, initialDate, headerToolbar, buttonText, selectable = false, editable = false,
     onEventClick, onDateSelect, onEventDrop, onEventResize, onDatesSet, noEventsText
 }, ref) => {
     const renderEventContent = (arg: EventContentArg) => {
@@ -146,10 +147,14 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                 border: '1px solid',
                 borderColor: 'divider',
                 borderRadius: 1,
-                overflow: 'hidden',
                 bgcolor: 'background.paper',
             },
-            '& .fc-scrollgrid': { border: '0 !important' },
+            '& .fc-scrollgrid': { border: '0 !important', borderRadius: 'inherit', overflow: 'hidden' },
+            '& .fc-more-popover': {
+                zIndex: `${theme.zIndex.modal + 1} !important`,
+                maxHeight: 'min(60vh, 420px)',
+                overflowY: 'auto',
+            },
             '& .fc-col-header-cell': { bgcolor: 'background.subtle' },
             '& .fc-col-header-cell-cushion': {
                 color: theme.palette.text.secondary,
@@ -229,6 +234,7 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                 // rrulePlugin を削除（実体化方式になったため不要）
                 plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
                 initialView={initialView}
+                initialDate={initialDate}
                 headerToolbar={headerToolbar}
                 buttonText={buttonText}
                 locale="ja"

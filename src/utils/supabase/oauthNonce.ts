@@ -1,7 +1,9 @@
 import 'server-only';
 
 import { createHash } from 'crypto';
-import { supabaseAdmin } from './auth';
+import { serviceRoleForOAuthNonce } from './serviceRole';
+
+const supabaseAdmin = serviceRoleForOAuthNonce();
 
 function hashNonce(nonce: string): string {
   return createHash('sha256').update(nonce).digest('hex');

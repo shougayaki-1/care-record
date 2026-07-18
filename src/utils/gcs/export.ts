@@ -1,6 +1,8 @@
-import { supabaseAdmin } from '@/utils/supabase/auth';
+import { serviceRoleForBackup } from '@/utils/supabase/serviceRole';
 import { sanitizeDbError } from '@/utils/errors';
 import { convertDataToReadable, type FormItem, type FormValue } from '@/utils/templateHelper';
+
+const supabaseAdmin = serviceRoleForBackup();
 
 type ReportRow = {
   id: string;

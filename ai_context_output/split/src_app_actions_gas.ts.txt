@@ -1,7 +1,7 @@
 'use server';
 
 import { createHmac, randomUUID } from 'crypto';
-import { assertOrgRole, getAuthedUser, supabaseAdmin } from '@/utils/supabase/auth';
+import { assertOrgRole, createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { convertSchemaToReadable, type FormItem } from '@/utils/templateHelper';
 
@@ -38,9 +38,10 @@ function validatePayload(payload: GasPayload) {
 
 async function sanitizeGasPayload(payload: GasPayload, userEmail?: string) {
   const base = { ...payload, userEmail };
+  const sessionClient = await createSessionClient();
   switch (payload.action) {
     case 'manage_org_folder': {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await sessionClient
         .from('organizations')
         .select('name, google_folder_id')
         .eq('id', payload.organizationId)
@@ -52,8 +53,8 @@ async function sanitizeGasPayload(payload: GasPayload, userEmail?: string) {
     case 'manage_client_folder': {
       const clientId = String(payload.clientId || '');
       const [{ data: client }, { data: organization }] = await Promise.all([
-        supabaseAdmin.from('clients').select('name, google_folder_id').eq('id', clientId).eq('organization_id', payload.organizationId).single(),
-        supabaseAdmin.from('organizations').select('google_folder_id').eq('id', payload.organizationId).single(),
+        sessionClient.from('clients').select('name, google_folder_id').eq('id', clientId).eq('organization_id', payload.organizationId).single(),
+        sessionClient.from('organizations').select('google_folder_id').eq('id', payload.organizationId).single(),
       ]);
       if (!client || !organization?.google_folder_id) throw new Error('利用者または事業所フォルダが見つかりません');
       return {
@@ -67,8 +68,8 @@ async function sanitizeGasPayload(payload: GasPayload, userEmail?: string) {
     case 'create_template_doc': {
       const clientId = String(payload.clientId || '');
       const [{ data: client }, { data: template }] = await Promise.all([
-        supabaseAdmin.from('clients').select('name, google_folder_id').eq('id', clientId).eq('organization_id', payload.organizationId).single(),
-        supabaseAdmin.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle(),
+        sessionClient.from('clients').select('name, google_folder_id').eq('id', clientId).eq('organization_id', payload.organizationId).single(),
+        sessionClient.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle(),
       ]);
       if (!client?.google_folder_id) throw new Error('利用者フォルダが見つかりません');
       return {
@@ -81,7 +82,7 @@ async function sanitizeGasPayload(payload: GasPayload, userEmail?: string) {
     }
     case 'create_sub_folder': {
       const clientId = String(payload.clientId || '');
-      const { data: client } = await supabaseAdmin
+      const { data: client } = await sessionClient
         .from('clients')
         .select('google_folder_id')
         .eq('id', clientId)
@@ -96,8 +97,8 @@ async function sanitizeGasPayload(payload: GasPayload, userEmail?: string) {
       const reportId = String(payload.reportId || '');
       const clientId = String(payload.clientId || '');
       const [{ data: report }, { data: client }] = await Promise.all([
-        supabaseAdmin.from('reports').select('id, client_id').eq('id', reportId).eq('client_id', clientId).is('deleted_at', null).single(),
-        supabaseAdmin.from('clients').select('google_template_id').eq('id', clientId).eq('organization_id', payload.organizationId).single(),
+        sessionClient.from('reports').select('id, client_id').eq('id', reportId).eq('client_id', clientId).is('deleted_at', null).single(),
+        sessionClient.from('clients').select('google_template_id').eq('id', clientId).eq('organization_id', payload.organizationId).single(),
       ]);
       if (!report || !client?.google_template_id) throw new Error('出力対象の記録またはテンプレートが不正です');
       return { ...base, reportId, clientId, templateId: client.google_template_id };

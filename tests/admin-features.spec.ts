@@ -1,49 +1,44 @@
 import { test, expect } from '@playwright/test';
-// clickMenu をインポートに追加
-import { generateUser, setupNewOrg, clickMenu } from './helpers';
+import { generateUser, setupNewOrg, clickMenu, registerClient } from './helpers';
 
 test.describe('管理者機能', () => {
-  
+
   test('利用者の登録とフォーム設定の変更', async ({ page }) => {
     const user = generateUser();
     const clientName = 'テスト利用者A';
 
     await setupNewOrg(page, user);
 
-    // 1. 利用者管理ページへ (clickMenuを使用)
-    await clickMenu(page, '利用者管理');
-    
-    // ページ遷移待ち
-    await expect(page.getByRole('heading', { name: '利用者管理' })).toBeVisible();
+    // 1. 利用者を登録（成功すると詳細設定ページ ?setup=1 へ自動遷移する）
+    await registerClient(page, clientName);
+    await expect(page.getByText('利用者を追加しました。記録フォーム、担当スタッフ、帳票・連携の順に設定してください。')).toBeVisible();
 
-    // 2. 新規登録
-    await page.getByRole('button', { name: '新規登録' }).click();
-    await page.getByLabel('利用者氏名').fill(clientName);
-    await page.getByRole('button', { name: '登録', exact: true }).click();
-
-    // リストに追加されたか確認 (タイムアウトを20秒に延長)
-    await expect(page.getByText(clientName)).toBeVisible({ timeout: 20000 });
-
-    // 3. フォーム設定へ移動
-    await page.getByRole('row', { name: clientName }).getByRole('button').first().click();
-    await expect(page.getByText('記録フォーム設定')).toBeVisible();
-
-    // 4. 新しい項目を追加
+    // 2. 記録フォームタブで新しい項目を追加
     await page.getByRole('button', { name: '項目を追加する' }).click();
-    
-    const lastLabelInput = page.locator('input[value=""]').last();
-    await lastLabelInput.fill('テスト独自の記録項目');
-    
-    await page.getByRole('button', { name: 'この設定を保存する' }).click();
-    await expect(page.getByText('設定を保存しました！')).toBeVisible();
+    await page.getByLabel('質問内容').last().fill('テスト独自の記録項目');
+
+    // 3. 保存
+    await page.getByRole('button', { name: '設定を保存' }).click();
+    await expect(page.getByText('フォーム設定を保存しました！')).toBeVisible({ timeout: 15000 });
+
+    // 4. 一覧に登録した利用者が表示されている
+    await clickMenu(page, '利用者管理');
+    await expect(page.getByRole('heading', { name: '利用者管理' })).toBeVisible();
+    await expect(page.getByRole('row', { name: new RegExp(clientName) })).toBeVisible({ timeout: 15000 });
   });
 
-  test('ダッシュボードの表示確認', async ({ page }) => {
+  test('セットアップ直後のアプリ初期表示', async ({ page }) => {
     const user = generateUser();
     await setupNewOrg(page, user);
 
-    await expect(page.getByText('本日の訪問予定')).toBeVisible();
-    await expect(page.getByText('未承認の記録')).toBeVisible();
-    await expect(page.getByText('スタッフ稼働中')).toBeVisible();
+    // 事業所作成直後は記録作成ページに着地する
+    await expect(page).toHaveURL(/\/app\/record/);
+    await expect(page.getByText('利用者を選択')).toBeVisible({ timeout: 15000 });
+
+    // オーナーには管理メニューが表示される
+    await expect(page.getByRole('link', { name: '利用者管理', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'スタッフ(名簿)管理', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'アカウント・権限管理', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: '未承認・差戻し', exact: true })).toBeVisible();
   });
 });

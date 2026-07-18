@@ -34,6 +34,7 @@ import { getSettingsSectionsData } from '@/app/actions/settingsSections';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 import type { ServiceType } from '@/app/actions/serviceTypes';
 import type { StaffRole } from '@/app/actions/staffRoles';
+import { issueReauthGrant } from '@/app/actions/auth';
 
 type GasResponse = {
     status: string;
@@ -73,6 +74,7 @@ function SettingsContent() {
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
     const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
     const [confirmInput, setConfirmInput] = useState('');
+    const [reauthPassword, setReauthPassword] = useState('');
 
     // 労働時間ルール・サービス種別・スタッフ役割の3セクションをまとめて1回で取得する
     const [settingsSectionsData, setSettingsSectionsData] = useState<{
@@ -119,7 +121,7 @@ function SettingsContent() {
                 router.push('/app');
                 return;
             }
-            fetchOrgDetails();
+            queueMicrotask(() => void fetchOrgDetails());
         }
     }, [wsLoading, currentOrg, router, fetchOrgDetails]);
 
@@ -246,7 +248,13 @@ function SettingsContent() {
         if (!currentOrg) return;
         setConnectingCal(true);
         try {
-            const url = await getGoogleAuthUrlAction(currentOrg.id, mode);
+            const password = window.prompt('外部連携を変更するため、現在のパスワードを入力してください');
+            if (!password) {
+                setConnectingCal(false);
+                return;
+            }
+            const grant = await issueReauthGrant('external_secret_change', password);
+            const url = await getGoogleAuthUrlAction(currentOrg.id, mode, grant.token);
             // Googleのログイン画面へリダイレクト
             window.location.href = url;
         } catch (e) {
@@ -260,7 +268,10 @@ function SettingsContent() {
         if (!(await confirm({ message: 'カレンダーの連携を解除しますか？\n（作成されたカレンダー自体はGoogleに残り、トークンのみ破棄されます）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
-            await disconnectGoogleCalendar(currentOrg.id);
+            const password = window.prompt('外部連携を変更するため、現在のパスワードを入力してください');
+            if (!password) return;
+            const grant = await issueReauthGrant('external_secret_change', password);
+            await disconnectGoogleCalendar(currentOrg.id, grant.token);
             setGoogleCalendarId(null);
             showToast('連携を解除しました');
         } catch(e) { 
@@ -281,8 +292,10 @@ function SettingsContent() {
     }, [currentOrg, canRepairCalendarSync]);
 
     useEffect(() => {
-        if (googleCalendarId && canRepairCalendarSync) refreshSyncStatus();
-        else setSyncStatus(null);
+        queueMicrotask(() => {
+            if (googleCalendarId && canRepairCalendarSync) void refreshSyncStatus();
+            else setSyncStatus(null);
+        });
     }, [googleCalendarId, canRepairCalendarSync, refreshSyncStatus]);
 
     // 同期結果のメッセージ
@@ -361,7 +374,8 @@ function SettingsContent() {
     const handleDeleteOrg = async () => {
         if (!currentOrg || confirmInput !== currentOrg.name) return;
         try {
-            await deleteOrganization(currentOrg.id);
+            const grant = await issueReauthGrant('organization_delete', reauthPassword);
+            await deleteOrganization(currentOrg.id, grant.token);
             showToast('事業所を削除しました');
             window.location.href = '/setup';
         } catch (e: unknown) { 
@@ -675,11 +689,10 @@ function SettingsContent() {
                                                 <Box sx={{ minWidth: 0 }}>
                                                     <Typography fontWeight="bold" color="error">事業所を削除</Typography>
                                                     <Typography variant="caption" color="text.secondary">
-                                                        全てのデータ（利用者、記録、スタッフ情報）が永久に削除されます。<br/>
-                                                        この操作は取り消せません。
+                                                        事業所を利用不能な削除保留状態にします。記録は保持方針に従い保全されます。
                                                     </Typography>
                                                 </Box>
-                                                <AppButton intent="danger" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
+                                                <AppButton intent="danger" onClick={() => { setConfirmInput(''); setReauthPassword(''); setOpenDeleteDialog(true); }}>
                                                     削除する
                                                 </AppButton>
                                             </Box>
@@ -692,9 +705,9 @@ function SettingsContent() {
 
             </PageBody>
 
-            <AppDialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)} title="事業所の完全削除" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton><AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name}>削除実行</AppButton></>}>
+            <AppDialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)} title="事業所の削除申請" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton><AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name || !reauthPassword}>削除実行</AppButton></>}>
                     <Typography color="error" sx={{ mb: 2 }}>
-                        本当に削除しますか？この操作は取り消せません。<br/>
+                        削除保留状態にします。重要操作のためパスワードで再認証します。<br/>
                         確認のため、事業所名 <b>{currentOrg.name}</b> を入力してください。
                     </Typography>
                     <AppTextField
@@ -703,6 +716,16 @@ function SettingsContent() {
                         value={confirmInput} 
                         onChange={e => setConfirmInput(e.target.value)} 
                         placeholder={currentOrg.name} 
+                    />
+                    <AppTextField
+                        fullWidth
+                        size="small"
+                        type="password"
+                        autoComplete="current-password"
+                        value={reauthPassword}
+                        onChange={e => setReauthPassword(e.target.value)}
+                        label="現在のパスワード"
+                        sx={{ mt: 2 }}
                     />
             </AppDialog>
 

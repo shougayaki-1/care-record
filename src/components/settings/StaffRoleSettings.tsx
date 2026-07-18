@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Box, Stack, CircularProgress, Alert, Chip,
   Table, TableBody, TableCell, TableHead, TableRow,
@@ -35,7 +35,7 @@ export default function StaffRoleSettings({
   const [deleteTarget, setDeleteTarget] = useState<StaffRole | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -45,13 +45,12 @@ export default function StaffRoleSettings({
     } finally {
       setLoading(false);
     }
-  };
+  }, [orgId]);
 
   useEffect(() => {
     if (initialStaffRoles !== undefined) return;
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId]);
+    queueMicrotask(() => void load());
+  }, [initialStaffRoles, load]);
 
   const handleToggleActive = async (row: StaffRole) => {
     try {

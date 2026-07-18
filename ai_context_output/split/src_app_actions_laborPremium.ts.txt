@@ -1,9 +1,10 @@
 'use server';
-import { supabaseAdmin, assertOrgRole, assertOrgPermission } from '@/utils/supabase/auth';
+import { assertOrgRole, assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 
 export async function getLaborPremiumTypes(orgId: string) {
   await assertOrgRole(orgId);
-  const { data, error } = await supabaseAdmin
+  const supabase = await createSessionClient();
+  const { data, error } = await supabase
     .from('labor_premium_types')
     .select('*')
     .eq('organization_id', orgId)
@@ -30,7 +31,8 @@ export async function updateLaborPremiumType(
   }
 ): Promise<void> {
   await assertOrgPermission(orgId, 'organization');
-  const { error } = await supabaseAdmin
+  const supabase = await createSessionClient();
+  const { error } = await supabase
     .from('labor_premium_types')
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq('id', typeId)
@@ -52,29 +54,28 @@ export async function createLaborPremiumType(
   }
 ): Promise<void> {
   await assertOrgPermission(orgId, 'organization');
-  const { data: last } = await supabaseAdmin
-    .from('labor_premium_types')
-    .select('display_order')
-    .eq('organization_id', orgId)
-    .order('display_order', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const { error } = await supabaseAdmin
-    .from('labor_premium_types')
-    .insert({
-      organization_id: orgId,
-      display_order: (last?.display_order ?? 0) + 1,
-      builtin_type: 'custom',
-      ...data,
-    });
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('create_labor_premium_type_atomic', {
+    p_organization_id: orgId,
+    p_name: data.name,
+    p_rate: data.rate,
+    p_calc_method: data.calc_method,
+    p_night_start_hour: data.night_start_hour,
+    p_night_end_hour: data.night_end_hour,
+    p_variable_working_hours_enabled: data.variable_working_hours_enabled ?? false,
+    p_variable_overtime_period: data.variable_overtime_period ?? null,
+    p_variable_overtime_threshold_hours: data.variable_overtime_threshold_hours ?? null,
+  });
   if (error) throw new Error('追加に失敗しました');
 }
 
 export async function disableLaborPremiumType(orgId: string, typeId: string): Promise<void> {
   await assertOrgPermission(orgId, 'organization');
-  await supabaseAdmin
+  const supabase = await createSessionClient();
+  const { error } = await supabase
     .from('labor_premium_types')
     .update({ is_enabled: false, updated_at: new Date().toISOString() })
     .eq('id', typeId)
     .eq('organization_id', orgId);
+  if (error) throw new Error('無効化に失敗しました');
 }

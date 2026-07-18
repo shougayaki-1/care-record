@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
-import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar';
 import { encryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { consumeOAuthNonce } from '@/utils/supabase/oauthNonce';
-import { mergePermissions, type RolePermissions } from '@/utils/permissions';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { logExternalError } from '@/utils/errors';
 
@@ -57,31 +55,10 @@ export async function GET(request: NextRequest) {
             return NextResponse.redirect(`${origin}/?error=not_authenticated`);
         }
 
-        const supabaseAdmin = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!,
-            { auth: { autoRefreshToken: false, persistSession: false } }
-        );
-
-        const { data: member } = await supabaseAdmin
-            .from('organization_members')
-            .select('role')
-            .eq('organization_id', organizationId)
-            .eq('user_id', user.id)
-            .single();
-        const { data: roleLinks } = await supabaseAdmin
-            .from('organization_member_roles')
-            .select('organization_roles(permissions)')
-            .eq('organization_id', organizationId)
-            .eq('user_id', user.id);
-        const permissions = mergePermissions((roleLinks ?? [])
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .map((row: any) => {
-                const role = Array.isArray(row.organization_roles) ? row.organization_roles[0] : row.organization_roles;
-                return role?.permissions as RolePermissions | undefined;
-            })
-            .filter((value): value is RolePermissions => value != null));
-        if (!member || (member.role !== 'owner' && !permissions.management.integrations)) {
+        const { data: oauthContext, error: contextError } = await supabaseSession.rpc('get_google_oauth_context', {
+            p_org_id: organizationId,
+        });
+        if (contextError || !oauthContext || typeof oauthContext !== 'object') {
             console.error('User cannot manage integrations for target organization');
             return failResponse;
         }
@@ -108,13 +85,7 @@ export async function GET(request: NextRequest) {
         oauth2Client.setCredentials(tokens);
 
         // 4. 事業所名の取得（カレンダー名に使うため）
-        const { data: orgData, error: orgError } = await supabaseAdmin
-            .from('organizations')
-            .select('name, google_calendar_id')
-            .eq('id', organizationId)
-            .single();
-
-        if (orgError || !orgData) throw new Error('Organization not found');
+        const orgData = oauthContext as { name: string; google_calendar_id: string | null };
 
         // 5. Keep the existing calendar whenever reauthorization succeeds.
         // Creating a new calendar silently makes existing event IDs point at the
@@ -145,16 +116,12 @@ export async function GET(request: NextRequest) {
 
         // 6. Persist the token and connection health. Calendar replacement is
         // deliberately a separate explicit action.
-        const { error: updateError } = await supabaseAdmin
-            .from('organizations')
-            .update({
-                google_refresh_token: encryptGoogleToken(tokens.refresh_token),
-                google_calendar_id: calendarId,
-                google_connection_status: connectionStatus,
-                google_connection_checked_at: new Date().toISOString(),
-                google_connection_error_code: connectionStatus === 'healthy' ? null : 'calendar_missing',
-            })
-            .eq('id', organizationId);
+        const { error: updateError } = await supabaseSession.rpc('complete_google_oauth_connection', {
+            p_org_id: organizationId,
+            p_encrypted_refresh_token: encryptGoogleToken(tokens.refresh_token),
+            p_calendar_id: calendarId,
+            p_status: connectionStatus,
+        });
 
         if (updateError) throw updateError;
 

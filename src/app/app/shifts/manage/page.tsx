@@ -108,7 +108,7 @@ export default function ShiftManagePage() {
         const startParam = searchParams.get('start');
         if (!shiftIdParam || handledShiftParamRef.current === shiftIdParam) return;
         if (activeTab !== 'fullCalendar') {
-            setActiveTab('fullCalendar');
+            queueMicrotask(() => setActiveTab('fullCalendar'));
             return;
         }
         if (initialLoading) return;
@@ -122,9 +122,11 @@ export default function ShiftManagePage() {
         if (!shiftIdParam || handledShiftParamRef.current === shiftIdParam) return;
         const targetShift = rawShifts.find((shift) => shift.id === shiftIdParam);
         if (!targetShift) return;
-        setSelectedShift(targetShift);
-        setShiftModalOpen(true);
-        handledShiftParamRef.current = shiftIdParam;
+        queueMicrotask(() => {
+            setSelectedShift(targetShift);
+            setShiftModalOpen(true);
+            handledShiftParamRef.current = shiftIdParam;
+        });
     }, [rawShifts, searchParams]);
 
     const {
@@ -142,15 +144,13 @@ export default function ShiftManagePage() {
 
     useEffect(() => {
         if (!wsLoading && currentOrg) {
-            fetchMasterData();
+            queueMicrotask(() => void fetchMasterData());
             const canUseOrgWideTabs = currentOrg.effectivePermissions.shifts.view === 'all';
             if (!canUseOrgWideTabs && (activeTab === 'fullCalendar' || activeTab === 'patterns')) {
-                setActiveTab('myShift');
+                queueMicrotask(() => setActiveTab('myShift'));
             }
         }
-    // activeTab を依存配列に入れない（初期補正のみ行う）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [wsLoading, currentOrg, fetchMasterData]);
+    }, [wsLoading, currentOrg, fetchMasterData, activeTab]);
 
     useEffect(() => {
         if (wsLoading || !currentOrg) return;

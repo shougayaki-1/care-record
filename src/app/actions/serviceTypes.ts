@@ -1,5 +1,5 @@
 'use server';
-import { supabaseAdmin, assertOrgPermission, assertOrgRole } from '@/utils/supabase/auth';
+import { assertOrgPermission, assertOrgRole, createSessionClient } from '@/utils/supabase/auth';
 
 export type ServiceType = {
   id: string;
@@ -12,7 +12,8 @@ export type ServiceType = {
 
 export async function getServiceTypes(orgId: string): Promise<ServiceType[]> {
   await assertOrgRole(orgId);
-  const { data, error } = await supabaseAdmin
+  const supabase = await createSessionClient();
+  const { data, error } = await supabase
     .from('service_types')
     .select('*')
     .eq('organization_id', orgId)
@@ -24,17 +25,11 @@ export async function getServiceTypes(orgId: string): Promise<ServiceType[]> {
 
 export async function createServiceType(orgId: string, name: string): Promise<void> {
   await assertOrgPermission(orgId, 'organization');
-  const { data: last } = await supabaseAdmin
-    .from('service_types')
-    .select('sort_order')
-    .eq('organization_id', orgId)
-    .is('deleted_at', null)
-    .order('sort_order', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const { error } = await supabaseAdmin
-    .from('service_types')
-    .insert({ organization_id: orgId, name, sort_order: (last?.sort_order ?? -1) + 1 });
+  const supabase = await createSessionClient();
+  const { error } = await supabase.rpc('create_service_type_atomic', {
+    p_organization_id: orgId,
+    p_name: name,
+  });
   if (error) throw new Error('サービス種別の追加に失敗しました');
 }
 
@@ -44,7 +39,8 @@ export async function updateServiceType(
   patch: { name?: string; is_active?: boolean; sort_order?: number }
 ): Promise<void> {
   await assertOrgPermission(orgId, 'organization');
-  const { error } = await supabaseAdmin
+  const supabase = await createSessionClient();
+  const { error } = await supabase
     .from('service_types')
     .update(patch)
     .eq('id', id)
@@ -54,7 +50,8 @@ export async function updateServiceType(
 
 export async function deleteServiceType(orgId: string, id: string): Promise<void> {
   await assertOrgPermission(orgId, 'organization');
-  const { error } = await supabaseAdmin
+  const supabase = await createSessionClient();
+  const { error } = await supabase
     .from('service_types')
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', id)

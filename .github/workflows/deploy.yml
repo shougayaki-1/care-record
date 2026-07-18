@@ -1,0 +1,142 @@
+name: Deploy database and application
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Protected GitHub Environment to deploy
+        type: choice
+        required: true
+        default: staging
+        options:
+          - staging
+          - production
+      git_ref:
+        description: Git ref to deploy (production only accepts main)
+        type: string
+        required: true
+        default: main
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: test
+      AI_IMPORT_ENABLED: 'false'
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: deploy-preflight-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: deploy-preflight-service-role-key
+    steps:
+      - name: Reject non-main production deployments
+        if: ${{ inputs.environment == 'production' && inputs.git_ref != 'main' }}
+        run: |
+          echo 'Production deployments must use git_ref=main.' >&2
+          exit 1
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.git_ref }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint -- --max-warnings=0
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run security:service-role
+      - run: npm run build
+
+  migrate:
+    name: Apply Supabase migrations
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.git_ref }}
+      - name: Validate deployment configuration
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_DB_PASSWORD"
+          test -n "$SUPABASE_PROJECT_ID"
+      - name: Link the exact target project
+        run: npx --yes supabase@2.108.0 link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+      - name: Show migration status
+        run: npx --yes supabase@2.108.0 migration list --linked
+      - name: Preview pending migrations
+        run: npx --yes supabase@2.108.0 db push --linked --dry-run --password "$SUPABASE_DB_PASSWORD"
+      - name: Apply pending migrations
+        run: npx --yes supabase@2.108.0 db push --linked --password "$SUPABASE_DB_PASSWORD"
+      - name: Record final migration status
+        run: npx --yes supabase@2.108.0 migration list --linked | tee migration-status.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: migration-status-${{ inputs.environment }}-${{ github.run_id }}
+          path: migration-status.txt
+          retention-days: 90
+
+  deploy:
+    name: Deploy Vercel application
+    needs: migrate
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.git_ref }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Validate deployment configuration
+        run: |
+          test -n "$VERCEL_TOKEN"
+          test -n "$VERCEL_ORG_ID"
+          test -n "$VERCEL_PROJECT_ID"
+      - name: Pull Vercel environment
+        run: npx --yes vercel@54.18.6 pull --yes --environment=${{ inputs.environment == 'production' && 'production' || 'preview' }} --token="$VERCEL_TOKEN"
+      - name: Build Vercel output
+        run: npx --yes vercel@54.18.6 build ${{ inputs.environment == 'production' && '--prod' || '' }} --token="$VERCEL_TOKEN"
+      - name: Deploy prebuilt output
+        id: deploy
+        run: |
+          url=$(npx --yes vercel@54.18.6 deploy --prebuilt ${{ inputs.environment == 'production' && '--prod' || '' }} --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: Verify non-PII health endpoint
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error "$DEPLOYMENT_URL/api/health" > health.json; then
+              jq -e '.ok == true and (.database.capacity | type == "string")' health.json
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deployment-health-${{ inputs.environment }}-${{ github.run_id }}
+          path: health.json
+          retention-days: 90

@@ -64,7 +64,9 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
     await onRolesChanged?.();
   };
 
-  useEffect(() => { void fetchRoles(); }, [fetchRoles]);
+  useEffect(() => {
+    queueMicrotask(() => void fetchRoles());
+  }, [fetchRoles]);
 
   if (!currentOrg || !checkManagementPermission(currentOrg.effectivePermissions, 'roles')) {
     return (

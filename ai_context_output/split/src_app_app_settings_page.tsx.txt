@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
-import { 
+import {
   Box, Typography, Alert, CircularProgress, LinearProgress, Stack, Divider,
-  Chip, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow
+  Chip, Tabs, Tab
 } from '@/components/ui/mui';
-import { AppButton, AppDialog, AppTextField, DateTimeField, NumberField, PageBody, PageLayout } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, NumberField, PageBody, PageLayout } from '@/components/ui';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
@@ -22,23 +22,19 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
-import { deleteOrganization, disconnectGoogleCalendar, getAuditLogs, exportAuditLogsCsv, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName, updateTravelCostSettings } from '@/app/actions/organization';
+import { deleteOrganization, disconnectGoogleCalendar, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName, updateTravelCostSettings } from '@/app/actions/organization';
 import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { getGoogleAuthUrlAction } from '@/app/actions/google';
+import { getGoogleAuthUrlAction, getGoogleConnectionHealth, type GoogleConnectionState } from '@/app/actions/google';
 import LaborPremiumSettings from '@/components/settings/LaborPremiumSettings';
 import ServiceTypeSettings from '@/components/settings/ServiceTypeSettings';
 import StaffRoleSettings from '@/components/settings/StaffRoleSettings';
-
-type AuditLog = {
-    id: string;
-    created_at: string;
-    action_type: string;
-    resource_id: string | null;
-    details: Record<string, unknown> | null;
-    profiles: { name: string } | null; 
-};
+import { getSettingsSectionsData } from '@/app/actions/settingsSections';
+import type { LaborPremiumType } from '@/utils/laborPremium';
+import type { ServiceType } from '@/app/actions/serviceTypes';
+import type { StaffRole } from '@/app/actions/staffRoles';
+import { issueReauthGrant } from '@/app/actions/auth';
 
 type GasResponse = {
     status: string;
@@ -62,6 +58,7 @@ function SettingsContent() {
     const [orgName, setOrgName] = useState('');
     const [googleFolderId, setGoogleFolderId] = useState<string | null>(null);
     const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null);
+    const [googleConnectionState, setGoogleConnectionState] = useState<GoogleConnectionState>('disconnected');
     const [driveUrl, setDriveUrl] = useState('');
     const [travelCostRate, setTravelCostRate] = useState('20');
     
@@ -74,13 +71,17 @@ function SettingsContent() {
     const [syncProgress, setSyncProgress] = useState<{ total: number; current: number } | null>(null);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
-    const [logs, setLogs] = useState<AuditLog[]>([]);
-    const [logFrom, setLogFrom] = useState('');
-    const [logTo, setLogTo] = useState('');
-
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
     const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
     const [confirmInput, setConfirmInput] = useState('');
+    const [reauthPassword, setReauthPassword] = useState('');
+
+    // 労働時間ルール・サービス種別・スタッフ役割の3セクションをまとめて1回で取得する
+    const [settingsSectionsData, setSettingsSectionsData] = useState<{
+        laborPremiumTypes: LaborPremiumType[];
+        serviceTypes: ServiceType[];
+        staffRoles: StaffRole[];
+    } | null>(null);
     const canRepairCalendarSync = Boolean(
         currentOrg &&
         checkShiftPermission(currentOrg.effectivePermissions, 'edit', true) &&
@@ -91,7 +92,7 @@ function SettingsContent() {
         if (!currentOrg) return;
         const { data } = await supabase
             .from('organizations')
-            .select('name, google_folder_id, google_calendar_id, travel_cost_rate_yen_per_km')
+            .select('name, google_folder_id, google_calendar_id, google_connection_status, travel_cost_rate_yen_per_km')
             .eq('id', currentOrg.id)
             .single();
         
@@ -99,6 +100,7 @@ function SettingsContent() {
             setOrgName(data.name);
             setGoogleFolderId(data.google_folder_id);
             setGoogleCalendarId(data.google_calendar_id);
+            setGoogleConnectionState((data.google_connection_status as GoogleConnectionState | null) || (data.google_calendar_id ? 'temporarily_unavailable' : 'disconnected'));
             setTravelCostRate(String(data.travel_cost_rate_yen_per_km ?? 20));
             if(data.google_folder_id) {
                 setDriveUrl(`https://drive.google.com/drive/folders/${data.google_folder_id}`);
@@ -106,31 +108,12 @@ function SettingsContent() {
         }
     }, [currentOrg]);
 
-    const fetchLogs = useCallback(async () => {
-        if (!currentOrg) return;
-        try {
-            const data = await getAuditLogs(currentOrg.id, {
-                from: logFrom ? new Date(logFrom).toISOString() : null,
-                to: logTo ? new Date(logTo).toISOString() : null,
-            });
-            setLogs((data as unknown as AuditLog[]) || []);
-        } catch (e) { console.error(e); }
-    }, [currentOrg, logFrom, logTo]);
-
-    const handleExportLogs = useCallback(async () => {
-        if (!currentOrg) return;
-        try {
-            const { filename, csv } = await exportAuditLogsCsv(currentOrg.id, {
-                from: logFrom ? new Date(logFrom).toISOString() : null,
-                to: logTo ? new Date(logTo).toISOString() : null,
-            });
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = filename; a.click();
-            URL.revokeObjectURL(url);
-        } catch (e) { console.error(e); }
-    }, [currentOrg, logFrom, logTo]);
+    useEffect(() => {
+        if (!currentOrg || !googleCalendarId || !checkManagementPermission(currentOrg.effectivePermissions, 'integrations')) return;
+        void getGoogleConnectionHealth(currentOrg.id)
+            .then(({ state }) => setGoogleConnectionState(state))
+            .catch(() => setGoogleConnectionState('temporarily_unavailable'));
+    }, [currentOrg, googleCalendarId]);
 
     useEffect(() => {
         if (!wsLoading && currentOrg) {
@@ -138,9 +121,20 @@ function SettingsContent() {
                 router.push('/app');
                 return;
             }
-            fetchOrgDetails();
+            queueMicrotask(() => void fetchOrgDetails());
         }
-    }, [wsLoading, currentOrg, router, fetchOrgDetails, fetchLogs]);
+    }, [wsLoading, currentOrg, router, fetchOrgDetails]);
+
+    // 労働時間ルール・サービス種別・スタッフ役割: 3セクション分をまとめて1回のServer Actionで取得し、
+    // 各コンポーネントの初期表示props（initialLaborPremiumTypes等）として渡す。
+    useEffect(() => {
+        if (!currentOrg) return;
+        let cancelled = false;
+        getSettingsSectionsData(currentOrg.id)
+            .then((data) => { if (!cancelled) setSettingsSectionsData(data); })
+            .catch((e) => { console.error(e); });
+        return () => { cancelled = true; };
+    }, [currentOrg]);
 
     // Google OAuth コールバック後のトースト表示
     useEffect(() => {
@@ -250,11 +244,17 @@ function SettingsContent() {
     };
 
     // OAuth認証によるカレンダー作成（Googleへ遷移）
-    const handleConnectCalendar = async () => {
+    const handleConnectCalendar = async (mode: 'connect' | 'reauthorize' = 'connect') => {
         if (!currentOrg) return;
         setConnectingCal(true);
         try {
-            const url = await getGoogleAuthUrlAction(currentOrg.id);
+            const password = window.prompt('外部連携を変更するため、現在のパスワードを入力してください');
+            if (!password) {
+                setConnectingCal(false);
+                return;
+            }
+            const grant = await issueReauthGrant('external_secret_change', password);
+            const url = await getGoogleAuthUrlAction(currentOrg.id, mode, grant.token);
             // Googleのログイン画面へリダイレクト
             window.location.href = url;
         } catch (e) {
@@ -268,7 +268,10 @@ function SettingsContent() {
         if (!(await confirm({ message: 'カレンダーの連携を解除しますか？\n（作成されたカレンダー自体はGoogleに残り、トークンのみ破棄されます）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
-            await disconnectGoogleCalendar(currentOrg.id);
+            const password = window.prompt('外部連携を変更するため、現在のパスワードを入力してください');
+            if (!password) return;
+            const grant = await issueReauthGrant('external_secret_change', password);
+            await disconnectGoogleCalendar(currentOrg.id, grant.token);
             setGoogleCalendarId(null);
             showToast('連携を解除しました');
         } catch(e) { 
@@ -289,8 +292,10 @@ function SettingsContent() {
     }, [currentOrg, canRepairCalendarSync]);
 
     useEffect(() => {
-        if (googleCalendarId && canRepairCalendarSync) refreshSyncStatus();
-        else setSyncStatus(null);
+        queueMicrotask(() => {
+            if (googleCalendarId && canRepairCalendarSync) void refreshSyncStatus();
+            else setSyncStatus(null);
+        });
     }, [googleCalendarId, canRepairCalendarSync, refreshSyncStatus]);
 
     // 同期結果のメッセージ
@@ -369,7 +374,8 @@ function SettingsContent() {
     const handleDeleteOrg = async () => {
         if (!currentOrg || confirmInput !== currentOrg.name) return;
         try {
-            await deleteOrganization(currentOrg.id);
+            const grant = await issueReauthGrant('organization_delete', reauthPassword);
+            await deleteOrganization(currentOrg.id, grant.token);
             showToast('事業所を削除しました');
             window.location.href = '/setup';
         } catch (e: unknown) { 
@@ -405,6 +411,9 @@ function SettingsContent() {
                 </Stack>
                 <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="scrollable" allowScrollButtonsMobile>
                     <Tab label="基本設定" />
+                    <Tab label="Google連携" />
+                    <Tab label="勤務・帳票ルール" />
+                    <Tab label="危険な設定" />
                 </Tabs>
             </Box>
 
@@ -453,7 +462,11 @@ function SettingsContent() {
                                     </Stack>
                                 </Box>
                             )}
+                        </Stack>
+                    )}
 
+                    {tabIndex === 1 && (
+                        <Stack spacing={3}>
                             {/* Google Drive連携 */}
                             <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>
                                 <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={2}>
@@ -513,7 +526,13 @@ function SettingsContent() {
                                         <Typography variant="h6" fontWeight="bold">Googleカレンダー連携</Typography>
                                         <Typography variant="body2" color="text.secondary">事業所ごとの専用カレンダーを自動作成し、シフトを同期します（OAuth直接連携）</Typography>
                                     </Box>
-                                    <Chip label={googleCalendarId ? "連携済み" : "未連携"} color={googleCalendarId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: { sm: 'auto' } }} />
+                                    <Chip
+                                        label={googleCalendarId ? (googleConnectionState === 'healthy' ? '連携・正常' : googleConnectionState === 'reauth_required' ? '再認証が必要' : googleConnectionState === 'calendar_missing' ? 'カレンダー要確認' : '接続を確認中') : '未連携'}
+                                        color={googleCalendarId && googleConnectionState === 'healthy' ? 'success' : googleCalendarId ? 'warning' : 'default'}
+                                        size="small"
+                                        icon={<LinkIcon />}
+                                        sx={{ ml: { sm: 'auto' } }}
+                                    />
                                 </Stack>
                                 
                                 <Box sx={{ mt: 2, p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider', minWidth: 0 }}>
@@ -578,6 +597,14 @@ function SettingsContent() {
                                                     >
                                                         連携を解除
                                                     </AppButton>
+                                                    <AppButton
+                                                        variant="outlined"
+                                                        intent="warning"
+                                                        onClick={() => handleConnectCalendar('reauthorize')}
+                                                        disabled={connectingCal || repairingCal || resyncingCal}
+                                                    >
+                                                        {connectingCal ? 'Googleへ移動中...' : 'Googleを再認証'}
+                                                    </AppButton>
                                                 </Stack>
                                             </Stack>
                                         ) : (
@@ -585,7 +612,7 @@ function SettingsContent() {
                                                 <Alert severity="info">
                                                     ボタンを押すとGoogleの認証画面へ移動します。許可すると、あなたのアカウントに事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
                                                 </Alert>
-                                                <AppButton intent="success" onClick={handleConnectCalendar} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                                                <AppButton intent="success" onClick={() => handleConnectCalendar()} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                                     {connectingCal ? 'Googleへ移動中...' : 'シフト用カレンダーを作成・連携する'}
                                                 </AppButton>
                                             </Stack>
@@ -597,7 +624,11 @@ function SettingsContent() {
                                     )}
                                 </Box>
                             </Box>
+                        </Stack>
+                    )}
 
+                    {tabIndex === 2 && (
+                        <Stack spacing={3}>
                             {/* 労働時間ルール */}
                             {canEditOrganization && (
                                 <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
@@ -605,7 +636,7 @@ function SettingsContent() {
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         深夜割り増し・時間外割り増しなどの種別と計算方法を管理します。
                                     </Typography>
-                                    <LaborPremiumSettings orgId={currentOrg.id} />
+                                    <LaborPremiumSettings orgId={currentOrg.id} initialLaborPremiumTypes={settingsSectionsData?.laborPremiumTypes} />
                                 </Box>
                             )}
 
@@ -616,7 +647,7 @@ function SettingsContent() {
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         シフト内の区間に設定できるサービス種別（例：重度訪問介護、移動支援）を管理します。
                                     </Typography>
-                                    <ServiceTypeSettings orgId={currentOrg.id} />
+                                    <ServiceTypeSettings orgId={currentOrg.id} initialServiceTypes={settingsSectionsData?.serviceTypes} />
                                 </Box>
                             )}
 
@@ -627,10 +658,14 @@ function SettingsContent() {
                                     <Typography variant="body2" color="text.secondary" mb={2}>
                                         シフト区間内でのスタッフの役割（例：正職員、パート、ボランティア）を管理します。無給フラグを設定することで給与計算から除外できます。
                                     </Typography>
-                                    <StaffRoleSettings orgId={currentOrg.id} />
+                                    <StaffRoleSettings orgId={currentOrg.id} initialStaffRoles={settingsSectionsData?.staffRoles} />
                                 </Box>
                             )}
+                        </Stack>
+                    )}
 
+                    {tabIndex === 3 && (
+                        <Stack spacing={3}>
                             {/* 危険な設定 */}
                             <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: 'error.light', bgcolor: 'background.danger' }}>
                                 <Stack direction="row" alignItems="center" gap={1} mb={2}>
@@ -654,11 +689,10 @@ function SettingsContent() {
                                                 <Box sx={{ minWidth: 0 }}>
                                                     <Typography fontWeight="bold" color="error">事業所を削除</Typography>
                                                     <Typography variant="caption" color="text.secondary">
-                                                        全てのデータ（利用者、記録、スタッフ情報）が永久に削除されます。<br/>
-                                                        この操作は取り消せません。
+                                                        事業所を利用不能な削除保留状態にします。記録は保持方針に従い保全されます。
                                                     </Typography>
                                                 </Box>
-                                                <AppButton intent="danger" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
+                                                <AppButton intent="danger" onClick={() => { setConfirmInput(''); setReauthPassword(''); setOpenDeleteDialog(true); }}>
                                                     削除する
                                                 </AppButton>
                                             </Box>
@@ -669,47 +703,11 @@ function SettingsContent() {
                         </Stack>
                     )}
 
-                    {tabIndex === 1 && (
-                        <Box>
-                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} sx={{ p: 2 }}>
-                                <DateTimeField kind="date" label="開始日" size="small" value={logFrom} onChange={(e) => setLogFrom(e.target.value)} />
-                                <DateTimeField kind="date" label="終了日" size="small" value={logTo} onChange={(e) => setLogTo(e.target.value)} />
-                                <AppButton variant="outlined" intent="secondary" onClick={fetchLogs}>絞り込み</AppButton>
-                                <Box sx={{ flexGrow: 1 }} />
-                                <AppButton onClick={handleExportLogs}>CSVエクスポート</AppButton>
-                            </Stack>
-                            <Divider />
-                            <Table>
-                                <TableHead>
-                                    <TableRow>
-                                        <TableCell>日時</TableCell>
-                                        <TableCell>操作者</TableCell>
-                                        <TableCell>操作内容</TableCell>
-                                        <TableCell>対象</TableCell>
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    {logs.length === 0 ? (
-                                        <TableRow><TableCell colSpan={4} align="center">ログはありません</TableCell></TableRow>
-                                    ) : (
-                                        logs.map((log) => (
-                                            <TableRow key={log.id}>
-                                                <TableCell>{new Date(log.created_at).toLocaleString()}</TableCell>
-                                                <TableCell>{log.profiles?.name || '不明'}</TableCell>
-                                                <TableCell>{log.action_type}</TableCell>
-                                                <TableCell>{log.resource_id || '-'}</TableCell>
-                                            </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </Box>
-                    )}
             </PageBody>
 
-            <AppDialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)} title="事業所の完全削除" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton><AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name}>削除実行</AppButton></>}>
+            <AppDialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)} title="事業所の削除申請" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton><AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name || !reauthPassword}>削除実行</AppButton></>}>
                     <Typography color="error" sx={{ mb: 2 }}>
-                        本当に削除しますか？この操作は取り消せません。<br/>
+                        削除保留状態にします。重要操作のためパスワードで再認証します。<br/>
                         確認のため、事業所名 <b>{currentOrg.name}</b> を入力してください。
                     </Typography>
                     <AppTextField
@@ -718,6 +716,16 @@ function SettingsContent() {
                         value={confirmInput} 
                         onChange={e => setConfirmInput(e.target.value)} 
                         placeholder={currentOrg.name} 
+                    />
+                    <AppTextField
+                        fullWidth
+                        size="small"
+                        type="password"
+                        autoComplete="current-password"
+                        value={reauthPassword}
+                        onChange={e => setReauthPassword(e.target.value)}
+                        label="現在のパスワード"
+                        sx={{ mt: 2 }}
                     />
             </AppDialog>
 

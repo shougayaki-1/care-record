@@ -5,7 +5,8 @@
 // - ログイン成功/失敗・ログアウトの監査記録（アクセスの記録）
 // パスワードログインをサーバーで行うことで、上記を確実に一元化する（@supabase/ssr のサーバーログインパターン）。
 
-import { createSessionClient, getAuthedUser, registerSessionActivity, revokeCurrentSession, touchCurrentSession, supabaseAdmin, SESSION_ABSOLUTE_HOURS } from '@/utils/supabase/auth';
+import { createSessionClient, getAuthedUser, registerSessionActivity, revokeCurrentSession, touchCurrentSession, SESSION_ABSOLUTE_HOURS } from '@/utils/supabase/auth';
+import { serviceRoleForServerSessions } from '@/utils/supabase/serviceRole';
 import { decodeJwtSessionId } from '@/utils/jwt';
 import { createHash } from 'crypto';
 import { recordAuditEvent } from '@/utils/supabase/audit';
@@ -15,6 +16,9 @@ import {
   recordLoginAttempt,
 } from '@/utils/supabase/loginAttempts';
 import { validatePassword } from '@/utils/passwordPolicy';
+import { issueReauthGrant as createReauthGrant, type ReauthPurpose } from '@/utils/supabase/reauth';
+
+const supabaseAdmin = serviceRoleForServerSessions();
 
 export type LoginResult =
   | { ok: true }
@@ -23,6 +27,10 @@ export type LoginResult =
 export type RegistrationResult =
   | { ok: true; signedIn: boolean }
   | { ok: false; reason: 'rate_limited' | 'invalid_password' | 'already_registered' | 'error'; message?: string };
+
+export async function issueReauthGrant(purpose: ReauthPurpose, password: string) {
+  return createReauthGrant(purpose, password);
+}
 
 /**
  * 監査基盤の障害で認証フローまで失敗させない。

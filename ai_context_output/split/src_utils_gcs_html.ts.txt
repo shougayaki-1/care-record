@@ -10,7 +10,13 @@ export type BackupRow = {
 };
 
 export function generateBackupHtml(date: string, rows: BackupRow[]): string {
-  const dataJson = JSON.stringify(rows).replace(/<\/script>/gi, '<\\/script>');
+  const dataJson = JSON.stringify(rows).replace(/[<>&\u2028\u2029]/g, (char) => ({
+    '<': '\\u003c',
+    '>': '\\u003e',
+    '&': '\\u0026',
+    '\u2028': '\\u2028',
+    '\u2029': '\\u2029',
+  })[char] || char);
 
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -76,6 +82,7 @@ const ALL = ${dataJson};
 const LABELS = ${JSON.stringify(REPORT_STATUS_LABELS)};
 const BADGE = {approved:'badge-approved',pending:'badge-pending',draft:'badge-draft',remanded:'badge-remanded'};
 function fmt(s){if(!s)return'-';const d=new Date(s);return d.toLocaleDateString('ja-JP')+'\\u00a0'+d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});}
+function td(value){const cell=document.createElement('td');cell.textContent=String(value??'');return cell;}
 function render(){
   const q=(document.getElementById('q').value||'').toLowerCase();
   const st=document.getElementById('status').value;
@@ -87,7 +94,17 @@ function render(){
   document.getElementById('count').textContent=rows.length+'件表示中（全'+ALL.length+'件）';
   const tbody=document.getElementById('tbody');
   if(rows.length===0){tbody.innerHTML='<tr><td colspan="5" class="empty">該当する記録がありません</td></tr>';return;}
-  tbody.innerHTML=rows.map(r=>'<tr><td>'+r.clientName+'</td><td>'+fmt(r.startAt)+'</td><td>'+fmt(r.endAt)+'</td><td>'+r.helperName+'</td><td><span class="badge '+(BADGE[r.status]||'')+'">'+( LABELS[r.status]||r.status)+'</span></td></tr>').join('');
+  tbody.replaceChildren(...rows.map(r=>{
+    const row=document.createElement('tr');
+    row.append(td(r.clientName),td(fmt(r.startAt)),td(fmt(r.endAt)),td(r.helperName));
+    const statusCell=document.createElement('td');
+    const badge=document.createElement('span');
+    badge.className='badge '+(BADGE[r.status]||'');
+    badge.textContent=LABELS[r.status]||r.status;
+    statusCell.append(badge);
+    row.append(statusCell);
+    return row;
+  }));
 }
 render();
 </script>

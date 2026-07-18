@@ -1,0 +1,92 @@
+name: Full logical backup
+
+on:
+  schedule:
+    - cron: '17 0,12 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment containing backup configuration
+        type: choice
+        required: true
+        default: staging
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: full-backup-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    env:
+      APP_ENV: ${{ github.event.inputs.environment || 'production' }}
+      DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      GCS_BACKUP_BUCKET: ${{ vars.GCS_BACKUP_BUCKET }}
+      BACKUP_CONFIG_VERSION: ${{ vars.BACKUP_CONFIG_VERSION }}
+      BACKUP_KEY_ID: ${{ vars.BACKUP_KEY_ID }}
+      DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Authenticate to Google Cloud using GitHub OIDC
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_BACKUP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Install PostgreSQL 17 client and jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-common ca-certificates
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-17 jq
+
+      - name: Create and upload full backup with bounded retries
+        id: backup
+        shell: bash
+        run: |
+          started_at=$(date +%s)
+          attempt_offsets=(0 1800 7200)
+          for offset in "${attempt_offsets[@]}"; do
+            remaining=$((started_at + offset - $(date +%s)))
+            if (( remaining > 0 )); then sleep "$remaining"; fi
+            if scripts/backup/full-logical-backup.sh; then exit 0; fi
+          done
+          exit 1
+
+      - name: Write non-sensitive backup receipt
+        if: success()
+        env:
+          BACKUP_URI: ${{ steps.backup.outputs.backup_uri }}
+          BACKUP_GENERATION: ${{ steps.backup.outputs.backup_generation }}
+          BACKUP_SHA256: ${{ steps.backup.outputs.backup_sha256 }}
+        run: |
+          jq -n --arg uri "$BACKUP_URI" --arg generation "$BACKUP_GENERATION" \
+            --arg sha256 "$BACKUP_SHA256" --arg run_url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{backup_uri: $uri, generation: $generation, sha256: $sha256, run_url: $run_url}' > backup-receipt.json
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: backup-receipt-${{ steps.backup.outputs.backup_generation }}
+          path: backup-receipt.json
+          retention-days: 90
+
+      - name: Notify after all three attempts fail
+        if: failure()
+        env:
+          EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: scripts/backup/notify-discord.sh Critical full_backup_failed "$EVIDENCE_URL"

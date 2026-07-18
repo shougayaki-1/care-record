@@ -1,7 +1,9 @@
 import { createHmac } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/utils/supabase/auth';
+import { serviceRoleForAuditPreservation } from '@/utils/supabase/serviceRole';
 import { uploadToGCS } from '@/utils/gcs/upload';
+
+const supabaseAdmin = serviceRoleForAuditPreservation();
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;

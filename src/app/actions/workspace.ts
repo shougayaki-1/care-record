@@ -1,6 +1,7 @@
 'use server';
 
-import { getAuthedUser, getAuthedUserFromAccessToken, supabaseAdmin, type OrgRole } from '@/utils/supabase/auth';
+import { createClient } from '@supabase/supabase-js';
+import { createSessionClient, getAuthedUser, getAuthedUserFromAccessToken, type OrgRole } from '@/utils/supabase/auth';
 
 export type WorkspaceSummary = {
   id: string;
@@ -23,12 +24,21 @@ const VALID_ROLES: OrgRole[] = ['owner', 'member'];
  */
 export async function getMyWorkspaces(accessToken?: string): Promise<WorkspaceResult> {
   let userId: string;
+  let sessionClient;
   try {
     try {
       userId = (await getAuthedUser()).id;
+      sessionClient = await createSessionClient();
     } catch (cookieError) {
       if (!accessToken) throw cookieError;
       userId = (await getAuthedUserFromAccessToken(accessToken)).id;
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!url || !anonKey) throw new Error('Supabase session environment is not configured');
+      sessionClient = createClient(url, anonKey, {
+        global: { headers: { Authorization: `Bearer ${accessToken}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
     }
   } catch (error) {
     console.warn('workspace session validation failed', error);
@@ -37,11 +47,11 @@ export async function getMyWorkspaces(accessToken?: string): Promise<WorkspaceRe
 
   try {
     const [{ data: members, error: memberError }, { data: profile, error: profileError }] = await Promise.all([
-      supabaseAdmin
+      sessionClient
         .from('organization_members')
         .select('organization_id, role, organizations!inner(id, name)')
         .eq('user_id', userId),
-      supabaseAdmin
+      sessionClient
         .from('profiles')
         .select('last_organization_id')
         .eq('id', userId)

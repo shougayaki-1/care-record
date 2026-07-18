@@ -2,8 +2,10 @@ import 'server-only';
 
 import { createHash } from 'crypto';
 import { headers } from 'next/headers';
-import { supabaseAdmin } from './auth';
+import { serviceRoleForAuditPreservation } from './serviceRole';
 import { sanitizeDbError } from '@/utils/errors';
+
+const supabaseAdmin = serviceRoleForAuditPreservation();
 
 export type AuditEventInput = {
   // 認証イベント（ログイン/ログアウト）は組織コンテキスト未確定でも記録するため null を許容する。

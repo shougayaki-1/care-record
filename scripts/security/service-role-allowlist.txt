@@ -1,0 +1,2 @@
+# The raw client may be imported only by this purpose-specific wrapper.
+src/utils/supabase/serviceRole.ts

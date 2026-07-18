@@ -9,40 +9,39 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   application-security:
-    if: false
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: test
+      AI_IMPORT_ENABLED: 'false'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
-      - run: npm install
-      - run: npm run typecheck
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-      - run: npm run lint
-      - run: npm run build
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
+      - run: npm ci
       - name: Block high/critical production dependency vulnerabilities
         run: npm audit --omit=dev --audit-level=high
       - name: Generate CycloneDX SBOM
-        run: npm sbom --omit=dev --sbom-format=cyclonedx > care-record-sbom.cdx.json
+        if: ${{ always() }}
+        # package-lock-only avoids platform-specific optional dependency gaps while
+        # retaining a deterministic production dependency inventory.
+        run: npm sbom --package-lock-only --omit=dev --sbom-format=cyclonedx > care-record-sbom.cdx.json
       - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
         with:
           name: sbom-${{ github.sha }}
           path: care-record-sbom.cdx.json
           retention-days: 90
 
   secret-scan:
-    if: false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2

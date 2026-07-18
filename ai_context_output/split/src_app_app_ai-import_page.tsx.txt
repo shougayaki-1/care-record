@@ -407,6 +407,8 @@ export default function AiImportPage() {
           endAt,
           status: 'draft',
           values: { ...row.result.values, _helpers: [helper.name] },
+          expectedVersion: 0,
+          idempotencyKey: crypto.randomUUID(),
           auditSource: 'ai_import',
           auditFileCount: row.fileCount,
         });

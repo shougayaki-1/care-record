@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Box, Stack, Chip, CircularProgress, Alert,
   Table, TableBody, TableCell, TableHead, TableRow,
@@ -52,9 +52,15 @@ function rowToEditState(row: PremiumRow): EditState {
   };
 }
 
-export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
-  const [rows, setRows] = useState<PremiumRow[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function LaborPremiumSettings({
+  orgId,
+  initialLaborPremiumTypes,
+}: {
+  orgId: string;
+  initialLaborPremiumTypes?: LaborPremiumType[];
+}) {
+  const [rows, setRows] = useState<PremiumRow[]>((initialLaborPremiumTypes as PremiumRow[]) ?? []);
+  const [loading, setLoading] = useState(initialLaborPremiumTypes === undefined);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -67,7 +73,7 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
   const [addOpen, setAddOpen] = useState(false);
   const [addState, setAddState] = useState<EditState>(defaultEditState());
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -78,9 +84,12 @@ export default function LaborPremiumSettings({ orgId }: { orgId: string }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [orgId]);
 
-  useEffect(() => { load(); }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (initialLaborPremiumTypes !== undefined) return;
+    queueMicrotask(() => void load());
+  }, [initialLaborPremiumTypes, load]);
 
   const handleToggleEnabled = async (row: PremiumRow) => {
     try {

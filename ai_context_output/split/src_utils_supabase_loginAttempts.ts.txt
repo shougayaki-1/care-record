@@ -1,8 +1,10 @@
 import 'server-only';
 
 import { headers } from 'next/headers';
-import { supabaseAdmin } from './auth';
+import { serviceRoleForLoginSecurity } from './serviceRole';
 import { hashNetworkIdentifier } from './audit';
+
+const supabaseAdmin = serviceRoleForLoginSecurity();
 
 // ログイン試行のレート制限パラメータ。
 export const LOGIN_WINDOW_MINUTES = 15;

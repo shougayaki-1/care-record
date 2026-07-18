@@ -14,6 +14,7 @@ describe('mergePermissions', () => {
     const r = mergePermissions([PRESET_STAFF_PERMISSIONS, PRESET_MANAGER_PERMISSIONS]);
     expect(r.management.staffs).toBe(true);
     expect(r.management.accounts).toBe(false);
+    expect(r.management.backupStatus).toBe(true);
   });
   it('treats missing new management keys as false', () => {
     const legacy = {
@@ -32,6 +33,7 @@ describe('mergePermissions', () => {
     const r = mergePermissions([legacy]);
     expect(r.management.roles).toBe(false);
     expect(r.management.organizationDelete).toBe(false);
+    expect(r.management.backupStatus).toBe(false);
   });
   it('merges role management dangerous permissions', () => {
     const roleManager: RolePermissions = {

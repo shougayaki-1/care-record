@@ -3,7 +3,10 @@
 
 import { sanitizeDbError } from '@/utils/errors';
 
-import { supabaseAdmin, assertSuperAdmin } from '@/utils/supabase/auth';
+import { assertSuperAdmin } from '@/utils/supabase/auth';
+import { serviceRoleForPlatformMetadata } from '@/utils/supabase/serviceRole';
+
+const supabaseAdmin = serviceRoleForPlatformMetadata();
 
 // 全事業所の一覧を取得
 export async function getAllOrganizations() {
@@ -40,31 +43,9 @@ export async function getAllOrganizations() {
     }));
 }
 
-// 事業所の削除（危険操作）
+// super adminは顧客データに対する削除経路を持たない。
 export async function deleteOrganization(orgId: string) {
-    const { userId } = await assertSuperAdmin();
-    const { data: organization, error: readError } = await supabaseAdmin
-        .from('organizations')
-        .select('retention_years')
-        .eq('id', orgId)
-        .single();
-    if (readError) throw new Error(readError.message);
-
-    const deletedAt = new Date();
-    const retentionUntil = new Date(deletedAt);
-    retentionUntil.setUTCFullYear(retentionUntil.getUTCFullYear() + (organization.retention_years || 5));
-    const { error } = await supabaseAdmin
-        .from('organizations')
-        .update({
-            deleted_at: deletedAt.toISOString(),
-            deleted_by: userId,
-            retention_until: retentionUntil.toISOString(),
-        })
-        .eq('id', orgId)
-        .is('deleted_at', null);
-
-    if (error) throw sanitizeDbError(error, 'action.super-admin');
-    await supabaseAdmin.from('profiles').update({ last_organization_id: null }).eq('last_organization_id', orgId);
-    await supabaseAdmin.from('organization_members').delete().eq('organization_id', orgId);
-    return { success: true };
+    await assertSuperAdmin();
+    void orgId;
+    throw new Error('super adminから顧客事業所を削除できません');
 }

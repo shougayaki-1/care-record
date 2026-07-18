@@ -1,8 +1,8 @@
 import { mergePermissions, normalizePermissions, type RolePermissions } from '@/utils/permissions';
-import { supabaseAdmin } from '@/utils/supabase/auth';
+import { createSessionClient } from '@/utils/supabase/auth';
 
 type RoleRow = { id: string; permissions: RolePermissions };
-type MemberRow = { user_id: string };
+type MemberRow = { user_id: string; role: string };
 type LinkRow = { user_id: string; role_id: string };
 
 type RoleSafetyPatch = {
@@ -27,16 +27,17 @@ export async function assertRoleManagerRemains(
   organizationId: string,
   patch: RoleSafetyPatch = {},
 ): Promise<void> {
+  const supabase = await createSessionClient();
   const [{ data: roles, error: rolesError }, { data: members, error: membersError }, { data: links, error: linksError }] = await Promise.all([
-    supabaseAdmin
+    supabase
       .from('organization_roles')
       .select('id, permissions')
       .eq('organization_id', organizationId),
-    supabaseAdmin
+    supabase
       .from('organization_members')
-      .select('user_id')
+      .select('user_id, role')
       .eq('organization_id', organizationId),
-    supabaseAdmin
+    supabase
       .from('organization_member_roles')
       .select('user_id, role_id')
       .eq('organization_id', organizationId),
@@ -55,6 +56,9 @@ export async function assertRoleManagerRemains(
   }
 
   const memberIds = new Set((members ?? []).map((member: MemberRow) => member.user_id));
+  const ownerIds = new Set(
+    (members ?? []).filter((member: MemberRow) => member.role === 'owner').map((member: MemberRow) => member.user_id),
+  );
   if (patch.removedMemberId) memberIds.delete(patch.removedMemberId);
 
   const rolesByMember = new Map<string, string[]>();
@@ -69,6 +73,10 @@ export async function assertRoleManagerRemains(
   }
 
   for (const userId of memberIds) {
+    // Mirrors private.has_management_permission: an organization owner always counts
+    // as a role manager, regardless of any explicit organization_member_roles link.
+    if (ownerIds.has(userId)) return;
+
     const permissions = mergePermissions(
       (rolesByMember.get(userId) ?? [])
         .map(roleId => roleMap.get(roleId))

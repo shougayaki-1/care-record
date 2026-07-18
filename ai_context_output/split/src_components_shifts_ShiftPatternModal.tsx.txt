@@ -127,7 +127,8 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                     console.error(error);
                     showToast('区間設定の選択肢を読み込めませんでした', 'error');
                 });
-            if (initialData) {
+            queueMicrotask(() => {
+              if (initialData) {
                 setClientId(initialData.client_id || '');
                 setStartTime(initialData.start_time ? initialData.start_time.slice(0, 5) : '10:00');
                 setEndTime(initialData.end_time ? initialData.end_time.slice(0, 5) : '12:00');
@@ -150,7 +151,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 setIntervalCount(parsed.interval);
                 setSelectedDays(parsed.selectedDays);
                 setSelectedWeeks(parsed.selectedWeeks);
-            } else {
+              } else {
                 setClientId('');
                 setStartTime('10:00');
                 setEndTime('12:00');
@@ -160,7 +161,8 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
                 setSelectedDays([]);
                 setSelectedWeeks([]);
                 setAutoAssign(true);
-            }
+              }
+            });
         }
     }, [open, initialData, organizationId, showToast]);
 

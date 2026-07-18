@@ -8,8 +8,10 @@ Supabase Auth（パスワード + Google OAuth）。`src/proxy.ts`（Next.js 16 
 
 - ログインは Server Action `loginWithPassword` 経由。IP単位で15分5回失敗すると429
   （`src/utils/supabase/loginAttempts.ts`）。
-- アイドルタイムアウト15分（`src/components/auth/IdleTimeout.tsx` + `cr_last_activity` Cookie）。
-- パスワードポリシー: 8文字以上・3種類以上の文字種（`src/utils/passwordPolicy.ts`）。
+- 無操作タイムアウト24時間、絶対セッション期限30日。クライアント、middleware、
+  Server Actionで同じ値を使用する。正式な決定は`docs/system-decisions.md`に従う。
+- パスワードポリシーの確定要件は8文字以上。現行実装の文字種要件は撤廃対象
+  （`src/utils/passwordPolicy.ts`、`docs/implementation-gap-plan.md`）。
 
 ## 権限モデル（フレキシブルロール）
 

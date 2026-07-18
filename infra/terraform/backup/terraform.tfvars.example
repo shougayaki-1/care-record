@@ -1,0 +1,11 @@
+project_id          = "replace-with-gcp-project-id"
+environment         = "staging"
+github_repository   = "replace-owner/care-record"
+bucket_name_prefix  = "care-record"
+github_refs = [
+  "refs/heads/main",
+]
+
+# Keep false until a saved terraform plan has been reviewed and approved.
+# Changing this to true permanently prevents retention policy reduction/removal.
+enable_bucket_lock = false
