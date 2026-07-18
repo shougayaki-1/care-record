@@ -138,14 +138,16 @@ jobs:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
-          for _ in $(seq 1 30); do
+          for i in $(seq 1 30); do
             # Preview/staging デプロイは Vercel の Deployment Protection (SSO) がかかり、
             # 素の curl だと /api/health が SSO へリダイレクトされ JSON が返らない。
             # Protection Bypass for Automation のヘッダーで無認証アクセスを許可する。
-            if curl --fail --silent --show-error -H "x-vercel-protection-bypass: $BYPASS_SECRET" "$DEPLOYMENT_URL/api/health" > health.json; then
-              jq -e '.ok == true and (.database.capacity | type == "string")' health.json
+            code=$(curl --silent --show-error -o health.json -w '%{http_code}' -H "x-vercel-protection-bypass: $BYPASS_SECRET" "$DEPLOYMENT_URL/api/health")
+            if [ "$code" = "200" ] && jq -e '.ok == true and (.database.capacity | type == "string")' health.json; then
               exit 0
             fi
+            echo "attempt $i: HTTP $code"
+            cat health.json
             sleep 10
           done
           exit 1
