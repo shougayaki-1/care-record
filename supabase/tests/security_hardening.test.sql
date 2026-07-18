@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path TO public, extensions;
-SELECT plan(42);
+SELECT plan(43);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
@@ -177,6 +177,17 @@ SELECT lives_ok(
      VALUES ('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-00000000000b', 'RETURNING Shift', now(), now() + interval '1 hour', 'published')
      RETURNING id $$,
   'org owner can INSERT shifts with RETURNING (insert().select())');
+
+-- Regression: mutate_organization_role_authorized's last-role-manager safety check
+-- must count an organization owner as a role manager even with no explicit
+-- organization_member_roles link (the state of every freshly created organization).
+-- 'e2e00000-...00001' is only linked via organization_members.role='owner' above.
+SELECT lives_ok(
+  $$ SELECT public.mutate_organization_role_authorized(
+       'e2e00000-0000-0000-0000-00000000000a'::uuid, NULL, 'create', 'Regression Role', '#ffffff',
+       '{"management":{}}'::jsonb, false) $$,
+  'org owner with no explicit role link can create a role (last_role_manager owner fix)');
+
 SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000002","role":"authenticated","session_id":"rls-outsider-session"}', true);
 SELECT is((SELECT count(*)::bigint FROM public.clients WHERE organization_id = 'e2e00000-0000-0000-0000-00000000000a'), 0::bigint,
   'non-members still cannot read another org''s clients');
