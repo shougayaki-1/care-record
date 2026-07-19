@@ -37,7 +37,7 @@
     "targets": ["audit_events", "audit_archive_checkpoints"],
     "authorization": "Server-derived actor/session context or CRON_SECRET",
     "audit": "Hash-chained events and archive checkpoint/receipt",
-    "consumers": ["src/utils/supabase/audit.ts", "src/app/api/cron/archive-audit/route.ts"]
+    "consumers": ["src/utils/supabase/audit.ts", "src/app/api/cron/archive-audit/route.ts", "src/app/api/cron/verify-audit-chain/route.ts"]
   },
   {
     "accessor": "serviceRoleForLoginSecurity",

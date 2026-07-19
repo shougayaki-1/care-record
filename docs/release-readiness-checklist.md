@@ -17,7 +17,17 @@
 - [ ] service role利用が承認済みallowlistと一致し、用途・対象・入力認可・監査が登録されている
 - [ ] allowlist外の`supabaseAdmin`利用をCIが拒否する
 - [ ] 未ログイン、一般、管理、オーナー、super admin、無効化ユーザーの拒否テストがある
+      （2026-07-19実装: `src/app/actions/clients.test.ts`／`src/app/actions/super-admin.test.ts`
+      でServer Action層の未ログイン・一般・オーナー・super_adminの拒否/防御チェックを追加。
+      accepted-risk: 「無効化ユーザー」はis_active的なカラムがprofilesに存在せず
+      DB/認可レイヤーに機構自体がないため今回は対象外。理由: RLS/permissions.tsへの
+      新規導入を要する別スコープの変更。代替策: 招待失効・ロール剥奪など既存の
+      権限剥奪経路で運用回避。承認者: [記入してください] / 記録日: 2026-07-19。
+      `npm run test:unit`実行結果をここに証跡リンクすること）
 - [ ] 同一組織、別組織、担当、未担当、削除済み、存在しないIDの拒否テストがある
+      （2026-07-19実装: `src/app/actions/clients.test.ts`で別組織ID・論理削除済み・
+      存在しないIDに対する`assertClientOrg`の拒否を検証。担当/未担当（shift割当）の
+      拒否テストは未着手）
 - [ ] UI、Server Action、API、Supabase REST/RPC、Supabase Storage署名URLで同じ認可結果になる（提供後のGCS正本化時はGCS署名URLも対象）
 - [ ] クライアント入力のuserId、role、organizationIdを信頼していない
 - [ ] super adminがアプリ内のどの経路からも顧客の記録本文・ファイルを取得できない（2026-07-16決定: 緊急アクセス機構は実装せず、基盤側運用＋手動記録で代替）
@@ -108,6 +118,13 @@
 - [ ] ログに記録本文、ファイル、パスワード、トークン、秘密情報がない
 - [ ] アプリ内1年、外部10年の保持設定を確認した
 - [ ] ハッシュチェーンを週次で検証し、改ざんテストで通知される
+      （2026-07-19実装: `public.verify_audit_chain()`（`supabase/migrations/20260719102606_audit_chain_verification.sql`）
+      が`private.chain_audit_event()`と同一の正規化式でチェーンを再検証し、
+      `src/app/api/cron/verify-audit-chain/route.ts`経由で`.github/workflows/audit-chain-verification.yml`
+      （毎週月曜03:30 UTC）が呼び出し、失敗時は`notify-discord.sh`でCritical通知する。
+      未実施: staging環境での実行確認と、行を改ざんして検知することの実地確認
+      （ローカルDockerが使えない環境で作業したため`supabase start`での検証ができていない）。
+      証跡: staging環境で本ワークフローを一度dispatchし、正常時とタンパー時の実行結果リンクをここに残すこと）
 - [ ] 別組織アクセス成功、認証回避、監査改ざんで自動隔離される
 - [ ] 5分間隔の外形監視が個人情報を読まないDB health queryまで確認する
 - [ ] Supabase Freeの自動一時停止・復旧遅延が理由・代替策・承認者付きのaccepted-riskへ登録されている

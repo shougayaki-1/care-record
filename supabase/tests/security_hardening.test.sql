@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path TO public, extensions;
-SELECT plan(43);
+SELECT plan(46);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
@@ -199,6 +199,13 @@ SELECT throws_ok(
   '42501', 'new row violates row-level security policy for table "clients"',
   'non-members still cannot INSERT clients into another org');
 RESET ROLE;
+
+SELECT ok(NOT has_function_privilege('authenticated','public.verify_audit_chain()','EXECUTE'),
+  'authenticated clients cannot run the audit chain verifier');
+SELECT ok(NOT has_function_privilege('anon','public.verify_audit_chain()','EXECUTE'),
+  'anonymous cannot run the audit chain verifier');
+SELECT is((SELECT count(*)::bigint FROM public.verify_audit_chain()), 0::bigint,
+  'audit hash chain has no mismatches for events recorded during this test run');
 
 SELECT * FROM finish();
 ROLLBACK;

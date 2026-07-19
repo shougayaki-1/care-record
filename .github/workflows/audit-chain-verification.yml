@@ -1,0 +1,52 @@
+name: Audit chain verification
+
+on:
+  schedule:
+    - cron: '30 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment to verify
+        type: choice
+        required: true
+        default: staging
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-chain-verification-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    env:
+      APP_ENV: ${{ github.event.inputs.environment || 'production' }}
+      HEALTHCHECK_URL: ${{ vars.HEALTHCHECK_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+      EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify the audit_events hash chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${HEALTHCHECK_URL:?HEALTHCHECK_URL is required}"
+          : "${CRON_SECRET:?CRON_SECRET is required}"
+          endpoint="${HEALTHCHECK_URL%/}/api/cron/verify-audit-chain"
+          status="$(curl --silent --show-error --location --max-time 30 \
+            --retry 2 --retry-all-errors --output verify-response.json \
+            --write-out '%{http_code}' -H "authorization: Bearer $CRON_SECRET" "$endpoint")"
+          cat verify-response.json
+          test "$status" = '200'
+          jq -e '.ok == true' verify-response.json >/dev/null
+      - name: Notify when the audit chain verification fails
+        if: ${{ failure() }}
+        run: scripts/backup/notify-discord.sh Critical audit_chain_tampered "$EVIDENCE_URL"
