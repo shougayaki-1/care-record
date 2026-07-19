@@ -54,6 +54,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes postgresql-client-17 jq
 
+      - name: Prefer PostgreSQL 17 client binaries on PATH
+        # ランナーに元々入っている旧バージョンの pg_dumpall/pg_dump/psql が
+        # PATH で優先され、接続先(PostgreSQL 17)とのメジャーバージョン不一致で
+        # pg_dumpall が "server version mismatch" で落ちるのを防ぐ。
+        run: echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
       - name: Create and upload full backup with bounded retries
         id: backup
         shell: bash
