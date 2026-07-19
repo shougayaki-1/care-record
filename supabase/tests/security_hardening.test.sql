@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path TO public, extensions;
-SELECT plan(43);
+SELECT plan(53);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
@@ -52,7 +52,7 @@ RESET ROLE;
 SELECT ok(NOT has_table_privilege('authenticated','public.reports','UPDATE'), 'clients cannot update reports directly');
 SELECT ok(NOT has_table_privilege('authenticated','public.shifts','DELETE'), 'clients cannot hard-delete shifts');
 SELECT ok(has_function_privilege('authenticated','public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text,uuid,jsonb)','EXECUTE'),
-  'authenticated users may call the bounded report RPC');
+  'authenticated users retain the legacy report RPC until external-use review completes');
 SELECT ok(NOT has_function_privilege('anon','public.save_report_atomic(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,text,uuid,jsonb)','EXECUTE'),
   'anonymous users cannot call the report RPC');
 SELECT has_trigger('public','audit_events','audit_events_chain_insert','audit events are hash chained');
@@ -98,6 +98,8 @@ RESET ROLE;
 
 SELECT ok(NOT has_table_privilege('authenticated','public.report_autosaves','SELECT,INSERT,UPDATE,DELETE'),
   'authenticated clients cannot access report autosaves directly');
+SELECT ok(NOT has_table_privilege('authenticated','public.reports','INSERT'),
+  'authenticated clients cannot directly INSERT reports, so INSERT RETURNING is not an application path');
 SELECT ok(NOT has_table_privilege('authenticated','public.google_sync_runs','SELECT,INSERT,UPDATE,DELETE'),
   'authenticated clients cannot access Google sync runs directly');
 SELECT ok(NOT has_table_privilege('authenticated','public.maintenance_runs','SELECT,INSERT,UPDATE,DELETE'),
@@ -159,9 +161,24 @@ ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 INSERT INTO public.organizations (id, name) VALUES ('e2e00000-0000-0000-0000-00000000000a', 'RLS Fixture Org');
 INSERT INTO public.organization_members (organization_id, user_id, role)
 VALUES ('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-000000000001', 'owner');
+INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
+VALUES ('e2e00000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'accounts-manager@example.invalid', 'x', now(), now(), now());
+INSERT INTO public.profiles (id, name) VALUES
+  ('e2e00000-0000-0000-0000-000000000003', 'Accounts Manager')
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
+INSERT INTO public.organization_members (organization_id, user_id, role)
+VALUES ('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-000000000003', 'member');
+INSERT INTO public.organization_roles (id, organization_id, name, color, is_preset, permissions)
+VALUES
+  ('e2e00000-0000-0000-0000-00000000000c', 'e2e00000-0000-0000-0000-00000000000a', 'Accounts manager', '#000000', false, '{"management":{"accounts":true}}'::jsonb),
+  ('e2e00000-0000-0000-0000-00000000000d', 'e2e00000-0000-0000-0000-00000000000a', 'Safe invitee role', '#000000', false, '{"management":{}}'::jsonb),
+  ('e2e00000-0000-0000-0000-00000000000e', 'e2e00000-0000-0000-0000-00000000000a', 'Dangerous invitee role', '#000000', false, '{"management":{"roles":true}}'::jsonb);
+INSERT INTO public.organization_member_roles (organization_id, user_id, role_id)
+VALUES ('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-000000000003', 'e2e00000-0000-0000-0000-00000000000c');
 INSERT INTO public.user_session_activity (session_hash, auth_session_id, user_id, last_activity, absolute_expires_at) VALUES
   ('rls-owner-hash', 'rls-owner-session', 'e2e00000-0000-0000-0000-000000000001', now(), now() + interval '1 hour'),
-  ('rls-outsider-hash', 'rls-outsider-session', 'e2e00000-0000-0000-0000-000000000002', now(), now() + interval '1 hour');
+  ('rls-outsider-hash', 'rls-outsider-session', 'e2e00000-0000-0000-0000-000000000002', now(), now() + interval '1 hour'),
+  ('accounts-manager-hash', 'accounts-manager-session', 'e2e00000-0000-0000-0000-000000000003', now(), now() + interval '1 hour');
 INSERT INTO public.clients (id, organization_id, name)
 VALUES ('e2e00000-0000-0000-0000-00000000000b', 'e2e00000-0000-0000-0000-00000000000a', 'RLS Fixture Client');
 
@@ -177,6 +194,47 @@ SELECT lives_ok(
      VALUES ('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-00000000000b', 'RETURNING Shift', now(), now() + interval '1 hour', 'published')
      RETURNING id $$,
   'org owner can INSERT shifts with RETURNING (insert().select())');
+
+-- Regression: the public invitation RPC is SECURITY DEFINER and callable by
+-- authenticated users. It must therefore enforce the same dangerous-role
+-- owner rule as the Server Action, even when called directly through RPC.
+SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000003","role":"authenticated","session_id":"accounts-manager-session"}', true);
+SELECT lives_ok(
+  $$ SELECT public.create_invitation_authorized(
+       'e2e00000-0000-0000-0000-00000000000a', 'safeinvite1', 'safe-invite@example.invalid', 'Safe invitee',
+       ARRAY['e2e00000-0000-0000-0000-00000000000d']::uuid[], NULL) $$,
+  'accounts manager can invite a member with a non-dangerous role');
+SELECT throws_ok(
+  $$ SELECT public.create_invitation_authorized(
+       'e2e00000-0000-0000-0000-00000000000a', 'dangerous1', 'dangerous-invite@example.invalid', 'Dangerous invitee',
+       ARRAY['e2e00000-0000-0000-0000-00000000000e']::uuid[], NULL) $$,
+  '42501', 'owner_required',
+  'accounts manager cannot invite a member with a dangerous role through direct RPC');
+SELECT throws_ok(
+  $$ SELECT public.create_invitation_authorized(
+       'e2e00000-0000-0000-0000-00000000000a', 'foreignrole', 'foreign-role@example.invalid', 'Foreign role',
+       ARRAY['00000000-0000-0000-0000-000000000001']::uuid[], NULL) $$,
+  'P0001', 'invalid_role_ids',
+  'invitation rejects role IDs from another organization');
+SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000001","role":"authenticated","session_id":"rls-owner-session"}', true);
+SELECT lives_ok(
+  $$ SELECT public.create_invitation_authorized(
+       'e2e00000-0000-0000-0000-00000000000a', 'ownerinvite', 'owner-invite@example.invalid', 'Owner invitee',
+       ARRAY['e2e00000-0000-0000-0000-00000000000e']::uuid[], NULL) $$,
+  'owner can invite a member with a dangerous role');
+RESET ROLE;
+SELECT ok(NOT has_function_privilege('anon', 'public.create_invitation_authorized(uuid,text,text,text,uuid[],uuid)', 'EXECUTE'),
+  'anonymous users cannot call the invitation creation RPC');
+SELECT ok(has_function_privilege('authenticated', 'public.save_report_versioned(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,bigint,uuid,text,uuid,jsonb,text)', 'EXECUTE'),
+  'authenticated users may call the versioned report contract RPC');
+SELECT ok(NOT has_function_privilege('anon', 'public.save_report_versioned(uuid,uuid,uuid,uuid,uuid,timestamptz,timestamptz,text,jsonb,bigint,uuid,text,uuid,jsonb,text)', 'EXECUTE'),
+  'anonymous users cannot call the versioned report contract RPC');
+SELECT ok(has_function_privilege('authenticated', 'public.save_generated_shift_atomic(uuid,uuid,jsonb)', 'EXECUTE'),
+  'authenticated users may call the generated-shift contract RPC');
+SELECT ok(NOT has_function_privilege('anon', 'public.transfer_owner_atomic(uuid,uuid,uuid)', 'EXECUTE'),
+  'anonymous users cannot call the owner-transfer contract RPC');
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000001","role":"authenticated","session_id":"rls-owner-session"}', true);
 
 -- Regression: mutate_organization_role_authorized's last-role-manager safety check
 -- must count an organization owner as a role manager even with no explicit

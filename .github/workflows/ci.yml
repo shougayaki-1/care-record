@@ -61,6 +61,10 @@ jobs:
         run: supabase start
       - name: Rebuild from an empty database
         run: supabase db reset
+      - name: Verify generated database types are current
+        run: |
+          supabase gen types --local --schema public > /tmp/database.generated.ts
+          diff -u src/types/database.generated.ts /tmp/database.generated.ts
       - name: Run database security tests
         run: supabase test db
       - name: Lint database functions and schema
@@ -68,6 +72,65 @@ jobs:
       - name: Stop local Supabase
         if: ${{ always() }}
         run: supabase stop --no-backup
+
+  database-upgrade:
+    name: Existing database migration upgrade
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.108.0
+      - name: Resolve the previous release baseline
+        env:
+          PREVIOUS_RELEASE_REF: ${{ vars.PREVIOUS_RELEASE_REF }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          candidate_sha="${PR_BASE_SHA:-$PUSH_BEFORE_SHA}"
+          if [[ -z "$candidate_sha" || "$candidate_sha" =~ ^0+$ ]]; then
+            candidate_sha="$(git rev-parse HEAD^)"
+          fi
+          git cat-file -e "${candidate_sha}^{commit}"
+
+          if [[ -n "$PREVIOUS_RELEASE_REF" ]]; then
+            baseline_sha="$(git rev-parse "${PREVIOUS_RELEASE_REF}^{commit}")"
+          else
+            baseline_sha="$(git describe --tags --abbrev=0 "$candidate_sha" 2>/dev/null || true)"
+            baseline_sha="${baseline_sha:-$candidate_sha}"
+          fi
+          git cat-file -e "${baseline_sha}^{commit}"
+          echo "BASELINE_SHA=$baseline_sha" >> "$GITHUB_ENV"
+      - name: Build the previous release database
+        run: |
+          git worktree add --detach /tmp/care-record-baseline "$BASELINE_SHA"
+          supabase start --workdir /tmp/care-record-baseline
+          supabase db reset --workdir /tmp/care-record-baseline
+      - name: Stage only newly added migrations
+        run: |
+          changed_migrations="$(git diff --name-status "$BASELINE_SHA" HEAD -- 'supabase/migrations/*.sql')"
+          invalid_changes="$(printf '%s\n' "$changed_migrations" | awk 'NF && $1 != "A"')"
+          if [[ -n "$invalid_changes" ]]; then
+            echo "Existing migrations must not be modified or deleted:"
+            echo "$invalid_changes"
+            exit 1
+          fi
+          printf '%s\n' "$changed_migrations" | awk '$1 == "A" { print $2 }' | while IFS= read -r migration; do
+            [[ -z "$migration" ]] && continue
+            cp "$migration" "/tmp/care-record-baseline/$migration"
+          done
+      - name: Apply the release migration delta
+        run: supabase migration up --local --workdir /tmp/care-record-baseline
+      - name: Run current pgTAP contracts against the upgraded database
+        run: supabase test db "$GITHUB_WORKSPACE/supabase/tests" --local --workdir /tmp/care-record-baseline
+      - name: Lint the upgraded database
+        run: supabase db lint --local --level warning --fail-on warning --workdir /tmp/care-record-baseline
+      - name: Stop upgrade-test Supabase
+        if: ${{ always() }}
+        run: supabase stop --no-backup --workdir /tmp/care-record-baseline
 
   build:
     name: Production build
