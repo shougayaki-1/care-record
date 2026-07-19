@@ -8,6 +8,7 @@ import { getShifts, getShiftPatterns, type ShiftQueryFilter } from '@/app/action
 import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
 import { ClientData, StaffData } from '@/components/shifts/ShiftFormModal';
 import { checkShiftPermission, type RolePermissions } from '@/utils/permissions';
+import { useRequestGeneration } from '@/hooks/useRequestGeneration';
 
 export type FetchedPatternData = {
     id: string;
@@ -87,10 +88,27 @@ export const useShiftData = ({
     const selectedStaffIdRef = useRef(selectedStaffId);
     const selectedClientIdRef = useRef(selectedClientId);
     const currentStaffIdRef = useRef(currentStaffId);
+    const { next: nextFetch, invalidate: invalidateFetch, isCurrent: isCurrentFetch } = useRequestGeneration();
+    const { next: nextMasterData, invalidate: invalidateMasterData, isCurrent: isCurrentMasterData } = useRequestGeneration();
+    const { next: nextPatterns, invalidate: invalidatePatterns, isCurrent: isCurrentPatterns } = useRequestGeneration();
+    const { next: nextUnsyncedCount, invalidate: invalidateUnsyncedCount, isCurrent: isCurrentUnsyncedCount } = useRequestGeneration();
 
     useEffect(() => {
+        invalidateFetch();
+        invalidateMasterData();
+        invalidatePatterns();
+        invalidateUnsyncedCount();
         masterDataReadyRef.current = false;
-    }, [currentOrg]);
+        queueMicrotask(() => {
+            setClients([]);
+            setStaffs([]);
+            setCurrentStaffId(null);
+            setPatterns([]);
+            setRawShifts([]);
+            setEvents([]);
+            setUnsyncedCount(0);
+        });
+    }, [currentOrg?.id, invalidateFetch, invalidateMasterData, invalidatePatterns, invalidateUnsyncedCount]);
 
     useEffect(() => {
         activeTabRef.current = activeTab;
@@ -110,11 +128,14 @@ export const useShiftData = ({
 
     const fetchMasterData = useCallback(async () => {
         if (!currentOrg) return;
+        const generation = nextMasterData();
+        const isStale = () => !isCurrentMasterData(generation);
         try {
             const { data: c } = await supabase
                 .from('clients')
                 .select('id, name')
                 .eq('organization_id', currentOrg.id);
+            if (isStale()) return;
             if (c) setClients(c as ClientData[]);
 
             const { data: s } = await supabase
@@ -124,6 +145,7 @@ export const useShiftData = ({
                 .is('archived_at', null)
                 .order('sort_order', { ascending: true, nullsFirst: false })
                 .order('name', { ascending: true });
+            if (isStale()) return;
             if (s) {
                 const parsed = s.map(item => ({
                     id: item.id,
@@ -138,28 +160,34 @@ export const useShiftData = ({
                 }
             }
         } catch (error) {
-            console.error(error);
+            if (!isStale()) console.error(error);
         } finally {
-            masterDataReadyRef.current = true;
+            if (!isStale()) masterDataReadyRef.current = true;
         }
-    }, [currentOrg, currentUserId]);
+    }, [currentOrg, currentUserId, isCurrentMasterData, nextMasterData]);
 
     const fetchUnsyncedCount = useCallback(async () => {
         if (!currentOrg) return;
+        const generation = nextUnsyncedCount();
+        const isStale = () => !isCurrentUnsyncedCount(generation);
         const { count: unsyncedCountResult } = await supabase
             .from('shifts')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', currentOrg.id)
             .is('deleted_at', null)
             .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)');
+        if (isStale()) return;
         setUnsyncedCount(unsyncedCountResult || 0);
-    }, [currentOrg]);
+    }, [currentOrg, isCurrentUnsyncedCount, nextUnsyncedCount]);
 
     const fetchPatterns = useCallback(async () => {
         if (!currentOrg) return;
+        const generation = nextPatterns();
+        const isStale = () => !isCurrentPatterns(generation);
         const fetchedPatterns = await getShiftPatterns(currentOrg.id);
+        if (isStale()) return;
         setPatterns((fetchedPatterns as unknown as FetchedPatternData[]) || []);
-    }, [currentOrg]);
+    }, [currentOrg, isCurrentPatterns, nextPatterns]);
 
     const getShiftFilter = useCallback((): ShiftQueryFilter | null => {
         const tab = activeTabRef.current;
@@ -175,8 +203,6 @@ export const useShiftData = ({
         return {};
     }, []);
 
-    const fetchSeqRef = useRef(0);
-
     const fetchData = useCallback(async (isBackground = false, range?: ShiftDateRange) => {
         if (!currentOrg) return;
         const tab = activeTabRef.current;
@@ -191,8 +217,8 @@ export const useShiftData = ({
 
         // 取得が複数同時に走った際、古い月のレスポンスが後着して
         // 新しい月の表示を上書きしないよう、最新リクエストだけ反映する
-        const seq = ++fetchSeqRef.current;
-        const isStale = () => seq !== fetchSeqRef.current;
+        const generation = nextFetch();
+        const isStale = () => !isCurrentFetch(generation);
 
         const currentView = calendarRef.current?.getApi()?.view;
         const targetRange = range || (currentView
@@ -227,6 +253,7 @@ export const useShiftData = ({
             setEvents(convertToCalendarEvents(typedShifts, !isEditable));
             void fetchUnsyncedCount().catch(console.error);
         } catch (error) {
+            if (isStale()) return;
             console.error(error);
             showToast('データの取得に失敗しました', 'error');
         } finally {
@@ -235,7 +262,7 @@ export const useShiftData = ({
                 setIsFetching(false);
             }
         }
-    }, [currentOrg, showToast, calendarRef, fetchPatterns, getShiftFilter, fetchUnsyncedCount]);
+    }, [currentOrg, showToast, calendarRef, fetchPatterns, getShiftFilter, fetchUnsyncedCount, isCurrentFetch, nextFetch]);
 
     useEffect(() => {
         queueMicrotask(() => {

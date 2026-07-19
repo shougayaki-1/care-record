@@ -34,7 +34,7 @@ export const signUp = async (page: Page, email: string, password: string) => {
 };
 
 export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUser>) => {
-  await page.goto('http://localhost:3000');
+  await page.goto('/?next=/setup');
   await registerTermsHandler(page);
   await signUp(page, user.email, user.password);
 

@@ -119,7 +119,7 @@ export default function AccountsPage() {
     refetch: fetchData,
   } = useFetchData(fetchAccountsData, initialAccountsData, !wsLoading && Boolean(currentOrg), () => {
     showToast('データの取得に失敗しました', 'error');
-  });
+  }, currentOrg?.id);
   const { accountList, currentUserId, availableRoles, inviteStaffCandidates } = accountsData;
 
 
