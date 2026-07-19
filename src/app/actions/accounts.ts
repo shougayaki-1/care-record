@@ -206,7 +206,7 @@ export async function createInvitation(orgId: string, params: { targetName: stri
         p_email: email,
         p_target_name: targetName,
         p_role_ids: params.roleIds ?? [],
-        p_staff_id: params.staffId || null,
+        p_staff_id: params.staffId ?? undefined,
     });
     if (error) throw sanitizeDbError(error, 'action.accounts');
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.invitation_create', resourceType: 'invitation', details: { roleIds: params.roleIds ?? [], staffId: params.staffId || null, targetName } });

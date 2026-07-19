@@ -4,6 +4,7 @@ import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
 import { computeOccurrenceSegmentDateTimes } from '@/utils/shiftRecurrence';
+import { asJson, asNullableRpcArg } from '@/types/json';
 
 import { normalizeTimeForDb } from './helpers';
 import { trySyncSilently } from './googleSyncInternal';
@@ -258,10 +259,10 @@ export async function saveGeneratedShiftAtomic(
   });
   const supabase = await createSessionClient();
   const { data, error } = await supabase.rpc('save_generated_shift_atomic', {
-    p_shift_id: shiftId, p_org_id: payload.organizationId,
-    p_payload: { client_id: payload.clientId, title: payload.title, start_at: payload.startAt,
+    p_shift_id: asNullableRpcArg<string>(shiftId), p_org_id: payload.organizationId,
+    p_payload: asJson({ client_id: payload.clientId, title: payload.title, start_at: payload.startAt,
       end_at: payload.endAt, status: payload.status ?? 'published', pattern_id: payload.patternId ?? null,
-      is_modified: payload.isModified ?? false, segments },
+      is_modified: payload.isModified ?? false, segments }),
   });
   if (error) throw error;
   return { success: true, shiftId: data as string };

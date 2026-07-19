@@ -136,15 +136,15 @@ export async function heartbeatSession(): Promise<void> {
  * クライアント側セッションが user_session_activity に未登録の場合（デプロイ前のセッション等）に登録する。
  * access_token をサーバーへ送り、Auth サーバーで検証した上で upsert する。
  */
-export async function ensureSessionActivity(accessToken: string): Promise<void> {
+export async function ensureSessionActivity(accessToken: string): Promise<boolean> {
   try {
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(accessToken);
-    if (error || !user) return;
+    if (error || !user) return false;
     const sessionId = decodeJwtSessionId(accessToken);
-    if (!sessionId) return;
+    if (!sessionId) return false;
     const sessionHash = createHash('sha256').update(accessToken).digest('hex');
     const absoluteExpiresAt = new Date(Date.now() + SESSION_ABSOLUTE_HOURS * 60 * 60 * 1000).toISOString();
-    await supabaseAdmin.from('user_session_activity').upsert({
+    const { error: upsertError } = await supabaseAdmin.from('user_session_activity').upsert({
       auth_session_id: sessionId,
       session_hash: sessionHash,
       user_id: user.id,
@@ -152,8 +152,9 @@ export async function ensureSessionActivity(accessToken: string): Promise<void> 
       absolute_expires_at: absoluteExpiresAt,
       revoked_at: null,
     }, { onConflict: 'auth_session_id', ignoreDuplicates: false });
+    return !upsertError;
   } catch {
-    // 最善努力のため、失敗してもサイレントに無視する。
+    return false;
   }
 }
 

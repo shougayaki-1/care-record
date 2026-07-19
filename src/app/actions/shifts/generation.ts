@@ -66,7 +66,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
               });
 
               details.push({
-                  title: p.title,
+                  title: p.title ?? '',
                   count: patternCount,
                   isOvernight
               });
@@ -168,7 +168,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                   const payload = {
                       organizationId,
                       clientId: p.client_id,
-                      title: p.title,
+                      title: p.title ?? '',
                       startAt,
                       endAt,
                       status: 'published' as const,

@@ -7,6 +7,7 @@ import { assertOrgPermission, assertOrgRole, assertRecordPermission, createSessi
 import { randomUUID } from 'crypto';
 import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 import { MODEL_NAME } from '@/lib/ai/model';
+import { asJson, asJsonRecord, asNullableRpcArg } from '@/types/json';
 
 type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
 
@@ -56,7 +57,7 @@ export async function getMyReportHistory(
     status: 'ok',
     items: (data ?? []).map((report) => ({
       id: report.id,
-      start_at: report.start_at,
+      start_at: report.start_at ?? '',
       status: report.status as 'pending' | 'approved' | 'remanded',
       client_id: report.client_id,
       clients: Array.isArray(report.clients) ? (report.clients[0] ?? null) : report.clients,
@@ -106,9 +107,9 @@ export async function saveReportAutosave(input: ReportAutosaveInput) {
   const supabase = await createSessionClient();
   const { data, error } = await supabase.rpc('save_report_autosave_authorized', {
     p_organization_id: input.organizationId, p_client_id: input.clientId,
-    p_report_id: input.reportId || null, p_draft_key: input.draftKey,
-    p_base_content_revision: input.baseContentRevision ?? null,
-    p_autosave_revision: input.autosaveRevision, p_payload: input.payload,
+    p_report_id: asNullableRpcArg(input.reportId), p_draft_key: input.draftKey,
+    p_base_content_revision: asNullableRpcArg(input.baseContentRevision),
+    p_autosave_revision: input.autosaveRevision, p_payload: asJson(input.payload),
   });
   if (error) throw sanitizeDbError(error, 'action.reports');
   return data as { saved: boolean; stale: boolean; savedAt: string | null };
@@ -119,10 +120,14 @@ export async function loadReportAutosave(organizationId: string, draftKey: strin
   const supabase = await createSessionClient();
   const { data, error } = await supabase.rpc('load_report_autosave_authorized', { p_organization_id: organizationId, p_draft_key: draftKey });
   if (error) throw sanitizeDbError(error, 'action.reports');
-  if (data) {
-    await assertRecordPermission(organizationId, 'edit', { clientId: data.client_id, reportId: data.report_id });
+  const autosave = asJsonRecord(data);
+  if (autosave && typeof autosave.client_id === 'string') {
+    await assertRecordPermission(organizationId, 'edit', { clientId: autosave.client_id, reportId: typeof autosave.report_id === 'string' ? autosave.report_id : null });
   }
-  return data;
+  return autosave as {
+    payload?: Record<string, unknown>;
+    autosave_revision?: number;
+  } | null;
 }
 
 export async function discardReportAutosave(organizationId: string, draftKey: string) {
@@ -152,20 +157,20 @@ export async function saveReport(input: SaveReportInput) {
   }
   const { data: saved, error } = await supabase.rpc('save_report_versioned', {
     p_organization_id: input.organizationId,
-    p_report_id: input.reportId || null,
+    p_report_id: asNullableRpcArg(input.reportId),
     p_client_id: input.clientId,
-    p_shift_id: input.shiftId || null,
-    p_segment_id: input.segmentId || null,
+    p_shift_id: asNullableRpcArg(input.shiftId),
+    p_segment_id: asNullableRpcArg(input.segmentId),
     p_start_at: input.startAt,
     p_end_at: input.endAt,
     p_status: input.status,
-    p_values: input.values,
+    p_values: asJson(input.values),
     p_expected_version: input.expectedVersion,
     p_idempotency_key: input.idempotencyKey,
     p_session_id: user.sessionId,
-    p_actual_service_type_id: input.actualServiceTypeId || null,
-    p_actual_staffs: input.actualStaffs ?? [],
-    p_correction_reason: input.correctionReason?.trim() || null,
+    p_actual_service_type_id: asNullableRpcArg(input.actualServiceTypeId),
+    p_actual_staffs: asJson(input.actualStaffs ?? []),
+    p_correction_reason: asNullableRpcArg(input.correctionReason?.trim()),
   });
   if (error || !saved) {
     await recordAuditEvent({ organizationId: input.organizationId, actorId: user.id, action: 'report.save',

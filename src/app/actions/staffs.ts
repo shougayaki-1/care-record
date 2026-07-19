@@ -5,6 +5,7 @@ import { sanitizeDbError, UserFacingError, withSafeError } from '@/utils/errors'
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertOrgRole, assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/types/database.generated';
 
 const EMPLOYMENT_TYPES = ['常勤', '非常勤'] as const;
 const WORK_STYLES = ['兼務', '専従'] as const;
@@ -17,7 +18,7 @@ function normalizeChoice<T extends readonly string[]>(value: string, allowedValu
   return value as T[number];
 }
 
-async function normalizePositions(supabase: SupabaseClient, organizationId: string, positions: string[]): Promise<string[]> {
+async function normalizePositions(supabase: SupabaseClient<Database>, organizationId: string, positions: string[]): Promise<string[]> {
   const uniquePositions = Array.from(new Set(positions.map((item) => item.trim()).filter(Boolean)));
   if (uniquePositions.length > 20 || uniquePositions.some((item) => item.length > 50)) {
     throw new UserFacingError('役職の入力が多すぎるか長すぎます');
@@ -43,7 +44,7 @@ async function normalizePositions(supabase: SupabaseClient, organizationId: stri
   return [...orderedPresetPositions, ...customPositions];
 }
 
-async function normalizeStaffInput(supabase: SupabaseClient, organizationId: string, name: string, positions: string[], employmentType: string, workStyle: string) {
+async function normalizeStaffInput(supabase: SupabaseClient<Database>, organizationId: string, name: string, positions: string[], employmentType: string, workStyle: string) {
   const normalizedName = name.trim();
   if (normalizedName.length < 1 || normalizedName.length > 100) throw new Error('スタッフ名は1〜100文字で入力してください');
   return {
@@ -54,13 +55,13 @@ async function normalizeStaffInput(supabase: SupabaseClient, organizationId: str
   };
 }
 
-async function assertStaffOrg(supabase: SupabaseClient, staffId: string, organizationId: string) {
+async function assertStaffOrg(supabase: SupabaseClient<Database>, staffId: string, organizationId: string) {
   const { data, error } = await supabase.from('staffs').select('id, archived_at, deleted_at').eq('id', staffId).eq('organization_id', organizationId).maybeSingle();
   if (error || !data || data.deleted_at) throw new Error('スタッフが見つかりません');
   return data;
 }
 
-async function validateLinkedUser(supabase: SupabaseClient, organizationId: string, linkedUserId: string | null, excludeStaffId?: string | null) {
+async function validateLinkedUser(supabase: SupabaseClient<Database>, organizationId: string, linkedUserId: string | null, excludeStaffId?: string | null) {
   if (!linkedUserId) return;
   const { data } = await supabase.from('organization_members').select('user_id').eq('organization_id', organizationId).eq('user_id', linkedUserId).maybeSingle();
   if (!data) throw new UserFacingError('事業所外のアカウントは紐付けできません');

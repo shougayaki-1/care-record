@@ -1,12 +1,14 @@
 'use server';
 
 import { sanitizeDbError, UserFacingError, withSafeError } from '@/utils/errors';
+import { asJson } from '@/types/json';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/types/database.generated';
 
-async function assertClientOrg(supabase: SupabaseClient, clientId: string, organizationId: string) {
+async function assertClientOrg(supabase: SupabaseClient<Database>, clientId: string, organizationId: string) {
   const { data, error } = await supabase
     .from('clients')
     .select('id, archived_at, deleted_at')
@@ -116,7 +118,7 @@ export async function saveClientForm(organizationId: string, clientId: string, s
     const { error } = await supabase.rpc('upsert_client_form_authorized', {
       p_organization_id: organizationId,
       p_client_id: clientId,
-      p_schema: schema,
+      p_schema: asJson(schema),
     });
     if (error) throw sanitizeDbError(error, 'action.clients');
     await recordAuditEvent({
@@ -175,7 +177,7 @@ export async function updateClientGoogleLink(
     const { userId } = await assertOrgPermission(organizationId, 'clients');
     const supabase = await createSessionClient();
     await assertClientOrg(supabase, clientId, organizationId);
-    const update: Record<string, string | null> = {};
+    const update: { google_folder_id?: string | null; google_template_id?: string | null } = {};
     if ('folderId' in values) update.google_folder_id = values.folderId?.trim() || null;
     if ('templateId' in values) update.google_template_id = values.templateId?.trim() || null;
     if (Object.keys(update).length === 0) throw new UserFacingError('更新内容がありません');

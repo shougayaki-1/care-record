@@ -5,6 +5,7 @@ import { PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS, type RolePermissi
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { assertOwnerForDangerousPermissions, assertRoleManagerRemains } from '@/utils/supabase/roleSafety';
+import { asJson, asNullableRpcArg } from '@/types/json';
 
 type RolePatch = Partial<{ name: string; color: string | null; permissions: RolePermissions }>;
 
@@ -41,8 +42,8 @@ export async function createOrgRole(orgId: string, name: string, color: string |
     assertOwnerForDangerousPermissions(permissions, isOwner);
     const supabase = await createSessionClient();
     const { data, error } = await supabase.rpc('mutate_organization_role_authorized', {
-      p_organization_id: orgId, p_role_id: null, p_action: 'create',
-      p_name: name, p_color: color, p_permissions: permissions, p_require_preset: false,
+      p_organization_id: orgId, p_role_id: asNullableRpcArg<string>(null), p_action: 'create',
+      p_name: name, p_color: asNullableRpcArg<string>(color), p_permissions: asJson(permissions), p_require_preset: false,
     });
     if (error) throw sanitizeDbError(error, 'action.roles.create');
     const roleId = String(data);
@@ -69,8 +70,8 @@ export async function updateOrgRole(orgId: string, roleId: string, patch: RolePa
     const { error } = await supabase.rpc('mutate_organization_role_authorized', {
       p_organization_id: orgId, p_role_id: roleId, p_action: 'update',
       p_name: patch.name ?? existing.name,
-      p_color: patch.color === undefined ? existing.color : patch.color,
-      p_permissions: effectivePermissions, p_require_preset: false,
+      p_color: asNullableRpcArg<string>(patch.color === undefined ? existing.color : patch.color),
+      p_permissions: asJson(effectivePermissions), p_require_preset: false,
     });
     if (error) throw sanitizeDbError(error, 'action.roles.update');
     await recordAuditEvent({
@@ -96,7 +97,7 @@ export async function deleteOrgRole(orgId: string, roleId: string): Promise<void
     await assertRoleManagerRemains(orgId, { deletedRoleId: roleId });
     const { error } = await supabase.rpc('mutate_organization_role_authorized', {
       p_organization_id: orgId, p_role_id: roleId, p_action: 'delete',
-      p_name: null, p_color: null, p_permissions: null, p_require_preset: false,
+      p_name: asNullableRpcArg<string>(null), p_color: asNullableRpcArg<string>(null), p_permissions: null, p_require_preset: false,
     });
     if (error) throw sanitizeDbError(error, 'action.roles.delete');
     await recordAuditEvent({
@@ -119,7 +120,7 @@ export async function resetPresetRole(orgId: string, roleId: string, preset: 'ma
     await assertRoleManagerRemains(orgId, { updatedRole: { roleId, permissions } });
     const { error } = await supabase.rpc('mutate_organization_role_authorized', {
       p_organization_id: orgId, p_role_id: roleId, p_action: 'reset',
-      p_name: null, p_color: null, p_permissions: permissions, p_require_preset: true,
+      p_name: asNullableRpcArg<string>(null), p_color: asNullableRpcArg<string>(null), p_permissions: asJson(permissions), p_require_preset: true,
     });
     if (error) throw sanitizeDbError(error, 'action.roles.reset');
     await recordAuditEvent({

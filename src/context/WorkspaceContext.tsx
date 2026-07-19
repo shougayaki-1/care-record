@@ -66,12 +66,20 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         return;
       }
 
-      // セッション活動記録は補助的な監査処理であり、workspace取得をブロックさせない。
-      // ルート遷移直後はServer Actionのリクエストがキャンセルされることがあるため、
-      // RLSクエリとは分離して失敗を記録する。
-      void ensureSessionActivity(session.access_token).catch((error) => {
-        console.warn('session activity registration skipped:', error);
-      });
+      // この記録はRLSの必須条件であるため、初回の組織クエリより先に完了させる。
+      // 失敗した場合も認証済みクエリを投げず、安全にセッションエラーとして扱う。
+      try {
+        if (!await ensureSessionActivity(session.access_token)) throw new Error('session activity unavailable');
+      } catch (error) {
+        if (!isCurrent()) return;
+        console.error('session activity registration failed:', error);
+        setOrgList([]);
+        setCurrentOrg(null);
+        setUserId(null);
+        setStatus('session_expired');
+        setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
+        return;
+      }
 
       // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
       // organization_member_roles を JOIN することで 3RTT → 2RTT に削減。
@@ -125,7 +133,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
 
       const list: Workspace[] = [];
       for (const { organization, role, memberRoles } of parsedMembers) {
-        const rolePerms: RolePermissions[] = memberRoles.flatMap((omr: { organization_roles: { permissions: RolePermissions } | { permissions: RolePermissions }[] | null }) => {
+        const rolePerms: RolePermissions[] = memberRoles.flatMap((omr) => {
           const orgRole = Array.isArray(omr.organization_roles) ? omr.organization_roles[0] : omr.organization_roles;
           if (!orgRole?.permissions) return [];
           return [orgRole.permissions as RolePermissions];

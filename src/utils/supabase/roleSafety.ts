@@ -2,7 +2,7 @@ import { mergePermissions, normalizePermissions, type RolePermissions } from '@/
 import { createSessionClient } from '@/utils/supabase/auth';
 
 type RoleRow = { id: string; permissions: RolePermissions };
-type MemberRow = { user_id: string; role: string };
+type MemberRow = { user_id: string | null; role: string };
 type LinkRow = { user_id: string; role_id: string };
 
 type RoleSafetyPatch = {
@@ -55,9 +55,9 @@ export async function assertRoleManagerRemains(
     roleMap.set(patch.updatedRole.roleId, patch.updatedRole.permissions);
   }
 
-  const memberIds = new Set((members ?? []).map((member: MemberRow) => member.user_id));
+  const memberIds = new Set((members ?? []).flatMap((member: MemberRow) => member.user_id ? [member.user_id] : []));
   const ownerIds = new Set(
-    (members ?? []).filter((member: MemberRow) => member.role === 'owner').map((member: MemberRow) => member.user_id),
+    (members ?? []).flatMap((member: MemberRow) => member.role === 'owner' && member.user_id ? [member.user_id] : []),
   );
   if (patch.removedMemberId) memberIds.delete(patch.removedMemberId);
 

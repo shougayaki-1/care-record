@@ -2,6 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { createSessionClient, getAuthedUser, getAuthedUserFromAccessToken, type OrgRole } from '@/utils/supabase/auth';
+import type { Database } from '@/types/database.generated';
 
 export type WorkspaceSummary = {
   id: string;
@@ -35,7 +36,7 @@ export async function getMyWorkspaces(accessToken?: string): Promise<WorkspaceRe
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       if (!url || !anonKey) throw new Error('Supabase session environment is not configured');
-      sessionClient = createClient(url, anonKey, {
+      sessionClient = createClient<Database>(url, anonKey, {
         global: { headers: { Authorization: `Bearer ${accessToken}` } },
         auth: { persistSession: false, autoRefreshToken: false },
       });

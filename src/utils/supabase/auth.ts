@@ -6,6 +6,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
+import type { Database } from '@/types/database.generated';
 import { sanitizeDbError } from '@/utils/errors';
 import { decodeJwtSessionId } from '@/utils/jwt';
 import { SESSION_ABSOLUTE_HOURS, SESSION_IDLE_MINUTES } from '@/utils/authConstants';
@@ -24,7 +25,7 @@ const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!supabaseUrl || !serviceRoleKey) {
     throw new Error('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
 }
-export const supabaseAdmin: SupabaseClient = createClient(
+export const supabaseAdmin: SupabaseClient<Database> = createClient<Database>(
     supabaseUrl,
     serviceRoleKey,
     { auth: { autoRefreshToken: false, persistSession: false } }
@@ -34,11 +35,11 @@ export const supabaseAdmin: SupabaseClient = createClient(
  * クッキーセッションに紐づく anon クライアントを生成する。
  * Server Action からは cookies() が利用できる。
  */
-export async function createSessionClient(): Promise<SupabaseClient> {
+export async function createSessionClient(): Promise<SupabaseClient<Database>> {
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!supabaseUrl || !anonKey) throw new Error('Supabase session environment is not configured');
     const cookieStore = await cookies();
-    return createServerClient(
+    return createServerClient<Database>(
         supabaseUrl,
         anonKey,
         {
@@ -214,15 +215,15 @@ export async function assertResourceOrgRole(
     allowedRoles: OrgRole[] = ['owner', 'member']
 ): Promise<{ organizationId: string; userId: string; role: OrgRole }> {
     if (!resourceId) throw new Error('リソースIDが不正です');
-    const { data, error } = await supabaseAdmin
-        .from(table)
-        .select('organization_id')
-        .eq('id', resourceId)
-        .single();
-    if (error || !data?.organization_id) throw new Error('リソースが見つかりません');
+    const query = supabaseAdmin
+        .from(table as keyof Database['public']['Tables'])
+        .select('*') as unknown as { eq: (column: string, value: string) => { single: () => Promise<{ data: unknown; error: unknown }> } };
+    const { data, error } = await query.eq('id', resourceId).single();
+    const resource = data as unknown as { organization_id?: string } | null;
+    if (error || !resource?.organization_id) throw new Error('リソースが見つかりません');
 
-    const { userId, role } = await assertOrgRole(data.organization_id, allowedRoles);
-    return { organizationId: data.organization_id, userId, role };
+    const { userId, role } = await assertOrgRole(resource.organization_id, allowedRoles);
+    return { organizationId: resource.organization_id, userId, role };
 }
 
 /**
@@ -263,9 +264,8 @@ export async function getEffectivePermissions(
     .eq('organization_id', organizationId)
     .eq('user_id', userId);
 
-  type RoleLinkRow = { organization_roles: { permissions?: RolePermissions } | Array<{ permissions?: RolePermissions }> | null };
   const rolePerms: RolePermissions[] = (roleLinks ?? [])
-    .map((r: RoleLinkRow) => (Array.isArray(r.organization_roles) ? r.organization_roles[0]?.permissions : r.organization_roles?.permissions))
+    .map((r) => (Array.isArray(r.organization_roles) ? r.organization_roles[0]?.permissions : r.organization_roles?.permissions) as RolePermissions | undefined)
     .filter((p): p is RolePermissions => p != null);
 
   const isOwner = member.role === 'owner';
@@ -499,14 +499,14 @@ export async function assertResourceOrgPermission(
   area: ManagementArea
 ): Promise<{ organizationId: string; userId: string; isOwner: boolean }> {
   if (!resourceId) throw new Error('リソースIDが不正です');
-  const { data, error } = await supabaseAdmin
-    .from(table)
-    .select('organization_id')
-    .eq('id', resourceId)
-    .single();
-  if (error || !data?.organization_id) throw new Error('リソースが見つかりません');
-  const { userId, isOwner } = await assertOrgPermission(data.organization_id, area);
-  return { organizationId: data.organization_id, userId, isOwner };
+  const query = supabaseAdmin
+    .from(table as keyof Database['public']['Tables'])
+    .select('*') as unknown as { eq: (column: string, value: string) => { single: () => Promise<{ data: unknown; error: unknown }> } };
+  const { data, error } = await query.eq('id', resourceId).single();
+  const resource = data as unknown as { organization_id?: string } | null;
+  if (error || !resource?.organization_id) throw new Error('リソースが見つかりません');
+  const { userId, isOwner } = await assertOrgPermission(resource.organization_id, area);
+  return { organizationId: resource.organization_id, userId, isOwner };
 }
 
 /**
