@@ -130,17 +130,17 @@ describe('useRecordForm', () => {
     rerender();
 
     await act(async () => {
-      testState.reports.get('report-b')?.resolve(report('report-b', '2026-07-19T11:00:00.000Z'));
+      testState.reports.get('report-b')?.resolve(report('report-b', '2026-07-20T12:00:00.000Z'));
       await testState.reports.get('report-b')?.promise;
     });
     await waitFor(() => expect(result.current.currentReportId).toBe('report-b'));
 
     await act(async () => {
-      testState.reports.get('report-a')?.resolve(report('report-a', '2026-07-19T08:00:00.000Z'));
+      testState.reports.get('report-a')?.resolve(report('report-a', '2026-07-19T12:00:00.000Z'));
       await testState.reports.get('report-a')?.promise;
     });
 
     expect(result.current.currentReportId).toBe('report-b');
-    expect(result.current.startDateTime).toContain('20:00');
+    expect(result.current.startDateTime.slice(0, 10)).toBe('2026-07-20');
   });
 });

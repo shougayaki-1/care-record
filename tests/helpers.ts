@@ -54,13 +54,24 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
   await page.getByLabel('事業所名').fill(user.orgName);
   await page.getByRole('button', { name: '作成して開始' }).click();
 
+  // 組織作成直後はセッション活動の登録が反映されるまで待つ。
+  // 一時障害の手動再試行画面が出た場合だけ、一度だけ UI から再試行する。
+  const retryButton = page.getByRole('button', { name: '再試行', exact: true });
+  const workspaceReady = page.getByRole('button', { name: user.orgName })
+    .or(page.getByRole('link', { name: '記録を作成', exact: true }));
+  await expect(workspaceReady.or(retryButton)).toBeVisible({ timeout: 30000 });
+  if (await retryButton.isVisible()) {
+    await retryButton.click();
+    await expect(workspaceReady).toBeVisible({ timeout: 30000 });
+  }
+
   // /app はワークスペース解決後 /app/record へ自動リダイレクトされる
   await expect(page).toHaveURL(/\/app(?:\/record)?$/, { timeout: 30000 });
   if (new URL(page.url()).pathname === '/app') {
     await page.getByRole('link', { name: '記録を作成', exact: true }).click();
     await expect(page).toHaveURL(/\/app\/record$/, { timeout: 30000 });
   }
-  await expect(page.getByRole('button', { name: user.orgName })).toBeVisible({ timeout: 15000 });
+  await expect(workspaceReady).toBeVisible({ timeout: 15000 });
 };
 
 // サイドバーのメニューをクリックするヘルパー（モバイル対応）

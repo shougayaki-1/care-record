@@ -63,7 +63,7 @@ jobs:
         run: supabase db reset
       - name: Verify generated database types are current
         run: |
-          supabase gen types --local --schema public > /tmp/database.generated.ts
+          node scripts/db/generate-types-local.mjs > /tmp/database.generated.ts
           diff -u src/types/database.generated.ts /tmp/database.generated.ts
       - name: Run database security tests
         run: supabase test db

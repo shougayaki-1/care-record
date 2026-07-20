@@ -8,6 +8,7 @@ import { CircularProgress, Box } from '@mui/material';
 import { setLastOrganization } from '@/app/actions/user';
 import { ensureSessionActivity } from '@/app/actions/auth';
 import { FULL_PERMISSIONS, mergePermissions, type RolePermissions } from '@/utils/permissions';
+import { ensureSessionActivityWithRetry } from '@/utils/sessionActivity';
 
 export type OrganizationRole = 'owner' | 'member';
 
@@ -67,17 +68,22 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       }
 
       // この記録はRLSの必須条件であるため、初回の組織クエリより先に完了させる。
-      // 失敗した場合も認証済みクエリを投げず、安全にセッションエラーとして扱う。
-      try {
-        if (!await ensureSessionActivity(session.access_token)) throw new Error('session activity unavailable');
-      } catch (error) {
+      // 同じ検証済みアクセストークンで一時障害だけを短時間リトライする。
+      const activityResult = await ensureSessionActivityWithRetry(
+        () => ensureSessionActivity(session.access_token),
+      );
+      if (activityResult.status !== 'ready') {
         if (!isCurrent()) return;
-        console.error('session activity registration failed:', error);
         setOrgList([]);
         setCurrentOrg(null);
         setUserId(null);
-        setStatus('session_expired');
-        setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
+        if (activityResult.status === 'invalid_session') {
+          setStatus('session_expired');
+          setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
+        } else {
+          setStatus('error');
+          setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
+        }
         return;
       }
 

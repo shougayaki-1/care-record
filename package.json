@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "db:types:local": "npx --yes supabase@2.108.0 gen types --local --schema public > src/types/database.generated.ts",
+    "db:types:local": "node scripts/db/generate-types-local.mjs > src/types/database.generated.ts",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "test:ui": "vitest run --project storybook",
