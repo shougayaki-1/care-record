@@ -144,25 +144,15 @@ describe('useRecordForm', () => {
     expect(result.current.startDateTime.slice(0, 10)).toBe('2026-07-20');
   });
 
-  // Regression test: a synchronous router.replace() on mount (to normalize the
-  // URL with a draftKey) races with Next.js App Router's pending-push history
-  // commit for the navigation that reached this page, causing the browser
-  // back button to skip past the list page entirely. See
-  // src/hooks/useRecordForm.ts's draftKey-normalization effect.
-  it('defers the draftKey-normalizing router.replace past the current tick', async () => {
-    vi.useFakeTimers();
-    try {
-      testState.search = 'reportId=report-a';
-      renderHook(() => useRecordForm());
+  // Fallback normalization for direct/deep-link loads with no draftKey in the
+  // URL (in-app navigation always supplies one via buildRecordPath(), so this
+  // path only exists for e.g. a typed URL or bookmark — see
+  // src/utils/recordNavigation.ts).
+  it('normalizes the URL with a draftKey when one is missing', () => {
+    testState.search = 'reportId=report-a';
+    renderHook(() => useRecordForm());
 
-      expect(testState.router.replace).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(0);
-
-      expect(testState.router.replace).toHaveBeenCalledTimes(1);
-      expect(testState.router.replace.mock.calls[0][0]).toContain('draftKey=');
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(testState.router.replace).toHaveBeenCalled();
+    expect(testState.router.replace.mock.calls[0][0]).toContain('draftKey=');
   });
 });

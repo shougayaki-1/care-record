@@ -344,20 +344,15 @@ export function useRecordForm() {
   }, []);
 
   useEffect(() => {
+    // Fallback for direct/deep-link loads that reach this page without a
+    // draftKey (e.g. a typed URL or bookmark) — every in-app navigation to
+    // this page goes through buildRecordPath() (src/utils/recordNavigation.ts),
+    // which already includes draftKey, so this replace() never races a
+    // pending router.push for those paths.
     if (searchParams.get('draftKey')) return;
-    // Deferred to the next macrotask: this page is typically reached via a
-    // fresh router.push (list → detail). Next.js App Router commits that
-    // pending push to the real browser history entry in an effect that runs
-    // AFTER this one (parent effects run after child effects on mount). A
-    // synchronous router.replace() here would consume the shared pending-push
-    // flag first, so the push never lands as its own history entry and
-    // browser back skips straight past this page's list.
-    const timer = setTimeout(() => {
-      const next = new URLSearchParams(searchParams.toString());
-      next.set('draftKey', draftKey);
-      router.replace(`/app/record/${clientId}?${next.toString()}`);
-    }, 0);
-    return () => clearTimeout(timer);
+    const next = new URLSearchParams(searchParams.toString());
+    next.set('draftKey', draftKey);
+    router.replace(`/app/record/${clientId}?${next.toString()}`);
   }, [clientId, draftKey, router, searchParams]);
 
   const formatTimeForLabel = (dateStr?: string) => {

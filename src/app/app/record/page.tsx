@@ -18,6 +18,7 @@ import { InnerPageHeader, PageLayout, TablePageSkeleton } from '@/components/ui'
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
 import { checkRecordPermission, checkShiftPermission } from '@/utils/permissions';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
+import { buildRecordPath } from '@/utils/recordNavigation';
 
 type Client = { id: string; name: string; };
 type DraftReport = { id: string; created_at: string; };
@@ -129,7 +130,7 @@ export default function RecordSelectPage() {
                         <Stack spacing={1.5}>
                             {todayShifts.map((shift) => (
                                 <Card key={shift.id} variant="outlined" sx={{ borderRadius: 2, borderColor: shift.report ? 'divider' : 'primary.light' }}>
-                                    <CardActionArea onClick={() => router.push(`/app/record/${shift.client_id}?shiftId=${shift.id}`)} sx={{ p: { xs: 1.5, sm: 2 } }}>
+                                    <CardActionArea onClick={() => router.push(buildRecordPath(shift.client_id, { shiftId: shift.id }))} sx={{ p: { xs: 1.5, sm: 2 } }}>
                                         <Box display="flex" alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" gap={1.5}>
                                             <Box sx={{ minWidth: 0 }}>
                                                 <Box display="flex" alignItems="center" gap={1} mb={0.5} flexWrap="wrap">
@@ -163,7 +164,7 @@ export default function RecordSelectPage() {
                         return (
                             <Box key={client.id}>
                                 <Card variant="outlined" sx={{ borderRadius: 1 }}>
-                                    <CardActionArea onClick={() => router.push(`/app/record/${client.id}`)} sx={{ p: { xs: 1.5, sm: 2 } }}>
+                                    <CardActionArea onClick={() => router.push(buildRecordPath(client.id))} sx={{ p: { xs: 1.5, sm: 2 } }}>
                                         <Box display="flex" alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" gap={1.5}>
                                             <Box display="flex" alignItems="center" gap={1.5} minWidth={0}>
                                                 <Avatar sx={{ bgcolor: 'primary.light', flexShrink: 0 }}><PersonIcon /></Avatar>
@@ -181,7 +182,7 @@ export default function RecordSelectPage() {
                                     <Box sx={{ mt: 1.5, ml: { xs: 0, sm: 2 }, display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1, '&::-webkit-scrollbar': { display: 'none' } }}>
                                         {drafts.map((draft) => (
                                             <Card key={draft.id} variant="outlined" sx={{ minWidth: { xs: 'min(220px, 75vw)', sm: 200 }, flexShrink: 0, borderRadius: 2, bgcolor: 'background.warning', borderColor: 'warning.light' }}>
-                                                <CardActionArea onClick={() => router.push(`/app/record/${client.id}?reportId=${draft.id}`)} sx={{ p: 1.5 }}>
+                                                <CardActionArea onClick={() => router.push(buildRecordPath(client.id, { reportId: draft.id }))} sx={{ p: 1.5 }}>
                                                     <Stack spacing={0.5}>
                                                         <Box display="flex" alignItems="center" gap={1}>
                                                             <Chip label={getReportStatusLabel('draft')} color={getReportStatusChipColor('draft')} size="small" sx={{ height: 20, fontSize: '0.7rem' }} />

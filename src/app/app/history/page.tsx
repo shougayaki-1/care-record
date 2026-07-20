@@ -17,6 +17,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { CalendarPageSkeleton, InnerPageHeader, PageLayout } from '@/components/ui';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 import { getMyReportHistory } from '@/app/actions/reports';
+import { buildRecordPath } from '@/utils/recordNavigation';
 
 type Report = {
     id: string; start_at: string; status: 'pending' | 'approved' | 'remanded';
@@ -114,7 +115,7 @@ export default function HistoryPage() {
         if (!wsLoading) fetchData();
     }, [wsLoading, currentOrg, filterDate, viewMode, currentMonth]);
 
-    const handleEdit = (report: Report) => router.push(`/app/record/${report.client_id}?reportId=${report.id}`);
+    const handleEdit = (report: Report) => router.push(buildRecordPath(report.client_id, { reportId: report.id }));
 
     const handleMonthChange = (diff: number) => {
         setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + diff, 1));

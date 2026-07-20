@@ -33,6 +33,7 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { InnerPageHeader, PageBody, PageLayout, TablePageSkeleton } from '@/components/ui';
 import { checkRecordPermission } from '@/utils/permissions';
+import { buildRecordPath } from '@/utils/recordNavigation';
 import { getReportStatusChipColor, getReportStatusLabel, type ReportStatus } from '@/utils/reportStatus';
 import {
   buildReportsCsv,
@@ -464,7 +465,7 @@ export default function ReportsClientPage() {
       finally { setGasProgress(null); }
   };
 
-  const handleOpenDetail = (report: Report) => { router.push(`/app/record/${report.clients.id}?reportId=${report.id}`); };
+  const handleOpenDetail = (report: Report) => { router.push(buildRecordPath(report.clients.id, { reportId: report.id })); };
   let headerTitle = "全件表示";
   if (onlyPending) headerTitle = "未承認・差戻し";
   if (isCurrentMonth) headerTitle = "今月の記録";
