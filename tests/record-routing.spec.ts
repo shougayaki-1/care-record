@@ -14,13 +14,17 @@ test.describe('記録画面の切替', () => {
     await clickMenu(page, '記録を作成');
     await expect(page.getByText('利用者を選択')).toBeVisible();
 
-    await page.getByText(`${firstClient} 様`).click();
+    const firstClientCard = page.getByText(`${firstClient} 様`);
+    await expect(firstClientCard).toBeVisible({ timeout: 30_000 });
+    await firstClientCard.click();
     await expect(page.getByRole('heading', { name: `${firstClient} 様` })).toBeVisible();
 
     await page.goBack();
     await expect(page.getByText('利用者を選択')).toBeVisible();
 
-    await page.getByText(`${secondClient} 様`).click();
+    const secondClientCard = page.getByText(`${secondClient} 様`);
+    await expect(secondClientCard).toBeVisible({ timeout: 30_000 });
+    await secondClientCard.click();
     await expect(page.getByRole('heading', { name: `${secondClient} 様` })).toBeVisible();
     await expect(page.getByRole('heading', { name: `${firstClient} 様` })).toHaveCount(0);
   });
