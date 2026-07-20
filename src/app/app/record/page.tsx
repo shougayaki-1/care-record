@@ -46,27 +46,32 @@ export default function RecordSelectPage() {
             end.setDate(end.getDate() + 1);
             end.setMilliseconds(end.getMilliseconds() - 1);
 
-            const [targetClients, shiftsResult] = await Promise.all([
-                // Clients fetch
-                (async (): Promise<Client[]> => {
-                    if (canCreateAll) {
-                        const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
-                        return (data ?? []) as Client[];
-                    } else if (canCreateAssigned) {
-                        const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', userId);
-                        return ((data ?? []) as unknown as { clients: Client | null }[])
-                            .map(d => d.clients).filter((c): c is Client => c !== null);
-                    }
-                    return [];
-                })(),
-                // Shifts fetch (if permission exists)
-                canViewShifts
-                    ? getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString())
-                    : Promise.resolve([] as MyShiftItem[]),
-            ]);
+            const targetClients = await (async (): Promise<Client[]> => {
+                if (canCreateAll) {
+                    const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
+                    return (data ?? []) as Client[];
+                } else if (canCreateAssigned) {
+                    const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', userId);
+                    return ((data ?? []) as unknown as { clients: Client | null }[])
+                        .map(d => d.clients).filter((c): c is Client => c !== null);
+                }
+                return [];
+            })();
 
             setClients(targetClients);
-            setTodayShifts(shiftsResult.filter(s => s.status !== 'cancelled'));
+
+            // getMyShiftsWithStatus is a withSafeError Server Action that CAN throw
+            // (e.g. the acting user has no `staffs` row yet — a normal state for a
+            // fresh organization). Fetch it separately so that failure never
+            // discards the clients list above. Mirrors d7aff24 / ccd1837.
+            if (canViewShifts) {
+                try {
+                    const shiftsResult = await getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString());
+                    setTodayShifts(shiftsResult.filter(s => s.status !== 'cancelled'));
+                } catch (e) {
+                    console.error('today shifts load failed:', e);
+                }
+            }
 
             // Step 2: drafts (needs client IDs from step 1)
             if (targetClients.length > 0) {
