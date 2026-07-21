@@ -79,9 +79,9 @@ export const ShiftFormModal = ({
         if (!open) return;
 
         // Load master data for the inline segment editor
-        getServiceTypes(organizationId).then((types) => {
-            setServiceTypes(types);
-        });
+        getServiceTypes(organizationId)
+            .then((types) => setServiceTypes(types))
+            .catch((e) => console.error('Failed to load service types:', e));
 
         queueMicrotask(() => {
             const formatDatetime = (isoStr: string) => {
