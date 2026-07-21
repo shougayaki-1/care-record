@@ -50,7 +50,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint -- --max-warnings=0
-      - run: npm run typecheck
+      - name: npm run typecheck
+        run: npm run typecheck
+        env:
+          # デフォルトの約2GBヒープでOOMになるため拡張する
+          NODE_OPTIONS: --max-old-space-size=6144
       - run: npm run test:unit
       - run: npm run security:service-role
       - name: npm run build
