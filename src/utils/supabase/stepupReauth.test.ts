@@ -26,7 +26,42 @@ vi.mock('@/utils/supabase/auth', () => ({
   getAuthedUser: vi.fn(),
 }));
 
-import { completeStepUpReauth } from './stepupReauth';
+import { beginStepUpReauth, completeStepUpReauth } from './stepupReauth';
+
+describe('beginStepUpReauth', () => {
+  it('starts the OAuth step-up even when the account also has a password, as long as a Google/Azure identity is linked', async () => {
+    mocks.createSessionClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: 'user-1', identities: [{ provider: 'email' }, { provider: 'google' }] } },
+          error: null,
+        })),
+      },
+    });
+    mocks.from.mockImplementation((table: string) => {
+      if (table === 'stepup_reauth_challenges') return makeInsertQuery({ error: null });
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    const result = await beginStepUpReauth('external_secret_change');
+
+    expect(result.provider).toBe('google');
+  });
+
+  it('rejects when the account has no SSO identity linked at all', async () => {
+    mocks.createSessionClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: 'user-1', identities: [{ provider: 'email' }] } },
+          error: null,
+        })),
+      },
+    });
+
+    await expect(beginStepUpReauth('external_secret_change'))
+      .rejects.toThrow('連携されたログイン方法が見つかりません');
+  });
+});
 
 describe('completeStepUpReauth', () => {
   it('rejects when the challenge nonce is unknown, expired, or already consumed', async () => {

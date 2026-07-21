@@ -17,7 +17,11 @@ import {
   recordLoginAttempt,
 } from '@/utils/supabase/loginAttempts';
 import { validatePassword } from '@/utils/passwordPolicy';
-import { issueReauthGrant as createReauthGrant, type ReauthPurpose } from '@/utils/supabase/reauth';
+import {
+  issueReauthGrant as createReauthGrant,
+  tryReuseRecentReauthGrant as reuseRecentReauthGrant,
+  type ReauthPurpose,
+} from '@/utils/supabase/reauth';
 import { beginStepUpReauth as createStepUpReauth } from '@/utils/supabase/stepupReauth';
 import { classifySessionActivityAuthentication, type SessionActivityResult } from '@/utils/sessionActivity';
 import { STEPUP_GRANT_COOKIE, STEPUP_NONCE_COOKIE } from '@/utils/authConstants';
@@ -36,7 +40,16 @@ export async function issueReauthGrant(purpose: ReauthPurpose, password: string)
   return createReauthGrant(purpose, password);
 }
 
-/** パスワードを持たない(SSOのみの)アカウント向け。OAuthプロバイダへの再ログインを開始する。 */
+/**
+ * 直近に同じ操作で本人確認済みなら、パスワード入力/OAuth往復なしで
+ * 新しいreauth_grantsを返す(対象purposeはtryReuseRecentReauthGrant側で限定)。
+ * 使えない場合はnullを返すので、呼び出し側は従来通りの再認証フローへ進む。
+ */
+export async function tryReuseRecentReauthGrant(purpose: ReauthPurpose) {
+  return reuseRecentReauthGrant(purpose);
+}
+
+/** Google/Azureでログインしているアカウント向け。OAuthプロバイダへの再ログインを開始する。 */
 export async function beginStepUpReauth(purpose: ReauthPurpose) {
   const { nonce, provider } = await createStepUpReauth(purpose);
   const cookieStore = await cookies();
