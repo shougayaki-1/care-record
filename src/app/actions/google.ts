@@ -10,6 +10,7 @@ import { google } from 'googleapis';
 import { classifyGoogleError } from '@/utils/googleSync';
 import { sanitizeDbError, withSafeError } from '@/utils/errors';
 import { consumeReauthGrant } from '@/utils/supabase/reauth';
+import { asNullableRpcArg } from '@/types/json';
 
 export type GoogleConnectionState = 'disconnected' | 'healthy' | 'reauth_required' | 'calendar_missing' | 'forbidden' | 'misconfigured' | 'temporarily_unavailable';
 
@@ -37,7 +38,7 @@ export async function getGoogleConnectionHealth(organizationId: string): Promise
             : 'misconfigured';
     }
     const { error: updateError } = await supabase.rpc('update_google_connection_health', {
-        p_org_id: organizationId, p_status: state, p_error_code: state === 'healthy' ? null : state,
+        p_org_id: organizationId, p_status: state, p_error_code: asNullableRpcArg(state === 'healthy' ? null : state),
     });
     if (updateError) throw sanitizeDbError(updateError, 'action.google.health-update');
     return { state };

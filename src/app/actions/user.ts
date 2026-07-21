@@ -14,7 +14,7 @@ export async function updateOwnProfile(name: string, agreeToTerms = false) {
     const { id: userId } = await getAuthedUser();
     const normalized = name.trim();
     if (normalized.length < 1 || normalized.length > 100) throw new Error('名前は1〜100文字で入力してください');
-    const values: Record<string, unknown> = { id: userId, name: normalized };
+    const values: { id: string; name: string; is_agreed?: boolean; agreed_at?: string } = { id: userId, name: normalized };
     if (agreeToTerms) Object.assign(values, { is_agreed: true, agreed_at: new Date().toISOString() });
     const sessionClient = await createSessionClient();
     const { error } = await sessionClient.from('profiles').upsert(values);

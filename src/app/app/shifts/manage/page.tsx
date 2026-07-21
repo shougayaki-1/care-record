@@ -36,6 +36,7 @@ import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
 import type { DatesSetArg } from '@fullcalendar/core';
 import { checkShiftPermission } from '@/utils/permissions';
+import { buildRecordPath } from '@/utils/recordNavigation';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { FetchedPatternData } from '@/hooks/useShiftData';
@@ -237,7 +238,7 @@ export default function ShiftManagePage() {
             return;
         }
         setShiftModalOpen(false);
-        router.push(`/app/record/${shift.client_id}?shiftId=${shift.id}${segmentId ? `&segmentId=${segmentId}` : ''}`);
+        router.push(buildRecordPath(shift.client_id, { shiftId: shift.id, segmentId }));
     };
 
     const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {

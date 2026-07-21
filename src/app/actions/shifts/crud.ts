@@ -160,7 +160,7 @@ export async function getShifts(organizationId: string, startDate: string, endDa
               const reportShifts = Array.isArray(shift.report_shifts) ? shift.report_shifts : [];
               return {
                   ...shift,
-                  report_statuses: reportShifts.flatMap((rs: { shift_id: string; is_primary: boolean; reports: { id: string; status: string; deleted_at: string | null } | { id: string; status: string; deleted_at: string | null }[] | null }) => {
+                  report_statuses: reportShifts.flatMap((rs: { shift_id: string; is_primary: boolean; reports: { id: string; status: string | null; deleted_at: string | null } | { id: string; status: string | null; deleted_at: string | null }[] | null }) => {
                       const r = Array.isArray(rs.reports) ? rs.reports[0] : rs.reports;
                       if (!r || r.deleted_at) return [];
                       return [{ id: r.id, status: r.status, is_primary: rs.is_primary }];

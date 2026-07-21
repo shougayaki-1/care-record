@@ -51,7 +51,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
     setLoading(true);
     try {
       const data = await getOrgRolesFull(currentOrg.id);
-      setRoles((data as OrgRole[]).map((role) => ({ ...role, permissions: normalizePermissions(role.permissions) })));
+      setRoles((data as unknown as OrgRole[]).map((role) => ({ ...role, permissions: normalizePermissions(role.permissions) })));
     } catch {
       showToast('ロール一覧の取得に失敗しました', 'error');
     } finally {

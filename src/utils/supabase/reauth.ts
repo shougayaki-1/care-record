@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getAuthedUser } from './auth';
 import { serviceRoleForServerSessions } from './serviceRole';
 import { REAUTH_GRANT_TTL_MINUTES } from '@/utils/authConstants';
+import type { Database } from '@/types/database.generated';
 
 const supabaseAdmin = serviceRoleForServerSessions();
 
@@ -29,7 +30,7 @@ export async function issueReauthGrant(
   if (!user.email) throw new Error('メールアドレスを確認できません');
 
   // Cookieを書き換えない一時クライアントで現在のpasswordを検証する。
-  const verifier = createClient(
+  const verifier = createClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } },

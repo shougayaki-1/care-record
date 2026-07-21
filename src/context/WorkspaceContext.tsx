@@ -8,6 +8,7 @@ import { CircularProgress, Box } from '@mui/material';
 import { setLastOrganization } from '@/app/actions/user';
 import { ensureSessionActivity } from '@/app/actions/auth';
 import { FULL_PERMISSIONS, mergePermissions, type RolePermissions } from '@/utils/permissions';
+import { ensureSessionActivityWithRetry } from '@/utils/sessionActivity';
 
 export type OrganizationRole = 'owner' | 'member';
 
@@ -66,12 +67,25 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         return;
       }
 
-      // セッション活動記録は補助的な監査処理であり、workspace取得をブロックさせない。
-      // ルート遷移直後はServer Actionのリクエストがキャンセルされることがあるため、
-      // RLSクエリとは分離して失敗を記録する。
-      void ensureSessionActivity(session.access_token).catch((error) => {
-        console.warn('session activity registration skipped:', error);
-      });
+      // この記録はRLSの必須条件であるため、初回の組織クエリより先に完了させる。
+      // 同じ検証済みアクセストークンで一時障害だけを短時間リトライする。
+      const activityResult = await ensureSessionActivityWithRetry(
+        () => ensureSessionActivity(session.access_token),
+      );
+      if (activityResult.status !== 'ready') {
+        if (!isCurrent()) return;
+        setOrgList([]);
+        setCurrentOrg(null);
+        setUserId(null);
+        if (activityResult.status === 'invalid_session') {
+          setStatus('session_expired');
+          setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
+        } else {
+          setStatus('error');
+          setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
+        }
+        return;
+      }
 
       // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
       // organization_member_roles を JOIN することで 3RTT → 2RTT に削減。
@@ -125,7 +139,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
 
       const list: Workspace[] = [];
       for (const { organization, role, memberRoles } of parsedMembers) {
-        const rolePerms: RolePermissions[] = memberRoles.flatMap((omr: { organization_roles: { permissions: RolePermissions } | { permissions: RolePermissions }[] | null }) => {
+        const rolePerms: RolePermissions[] = memberRoles.flatMap((omr) => {
           const orgRole = Array.isArray(omr.organization_roles) ? omr.organization_roles[0] : omr.organization_roles;
           if (!orgRole?.permissions) return [];
           return [orgRole.permissions as RolePermissions];

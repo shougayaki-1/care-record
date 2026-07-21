@@ -145,7 +145,7 @@ export default function StatisticsPage() {
         loading,
     } = useFetchData(fetchStatisticsData, initialStatisticsSourceData, !wsLoading && Boolean(currentOrg), (message) => {
         showToast(`データの取得に失敗しました: ${message}`, 'error');
-    });
+    }, `${currentOrg?.id ?? ''}:${targetMonth}`);
     const { rawShifts, rawReports, premiumTypes, rawShiftsWithLinks, internalWorkRecords } = statisticsSourceData;
 
     const aggregatedDataByTab = useMemo(() => aggregateByTab({

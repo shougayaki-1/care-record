@@ -70,12 +70,13 @@ export default function ClientSettingsPage() {
 
     const fetchClientData = useCallback(async () => {
         try {
+            // Core client data. All four are supabase queries that resolve to
+            // { data, error } and never reject, so Promise.all is safe here.
             const [
                 { data: client },
                 { data: template },
                 staffsResult,
                 { data: assigns },
-                permissionHintsResult,
             ] = await Promise.all([
                 supabase.from('clients').select('name, google_template_id').eq('id', clientId).single(),
                 supabase.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle(),
@@ -89,7 +90,6 @@ export default function ClientSettingsPage() {
                         .order('name', { ascending: true })
                     : Promise.resolve(null),
                 supabase.from('assignments').select('staff_id, helper_id, round_trip_distance_km').eq('client_id', clientId),
-                currentOrg ? getClientAssignmentPermissionHints(currentOrg.id, clientId) : Promise.resolve(null),
             ]);
 
             if (client) {
@@ -127,15 +127,28 @@ export default function ClientSettingsPage() {
                     });
                     setRoundTripDistances(distances);
                 }
-                if (permissionHintsResult) setPermissionHints(permissionHintsResult);
             }
 
         } catch (error) {
             console.error(error);
+            showToast('利用者情報の取得に失敗しました', 'error');
         } finally {
             setLoading(false);
         }
-    }, [clientId, currentOrg]);
+
+        // Permission hints are advisory UI. getClientAssignmentPermissionHints is
+        // a withSafeError Server Action that CAN throw (unlike the supabase queries
+        // above), so it is fetched separately: a hints failure must not discard the
+        // core client data. Mirrors d7aff24 for record/[clientId].
+        if (currentOrg) {
+            try {
+                const hints = await getClientAssignmentPermissionHints(currentOrg.id, clientId);
+                if (hints) setPermissionHints(hints);
+            } catch (error) {
+                console.error('permission hints load failed:', error);
+            }
+        }
+    }, [clientId, currentOrg, showToast]);
 
     const fetchOtherClients = useCallback(async () => {
         if (!currentOrg) return [];
@@ -145,7 +158,7 @@ export default function ClientSettingsPage() {
 
     const { data: otherClients } = useFetchData(fetchOtherClients, [] as {id: string, name: string}[], !wsLoading && Boolean(currentOrg), () => {
         showToast('コピー元利用者の取得に失敗しました', 'error');
-    });
+    }, `${currentOrg?.id ?? ''}:${clientId}`);
 
     useEffect(() => {
         if (!wsLoading && currentOrg) {

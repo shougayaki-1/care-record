@@ -18,6 +18,7 @@ import { InnerPageHeader, PageLayout, TablePageSkeleton } from '@/components/ui'
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
 import { checkRecordPermission, checkShiftPermission } from '@/utils/permissions';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
+import { buildRecordPath } from '@/utils/recordNavigation';
 
 type Client = { id: string; name: string; };
 type DraftReport = { id: string; created_at: string; };
@@ -46,27 +47,32 @@ export default function RecordSelectPage() {
             end.setDate(end.getDate() + 1);
             end.setMilliseconds(end.getMilliseconds() - 1);
 
-            const [targetClients, shiftsResult] = await Promise.all([
-                // Clients fetch
-                (async (): Promise<Client[]> => {
-                    if (canCreateAll) {
-                        const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
-                        return (data ?? []) as Client[];
-                    } else if (canCreateAssigned) {
-                        const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', userId);
-                        return ((data ?? []) as unknown as { clients: Client | null }[])
-                            .map(d => d.clients).filter((c): c is Client => c !== null);
-                    }
-                    return [];
-                })(),
-                // Shifts fetch (if permission exists)
-                canViewShifts
-                    ? getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString())
-                    : Promise.resolve([] as MyShiftItem[]),
-            ]);
+            const targetClients = await (async (): Promise<Client[]> => {
+                if (canCreateAll) {
+                    const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
+                    return (data ?? []) as Client[];
+                } else if (canCreateAssigned) {
+                    const { data } = await supabase.from('assignments').select('clients(id, name)').eq('helper_id', userId);
+                    return ((data ?? []) as unknown as { clients: Client | null }[])
+                        .map(d => d.clients).filter((c): c is Client => c !== null);
+                }
+                return [];
+            })();
 
             setClients(targetClients);
-            setTodayShifts(shiftsResult.filter(s => s.status !== 'cancelled'));
+
+            // getMyShiftsWithStatus is a withSafeError Server Action that CAN throw
+            // (e.g. the acting user has no `staffs` row yet — a normal state for a
+            // fresh organization). Fetch it separately so that failure never
+            // discards the clients list above. Mirrors d7aff24 / ccd1837.
+            if (canViewShifts) {
+                try {
+                    const shiftsResult = await getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString());
+                    setTodayShifts(shiftsResult.filter(s => s.status !== 'cancelled'));
+                } catch (e) {
+                    console.error('today shifts load failed:', e);
+                }
+            }
 
             // Step 2: drafts (needs client IDs from step 1)
             if (targetClients.length > 0) {
@@ -124,7 +130,7 @@ export default function RecordSelectPage() {
                         <Stack spacing={1.5}>
                             {todayShifts.map((shift) => (
                                 <Card key={shift.id} variant="outlined" sx={{ borderRadius: 2, borderColor: shift.report ? 'divider' : 'primary.light' }}>
-                                    <CardActionArea onClick={() => router.push(`/app/record/${shift.client_id}?shiftId=${shift.id}`)} sx={{ p: { xs: 1.5, sm: 2 } }}>
+                                    <CardActionArea onClick={() => router.push(buildRecordPath(shift.client_id, { shiftId: shift.id }))} sx={{ p: { xs: 1.5, sm: 2 } }}>
                                         <Box display="flex" alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" gap={1.5}>
                                             <Box sx={{ minWidth: 0 }}>
                                                 <Box display="flex" alignItems="center" gap={1} mb={0.5} flexWrap="wrap">
@@ -158,7 +164,7 @@ export default function RecordSelectPage() {
                         return (
                             <Box key={client.id}>
                                 <Card variant="outlined" sx={{ borderRadius: 1 }}>
-                                    <CardActionArea onClick={() => router.push(`/app/record/${client.id}`)} sx={{ p: { xs: 1.5, sm: 2 } }}>
+                                    <CardActionArea onClick={() => router.push(buildRecordPath(client.id))} sx={{ p: { xs: 1.5, sm: 2 } }}>
                                         <Box display="flex" alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" gap={1.5}>
                                             <Box display="flex" alignItems="center" gap={1.5} minWidth={0}>
                                                 <Avatar sx={{ bgcolor: 'primary.light', flexShrink: 0 }}><PersonIcon /></Avatar>
@@ -176,7 +182,7 @@ export default function RecordSelectPage() {
                                     <Box sx={{ mt: 1.5, ml: { xs: 0, sm: 2 }, display: 'flex', gap: 1.5, overflowX: 'auto', pb: 1, '&::-webkit-scrollbar': { display: 'none' } }}>
                                         {drafts.map((draft) => (
                                             <Card key={draft.id} variant="outlined" sx={{ minWidth: { xs: 'min(220px, 75vw)', sm: 200 }, flexShrink: 0, borderRadius: 2, bgcolor: 'background.warning', borderColor: 'warning.light' }}>
-                                                <CardActionArea onClick={() => router.push(`/app/record/${client.id}?reportId=${draft.id}`)} sx={{ p: 1.5 }}>
+                                                <CardActionArea onClick={() => router.push(buildRecordPath(client.id, { reportId: draft.id }))} sx={{ p: 1.5 }}>
                                                     <Stack spacing={0.5}>
                                                         <Box display="flex" alignItems="center" gap={1}>
                                                             <Chip label={getReportStatusLabel('draft')} color={getReportStatusChipColor('draft')} size="small" sx={{ height: 20, fontSize: '0.7rem' }} />

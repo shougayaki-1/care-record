@@ -39,12 +39,12 @@ export async function getShiftSuggestions(
 
   return (candidates ?? [])
     .filter((c: { id: string }) => !linkedIds.has(c.id))
-    .map((c: { id: string; title: string | null; start_at: string; end_at: string; shift_staffs: Array<{ staffs: Array<{ name: string }> }> }) => ({
+    .map((c: { id: string; title: string | null; start_at: string; end_at: string; shift_staffs: Array<{ staffs: { name: string } | null }> }) => ({
       id: c.id,
       title: c.title,
       start_at: c.start_at,
       end_at: c.end_at,
-      staffName: c.shift_staffs?.[0]?.staffs?.[0]?.name ?? null,
+      staffName: c.shift_staffs?.[0]?.staffs?.name ?? null,
     }));
 }
 

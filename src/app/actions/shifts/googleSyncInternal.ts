@@ -20,6 +20,7 @@ import {
 } from '@/utils/googleSync';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { createSessionClient } from '@/utils/supabase/auth';
+import { asNullableRpcArg } from '@/types/json';
 
 export type GoogleCalendarClient = ReturnType<typeof google.calendar>;
 
@@ -133,9 +134,9 @@ export async function markShiftGoogleSync(
   const { error } = await supabase.rpc('mark_shift_google_sync', {
     p_shift_id: shiftId,
     p_status: status,
-    p_event_id: 'eventId' in options ? options.eventId ?? null : null,
+    p_event_id: asNullableRpcArg('eventId' in options ? options.eventId : null),
     p_set_event_id: 'eventId' in options,
-    p_error: options.error ?? null,
+    p_error: asNullableRpcArg(options.error),
   });
   if (error) throw error;
 }

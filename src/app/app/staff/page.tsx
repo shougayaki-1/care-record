@@ -103,7 +103,7 @@ export default function StaffPage() {
         
       const accounts: AccountData[] = [];
       if (membersData && membersData.length > 0) {
-          const userIds = membersData.map(m => m.user_id);
+          const userIds = membersData.flatMap(m => m.user_id ? [m.user_id] : []);
           const { data: profilesData } = await supabase
               .from('profiles')
               .select('id, name')
@@ -129,7 +129,7 @@ export default function StaffPage() {
     setData: setStaffPageData,
   } = useFetchData(fetchStaffData, initialStaffPageData, !wsLoading && Boolean(currentOrg), (message) => {
     showToast(`データの取得に失敗しました: ${message}`, 'error');
-  });
+  }, currentOrg?.id);
   const { staffList, accountList, positionPresets } = staffPageData;
 
   const handleSave = async () => {

@@ -31,14 +31,14 @@ export async function getAllOrganizations() {
         id: string;
         name: string;
         created_at: string;
-        profiles: { count: number }[];
+        profiles: { count: number } | null;
         clients: { count: number }[];
     };
-    return (orgs as OrgRow[]).map((org) => ({
+    return (orgs as unknown as OrgRow[]).map((org) => ({
         id: org.id,
         name: org.name,
         createdAt: org.created_at,
-        staffCount: org.profiles[0]?.count || 0,
+        staffCount: org.profiles?.count || 0,
         clientCount: org.clients[0]?.count || 0,
     }));
 }

@@ -63,8 +63,8 @@ export async function createLaborPremiumType(
     p_night_start_hour: data.night_start_hour,
     p_night_end_hour: data.night_end_hour,
     p_variable_working_hours_enabled: data.variable_working_hours_enabled ?? false,
-    p_variable_overtime_period: data.variable_overtime_period ?? null,
-    p_variable_overtime_threshold_hours: data.variable_overtime_threshold_hours ?? null,
+    p_variable_overtime_period: data.variable_overtime_period ?? undefined,
+    p_variable_overtime_threshold_hours: data.variable_overtime_threshold_hours ?? undefined,
   });
   if (error) throw new Error('追加に失敗しました');
 }

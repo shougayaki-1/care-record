@@ -55,7 +55,7 @@ export async function getMyShiftsWithStatus(
           .is('deleted_at', null);
 
       const reportByShiftId = new Map(
-          (reports ?? []).map(r => [r.shift_id, { id: r.id, status: r.status }])
+          (reports ?? []).map(r => [r.shift_id, { id: r.id, status: r.status ?? 'draft' }])
       );
 
       return (shifts as unknown as Omit<MyShiftItem, 'report'>[]).map(shift => ({

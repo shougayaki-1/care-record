@@ -17,6 +17,7 @@ import {
 } from '@/utils/supabase/loginAttempts';
 import { validatePassword } from '@/utils/passwordPolicy';
 import { issueReauthGrant as createReauthGrant, type ReauthPurpose } from '@/utils/supabase/reauth';
+import { classifySessionActivityAuthentication, type SessionActivityResult } from '@/utils/sessionActivity';
 
 const supabaseAdmin = serviceRoleForServerSessions();
 
@@ -136,15 +137,22 @@ export async function heartbeatSession(): Promise<void> {
  * クライアント側セッションが user_session_activity に未登録の場合（デプロイ前のセッション等）に登録する。
  * access_token をサーバーへ送り、Auth サーバーで検証した上で upsert する。
  */
-export async function ensureSessionActivity(accessToken: string): Promise<void> {
+export async function ensureSessionActivity(accessToken: string): Promise<SessionActivityResult> {
   try {
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(accessToken);
-    if (error || !user) return;
+    // Auth rejects malformed, expired, or revoked tokens with a 4xx response.
+    // Network and 5xx failures must remain retryable so a valid user is not logged out.
+    const authErrorStatus = error && typeof error.status === 'number' ? error.status : null;
+    if (authErrorStatus !== null) {
+      return classifySessionActivityAuthentication(authErrorStatus, Boolean(user), true);
+    }
+    if (error) return classifySessionActivityAuthentication(null, Boolean(user), true);
+    if (!user) return classifySessionActivityAuthentication(null, false);
     const sessionId = decodeJwtSessionId(accessToken);
-    if (!sessionId) return;
+    if (!sessionId) return { status: 'invalid_session' };
     const sessionHash = createHash('sha256').update(accessToken).digest('hex');
     const absoluteExpiresAt = new Date(Date.now() + SESSION_ABSOLUTE_HOURS * 60 * 60 * 1000).toISOString();
-    await supabaseAdmin.from('user_session_activity').upsert({
+    const { error: upsertError } = await supabaseAdmin.from('user_session_activity').upsert({
       auth_session_id: sessionId,
       session_hash: sessionHash,
       user_id: user.id,
@@ -152,8 +160,10 @@ export async function ensureSessionActivity(accessToken: string): Promise<void> 
       absolute_expires_at: absoluteExpiresAt,
       revoked_at: null,
     }, { onConflict: 'auth_session_id', ignoreDuplicates: false });
-  } catch {
-    // 最善努力のため、失敗してもサイレントに無視する。
+    return upsertError ? { status: 'transient_error' } : { status: 'ready' };
+  } catch (error) {
+    console.error('session activity registration failed', error);
+    return { status: 'transient_error' };
   }
 }
 

@@ -20,6 +20,7 @@ import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useToast } from '@/components/ui/ToastProvider';
 import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { useRequestGeneration } from '@/hooks/useRequestGeneration';
 import { supabase } from '@/lib/supabase';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { checkRecordPermission } from '@/utils/permissions';
@@ -107,17 +108,20 @@ type FormAction =
   | { type: 'SET_FIELD'; field: keyof FormState; value: SetStateValue<unknown> }
   | { type: 'SET_ANSWER'; id: string; value: FormAnswers[string] }
   | { type: 'SET_ANSWERS'; value: SetStateValue<FormAnswers> }
+  | { type: 'RESET' }
   | { type: 'CLEAR_ANSWERS' }
   | { type: 'AI_FILL'; answers: FormAnswers; fields: Set<string> };
 
 type UiAction =
   | { type: 'SET_FIELD'; field: keyof UiState; value: SetStateValue<unknown> }
+  | { type: 'RESET'; currentReportId: string | null }
   | { type: 'MARK_DIRTY'; dirty?: boolean }
   | { type: 'SET_ERROR_MAP'; errors: Record<string, string> }
   | { type: 'CLEAR_ERROR'; id: string };
 
 type ShiftAction =
   | { type: 'SET_FIELD'; field: keyof ShiftState; value: SetStateValue<unknown> }
+  | { type: 'RESET'; selectedSegmentId: string | null }
   | { type: 'DISMISS_SUGGESTION'; id: string };
 
 const resolveStateValue = <T,>(value: SetStateValue<T>, prev: T): T => (
@@ -173,6 +177,8 @@ function formReducer(state: FormState, action: FormAction): FormState {
       return { ...state, [action.field]: resolveStateValue(action.value, state[action.field]) };
     case 'SET_ANSWER':
       return { ...state, answers: { ...state.answers, [action.id]: action.value } };
+    case 'RESET':
+      return formInitialState;
     case 'SET_ANSWERS':
       return { ...state, answers: resolveStateValue(action.value, state.answers) };
     case 'CLEAR_ANSWERS':
@@ -193,6 +199,8 @@ function uiReducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
     case 'SET_FIELD':
       return { ...state, [action.field]: resolveStateValue(action.value, state[action.field]) };
+    case 'RESET':
+      return createUiInitialState(action.currentReportId);
     case 'MARK_DIRTY':
       return { ...state, isDirty: action.dirty ?? true };
     case 'SET_ERROR_MAP':
@@ -212,6 +220,8 @@ function shiftReducer(state: ShiftState, action: ShiftAction): ShiftState {
   switch (action.type) {
     case 'SET_FIELD':
       return { ...state, [action.field]: resolveStateValue(action.value, state[action.field]) };
+    case 'RESET':
+      return createShiftInitialState(action.selectedSegmentId);
     case 'DISMISS_SUGGESTION':
       return { ...state, dismissedSuggestions: new Set([...state.dismissedSuggestions, action.id]) };
     default:
@@ -230,10 +240,18 @@ export function useRecordForm() {
   const paramReportId = searchParams.get('reportId');
   const shiftId = searchParams.get('shiftId');
   const segmentId = searchParams.get('segmentId');
-  const draftKeyRef = useRef<string>(searchParams.get('draftKey') || crypto.randomUUID());
+  const incomingDraftKey = searchParams.get('draftKey');
+  const recordIdentityKey = `${currentOrg?.id ?? ''}:${clientId ?? ''}:${paramReportId ?? ''}:${shiftId ?? ''}:${segmentId ?? ''}`;
+  const draftScope = useMemo(
+    () => ({ identity: recordIdentityKey, key: incomingDraftKey || crypto.randomUUID() }),
+    [incomingDraftKey, recordIdentityKey],
+  );
+  const draftKey = draftScope.key;
+  const recordScopeKey = `${recordIdentityKey}:${draftKey}`;
   const autosaveRestoredRef = useRef(false);
   const autosaveRevisionRef = useRef(0);
   const contentVersionRef = useRef(0);
+  const { next: nextLoadGeneration, invalidate: invalidateLoadGeneration, isCurrent: isCurrentLoadGeneration } = useRequestGeneration();
   const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const [formState, formDispatch] = useReducer(formReducer, formInitialState);
@@ -266,6 +284,11 @@ export function useRecordForm() {
   } = formState;
   const { currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting } = uiState;
   const { shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId } = shiftState;
+  const travelCostRateRef = useRef(travelCostRateYenPerKm);
+
+  useEffect(() => {
+    travelCostRateRef.current = travelCostRateYenPerKm;
+  }, [travelCostRateYenPerKm]);
 
   const setFormField = useCallback(<K extends keyof FormState>(field: K, value: SetStateValue<FormState[K]>) => {
     formDispatch({ type: 'SET_FIELD', field, value });
@@ -321,11 +344,16 @@ export function useRecordForm() {
   }, []);
 
   useEffect(() => {
+    // Fallback for direct/deep-link loads that reach this page without a
+    // draftKey (e.g. a typed URL or bookmark) — every in-app navigation to
+    // this page goes through buildRecordPath() (src/utils/recordNavigation.ts),
+    // which already includes draftKey, so this replace() never races a
+    // pending router.push for those paths.
     if (searchParams.get('draftKey')) return;
     const next = new URLSearchParams(searchParams.toString());
-    next.set('draftKey', draftKeyRef.current);
+    next.set('draftKey', draftKey);
     router.replace(`/app/record/${clientId}?${next.toString()}`);
-  }, [clientId, router, searchParams]);
+  }, [clientId, draftKey, router, searchParams]);
 
   const formatTimeForLabel = (dateStr?: string) => {
       if (!dateStr) return '';
@@ -407,19 +435,19 @@ export function useRecordForm() {
 
       if (existing) {
           setCurrentReportId(existing.id);
-          router.replace(`/app/record/${clientId}?reportId=${existing.id}&shiftId=${shiftId}`);
+          router.replace(`/app/record/${clientId}?reportId=${existing.id}&shiftId=${shiftId}&draftKey=${encodeURIComponent(draftKey)}`);
           await loadExistingData(existing.id);
       } else {
           setCurrentReportId(null);
-          router.replace(`/app/record/${clientId}?shiftId=${shiftId}`);
+          router.replace(`/app/record/${clientId}?shiftId=${shiftId}&draftKey=${encodeURIComponent(draftKey)}`);
           setupTimeForPart(part, originalShiftTimes.start_at, originalShiftTimes.end_at);
           setAnswers({});
           setCurrentStatus('draft');
       }
   };
 
-  const fetchBaseData = useCallback(async () => {
-    if (!currentOrg) return;
+  const fetchBaseData = useCallback(async (isCurrent: () => boolean, hasExistingReport: boolean) => {
+    if (!currentOrg || typeof clientId !== 'string') return;
 
     try {
       const [
@@ -467,6 +495,8 @@ export function useRecordForm() {
           .order('name', { ascending: true }),
       ]);
 
+      if (!isCurrent()) return;
+
       if (client) {
         setClientName(client.name);
         const schema = (tmpl?.schema as FormItem[]) || DEFAULT_TEMPLATE;
@@ -481,7 +511,7 @@ export function useRecordForm() {
       setServiceTypes((serviceTypeData ?? []) as ServiceTypeOption[]);
       setStaffRoles((staffRoleData ?? []) as StaffRoleOption[]);
 
-      if (!currentReportId && !shiftId && userId) {
+      if (!hasExistingReport && !shiftId && userId) {
         const myStaffRecord = allStaffs.find(s => s.user_id === userId);
         if (myStaffRecord) {
             setSelectedHelpers([myStaffRecord.name]);
@@ -490,20 +520,21 @@ export function useRecordForm() {
         }
       }
     } catch (error) { console.error('Error fetching base data:', error); }
-  }, [clientId, currentOrg, currentReportId, setActualStaffs, setClientName, setRoundTripDistanceKm, setSelectableStaffs, setSelectedHelpers, setServiceTypes, setStaffRoles, setTemplate, setTravelCostRateYenPerKm, shiftId, userId]);
+  }, [clientId, currentOrg, setActualStaffs, setClientName, setRoundTripDistanceKm, setSelectableStaffs, setSelectedHelpers, setServiceTypes, setStaffRoles, setTemplate, setTravelCostRateYenPerKm, shiftId, userId]);
 
-  const loadExistingData = useCallback(async (targetId: string) => {
+  const loadExistingData = useCallback(async (targetId: string, isCurrent: () => boolean = () => true) => {
     if (!targetId) return;
     try {
       // ★修正: reports と shifts には外部キーが無く埋め込み(shifts(...))が400になるため、shift_id で別途取得する
       const { data: r, error: rError } = await supabase.from('reports').select('*').eq('id', targetId).is('deleted_at', null).maybeSingle();
       if (rError) throw rError;
-      if (!r) { showToast('記録が見つかりませんでした', 'error'); return; }
+      if (!isCurrent()) return;
+      if (!r || !r.start_at || !r.end_at) { showToast('記録が見つからないか、日時が不正です', 'error'); return; }
 
       // ★修正: report_values が無い/読めない場合でも、基本情報（日時・ステータス）は表示する
       setStartDateTime(formatDatetimeLocal(new Date(r.start_at)));
       setEndDateTime(formatDatetimeLocal(new Date(r.end_at)));
-      setCurrentStatus(r.status);
+      setCurrentStatus((r.status ?? 'draft') as ReportStatus);
       contentVersionRef.current = Number(r.current_version ?? 0);
       setSelectedSegmentId(r.segment_id ?? null);
       setActualServiceTypeId(r.actual_service_type_id ?? '');
@@ -529,13 +560,16 @@ export function useRecordForm() {
           ? (async () => {
               try {
                 await auditReportView(currentOrg.id, targetId);
-                setImages(await getReportImages(currentOrg.id, targetId));
+                const nextImages = await getReportImages(currentOrg.id, targetId);
+                if (isCurrent()) setImages(nextImages);
               } catch (auditImageError) {
                 console.error('audit/image load error:', auditImageError);
               }
             })()
           : Promise.resolve(),
       ]);
+
+      if (!isCurrent()) return;
 
       if (shiftResult?.data) {
           const shift = shiftResult.data;
@@ -557,7 +591,7 @@ export function useRecordForm() {
       setServiceTime(data.service_time || '');
       setTravelTime(data.travel_time || '0');
       setRoundTripDistanceKm(data.round_trip_distance_km || '0');
-      setTravelCostRateYenPerKm(Number(data.travel_cost_rate_yen_per_km || travelCostRateYenPerKm || 20));
+      setTravelCostRateYenPerKm(Number(data.travel_cost_rate_yen_per_km || travelCostRateRef.current || 20));
       setDistanceTouched(false);
       if (actualStaffError) console.error('report_actual_staffs load error:', actualStaffError);
       const typedActualStaffRows = (actualStaffRows ?? []) as unknown as Array<{ staff_id: string; staff_role_id: string | null; staff?: { name: string } | { name: string }[] | null }>;
@@ -572,8 +606,12 @@ export function useRecordForm() {
         setSelectedHelpers(data._helpers || []);
       }
       setAnswers(data);
-    } catch (e) { console.error(e); showToast('記録の読み込みに失敗しました', 'error'); }
-  }, [showToast, formatDatetimeLocal, currentOrg, setActualServiceTypeId, setActualStaffs, setAnswers, setCurrentStatus, setDistanceTouched, setEndDateTime, setImages, setIsDirty, setIsSpanningMonth, setOriginalShiftTimes, setRoundTripDistanceKm, setSelectedHelpers, setSelectedPart, setSelectedSegmentId, setServiceTime, setStartDateTime, setTravelCostRateYenPerKm, setTravelTime, travelCostRateYenPerKm]);
+    } catch (e) {
+      if (!isCurrent()) return;
+      console.error(e);
+      showToast('記録の読み込みに失敗しました', 'error');
+    }
+  }, [showToast, formatDatetimeLocal, currentOrg, setActualServiceTypeId, setActualStaffs, setAnswers, setCurrentStatus, setDistanceTouched, setEndDateTime, setImages, setIsDirty, setIsSpanningMonth, setOriginalShiftTimes, setRoundTripDistanceKm, setSelectedHelpers, setSelectedPart, setSelectedSegmentId, setServiceTime, setStartDateTime, setTravelCostRateYenPerKm, setTravelTime]);
 
   useEffect(() => {
     if (currentReportId || distanceTouched || selectableStaffs.length === 0 || selectedHelpers.length === 0) return;
@@ -582,6 +620,14 @@ export function useRecordForm() {
   }, [currentReportId, distanceTouched, selectableStaffs, selectedHelpers, setRoundTripDistanceKm]);
 
   useEffect(() => {
+    autosaveRestoredRef.current = false;
+    autosaveRevisionRef.current = 0;
+    contentVersionRef.current = 0;
+  }, [recordScopeKey]);
+
+  useEffect(() => {
+    const generation = nextLoadGeneration();
+    const isCurrent = () => isCurrentLoadGeneration(generation);
     const init = async () => {
       let targetId = paramReportId;
       setSelectedSegmentId(segmentId);
@@ -612,13 +658,15 @@ export function useRecordForm() {
               .eq('id', shiftId)
               .single();
 
+          if (!isCurrent()) return;
+
           const typedSegments = (((shiftData?.shift_segments as unknown as ShiftSegmentData[]) ?? [])
               .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()));
           setShiftSegments(typedSegments);
 
           const effectiveSegmentId = segmentId || (typedSegments.length === 1 ? typedSegments[0].id : null);
           if (typedSegments.length === 1 && !segmentId) {
-              router.replace(`/app/record/${clientId}?shiftId=${shiftId}&segmentId=${typedSegments[0].id}`);
+              router.replace(`/app/record/${clientId}?shiftId=${shiftId}&segmentId=${typedSegments[0].id}&draftKey=${encodeURIComponent(draftKey)}`);
           }
 
           if (effectiveSegmentId) {
@@ -630,10 +678,12 @@ export function useRecordForm() {
                   .is('deleted_at', null)
                   .maybeSingle();
 
+              if (!isCurrent()) return;
+
               if (existingReport) {
                   targetId = existingReport.id;
                   setCurrentReportId(targetId);
-                  router.replace(`/app/record/${clientId}?reportId=${targetId}&shiftId=${shiftId}&segmentId=${effectiveSegmentId}`);
+                  router.replace(`/app/record/${clientId}?reportId=${targetId}&shiftId=${shiftId}&segmentId=${effectiveSegmentId}&draftKey=${encodeURIComponent(draftKey)}`);
                   showToast('この区間にはすでに記録が存在します。該当する記録を開きました。', 'info');
               } else {
                   const targetSegment = typedSegments.find((segment) => segment.id === effectiveSegmentId);
@@ -650,10 +700,12 @@ export function useRecordForm() {
                   .is('deleted_at', null)
                   .maybeSingle();
 
+              if (!isCurrent()) return;
+
               if (existingReport) {
                   targetId = existingReport.id;
                   setCurrentReportId(targetId);
-                  router.replace(`/app/record/${clientId}?reportId=${targetId}&shiftId=${shiftId}`);
+                  router.replace(`/app/record/${clientId}?reportId=${targetId}&shiftId=${shiftId}&draftKey=${encodeURIComponent(draftKey)}`);
                   showToast('このシフトにはすでに記録が存在します。該当する記録を開きました。', 'info');
               } else if (shiftData) {
                   const s = new Date(shiftData.start_at);
@@ -694,17 +746,25 @@ export function useRecordForm() {
         setCurrentStatus('draft');
       }
 
-      await fetchBaseData();
+      await fetchBaseData(isCurrent, Boolean(targetId));
+      if (!isCurrent()) return;
       if (targetId) {
-          await loadExistingData(targetId);
+          await loadExistingData(targetId, isCurrent);
       }
+      if (!isCurrent()) return;
       setLoading(false);
     };
 
+    formDispatch({ type: 'RESET' });
+    uiDispatch({ type: 'RESET', currentReportId: paramReportId });
+    shiftDispatch({ type: 'RESET', selectedSegmentId: segmentId });
     if (!wsLoading && currentOrg) {
-      init();
+      void init();
     }
-  }, [wsLoading, currentOrg, paramReportId, shiftId, segmentId, clientId, router, showToast, fetchBaseData, loadExistingData, formatDatetimeLocal, setupTimeForPart, applySegmentDefaults, setActualStaffs, setCurrentReportId, setCurrentStatus, setEndDateTime, setIsSpanningMonth, setLoading, setOriginalShiftTimes, setSelectedHelpers, setSelectedSegmentId, setServiceTime, setShiftSegments, setStartDateTime]);
+    return () => {
+      if (isCurrent()) invalidateLoadGeneration();
+    };
+  }, [wsLoading, currentOrg, paramReportId, shiftId, segmentId, clientId, draftKey, router, showToast, fetchBaseData, loadExistingData, formatDatetimeLocal, setupTimeForPart, applySegmentDefaults, invalidateLoadGeneration, isCurrentLoadGeneration, nextLoadGeneration, setActualStaffs, setCurrentReportId, setCurrentStatus, setEndDateTime, setIsSpanningMonth, setLoading, setOriginalShiftTimes, setSelectedHelpers, setSelectedSegmentId, setServiceTime, setShiftSegments, setStartDateTime]);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -721,8 +781,10 @@ export function useRecordForm() {
   // in localStorage because this screen can contain sensitive care information.
   useEffect(() => {
     if (loading || !currentOrg || autosaveRestoredRef.current || currentStatus === 'approved') return;
+    let cancelled = false;
     autosaveRestoredRef.current = true;
-    void loadReportAutosave(currentOrg.id, draftKeyRef.current).then((saved) => {
+    void loadReportAutosave(currentOrg.id, draftKey).then((saved) => {
+      if (cancelled) return;
       if (!saved?.payload) return;
       const payload = saved.payload as Partial<{
         answers: FormAnswers;
@@ -744,17 +806,22 @@ export function useRecordForm() {
       if (payload.serviceTime !== undefined) setServiceTime(payload.serviceTime);
       if (payload.travelTime !== undefined) setTravelTime(payload.travelTime);
       if (payload.roundTripDistanceKm !== undefined) setRoundTripDistanceKm(payload.roundTripDistanceKm);
-      autosaveRevisionRef.current = saved.autosave_revision;
+      autosaveRevisionRef.current = saved.autosave_revision ?? 0;
       setIsDirty(true);
       setAutosaveState('saved');
       showToast('入力途中の内容を復元しました', 'info');
     }).catch((error) => {
+      if (cancelled) return;
       console.error('Failed to restore report autosave', error);
     });
-  }, [autosaveRestoredRef, currentOrg, currentStatus, loading, setActualServiceTypeId, setActualStaffs, setAnswers, setEndDateTime, setIsDirty, setRoundTripDistanceKm, setSelectedHelpers, setServiceTime, setStartDateTime, setTravelTime, showToast]);
+    return () => {
+      cancelled = true;
+    };
+  }, [currentOrg, currentStatus, draftKey, loading, recordScopeKey, setActualServiceTypeId, setActualStaffs, setAnswers, setEndDateTime, setIsDirty, setRoundTripDistanceKm, setSelectedHelpers, setServiceTime, setStartDateTime, setTravelTime, showToast]);
 
   useEffect(() => {
     if (!isDirty || loading || !currentOrg || currentStatus === 'approved') return;
+    let cancelled = false;
     const timer = window.setTimeout(() => {
       const revision = autosaveRevisionRef.current + 1;
       setAutosaveState('saving');
@@ -762,7 +829,7 @@ export function useRecordForm() {
         organizationId: currentOrg.id,
         clientId: clientId as string,
         reportId: currentReportId,
-        draftKey: draftKeyRef.current,
+        draftKey,
         autosaveRevision: revision,
         payload: {
           answers,
@@ -776,22 +843,37 @@ export function useRecordForm() {
           roundTripDistanceKm,
         },
       }).then((result) => {
+        if (cancelled) return;
         if (result.saved) autosaveRevisionRef.current = revision;
         setAutosaveState('saved');
       }).catch((error) => {
+        if (cancelled) return;
         console.error('Report autosave failed', error);
         setAutosaveState('error');
       });
     }, 3000);
-    return () => window.clearTimeout(timer);
-  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, currentStatus, endDateTime, isDirty, loading, roundTripDistanceKm, selectedHelpers, serviceTime, startDateTime, travelTime]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, currentStatus, draftKey, endDateTime, isDirty, loading, recordScopeKey, roundTripDistanceKm, selectedHelpers, serviceTime, startDateTime, travelTime]);
 
   useEffect(() => {
     if (!currentReportId || !currentOrg) return;
+    let cancelled = false;
     void Promise.all([
-      getLinkedShifts(currentReportId).then(data => setLinkedShifts(data as LinkedShift[])),
-      getShiftSuggestions(currentOrg.id, currentReportId).then(setShiftSuggestions),
-    ]);
+      getLinkedShifts(currentReportId),
+      getShiftSuggestions(currentOrg.id, currentReportId),
+    ]).then(([linked, suggestions]) => {
+      if (cancelled) return;
+      setLinkedShifts(linked as LinkedShift[]);
+      setShiftSuggestions(suggestions);
+    }).catch((error) => {
+      if (!cancelled) console.error('Failed to load linked shifts or suggestions', error);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [currentReportId, currentOrg, setLinkedShifts, setShiftSuggestions]);
 
   const handleChange = useCallback((setter: (val: string) => void, val: string) => {
@@ -894,13 +976,13 @@ export function useRecordForm() {
       if (!currentReportId) setCurrentReportId(targetReportId);
       if (status === 'draft') setHasAiDraftSource(false);
       setIsDirty(false);
-      void discardReportAutosave(currentOrg.id, draftKeyRef.current).catch((error) => {
+      void discardReportAutosave(currentOrg.id, draftKey).catch((error) => {
         console.error('Failed to discard committed autosave', error);
       });
       setAutosaveState('idle');
       
       if (!currentReportId && targetReportId) {
-          const newUrl = `/app/record/${clientId}?reportId=${targetReportId}`;
+          const newUrl = `/app/record/${clientId}?reportId=${targetReportId}&draftKey=${encodeURIComponent(draftKey)}`;
           router.replace(newUrl);
       }
 
@@ -914,7 +996,7 @@ export function useRecordForm() {
       return false;
     }
     finally { setSubmitting(false); }
-  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, endDateTime, hasAiDraftSource, roundTripDistanceKm, router, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setSubmitting, shiftId, shiftSegments.length, showToast, startDateTime, travelCostRateYenPerKm, travelTime, validate]);
+  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, draftKey, endDateTime, hasAiDraftSource, roundTripDistanceKm, router, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setSubmitting, shiftId, shiftSegments.length, showToast, startDateTime, travelCostRateYenPerKm, travelTime, validate]);
 
   const handleDraftSave = useCallback(async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); } }, [saveReport, showToast]);
   const handleSubmit = useCallback(async () => {

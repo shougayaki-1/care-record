@@ -4,6 +4,7 @@ import { withSafeError } from '@/utils/errors';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
+import { asJson, asNullableRpcArg } from '@/types/json';
 
 import { normalizePatternSegments } from './helpers';
 import type { ShiftPatternPayload } from './types';
@@ -47,10 +48,10 @@ export async function createShiftPattern(payload: ShiftPatternPayload) {
       const supabase = await createSessionClient();
       const segments = normalizePatternSegments(payload);
       const { data: patternId, error } = await supabase.rpc('save_shift_pattern_atomic', {
-          p_pattern_id: null,
+          p_pattern_id: asNullableRpcArg<string>(null),
           p_org_id: payload.organizationId,
-          p_payload: { client_id: payload.clientId, title: payload.title, start_time: payload.startTime,
-              end_time: payload.endTime, rrule: payload.rrule, segments, auto_assign: Boolean(payload.autoAssign) },
+          p_payload: asJson({ client_id: payload.clientId, title: payload.title, start_time: payload.startTime,
+              end_time: payload.endTime, rrule: payload.rrule, segments, auto_assign: Boolean(payload.autoAssign) }),
       });
       if (error || !patternId) throw error;
 

@@ -34,7 +34,7 @@ export const signUp = async (page: Page, email: string, password: string) => {
 };
 
 export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUser>) => {
-  await page.goto('http://localhost:3000');
+  await page.goto('/?next=/setup');
   await registerTermsHandler(page);
   await signUp(page, user.email, user.password);
 
@@ -54,13 +54,35 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
   await page.getByLabel('事業所名').fill(user.orgName);
   await page.getByRole('button', { name: '作成して開始' }).click();
 
+  // 組織作成直後はセッション活動の登録が反映されるまで待つ。
+  // 一時障害の手動再試行画面が出た場合だけ、一度だけ UI から再試行する。
+  const retryButton = page.getByRole('button', { name: '再試行', exact: true });
+  const organizationSelector = page.getByRole('button', { name: user.orgName });
+  const createRecordLink = page.getByRole('link', { name: '記録を作成', exact: true });
+  const waitForWorkspaceReady = async () => {
+    await expect.poll(
+      async () => (
+        await organizationSelector.isVisible()
+        || await createRecordLink.isVisible()
+        || await retryButton.isVisible()
+      ),
+      { timeout: 30_000 },
+    ).toBe(true);
+  };
+
+  await waitForWorkspaceReady();
+  if (await retryButton.isVisible()) {
+    await retryButton.click();
+    await waitForWorkspaceReady();
+  }
+
   // /app はワークスペース解決後 /app/record へ自動リダイレクトされる
   await expect(page).toHaveURL(/\/app(?:\/record)?$/, { timeout: 30000 });
   if (new URL(page.url()).pathname === '/app') {
     await page.getByRole('link', { name: '記録を作成', exact: true }).click();
     await expect(page).toHaveURL(/\/app\/record$/, { timeout: 30000 });
   }
-  await expect(page.getByRole('button', { name: user.orgName })).toBeVisible({ timeout: 15000 });
+  await expect(organizationSelector).toBeVisible({ timeout: 15000 });
 };
 
 // サイドバーのメニューをクリックするヘルパー（モバイル対応）

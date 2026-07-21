@@ -18,6 +18,7 @@ import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
+import { buildRecordPath } from '@/utils/recordNavigation';
 import { convertToCalendarEvents } from '@/utils/shiftHelper';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 
@@ -159,7 +160,7 @@ export default function MyShiftsPage() {
       showToast('このシフトはキャンセルされています', 'info');
       return;
     }
-    router.push(`/app/record/${clientId}?shiftId=${shiftId}`);
+    router.push(buildRecordPath(clientId, { shiftId }));
   };
 
   const handleViewReports = (shiftId: string) => {

@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { headers } from 'next/headers';
 import { serviceRoleForAuditPreservation } from './serviceRole';
 import { sanitizeDbError } from '@/utils/errors';
+import { asJson } from '@/types/json';
 
 const supabaseAdmin = serviceRoleForAuditPreservation();
 
@@ -48,7 +49,7 @@ export async function recordAuditEvent(input: AuditEventInput): Promise<void> {
     reason: input.reason || null,
     ip_hash: hashNetworkIdentifier(forwardedFor),
     user_agent: requestHeaders.get('user-agent')?.slice(0, 500) || null,
-    details: input.details || {},
+    details: asJson(input.details || {}),
   });
 
   if (error) {

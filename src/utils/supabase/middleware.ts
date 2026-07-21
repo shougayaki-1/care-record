@@ -4,52 +4,15 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import { decodeJwtPayload, decodeJwtSessionId } from '@/utils/jwt';
 import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from '@/utils/authConstants';
+import type { Database } from '@/types/database.generated';
 
-type MiddlewareDatabase = {
-    public: {
-        Tables: {
-            user_session_activity: {
-                Row: {
-                    session_hash: string;
-                    auth_session_id: string;
-                    user_id: string;
-                    last_activity: string;
-                    absolute_expires_at: string;
-                    revoked_at: string | null;
-                };
-                Insert: {
-                    session_hash: string;
-                    auth_session_id: string;
-                    user_id: string;
-                    last_activity: string;
-                    absolute_expires_at: string;
-                    revoked_at: string | null;
-                };
-                Update: {
-                    session_hash?: string;
-                    auth_session_id?: string;
-                    user_id?: string;
-                    last_activity?: string;
-                    absolute_expires_at?: string;
-                    revoked_at?: string | null;
-                };
-                Relationships: [];
-            };
-        };
-        Views: Record<string, never>;
-        Functions: Record<string, never>;
-        Enums: Record<string, never>;
-        CompositeTypes: Record<string, never>;
-    };
-};
-
-type SupabaseAdminClient = ReturnType<typeof createClient<MiddlewareDatabase, 'public'>>;
+type SupabaseAdminClient = ReturnType<typeof createClient<Database, 'public'>>;
 
 let supabaseAdmin: SupabaseAdminClient | null = null;
 
 function getSupabaseAdmin(supabaseUrl: string, serviceRoleKey: string): SupabaseAdminClient {
     if (!supabaseAdmin) {
-        supabaseAdmin = createClient<MiddlewareDatabase, 'public'>(supabaseUrl, serviceRoleKey, {
+        supabaseAdmin = createClient<Database, 'public'>(supabaseUrl, serviceRoleKey, {
             auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
         });
     }
@@ -88,7 +51,7 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
         throw new Error('Supabase middleware environment is not configured');
     }
 
-    const supabase = createServerClient(
+    const supabase = createServerClient<Database>(
         supabaseUrl,
         supabaseAnonKey,
         {

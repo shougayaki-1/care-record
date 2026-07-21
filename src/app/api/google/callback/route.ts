@@ -6,6 +6,7 @@ import { encryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { consumeOAuthNonce } from '@/utils/supabase/oauthNonce';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { logExternalError } from '@/utils/errors';
+import type { Database } from '@/types/database.generated';
 
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
 
     try {
         // 2. ログイン中ユーザーを検証し、当該事業所の owner であることを確認
-        const supabaseSession = createServerClient(
+        const supabaseSession = createServerClient<Database>(
             process.env.NEXT_PUBLIC_SUPABASE_URL!,
             process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
             {

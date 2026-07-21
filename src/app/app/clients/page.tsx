@@ -61,7 +61,10 @@ export default function ClientsPage() {
       
       const { data, error } = await query;
       if (error) throw error;
-      setClients(data || []);
+      setClients((data ?? []).map((client) => ({
+        ...client,
+        assignments: client.assignments.filter((assignment) => assignment.staff_id !== null) as { staff_id: string }[],
+      })));
     } catch (error) { 
         console.error(error); 
     } finally { 

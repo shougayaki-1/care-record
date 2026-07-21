@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { registerSessionActivity } from '@/utils/supabase/auth';
+import type { Database } from '@/types/database.generated';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
   // cookies().set と response.cookies.set の併用は、チャンクCookieの重複や
   // PKCE verifier/sessionの不整合をブラウザ間で起こし得る。
   const response = NextResponse.redirect(`${origin}${next}`);
-  const supabase = createServerClient(
+  const supabase = createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
