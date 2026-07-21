@@ -161,11 +161,19 @@ function SettingsContent() {
 
     // ログイン方式の判定: パスワードを持たない(SSOのみの)アカウントは、重要操作の
     // 再認証をパスワードではなくOAuthのstep-upで行う。
+    // identities に 'email' が含まれるかではなく、実際にパスワードが設定されて
+    // いるかで判定する(後からのパスワード設定/削除に identities が追従すると
+    // は限らないため)。
     useEffect(() => {
-        supabase.auth.getUser().then(({ data: { user } }) => {
-            const identities = (user?.identities || []) as { provider: string }[];
-            setHasPasswordIdentity(identities.some((identity) => identity.provider === 'email'));
-        }).catch(() => setHasPasswordIdentity(true));
+        (async () => {
+            try {
+                const { data, error } = await supabase.rpc('current_user_has_password');
+                if (error) throw error;
+                setHasPasswordIdentity(Boolean(data));
+            } catch {
+                setHasPasswordIdentity(true);
+            }
+        })();
     }, []);
 
     // OAuth step-up再認証(/auth/reauth-callback)から戻ってきた際、中断していた操作を再開する。

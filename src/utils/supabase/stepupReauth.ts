@@ -27,10 +27,15 @@ export async function beginStepUpReauth(purpose: ReauthPurpose): Promise<{ nonce
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) throw new Error('認証が必要です');
 
-  const identities = user.identities || [];
-  if (identities.some((identity) => identity.provider === 'email')) {
+  // identities に 'email' が含まれるかではなく、実際にパスワードが
+  // 設定されているかで判定する(後からのパスワード設定/削除に identities
+  // が追従するとは限らないため)。
+  const { data: hasPassword, error: hasPasswordError } = await supabase.rpc('current_user_has_password');
+  if (hasPasswordError) throw new Error('認証情報を確認できません');
+  if (hasPassword) {
     throw new Error('パスワードをお持ちのアカウントは、パスワードで再認証してください');
   }
+  const identities = user.identities || [];
   const ssoIdentity = identities.find(
     (identity): identity is typeof identity & { provider: SsoProvider } =>
       (SSO_PROVIDERS as readonly string[]).includes(identity.provider),

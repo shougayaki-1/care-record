@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path TO public, extensions;
-SELECT plan(53);
+SELECT plan(55);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
@@ -257,6 +257,11 @@ SELECT throws_ok(
   '42501', 'new row violates row-level security policy for table "clients"',
   'non-members still cannot INSERT clients into another org');
 RESET ROLE;
+
+SELECT ok(has_function_privilege('authenticated','public.current_user_has_password()','EXECUTE'),
+  'authenticated users can check their own password status for SSO step-up reauth');
+SELECT ok(NOT has_function_privilege('anon','public.current_user_has_password()','EXECUTE'),
+  'anonymous cannot check password status');
 
 SELECT * FROM finish();
 ROLLBACK;
