@@ -70,5 +70,13 @@
     "authorization": "CRON_SECRET; physical deletion path throws unconditionally",
     "audit": "Dry-run counts only; no object or row deletion is possible",
     "consumers": ["src/utils/supabase/retention.ts"]
+  },
+  {
+    "accessor": "serviceRoleForStepupReauth",
+    "purpose": "Single-use OAuth step-up reauthentication challenge for password-less SSO accounts",
+    "targets": ["stepup_reauth_challenges"],
+    "authorization": "Verified user ID with an SSO identity; nonce is hashed and consumed exactly once",
+    "audit": "Successful completion issues a purpose-specific reauth grant via issueGrantToken",
+    "consumers": ["src/utils/supabase/stepupReauth.ts"]
   }
 ]
