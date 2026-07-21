@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { getAuthedUser } from './auth';
 import { serviceRoleForServerSessions } from './serviceRole';
-import { REAUTH_GRANT_TTL_MINUTES } from '@/utils/authConstants';
+import { REAUTH_GRANT_TTL_MINUTES, REAUTH_GRACE_PERIOD_MINUTES } from '@/utils/authConstants';
 import type { Database } from '@/types/database.generated';
 
 const supabaseAdmin = serviceRoleForServerSessions();
@@ -16,6 +16,10 @@ export const REAUTH_PURPOSES = [
 ] as const;
 
 export type ReauthPurpose = (typeof REAUTH_PURPOSES)[number];
+
+// 直近の本人確認を無条件で使い回せる対象は、破壊的でない操作(外部連携の
+// 接続/切断)に限定する。事業所削除・オーナー移譲はここに含めない。
+const GRACE_PERIOD_ELIGIBLE_PURPOSES: readonly ReauthPurpose[] = ['external_secret_change'];
 
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -61,6 +65,37 @@ export async function issueReauthGrant(
   const { data, error } = await verifier.auth.signInWithPassword({ email: user.email, password });
   if (error || data.user?.id !== user.id) throw new Error('再認証に失敗しました');
   await verifier.auth.signOut().catch(() => undefined);
+
+  return issueGrantToken(purpose, user.id, user.sessionId);
+}
+
+/**
+ * 直近(REAUTH_GRACE_PERIOD_MINUTES以内)に同じセッション・同じpurposeで
+ * 本人確認(パスワード確認またはOAuth step-up)に成功していれば、
+ * ユーザーへ再度確認を求めずに新しい reauth_grants を発行する。
+ * 対象は GRACE_PERIOD_ELIGIBLE_PURPOSES に限定し、事業所削除等の
+ * 破壊的操作では常に本人確認をやり直す。
+ */
+export async function tryReuseRecentReauthGrant(
+  purpose: ReauthPurpose,
+): Promise<{ token: string; expiresAt: string } | null> {
+  if (!REAUTH_PURPOSES.includes(purpose)) throw new Error('再認証情報が不正です');
+  if (!GRACE_PERIOD_ELIGIBLE_PURPOSES.includes(purpose)) return null;
+
+  const user = await getAuthedUser();
+  const graceThreshold = new Date(Date.now() - REAUTH_GRACE_PERIOD_MINUTES * 60 * 1000).toISOString();
+  const { data, error } = await supabaseAdmin
+    .from('reauth_grants')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('auth_session_id', user.sessionId)
+    .eq('purpose', purpose)
+    .not('used_at', 'is', null)
+    .gt('used_at', graceThreshold)
+    .order('used_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
 
   return issueGrantToken(purpose, user.id, user.sessionId);
 }

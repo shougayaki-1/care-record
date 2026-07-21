@@ -34,7 +34,7 @@ import { getSettingsSectionsData } from '@/app/actions/settingsSections';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 import type { ServiceType } from '@/app/actions/serviceTypes';
 import type { StaffRole } from '@/app/actions/staffRoles';
-import { issueReauthGrant, beginStepUpReauth, consumeStepUpGrantCookie } from '@/app/actions/auth';
+import { issueReauthGrant, beginStepUpReauth, consumeStepUpGrantCookie, tryReuseRecentReauthGrant } from '@/app/actions/auth';
 
 // reauth_grants の purpose のうち、この画面で発行し得るもの
 type SettingsReauthPurpose = 'external_secret_change' | 'organization_delete';
@@ -80,9 +80,10 @@ function SettingsContent() {
     const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
     const [confirmInput, setConfirmInput] = useState('');
     const [reauthPassword, setReauthPassword] = useState('');
-    // false と判明した場合のみ「パスワードを持たないSSO専用アカウント」として扱う。
-    // 未確定(null)や取得失敗時は安全側(パスワード方式)にフォールバックする。
-    const [hasPasswordIdentity, setHasPasswordIdentity] = useState<boolean | null>(null);
+    // true と判明した場合のみ「Google/AzureでSSOログインしているアカウント」として
+    // OAuth step-up再認証を優先する(パスワードを別途持っていても優先度はログイン
+    // プロバイダ側)。未確定(null)や取得失敗時は安全側(パスワード方式)にフォールバックする。
+    const [preferOAuthReauth, setPreferOAuthReauth] = useState<boolean | null>(null);
 
     // 労働時間ルール・サービス種別・スタッフ役割の3セクションをまとめて1回で取得する
     const [settingsSectionsData, setSettingsSectionsData] = useState<{
@@ -159,19 +160,19 @@ function SettingsContent() {
         }
     }, [searchParams, showToast]);
 
-    // ログイン方式の判定: パスワードを持たない(SSOのみの)アカウントは、重要操作の
-    // 再認証をパスワードではなくOAuthのstep-upで行う。
-    // identities に 'email' が含まれるかではなく、実際にパスワードが設定されて
-    // いるかで判定する(後からのパスワード設定/削除に identities が追従すると
-    // は限らないため)。
+    // ログイン方式の判定: Google/AzureでSSOログインしているアカウントは、
+    // パスワードを別途設定していても重要操作の再認証をOAuthのstep-upで行う
+    // (ログインプロバイダ優先)。パスワードのみのアカウントは従来通りパスワードで確認する。
     useEffect(() => {
         (async () => {
             try {
-                const { data, error } = await supabase.rpc('current_user_has_password');
+                const { data: { user }, error } = await supabase.auth.getUser();
                 if (error) throw error;
-                setHasPasswordIdentity(Boolean(data));
+                const identities = user?.identities || [];
+                const hasSsoIdentity = identities.some((identity) => identity.provider === 'google' || identity.provider === 'azure');
+                setPreferOAuthReauth(hasSsoIdentity);
             } catch {
-                setHasPasswordIdentity(true);
+                setPreferOAuthReauth(false);
             }
         })();
     }, []);
@@ -342,11 +343,15 @@ function SettingsContent() {
         if (!currentOrg) return;
         setConnectingCal(true);
         try {
-            if (hasPasswordIdentity === false) {
-                await startOAuthStepUp('external_secret_change', mode === 'reauthorize' ? 'reauthorize_calendar' : 'connect_calendar');
-                return; // Googleへ全遷移するため、ここで処理を終える
+            // 直近に本人確認済みなら、パスワード入力/OAuth往復を省略する。
+            let grant = await tryReuseRecentReauthGrant('external_secret_change');
+            if (!grant) {
+                if (preferOAuthReauth === true) {
+                    await startOAuthStepUp('external_secret_change', mode === 'reauthorize' ? 'reauthorize_calendar' : 'connect_calendar');
+                    return; // Googleへ全遷移するため、ここで処理を終える
+                }
+                grant = await promptPasswordReauth('external_secret_change');
             }
-            const grant = await promptPasswordReauth('external_secret_change');
             if (!grant) {
                 setConnectingCal(false);
                 return;
@@ -365,11 +370,14 @@ function SettingsContent() {
         if (!(await confirm({ message: 'カレンダーの連携を解除しますか？\n（作成されたカレンダー自体はGoogleに残り、トークンのみ破棄されます）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
-            if (hasPasswordIdentity === false) {
-                await startOAuthStepUp('external_secret_change', 'disconnect_calendar');
-                return; // Googleへ全遷移するため、ここで処理を終える
+            let grant = await tryReuseRecentReauthGrant('external_secret_change');
+            if (!grant) {
+                if (preferOAuthReauth === true) {
+                    await startOAuthStepUp('external_secret_change', 'disconnect_calendar');
+                    return; // Googleへ全遷移するため、ここで処理を終える
+                }
+                grant = await promptPasswordReauth('external_secret_change');
             }
-            const grant = await promptPasswordReauth('external_secret_change');
             if (!grant) return;
             await disconnectGoogleCalendar(currentOrg.id, grant.token);
             setGoogleCalendarId(null);
@@ -824,7 +832,7 @@ function SettingsContent() {
                 dividers={false}
                 actions={<>
                     <AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton>
-                    {hasPasswordIdentity === false ? (
+                    {preferOAuthReauth === true ? (
                         <AppButton onClick={handleDeleteOrgViaStepUp} intent="danger" disabled={confirmInput !== currentOrg.name}>
                             Googleで再認証して削除実行
                         </AppButton>
@@ -846,7 +854,7 @@ function SettingsContent() {
                         onChange={e => setConfirmInput(e.target.value)}
                         placeholder={currentOrg.name}
                     />
-                    {hasPasswordIdentity === false ? (
+                    {preferOAuthReauth === true ? (
                         <Alert severity="info" sx={{ mt: 2 }}>
                             SSOでログインしているため、削除実行を押すとGoogleの認証画面へ移動して本人確認します。
                         </Alert>
