@@ -1,4 +1,5 @@
 'use server';
+import { sanitizeDbError, withSafeError } from '@/utils/errors';
 import { createSessionClient, assertShiftPermission, assertOrgRole } from '@/utils/supabase/auth';
 
 export type ShiftSegmentStaff = {
@@ -31,31 +32,33 @@ export type SaveSegmentInput = {
 };
 
 export async function getShiftSegments(orgId: string, shiftId: string): Promise<ShiftSegment[]> {
-  await assertOrgRole(orgId);
-  const supabase = await createSessionClient();
-  const { data: shift, error: shiftError } = await supabase
-    .from('shifts')
-    .select('id')
-    .eq('id', shiftId)
-    .eq('organization_id', orgId)
-    .is('deleted_at', null)
-    .maybeSingle();
-  if (shiftError || !shift) throw new Error('シフトにアクセスできません');
-  const { data, error } = await supabase
-    .from('shift_segments')
-    .select(`
-      *,
-      service_type:service_types(id, name),
-      shift_segment_staffs(
+  return withSafeError('getShiftSegments', async () => {
+    await assertOrgRole(orgId);
+    const supabase = await createSessionClient();
+    const { data: shift, error: shiftError } = await supabase
+      .from('shifts')
+      .select('id')
+      .eq('id', shiftId)
+      .eq('organization_id', orgId)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (shiftError || !shift) throw new Error('シフトにアクセスできません');
+    const { data, error } = await supabase
+      .from('shift_segments')
+      .select(`
         *,
-        staff:staffs(id, name),
-        staff_role:staff_roles(id, name, is_unpaid)
-      )
-    `)
-    .eq('shift_id', shiftId)
-    .order('sort_order');
-  if (error) throw new Error('シフト区間を取得できませんでした');
-  return (data ?? []) as ShiftSegment[];
+        service_type:service_types(id, name),
+        shift_segment_staffs(
+          *,
+          staff:staffs(id, name),
+          staff_role:staff_roles(id, name, is_unpaid)
+        )
+      `)
+      .eq('shift_id', shiftId)
+      .order('sort_order');
+    if (error) throw sanitizeDbError(error, 'getShiftSegments');
+    return (data ?? []) as ShiftSegment[];
+  });
 }
 
 export async function saveShiftSegments(
@@ -63,29 +66,33 @@ export async function saveShiftSegments(
   shiftId: string,
   segments: SaveSegmentInput[]
 ): Promise<void> {
-  await assertShiftPermission(orgId, 'edit', { shiftId });
-  const supabase = await createSessionClient();
-  const { error } = await supabase.rpc('replace_shift_segments', {
-    p_org_id: orgId,
-    p_shift_id: shiftId,
-    p_segments: segments,
+  return withSafeError('saveShiftSegments', async () => {
+    await assertShiftPermission(orgId, 'edit', { shiftId });
+    const supabase = await createSessionClient();
+    const { error } = await supabase.rpc('replace_shift_segments', {
+      p_org_id: orgId,
+      p_shift_id: shiftId,
+      p_segments: segments,
+    });
+    if (error) throw sanitizeDbError(error, 'saveShiftSegments');
   });
-  if (error) throw new Error(error.message || '区間の保存に失敗しました');
 }
 
 export async function deleteShiftSegment(orgId: string, segmentId: string): Promise<void> {
-  const supabase = await createSessionClient();
-  const { data: seg } = await supabase
-    .from('shift_segments')
-    .select('shift_id')
-    .eq('id', segmentId)
-    .maybeSingle();
-  if (!seg) throw new Error('区間が見つかりません');
-  await assertShiftPermission(orgId, 'edit', { shiftId: seg.shift_id });
+  return withSafeError('deleteShiftSegment', async () => {
+    const supabase = await createSessionClient();
+    const { data: seg } = await supabase
+      .from('shift_segments')
+      .select('shift_id')
+      .eq('id', segmentId)
+      .maybeSingle();
+    if (!seg) throw new Error('区間が見つかりません');
+    await assertShiftPermission(orgId, 'edit', { shiftId: seg.shift_id });
 
-  const { error } = await supabase.rpc('delete_shift_segment_atomic', {
-    p_org_id: orgId,
-    p_segment_id: segmentId,
+    const { error } = await supabase.rpc('delete_shift_segment_atomic', {
+      p_org_id: orgId,
+      p_segment_id: segmentId,
+    });
+    if (error) throw sanitizeDbError(error, 'deleteShiftSegment');
   });
-  if (error) throw new Error(error.message || '区間の削除に失敗しました');
 }
