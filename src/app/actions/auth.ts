@@ -5,6 +5,7 @@
 // - ログイン成功/失敗・ログアウトの監査記録（アクセスの記録）
 // パスワードログインをサーバーで行うことで、上記を確実に一元化する（@supabase/ssr のサーバーログインパターン）。
 
+import { cookies } from 'next/headers';
 import { createSessionClient, getAuthedUser, registerSessionActivity, revokeCurrentSession, touchCurrentSession, SESSION_ABSOLUTE_HOURS } from '@/utils/supabase/auth';
 import { serviceRoleForServerSessions } from '@/utils/supabase/serviceRole';
 import { decodeJwtSessionId } from '@/utils/jwt';
@@ -17,7 +18,9 @@ import {
 } from '@/utils/supabase/loginAttempts';
 import { validatePassword } from '@/utils/passwordPolicy';
 import { issueReauthGrant as createReauthGrant, type ReauthPurpose } from '@/utils/supabase/reauth';
+import { beginStepUpReauth as createStepUpReauth } from '@/utils/supabase/stepupReauth';
 import { classifySessionActivityAuthentication, type SessionActivityResult } from '@/utils/sessionActivity';
+import { STEPUP_GRANT_COOKIE, STEPUP_NONCE_COOKIE } from '@/utils/authConstants';
 
 const supabaseAdmin = serviceRoleForServerSessions();
 
@@ -31,6 +34,32 @@ export type RegistrationResult =
 
 export async function issueReauthGrant(purpose: ReauthPurpose, password: string) {
   return createReauthGrant(purpose, password);
+}
+
+/** パスワードを持たない(SSOのみの)アカウント向け。OAuthプロバイダへの再ログインを開始する。 */
+export async function beginStepUpReauth(purpose: ReauthPurpose) {
+  const { nonce, provider } = await createStepUpReauth(purpose);
+  const cookieStore = await cookies();
+  cookieStore.set(STEPUP_NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 10, // 10分。stepup_reauth_challenges の有効期限と揃える。
+  });
+  return { nonce, provider };
+}
+
+/**
+ * OAuth step-up再認証の完了後、/auth/reauth-callback がhttpOnly Cookieに
+ * 一度だけ保存した再認証グラントトークンを読み出し、Cookieを破棄する。
+ */
+export async function consumeStepUpGrantCookie(): Promise<{ token: string } | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(STEPUP_GRANT_COOKIE)?.value;
+  if (!token) return null;
+  cookieStore.delete(STEPUP_GRANT_COOKIE);
+  return { token };
 }
 
 /**

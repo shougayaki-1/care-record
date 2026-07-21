@@ -21,6 +21,29 @@ function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+/**
+ * 再認証グラントのトークンを実際に発行する共通部分。
+ * パスワードでの本人確認(issueReauthGrant)とOAuth step-up確認(stepupReauth.ts)の
+ * どちらから呼ばれても、発行されるトークンの形と consumeReauthGrant 側の検証は同一。
+ */
+export async function issueGrantToken(
+  purpose: ReauthPurpose,
+  userId: string,
+  authSessionId: string,
+): Promise<{ token: string; expiresAt: string }> {
+  const token = randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + REAUTH_GRANT_TTL_MINUTES * 60 * 1000).toISOString();
+  const { error: insertError } = await supabaseAdmin.from('reauth_grants').insert({
+    token_hash: hashToken(token),
+    user_id: userId,
+    auth_session_id: authSessionId,
+    purpose,
+    expires_at: expiresAt,
+  });
+  if (insertError) throw new Error('再認証証明を発行できません');
+  return { token, expiresAt };
+}
+
 export async function issueReauthGrant(
   purpose: ReauthPurpose,
   password: string,
@@ -39,17 +62,7 @@ export async function issueReauthGrant(
   if (error || data.user?.id !== user.id) throw new Error('再認証に失敗しました');
   await verifier.auth.signOut().catch(() => undefined);
 
-  const token = randomBytes(32).toString('base64url');
-  const expiresAt = new Date(Date.now() + REAUTH_GRANT_TTL_MINUTES * 60 * 1000).toISOString();
-  const { error: insertError } = await supabaseAdmin.from('reauth_grants').insert({
-    token_hash: hashToken(token),
-    user_id: user.id,
-    auth_session_id: user.sessionId,
-    purpose,
-    expires_at: expiresAt,
-  });
-  if (insertError) throw new Error('再認証証明を発行できません');
-  return { token, expiresAt };
+  return issueGrantToken(purpose, user.id, user.sessionId);
 }
 
 export async function consumeReauthGrant(purpose: ReauthPurpose, token: string): Promise<{ userId: string }> {

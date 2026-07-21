@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, Suspense } from 'react';
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
 import {
   Box, Typography, Alert, CircularProgress, LinearProgress, Stack, Divider,
@@ -34,7 +34,12 @@ import { getSettingsSectionsData } from '@/app/actions/settingsSections';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 import type { ServiceType } from '@/app/actions/serviceTypes';
 import type { StaffRole } from '@/app/actions/staffRoles';
-import { issueReauthGrant } from '@/app/actions/auth';
+import { issueReauthGrant, beginStepUpReauth, consumeStepUpGrantCookie } from '@/app/actions/auth';
+
+// reauth_grants の purpose のうち、この画面で発行し得るもの
+type SettingsReauthPurpose = 'external_secret_change' | 'organization_delete';
+// OAuth step-up 再認証の往復から戻ってきた後に再開する操作
+type StepUpResumeAction = 'connect_calendar' | 'reauthorize_calendar' | 'disconnect_calendar' | 'delete_org';
 
 type GasResponse = {
     status: string;
@@ -75,6 +80,9 @@ function SettingsContent() {
     const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
     const [confirmInput, setConfirmInput] = useState('');
     const [reauthPassword, setReauthPassword] = useState('');
+    // false と判明した場合のみ「パスワードを持たないSSO専用アカウント」として扱う。
+    // 未確定(null)や取得失敗時は安全側(パスワード方式)にフォールバックする。
+    const [hasPasswordIdentity, setHasPasswordIdentity] = useState<boolean | null>(null);
 
     // 労働時間ルール・サービス種別・スタッフ役割の3セクションをまとめて1回で取得する
     const [settingsSectionsData, setSettingsSectionsData] = useState<{
@@ -140,7 +148,7 @@ function SettingsContent() {
     useEffect(() => {
         const successMsg = searchParams.get('success');
         const errorMsg = searchParams.get('error');
-        
+
         if (successMsg === 'calendar_connected') {
             showToast('Googleカレンダーを作成し連携しました！', 'success');
             // パラメータを消去（replaceはエラーを防ぐため今回はシンプルにURLを上書き）
@@ -150,6 +158,84 @@ function SettingsContent() {
             window.history.replaceState(null, '', '/app/settings');
         }
     }, [searchParams, showToast]);
+
+    // ログイン方式の判定: パスワードを持たない(SSOのみの)アカウントは、重要操作の
+    // 再認証をパスワードではなくOAuthのstep-upで行う。
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user } }) => {
+            const identities = (user?.identities || []) as { provider: string }[];
+            setHasPasswordIdentity(identities.some((identity) => identity.provider === 'email'));
+        }).catch(() => setHasPasswordIdentity(true));
+    }, []);
+
+    // OAuth step-up再認証(/auth/reauth-callback)から戻ってきた際、中断していた操作を再開する。
+    const stepupHandledRef = useRef(false);
+    useEffect(() => {
+        const stepupError = searchParams.get('stepupError');
+        if (stepupError) {
+            window.history.replaceState(null, '', '/app/settings');
+            showToast('Googleでの再認証に失敗しました。もう一度お試しください。', 'error');
+            return;
+        }
+        const stepup = searchParams.get('stepup');
+        const action = searchParams.get('action') as StepUpResumeAction | null;
+        if (stepup !== '1' || !action || !currentOrg || stepupHandledRef.current) return;
+        stepupHandledRef.current = true;
+        window.history.replaceState(null, '', '/app/settings');
+
+        (async () => {
+            try {
+                const grant = await consumeStepUpGrantCookie();
+                if (!grant) {
+                    showToast('再認証の有効期限が切れました。もう一度お試しください。', 'error');
+                    return;
+                }
+                if (action === 'connect_calendar' || action === 'reauthorize_calendar') {
+                    setConnectingCal(true);
+                    const url = await getGoogleAuthUrlAction(
+                        currentOrg.id,
+                        action === 'reauthorize_calendar' ? 'reauthorize' : 'connect',
+                        grant.token,
+                    );
+                    window.location.href = url;
+                } else if (action === 'disconnect_calendar') {
+                    await disconnectGoogleCalendar(currentOrg.id, grant.token);
+                    setGoogleCalendarId(null);
+                    showToast('連携を解除しました');
+                } else if (action === 'delete_org') {
+                    await deleteOrganization(currentOrg.id, grant.token);
+                    showToast('事業所を削除しました');
+                    window.location.href = '/setup';
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('操作に失敗しました', 'error');
+                setConnectingCal(false);
+            }
+        })();
+    }, [searchParams, currentOrg, showToast]);
+
+    /** パスワードを持つ人向けの再認証。 */
+    const promptPasswordReauth = async (purpose: SettingsReauthPurpose) => {
+        const password = window.prompt('外部連携を変更するため、現在のパスワードを入力してください');
+        if (!password) return null;
+        return issueReauthGrant(purpose, password);
+    };
+
+    /**
+     * SSOのみの人向けの再認証。Googleの認証画面へ全遷移するため、
+     * 呼び出し側は以後の処理を諦めて return する(戻り先で resume 用の action として続きを行う)。
+     */
+    const startOAuthStepUp = async (purpose: SettingsReauthPurpose, resume: StepUpResumeAction) => {
+        const { nonce, provider } = await beginStepUpReauth(purpose);
+        const next = `/app/settings?stepup=1&action=${resume}`;
+        const redirectTo = `${window.location.origin}/auth/reauth-callback?nonce=${encodeURIComponent(nonce)}&next=${encodeURIComponent(next)}`;
+        showToast('本人確認のためGoogleへ移動します', 'info');
+        await supabase.auth.signInWithOAuth({
+            provider: provider as 'google' | 'azure',
+            options: { redirectTo, queryParams: { prompt: 'select_account' } },
+        });
+    };
 
     const handleSave = async () => {
         if (!orgName.trim() || !currentOrg) return;
@@ -248,12 +334,15 @@ function SettingsContent() {
         if (!currentOrg) return;
         setConnectingCal(true);
         try {
-            const password = window.prompt('外部連携を変更するため、現在のパスワードを入力してください');
-            if (!password) {
+            if (hasPasswordIdentity === false) {
+                await startOAuthStepUp('external_secret_change', mode === 'reauthorize' ? 'reauthorize_calendar' : 'connect_calendar');
+                return; // Googleへ全遷移するため、ここで処理を終える
+            }
+            const grant = await promptPasswordReauth('external_secret_change');
+            if (!grant) {
                 setConnectingCal(false);
                 return;
             }
-            const grant = await issueReauthGrant('external_secret_change', password);
             const url = await getGoogleAuthUrlAction(currentOrg.id, mode, grant.token);
             // Googleのログイン画面へリダイレクト
             window.location.href = url;
@@ -268,15 +357,18 @@ function SettingsContent() {
         if (!(await confirm({ message: 'カレンダーの連携を解除しますか？\n（作成されたカレンダー自体はGoogleに残り、トークンのみ破棄されます）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
-            const password = window.prompt('外部連携を変更するため、現在のパスワードを入力してください');
-            if (!password) return;
-            const grant = await issueReauthGrant('external_secret_change', password);
+            if (hasPasswordIdentity === false) {
+                await startOAuthStepUp('external_secret_change', 'disconnect_calendar');
+                return; // Googleへ全遷移するため、ここで処理を終える
+            }
+            const grant = await promptPasswordReauth('external_secret_change');
+            if (!grant) return;
             await disconnectGoogleCalendar(currentOrg.id, grant.token);
             setGoogleCalendarId(null);
             showToast('連携を解除しました');
-        } catch(e) { 
+        } catch(e) {
             console.error(e);
-            showToast('解除に失敗しました', 'error'); 
+            showToast('解除に失敗しました', 'error');
         }
     };
 
@@ -378,10 +470,22 @@ function SettingsContent() {
             await deleteOrganization(currentOrg.id, grant.token);
             showToast('事業所を削除しました');
             window.location.href = '/setup';
-        } catch (e: unknown) { 
-            console.error(e); 
+        } catch (e: unknown) {
+            console.error(e);
             const msg = e instanceof Error ? e.message : String(e);
-            showToast('削除失敗: ' + msg, 'error'); 
+            showToast('削除失敗: ' + msg, 'error');
+        }
+    };
+
+    /** SSOのみのアカウント向け: Googleで再認証してから削除を実行する。 */
+    const handleDeleteOrgViaStepUp = async () => {
+        if (!currentOrg || confirmInput !== currentOrg.name) return;
+        try {
+            await startOAuthStepUp('organization_delete', 'delete_org');
+        } catch (e: unknown) {
+            console.error(e);
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast('再認証の開始に失敗しました: ' + msg, 'error');
         }
     };
 
@@ -705,28 +809,51 @@ function SettingsContent() {
 
             </PageBody>
 
-            <AppDialog open={openDeleteDialog} onClose={() => setOpenDeleteDialog(false)} title="事業所の削除申請" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton><AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name || !reauthPassword}>削除実行</AppButton></>}>
+            <AppDialog
+                open={openDeleteDialog}
+                onClose={() => setOpenDeleteDialog(false)}
+                title="事業所の削除申請"
+                dividers={false}
+                actions={<>
+                    <AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton>
+                    {hasPasswordIdentity === false ? (
+                        <AppButton onClick={handleDeleteOrgViaStepUp} intent="danger" disabled={confirmInput !== currentOrg.name}>
+                            Googleで再認証して削除実行
+                        </AppButton>
+                    ) : (
+                        <AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name || !reauthPassword}>
+                            削除実行
+                        </AppButton>
+                    )}
+                </>}
+            >
                     <Typography color="error" sx={{ mb: 2 }}>
-                        削除保留状態にします。重要操作のためパスワードで再認証します。<br/>
+                        削除保留状態にします。重要操作のため再認証します。<br/>
                         確認のため、事業所名 <b>{currentOrg.name}</b> を入力してください。
                     </Typography>
                     <AppTextField
-                        fullWidth 
-                        size="small" 
-                        value={confirmInput} 
-                        onChange={e => setConfirmInput(e.target.value)} 
-                        placeholder={currentOrg.name} 
-                    />
-                    <AppTextField
                         fullWidth
                         size="small"
-                        type="password"
-                        autoComplete="current-password"
-                        value={reauthPassword}
-                        onChange={e => setReauthPassword(e.target.value)}
-                        label="現在のパスワード"
-                        sx={{ mt: 2 }}
+                        value={confirmInput}
+                        onChange={e => setConfirmInput(e.target.value)}
+                        placeholder={currentOrg.name}
                     />
+                    {hasPasswordIdentity === false ? (
+                        <Alert severity="info" sx={{ mt: 2 }}>
+                            SSOでログインしているため、削除実行を押すとGoogleの認証画面へ移動して本人確認します。
+                        </Alert>
+                    ) : (
+                        <AppTextField
+                            fullWidth
+                            size="small"
+                            type="password"
+                            autoComplete="current-password"
+                            value={reauthPassword}
+                            onChange={e => setReauthPassword(e.target.value)}
+                            label="現在のパスワード"
+                            sx={{ mt: 2 }}
+                        />
+                    )}
             </AppDialog>
 
             <AppDialog open={openLeaveDialog} onClose={() => setOpenLeaveDialog(false)} title="脱退の確認" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenLeaveDialog(false)}>キャンセル</AppButton><AppButton onClick={handleLeaveOrg} intent="warning">脱退する</AppButton></>}>
