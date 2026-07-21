@@ -17,8 +17,11 @@ export default defineConfig({
     // タイミング依存の既知の空振りエラーのみを対象を絞ってフィルタする
     // (テストのアサーション自体は全て成功している)。
     onUnhandledError(error) {
+      // onUnhandledError runs on the main thread after the error is
+      // serialized back from the worker, so `instanceof ReferenceError`
+      // does not reliably hold — match on name/message/stack instead.
       if (
-        error instanceof ReferenceError
+        error.name === 'ReferenceError'
         && error.message === 'window is not defined'
         && /react-dom|scheduler/.test(String(error.stack))
       ) {
