@@ -2490,6 +2490,36 @@ export type Database = {
           },
         ]
       }
+      stepup_reauth_challenges: {
+        Row: {
+          consumed_at: string | null
+          created_at: string
+          expires_at: string
+          nonce_hash: string
+          provider: string
+          purpose: string
+          user_id: string
+        }
+        Insert: {
+          consumed_at?: string | null
+          created_at?: string
+          expires_at: string
+          nonce_hash: string
+          provider: string
+          purpose: string
+          user_id: string
+        }
+        Update: {
+          consumed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          nonce_hash?: string
+          provider?: string
+          purpose?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_deletion_requests: {
         Row: {
           approved_by: string | null
