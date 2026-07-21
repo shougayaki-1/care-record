@@ -2730,6 +2730,7 @@ export type Database = {
         }
         Returns: string
       }
+      current_user_has_password: { Args: never; Returns: boolean }
       decide_report_deletion: {
         Args: { p_decision: string; p_org_id: string; p_request_id: string }
         Returns: Json
