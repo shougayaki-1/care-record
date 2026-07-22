@@ -22,6 +22,24 @@ import {
   trySyncSilently,
 } from './googleSyncInternal';
 import type { ShiftPayload, ShiftQueryFilter } from './types';
+import { buildShiftTitle } from '@/utils/shiftTitle';
+
+async function getCurrentShiftTitle(shiftId: string, fallbackTitle?: string): Promise<string | undefined> {
+  const supabase = await createSessionClient();
+  const { data, error } = await supabase
+    .from('shifts')
+    .select('clients(name), shift_staffs(staffs(name))')
+    .eq('id', shiftId)
+    .single();
+  if (error || !data) return fallbackTitle;
+
+  const client = Array.isArray(data.clients) ? data.clients[0] : data.clients;
+  const staffNames = (data.shift_staffs ?? []).flatMap((shiftStaff) => {
+    const staff = Array.isArray(shiftStaff.staffs) ? shiftStaff.staffs[0] : shiftStaff.staffs;
+    return staff?.name ? [staff.name] : [];
+  });
+  return client?.name ? buildShiftTitle(client.name, staffNames) : fallbackTitle;
+}
 
 // 認可チェックを伴う公開アクション
 export async function createShift(payload: ShiftPayload, awaitSync: boolean | 'skip' = true) {
@@ -68,7 +86,10 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
       if (payload.organizationId && payload.organizationId !== organizationId) {
           throw new UserFacingError('シフトの事業所は変更できません');
       }
-      const result = await updateShiftInternal(shiftId, payload, awaitSync);
+      // 区間の担当者は別の保存操作で更新される。UI から届く古い・空の
+      // segments を信用せず、DB上の担当者から常にタイトルを再構成する。
+      const title = await getCurrentShiftTitle(shiftId, payload.title);
+      const result = await updateShiftInternal(shiftId, { ...payload, title }, awaitSync);
       await recordAuditEvent({ organizationId, actorId: actor.userId, action: 'shift.update', resourceType: 'shift', resourceId: shiftId, details: { fields: Object.keys(payload) } });
       return result;
   });

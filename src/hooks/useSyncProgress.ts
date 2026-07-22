@@ -61,15 +61,19 @@ export const useSyncProgress = ({
         if (total === 0) { await refreshUnsyncedCount(); return true; }
 
         setSyncProgress({ total, current: 0, currentName: 'Googleカレンダーへ同期中...' });
-        let done = 0, failed = 0;
+        let done = 0, failed = 0, processed = 0;
         let errorKind: string | undefined;
         try {
             for (;;) {
-                const res = await syncUnsyncedBatch(currentOrg.id, 20);
+                // 進捗モーダルは1件の完了ごとに更新する。まとめて20件を処理すると
+                // 表示が一度に進み、処理が止まったように見えてしまう。
+                const res = await syncUnsyncedBatch(currentOrg.id, 1);
                 done += res.succeeded;
                 failed += res.failed;
+                processed += res.processed;
                 if (res.errorKind) errorKind = res.errorKind;
-                setSyncProgress({ total, current: Math.min(total, done), currentName: `${Math.min(total, done)} / ${total} 件 同期済み` });
+                const current = Math.min(total, processed);
+                setSyncProgress({ total, current, currentName: `${current} / ${total} 件 処理済み` });
                 if (errorKind === 'auth' || res.remaining <= 0 || res.succeeded === 0) break;
             }
         } finally {

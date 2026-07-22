@@ -442,13 +442,15 @@ function SettingsContent() {
             const total = status.unsynced;
             if (total === 0) { showToast('未同期の予定はありません。', 'info'); return; }
             setSyncProgress({ total, current: 0 });
-            let done = 0, failed = 0;
+            let done = 0, failed = 0, processed = 0;
             let errorKind: string | undefined;
             for (;;) {
-                const res = await syncUnsyncedBatch(currentOrg.id, 20);
+                // 進捗表示と実際の同期を1件単位でそろえる。
+                const res = await syncUnsyncedBatch(currentOrg.id, 1);
                 done += res.succeeded; failed += res.failed;
+                processed += res.processed;
                 if (res.errorKind) errorKind = res.errorKind;
-                setSyncProgress({ total, current: Math.min(total, done) });
+                setSyncProgress({ total, current: Math.min(total, processed) });
                 if (errorKind === 'auth' || res.remaining <= 0 || res.succeeded === 0) break;
             }
             reportSyncResult(done, failed, errorKind);

@@ -17,6 +17,7 @@ import { getServiceTypes, type ServiceType } from '@/app/actions/serviceTypes';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, AppTextField, DateTimeField, MultiSelectField, SelectField } from '@/components/ui';
+import { buildShiftTitle } from '@/utils/shiftTitle';
 
 export type ClientData = { id: string; name: string };
 export type StaffData = { id: string; name: string };
@@ -138,15 +139,17 @@ export const ShiftFormModal = ({
         setLoading(true);
         try {
             const clientName = clients.find(c => c.id === clientId)?.name || '';
-            const staffNames = segments.flatMap(s =>
-                s.staffs.map(ss => staffs.find(st => st.id === ss.staff_id)?.name ?? '')
-            ).filter(Boolean);
-            const uniqueStaffNames = [...new Set(staffNames)];
+            // 編集時の区間は ShiftSegmentEditor が別に管理している。空のローカル
+            // segments からタイトルを作ると、担当者名を消してしまうため既存の担当者を使う。
+            const staffIds = initialData
+                ? initialData.shift_staffs.map((staff) => staff.staff_id)
+                : segments.flatMap((segment) => segment.staffs.map((staff) => staff.staff_id));
+            const staffNames = staffIds.map((staffId) => staffs.find((staff) => staff.id === staffId)?.name ?? '');
 
             const payload: ShiftPayload = {
                 organizationId,
                 clientId,
-                title: clientName + (uniqueStaffNames.length > 0 ? ` (${uniqueStaffNames.join(', ')})` : ''),
+                title: buildShiftTitle(clientName, staffNames),
                 startAt: new Date(startAt).toISOString(),
                 endAt: new Date(endAt).toISOString(),
                 segments: !initialData
