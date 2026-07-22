@@ -48,17 +48,35 @@ export async function getGoogleConnectionHealth(organizationId: string): Promise
 export async function getGoogleAuthUrlAction(
     organizationId: string,
     mode: 'connect' | 'reauthorize',
-    reauthToken: string,
+    reauthToken?: string,
 ) {
     return withSafeError('getGoogleAuthUrlAction', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'integrations');
-    const reauth = await consumeReauthGrant('external_secret_change', reauthToken);
-    if (reauth.userId !== userId) throw new Error('再認証した利用者が一致しません');
+    let requiresGoogleIdentityMatch = false;
+    if (reauthToken) {
+        const reauth = await consumeReauthGrant('external_secret_change', reauthToken);
+        if (reauth.userId !== userId) throw new Error('再認証した利用者が一致しません');
+    } else {
+        // A Google SSO-only user can prove recent possession of the same
+        // account while granting Calendar access. Running a separate Supabase
+        // OAuth step-up first caused two consecutive Google prompts and could
+        // trap users in a verification loop.
+        const supabase = await createSessionClient();
+        const [{ data: { user }, error: userError }, { data: hasPassword, error: passwordError }] = await Promise.all([
+            supabase.auth.getUser(),
+            supabase.rpc('current_user_has_password'),
+        ]);
+        const hasGoogleIdentity = user?.identities?.some((identity) => identity.provider === 'google') ?? false;
+        if (userError || passwordError || !user || user.id !== userId || hasPassword || !hasGoogleIdentity) {
+            throw new Error('この操作には再認証が必要です');
+        }
+        requiresGoogleIdentityMatch = true;
+    }
 
     // CSRF 対策: 推測不能な nonce を生成し、orgId と紐づけて httpOnly Cookie に保存。
     // コールバック時に state(nonce) と Cookie を突合し、orgId は Cookie 側を信頼する。
     const nonce = randomBytes(32).toString('hex');
-    await storeOAuthNonce({ nonce, provider: 'google-calendar', userId, organizationId, mode });
+    await storeOAuthNonce({ nonce, provider: 'google-calendar', userId, organizationId, mode, requiresGoogleIdentityMatch });
     const cookieStore = await cookies();
     cookieStore.set(OAUTH_STATE_COOKIE, `${nonce}:${organizationId}`, {
         httpOnly: true,
@@ -72,7 +90,9 @@ export async function getGoogleAuthUrlAction(
 
     // カレンダーの読み書き権限を要求
     const scopes = [
-        'https://www.googleapis.com/auth/calendar'
+        'https://www.googleapis.com/auth/calendar',
+        'openid',
+        'email',
     ];
 
     const url = oauth2Client.generateAuthUrl({

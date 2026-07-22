@@ -15,6 +15,10 @@ export async function storeOAuthNonce(input: {
   userId: string;
   organizationId: string;
   mode?: 'connect' | 'reauthorize';
+  // Google SSO-only accounts complete their step-up in the calendar OAuth
+  // flow itself. Persist the requirement server-side rather than trusting a
+  // client-provided callback flag.
+  requiresGoogleIdentityMatch?: boolean;
   ttlMinutes?: number;
 }): Promise<void> {
   const expiresAt = new Date(Date.now() + (input.ttlMinutes ?? 10) * 60 * 1000).toISOString();
@@ -24,6 +28,7 @@ export async function storeOAuthNonce(input: {
     user_id: input.userId,
     organization_id: input.organizationId,
     mode: input.mode ?? 'connect',
+    requires_google_identity_match: input.requiresGoogleIdentityMatch ?? false,
     expires_at: expiresAt,
   });
   if (error) throw new Error('OAuth認証を開始できませんでした');
@@ -35,7 +40,7 @@ export async function consumeOAuthNonce(input: {
   provider: string;
   userId: string;
   organizationId: string;
-}): Promise<boolean> {
+}): Promise<{ requiresGoogleIdentityMatch: boolean } | null> {
   const now = new Date().toISOString();
   const { data, error } = await supabaseAdmin.from('oauth_nonces')
     .update({ consumed_at: now })
@@ -45,7 +50,8 @@ export async function consumeOAuthNonce(input: {
     .eq('organization_id', input.organizationId)
     .is('consumed_at', null)
     .gt('expires_at', now)
-    .select('nonce_hash')
+    .select('requires_google_identity_match')
     .maybeSingle();
-  return !error && !!data;
+  if (error || !data) return null;
+  return { requiresGoogleIdentityMatch: Boolean(data.requires_google_identity_match) };
 }

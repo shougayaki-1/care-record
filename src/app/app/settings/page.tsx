@@ -343,8 +343,20 @@ function SettingsContent() {
         setConnectingCal(true);
         try {
             if (hasPasswordIdentity === false) {
+                const { data: { user } } = await supabase.auth.getUser();
+                const hasGoogleIdentity = user?.identities?.some((identity) => identity.provider === 'google');
+                if (hasGoogleIdentity) {
+                    // Google SSO-only accounts use this Calendar authorization
+                    // as their step-up as well. It avoids a second,
+                    // back-to-back Google verification flow that can loop.
+                    const url = await getGoogleAuthUrlAction(currentOrg.id, mode);
+                    window.location.href = url;
+                    return;
+                }
+                // Azure-only SSO cannot be proven by a Google Calendar OAuth
+                // response, so it retains its provider-specific step-up.
                 await startOAuthStepUp('external_secret_change', mode === 'reauthorize' ? 'reauthorize_calendar' : 'connect_calendar');
-                return; // Googleへ全遷移するため、ここで処理を終える
+                return;
             }
             const grant = await promptPasswordReauth('external_secret_change');
             if (!grant) {

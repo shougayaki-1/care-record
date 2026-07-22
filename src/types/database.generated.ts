@@ -940,6 +940,7 @@ export type Database = {
           nonce_hash: string
           organization_id: string | null
           provider: string
+          requires_google_identity_match: boolean
           user_id: string
         }
         Insert: {
@@ -950,6 +951,7 @@ export type Database = {
           nonce_hash: string
           organization_id?: string | null
           provider: string
+          requires_google_identity_match?: boolean
           user_id: string
         }
         Update: {
@@ -960,6 +962,7 @@ export type Database = {
           nonce_hash?: string
           organization_id?: string | null
           provider?: string
+          requires_google_identity_match?: boolean
           user_id?: string
         }
         Relationships: [

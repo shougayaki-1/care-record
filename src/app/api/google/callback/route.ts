@@ -63,12 +63,13 @@ export async function GET(request: NextRequest) {
             console.error('User cannot manage integrations for target organization');
             return failResponse;
         }
-        if (!await consumeOAuthNonce({
+        const oauthNonce = await consumeOAuthNonce({
             nonce: state,
             provider: 'google-calendar',
             userId: user.id,
             organizationId,
-        })) {
+        });
+        if (!oauthNonce) {
             console.error('OAuth state was expired or already consumed');
             return failResponse;
         }
@@ -77,6 +78,24 @@ export async function GET(request: NextRequest) {
 
         // 3. Googleから送られてきたcodeをトークンに交換
         const { tokens } = await oauth2Client.getToken(code);
+
+        // For Google SSO-only users, this Calendar authorization is also the
+        // required step-up. Verify that the Google account is the same one
+        // used to sign in to CareRecord before accepting its refresh token.
+        if (oauthNonce.requiresGoogleIdentityMatch) {
+            if (!tokens.id_token) throw new Error('Google本人確認トークンを取得できませんでした');
+            const ticket = await oauth2Client.verifyIdToken({
+                idToken: tokens.id_token,
+                audience: process.env.GOOGLE_CLIENT_ID,
+            });
+            const googleSubject = ticket.getPayload()?.sub;
+            const linkedGoogleSubject = user.identities
+                ?.find((identity) => identity.provider === 'google')
+                ?.identity_data?.sub;
+            if (!googleSubject || googleSubject !== linkedGoogleSubject) {
+                throw new Error('ログインに使用したGoogleアカウントを選択してください');
+            }
+        }
 
         if (!tokens.refresh_token) {
             console.error('No refresh token received');
