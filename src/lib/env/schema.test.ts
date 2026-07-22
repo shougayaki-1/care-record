@@ -52,4 +52,28 @@ describe('parseDeploymentEnv', () => {
   it('requires credentials when AI import is enabled', () => {
     expect(() => parseDeploymentEnv({ ...productionEnv, AI_IMPORT_ENABLED: 'true' })).toThrow(/Google Cloud credentials/);
   });
+
+  it('accepts a staging deployment with external integrations explicitly disabled', () => {
+    expect(parseDeploymentEnv({
+      APP_ENV: 'staging',
+      AI_IMPORT_ENABLED: 'false',
+      EXTERNAL_INTEGRATIONS_ENABLED: 'false',
+      NEXT_PUBLIC_SUPABASE_URL: 'https://stagingref.supabase.co',
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-staging-value',
+      SUPABASE_SERVICE_ROLE_KEY: 'service-staging-value',
+      EXPECTED_SUPABASE_PROJECT_ID: 'stagingref',
+    })).toMatchObject({ APP_ENV: 'staging', EXTERNAL_INTEGRATIONS_ENABLED: false });
+  });
+
+  it('does not allow AI import when external integrations are disabled', () => {
+    expect(() => parseDeploymentEnv({
+      APP_ENV: 'staging',
+      AI_IMPORT_ENABLED: 'true',
+      EXTERNAL_INTEGRATIONS_ENABLED: 'false',
+      NEXT_PUBLIC_SUPABASE_URL: 'https://stagingref.supabase.co',
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-staging-value',
+      SUPABASE_SERVICE_ROLE_KEY: 'service-staging-value',
+      EXPECTED_SUPABASE_PROJECT_ID: 'stagingref',
+    })).toThrow(/external integrations/);
+  });
 });

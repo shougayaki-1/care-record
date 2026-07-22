@@ -8,6 +8,7 @@ const deploymentEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).optional(),
   APP_ENV: appEnvSchema.default('local'),
   AI_IMPORT_ENABLED: enabledSchema,
+  EXTERNAL_INTEGRATIONS_ENABLED: enabledSchema.default(true),
   NEXT_PUBLIC_SUPABASE_URL: optionalString,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: optionalString,
   SUPABASE_SERVICE_ROLE_KEY: optionalString,
@@ -37,9 +38,16 @@ const deploymentEnvSchema = z.object({
   }
   if (env.APP_ENV !== 'staging' && env.APP_ENV !== 'production') return;
 
+  if (env.APP_ENV === 'production' && !env.EXTERNAL_INTEGRATIONS_ENABLED) {
+    context.addIssue({ code: 'custom', path: ['EXTERNAL_INTEGRATIONS_ENABLED'], message: 'Production requires external integrations to be enabled' });
+  }
+
   const required = [
     'NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY',
-    'EXPECTED_SUPABASE_PROJECT_ID', 'GCP_PROJECT_ID', 'EXPECTED_GCP_PROJECT_ID',
+    'EXPECTED_SUPABASE_PROJECT_ID',
+  ] as const;
+  const externalRequired = [
+    'GCP_PROJECT_ID', 'EXPECTED_GCP_PROJECT_ID',
     'GCS_EXPORT_BUCKET', 'GCS_BACKUP_BUCKET', 'GCS_REPLICA_BUCKET', 'GCS_AUDIT_BUCKET',
     'GCP_WORKLOAD_IDENTITY_PROVIDER', 'GCP_BACKUP_SERVICE_ACCOUNT',
     'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI',
@@ -48,7 +56,7 @@ const deploymentEnvSchema = z.object({
   ] as const;
   const dummyPattern = /^(?:change[-_]?me|dummy|example|placeholder|your[-_]|test(?:ing)?$)/i;
 
-  for (const key of required) {
+  for (const key of [...required, ...(env.APP_ENV === 'production' || env.EXTERNAL_INTEGRATIONS_ENABLED ? externalRequired : [])]) {
     const value = env[key];
     if (!value || dummyPattern.test(value)) {
       context.addIssue({ code: 'custom', path: [key], message: `${key} must be configured with a non-placeholder value` });
@@ -66,11 +74,17 @@ const deploymentEnvSchema = z.object({
     }
   }
 
-  if (env.GCP_PROJECT_ID && env.EXPECTED_GCP_PROJECT_ID && env.GCP_PROJECT_ID !== env.EXPECTED_GCP_PROJECT_ID) {
+  if (!env.EXTERNAL_INTEGRATIONS_ENABLED && env.AI_IMPORT_ENABLED) {
+    context.addIssue({ code: 'custom', path: ['AI_IMPORT_ENABLED'], message: 'AI import requires external integrations to be enabled' });
+  }
+
+  if (env.EXTERNAL_INTEGRATIONS_ENABLED && env.GCP_PROJECT_ID && env.EXPECTED_GCP_PROJECT_ID && env.GCP_PROJECT_ID !== env.EXPECTED_GCP_PROJECT_ID) {
     context.addIssue({ code: 'custom', path: ['GCP_PROJECT_ID'], message: 'GCP project does not match EXPECTED_GCP_PROJECT_ID' });
   }
 
-  const buckets = [env.GCS_EXPORT_BUCKET, env.GCS_BACKUP_BUCKET, env.GCS_REPLICA_BUCKET, env.GCS_AUDIT_BUCKET].filter(Boolean) as string[];
+  const buckets = env.EXTERNAL_INTEGRATIONS_ENABLED
+    ? [env.GCS_EXPORT_BUCKET, env.GCS_BACKUP_BUCKET, env.GCS_REPLICA_BUCKET, env.GCS_AUDIT_BUCKET].filter(Boolean) as string[]
+    : [];
   if (new Set(buckets).size !== buckets.length) {
     context.addIssue({ code: 'custom', path: ['GCS_BACKUP_BUCKET'], message: 'GCS buckets must be distinct' });
   }
@@ -90,7 +104,7 @@ const deploymentEnvSchema = z.object({
     }
   }
 
-  if (env.GOOGLE_TOKEN_ENCRYPTION_KEYS && env.GOOGLE_TOKEN_ACTIVE_KEY_ID) {
+  if (env.EXTERNAL_INTEGRATIONS_ENABLED && env.GOOGLE_TOKEN_ENCRYPTION_KEYS && env.GOOGLE_TOKEN_ACTIVE_KEY_ID) {
     try {
       const keyring = JSON.parse(env.GOOGLE_TOKEN_ENCRYPTION_KEYS) as Record<string, string>;
       const activeKey = Buffer.from(keyring[env.GOOGLE_TOKEN_ACTIVE_KEY_ID] ?? '', 'base64');

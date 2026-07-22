@@ -11,11 +11,13 @@ import { classifyGoogleError } from '@/utils/googleSync';
 import { sanitizeDbError, withSafeError } from '@/utils/errors';
 import { consumeReauthGrant } from '@/utils/supabase/reauth';
 import { asNullableRpcArg } from '@/types/json';
+import { areExternalIntegrationsEnabled } from '@/lib/env/server';
 
 export type GoogleConnectionState = 'disconnected' | 'healthy' | 'reauth_required' | 'calendar_missing' | 'forbidden' | 'misconfigured' | 'temporarily_unavailable';
 
 export async function getGoogleConnectionHealth(organizationId: string): Promise<{ state: GoogleConnectionState }> {
     return withSafeError('getGoogleConnectionHealth', async () => {
+    if (!areExternalIntegrationsEnabled()) return { state: 'disconnected' };
     await assertOrgPermission(organizationId, 'integrations');
     const supabase = await createSessionClient();
     const { data: org, error } = await supabase
@@ -51,6 +53,7 @@ export async function getGoogleAuthUrlAction(
     reauthToken?: string,
 ) {
     return withSafeError('getGoogleAuthUrlAction', async () => {
+    if (!areExternalIntegrationsEnabled()) throw new Error('EXTERNAL_INTEGRATIONS_DISABLED');
     const { userId } = await assertOrgPermission(organizationId, 'integrations');
     let requiresGoogleIdentityMatch = false;
     if (reauthToken) {

@@ -7,8 +7,12 @@ import { consumeOAuthNonce } from '@/utils/supabase/oauthNonce';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { logExternalError } from '@/utils/errors';
 import type { Database } from '@/types/database.generated';
+import { areExternalIntegrationsEnabled } from '@/lib/env/server';
 
 export async function GET(request: NextRequest) {
+    if (!areExternalIntegrationsEnabled()) {
+        return NextResponse.json({ error: 'external_integrations_disabled' }, { status: 404 });
+    }
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get('code');
     const error = searchParams.get('error');

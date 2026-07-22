@@ -27,6 +27,8 @@ function parseServiceAccountCredentials(): ServiceAccountCredentials | undefined
 
 export function isGcsBackupConfigured(): boolean {
   return !!(
+    process.env.EXTERNAL_INTEGRATIONS_ENABLED !== 'false'
+    &&
     process.env.GCP_PROJECT_ID
     && (
       process.env.GCP_SERVICE_ACCOUNT_KEY_JSON

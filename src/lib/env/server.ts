@@ -16,3 +16,7 @@ export function validateDeploymentEnv(): void {
 export function isAiImportEnabled(): boolean {
   return getDeploymentEnv().AI_IMPORT_ENABLED;
 }
+
+export function areExternalIntegrationsEnabled(): boolean {
+  return getDeploymentEnv().EXTERNAL_INTEGRATIONS_ENABLED;
+}
