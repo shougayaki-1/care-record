@@ -59,27 +59,47 @@ FOR EACH ROW EXECUTE FUNCTION public.refresh_shift_title_from_staff_trigger();
 -- Repair already-affected active shifts and queue them for calendar synchronization.
 UPDATE public.shifts s
 SET
-  title = c.name || CASE
-    WHEN COALESCE(staff_names.names, '') = '' THEN ''
-    ELSE ' (' || staff_names.names || ')'
-  END,
+  title = (
+    SELECT c2.name || CASE
+      WHEN COALESCE((
+        SELECT string_agg(DISTINCT st.name, ', ' ORDER BY st.name)
+        FROM public.shift_staffs ss
+        JOIN public.staffs st ON st.id = ss.staff_id AND st.deleted_at IS NULL
+        WHERE ss.shift_id = s.id
+      ), '') = '' THEN ''
+      ELSE ' (' || (
+        SELECT string_agg(DISTINCT st.name, ', ' ORDER BY st.name)
+        FROM public.shift_staffs ss
+        JOIN public.staffs st ON st.id = ss.staff_id AND st.deleted_at IS NULL
+        WHERE ss.shift_id = s.id
+      ) || ')'
+    END
+    FROM public.clients c2
+    WHERE c2.id = s.client_id
+  ),
   google_sync_status = 'pending_upsert',
   google_sync_error = NULL,
   google_synced_at = NULL,
   updated_at = now()
-FROM public.clients c
-LEFT JOIN LATERAL (
-  SELECT string_agg(DISTINCT st.name, ', ' ORDER BY st.name) AS names
-  FROM public.shift_staffs ss
-  JOIN public.staffs st ON st.id = ss.staff_id AND st.deleted_at IS NULL
-  WHERE ss.shift_id = s.id
-) staff_names ON true
-WHERE s.client_id = c.id
-  AND s.deleted_at IS NULL
-  AND s.title IS DISTINCT FROM c.name || CASE
-    WHEN COALESCE(staff_names.names, '') = '' THEN ''
-    ELSE ' (' || staff_names.names || ')'
-  END;
+WHERE s.deleted_at IS NULL
+  AND s.title IS DISTINCT FROM (
+    SELECT c2.name || CASE
+      WHEN COALESCE((
+        SELECT string_agg(DISTINCT st.name, ', ' ORDER BY st.name)
+        FROM public.shift_staffs ss
+        JOIN public.staffs st ON st.id = ss.staff_id AND st.deleted_at IS NULL
+        WHERE ss.shift_id = s.id
+      ), '') = '' THEN ''
+      ELSE ' (' || (
+        SELECT string_agg(DISTINCT st.name, ', ' ORDER BY st.name)
+        FROM public.shift_staffs ss
+        JOIN public.staffs st ON st.id = ss.staff_id AND st.deleted_at IS NULL
+        WHERE ss.shift_id = s.id
+      ) || ')'
+    END
+    FROM public.clients c2
+    WHERE c2.id = s.client_id
+  );
 
 REVOKE ALL ON FUNCTION public.refresh_shift_title(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.refresh_shift_title_from_staff_trigger() FROM PUBLIC;
