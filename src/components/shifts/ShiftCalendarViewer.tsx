@@ -254,7 +254,8 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                     arg.event.extendedProps.isCancelled ? 'is-cancelled' : '',
                 ].filter(Boolean)}
                 eventDisplay="block"
-                dayMaxEvents={true}
+                // 月間ビューでも同日のシフトを省略せず、すべて一覧できるようにする。
+                dayMaxEvents={false}
                 expandRows={true}
                 handleWindowResize={true}
                 height="100%"
