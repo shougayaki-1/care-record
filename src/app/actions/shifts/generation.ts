@@ -4,6 +4,7 @@ import { rrulestr } from 'rrule';
 
 import { withSafeError } from '@/utils/errors';
 import { buildFloatingDate, buildJstIsoString } from '@/utils/googleSync';
+import { logError, serializeError } from '@/utils/log';
 import {
   buildPatternRuleString,
   computeOccurrenceDateTimes,
@@ -77,7 +78,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
               details
           };
       } catch (e) {
-          console.error('Preview Calculation Error:', e);
+          logError('Preview Calculation Error', { organizationId, error: serializeError(e) });
           throw e;
       }
   });
@@ -214,12 +215,12 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
           }
           const failedCount = results.filter(r => r.status === 'rejected').length;
           if (failedCount > 0) {
-              results.forEach(r => { if (r.status === 'rejected') console.error('Generate Shift DB Error:', r.reason); });
+              results.forEach(r => { if (r.status === 'rejected') logError('Generate Shift DB Error', { organizationId, reason: serializeError(r.reason) }); });
           }
 
           return { success: true, count: createdCount, updated: updatedCount, skipped: skippedCount, failed: failedCount };
       } catch (error) {
-          console.error('Generate Shifts Error:', error);
+          logError('Generate Shifts Error', { organizationId, error: serializeError(error) });
           throw error;
       }
   });

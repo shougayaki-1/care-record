@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { serializeError } from './log';
 import { getSafeExternalErrorDetails, logExternalError, sanitizeDbError, UserFacingError, withSafeError } from './errors';
+
+vi.mock('./log', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./log')>();
+  return { ...actual, logError: vi.fn() };
+});
 
 const GENERIC_MESSAGE = '処理に失敗しました。時間をおいて再度お試しください。';
 
@@ -9,14 +15,23 @@ afterEach(() => {
 });
 
 describe('sanitizeDbError', () => {
-  it('logs the original error with context and returns only the generic message', () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it('logs the original error with context and returns only the generic message', async () => {
+    const { logError } = await import('./log');
     const originalError = new Error('relation private_table does not exist');
 
     const result = sanitizeDbError(originalError, 'loadPrivateData');
 
     expect(result).toEqual(new Error(GENERIC_MESSAGE));
-    expect(consoleError).toHaveBeenCalledWith('[db:loadPrivateData]', originalError);
+    expect(logError).toHaveBeenCalledWith('[db:loadPrivateData]', { organizationId: undefined, error: serializeError(originalError) });
+  });
+
+  it('attaches organizationId when provided', async () => {
+    const { logError } = await import('./log');
+    const originalError = new Error('relation private_table does not exist');
+
+    sanitizeDbError(originalError, 'loadPrivateData', { organizationId: 'org-1' });
+
+    expect(logError).toHaveBeenCalledWith('[db:loadPrivateData]', { organizationId: 'org-1', error: serializeError(originalError) });
   });
 });
 
@@ -50,23 +65,33 @@ describe('withSafeError', () => {
   });
 
   it('hides an unexpected Error and logs the original value', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { logError } = await import('./log');
     const originalError = new Error('password authentication failed for database');
 
     await expect(withSafeError('unexpected', async () => {
       throw originalError;
     })).rejects.toThrow(GENERIC_MESSAGE);
-    expect(consoleError).toHaveBeenCalledWith('[action:unexpected]', originalError);
+    expect(logError).toHaveBeenCalledWith('[action:unexpected]', { organizationId: undefined, error: serializeError(originalError) });
   });
 
   it('hides a non-Error throw and logs the original value', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { logError } = await import('./log');
     const originalError = { database: 'secret detail' };
 
     await expect(withSafeError('nonError', async () => {
       throw originalError;
     })).rejects.toThrow(GENERIC_MESSAGE);
-    expect(consoleError).toHaveBeenCalledWith('[action:nonError]', originalError);
+    expect(logError).toHaveBeenCalledWith('[action:nonError]', { organizationId: undefined, error: serializeError(originalError) });
+  });
+
+  it('attaches organizationId when provided', async () => {
+    const { logError } = await import('./log');
+    const originalError = new Error('password authentication failed for database');
+
+    await expect(withSafeError('unexpected', async () => {
+      throw originalError;
+    }, { organizationId: 'org-1' })).rejects.toThrow(GENERIC_MESSAGE);
+    expect(logError).toHaveBeenCalledWith('[action:unexpected]', { organizationId: 'org-1', error: serializeError(originalError) });
   });
 });
 
@@ -84,10 +109,10 @@ describe('external error logging', () => {
     expect(JSON.stringify(getSafeExternalErrorDetails(error))).not.toContain('secret');
   });
 
-  it('logs only the sanitized projection', () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it('logs only the sanitized projection', async () => {
+    const { logError } = await import('./log');
     const error = Object.assign(new Error('failure'), { config: { headers: { Authorization: 'Bearer secret' } } });
     logExternalError('calendar', error);
-    expect(consoleError).toHaveBeenCalledWith('[external:calendar]', { name: 'Error', message: 'failure' });
+    expect(logError).toHaveBeenCalledWith('[external:calendar]', { organizationId: undefined, name: 'Error', message: 'failure' });
   });
 });

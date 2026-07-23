@@ -4,6 +4,7 @@ import { createHmac, randomUUID } from 'crypto';
 import { assertOrgRole, createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { convertSchemaToReadable, type FormItem } from '@/utils/templateHelper';
+import { logError, serializeError } from '@/utils/log';
 
 const GAS_API_URL = process.env.GAS_API_URL;
 const GAS_SHARED_SECRET = process.env.GAS_SHARED_SECRET;
@@ -167,7 +168,7 @@ export async function callGasApi(payload: GasPayload) {
     });
     return data;
   } catch (error) {
-    console.error('GAS Action Error:', error);
+    logError('GAS Action Error', { organizationId, error: serializeError(error) });
     await recordAuditEvent({
       organizationId,
       actorId: user.id,

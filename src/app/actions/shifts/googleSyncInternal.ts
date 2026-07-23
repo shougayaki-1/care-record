@@ -3,6 +3,7 @@ import 'server-only';
 import { type calendar_v3, google } from 'googleapis';
 
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
+import { logError, serializeError } from '@/utils/log';
 import {
   GOOGLE_PROP_ORG_ID,
   GOOGLE_PROP_SHIFT_ID,
@@ -276,11 +277,11 @@ export async function trySyncSilently(
     const syncError = classifyGoogleError(error);
     if (syncError.kind !== 'skipped') {
       await markShiftGoogleSync(shiftId, 'failed', { error: syncError.message })
-        .catch(console.error);
-      console.error(
-        `Google Calendar sync (${action}) failed for shift ${shiftId} [${syncError.kind}]:`,
-        syncError.message,
-      );
+        .catch((err) => logError('markShiftGoogleSync failed', { organizationId, error: serializeError(err) }));
+      logError(`Google Calendar sync (${action}) failed for shift ${shiftId} [${syncError.kind}]`, {
+        organizationId,
+        message: syncError.message,
+      });
     }
   }
 }
@@ -308,7 +309,7 @@ export async function processShiftsSequential(
         continue;
       }
       await markShiftGoogleSync(shift.id, 'failed', { error: syncError.message })
-        .catch(console.error);
+        .catch((err) => logError('markShiftGoogleSync failed', { organizationId, error: serializeError(err) }));
       failedIds.push(shift.id);
       errorKind = syncError.kind;
       if (syncError.kind === 'auth') break;

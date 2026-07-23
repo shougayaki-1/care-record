@@ -15,7 +15,7 @@ export async function updateOrganizationName(orgId: string, name: string) {
     if (normalized.length < 1 || normalized.length > 100) throw new Error('事業所名は1〜100文字で入力してください');
     const sessionClient = await createSessionClient();
     const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'name', p_value: normalized });
-    if (error) throw sanitizeDbError(error, 'action.organization');
+    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'organization.update', resourceType: 'organization', resourceId: orgId, details: { fields: ['name'] } });
     return { success: true };
 }
@@ -26,7 +26,7 @@ export async function updateOrganizationDriveFolder(orgId: string, folderId: str
     if (normalized && normalized.length > 255) throw new Error('フォルダIDが不正です');
     const sessionClient = await createSessionClient();
     const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'drive_folder', p_value: normalized ?? '' });
-    if (error) throw sanitizeDbError(error, 'action.organization');
+    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: normalized ? 'integration.drive.connect' : 'integration.drive.disconnect', resourceType: 'organization', resourceId: orgId });
     return { success: true };
 }
@@ -39,7 +39,7 @@ export async function updateTravelCostSettings(orgId: string, rateYenPerKm: numb
     }
     const sessionClient = await createSessionClient();
     const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'travel_rate', p_value: String(rate) });
-    if (error) throw sanitizeDbError(error, 'action.organization');
+    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
     await recordAuditEvent({
         organizationId: orgId,
         actorId: userId,
@@ -64,13 +64,13 @@ export async function disconnectGoogleCalendar(orgId: string, reauthToken: strin
             await getGoogleOAuthClient().revokeToken(decryptGoogleToken(org.google_refresh_token));
             revoked = true;
         } catch (error) {
-            logExternalError('google.token-revocation', error);
+            logExternalError('google.token-revocation', error, { organizationId: orgId });
         }
     }
     const { error } = await sessionClient.rpc('update_organization_setting', {
         p_org_id: orgId, p_setting: 'calendar_disconnect', p_value: '',
     });
-    if (error) throw sanitizeDbError(error, 'action.organization');
+    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
     await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'integration.calendar.disconnect', resourceType: 'organization', resourceId: orgId, details: { providerRevoked: revoked } });
     return { success: true, providerRevoked: revoked };
 }
@@ -84,7 +84,7 @@ export async function deleteOrganization(orgId: string, reauthToken: string) {
 
     const sessionClient = await createSessionClient();
     const { error } = await sessionClient.rpc('soft_delete_organization', { p_org_id: orgId });
-    if (error) throw sanitizeDbError(error, 'action.organization');
+    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
     
     return { success: true };
 }
@@ -93,7 +93,7 @@ export async function leaveOrganization(orgId: string) {
     // 脱退対象はRPC内で auth.uid() から解決する。
     const sessionClient = await createSessionClient();
     const { error } = await sessionClient.rpc('leave_organization_atomic', { p_org_id: orgId });
-    if (error) throw sanitizeDbError(error, 'action.organization');
+    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
 
     return { success: true };
 }
@@ -115,7 +115,7 @@ export async function transferOwner(orgId: string, newOwnerId: string, reauthTok
     });
     if (error?.message === 'invalid_transfer_target') throw new Error('譲渡先が不正です');
     if (error?.message === 'target_not_member') throw new Error('譲渡先がこの事業所のメンバーではありません');
-    if (error) throw sanitizeDbError(error, 'action.organization');
+    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
 
     return { success: true };
 }
@@ -156,7 +156,7 @@ export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {})
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
 
-    if (error) throw sanitizeDbError(error, 'action.organization');
+    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
     return data;
 }
 
@@ -173,7 +173,7 @@ export async function exportAuditLogsCsv(orgId: string, filters: AuditLogFilters
     const { data, error } = await query
         .order('created_at', { ascending: false })
         .limit(EXPORT_CAP);
-    if (error) throw sanitizeDbError(error, 'action.organization');
+    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
 
     const rows = (data ?? []) as Array<Record<string, unknown> & { profiles?: { name?: string } | null }>;
     const header = ['日時', '操作者', '操作内容', '対象種別', '対象ID', '結果', 'IPハッシュ'];
@@ -232,7 +232,9 @@ export async function listCloudLogEntries(orgId: string, filters: CloudLogFilter
 
     const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/cloud-platform.read-only'] });
     const logging = google.logging({ version: 'v2', auth });
-    const filterParts: string[] = [];
+    // マルチテナント: 全組織が同一GCPプロジェクトを共有するため、組織スコープのラベル
+    // フィルタを必須で先頭に付与する（他組織のログが漏洩しないようにするため）。
+    const filterParts: string[] = [`labels.organization_id="${orgId}"`];
     if (filters.from) filterParts.push(`timestamp >= "${filters.from}"`);
     if (filters.to) filterParts.push(`timestamp <= "${filters.to}"`);
     if (filters.severity) filterParts.push(`severity >= ${filters.severity}`);
@@ -240,7 +242,7 @@ export async function listCloudLogEntries(orgId: string, filters: CloudLogFilter
     const res = await logging.entries.list({
         requestBody: {
             resourceNames: [`projects/${projectId}`],
-            filter: filterParts.join(' AND ') || undefined,
+            filter: filterParts.join(' AND '),
             orderBy: 'timestamp desc',
             pageSize: Math.min(Math.max(filters.limit ?? 100, 1), 200),
         },

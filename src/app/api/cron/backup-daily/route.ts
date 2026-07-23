@@ -3,6 +3,7 @@ import { getActiveOrganizationIds, exportReportsAsCsv } from '@/utils/gcs/export
 import { isGcsBackupConfigured, uploadToGCS } from '@/utils/gcs/upload';
 import { generateBackupHtml } from '@/utils/gcs/html';
 import { recordAuditEvent } from '@/utils/supabase/audit';
+import { logError, serializeError } from '@/utils/log';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -26,7 +27,7 @@ async function logBackupRun(params: { organizationId: string | null; outcome: 's
       details: params.details,
     });
   } catch (e) {
-    console.error('[cron:backup-daily] failed to record audit event', e);
+    logError('[cron:backup-daily] failed to record audit event', { organizationId: params.organizationId, error: serializeError(e) });
   }
 }
 
@@ -64,14 +65,14 @@ export async function GET(request: NextRequest) {
         if (rows.length === 0) empty++;
         await logBackupRun({ organizationId: orgId, outcome: 'success', details: { records: rows.length, empty: rows.length === 0, date: today } });
       } catch (orgErr) {
-        console.error('[cron:backup-daily] org failed', orgId, orgErr);
+        logError('[cron:backup-daily] org failed', { organizationId: orgId, error: serializeError(orgErr) });
         await logBackupRun({ organizationId: orgId, outcome: 'failure', details: { date: today, reason: orgErr instanceof Error ? orgErr.message : 'unknown' } });
       }
     }
 
     return NextResponse.json({ ok: true, orgs: succeeded, empty, date: today });
   } catch (err) {
-    console.error('[cron:backup-daily]', err);
+    logError('[cron:backup-daily]', { error: serializeError(err) });
     await logBackupRun({ organizationId: null, outcome: 'failure', details: { date: today, reason: err instanceof Error ? err.message : 'unknown' } });
     return NextResponse.json({ ok: false, error: 'backup_failed' }, { status: 500 });
   }

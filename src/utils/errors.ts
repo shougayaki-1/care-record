@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logError, serializeError } from '@/utils/log';
+
 // Server Action のエラー秘匿（3省2ガイドライン: 多層防御 / 情報露出の防止）。
 // 想定済みの利用者向けメッセージ（認可エラー等）はそのまま返してよいが、
 // 想定外の内部エラー（DBメッセージ・スタックなど）はクライアントへ反射させず、
@@ -46,8 +48,10 @@ function isSafeMessage(message: string): boolean {
  *
  * 使い方:  if (error) throw sanitizeDbError(error, 'updateOrganizationName');
  */
-export function sanitizeDbError(error: unknown, context = 'db'): Error {
-  console.error(`[db:${context}]`, error);
+export type LogOptions = { organizationId?: string | null };
+
+export function sanitizeDbError(error: unknown, context = 'db', opts: LogOptions = {}): Error {
+  logError(`[db:${context}]`, { organizationId: opts.organizationId, error: serializeError(error) });
   return new Error(GENERIC_MESSAGE);
 }
 
@@ -76,16 +80,16 @@ export function getSafeExternalErrorDetails(error: unknown): SafeExternalErrorDe
   };
 }
 
-export function logExternalError(context: string, error: unknown): void {
-  console.error(`[external:${context}]`, getSafeExternalErrorDetails(error));
+export function logExternalError(context: string, error: unknown, opts: LogOptions = {}): void {
+  logError(`[external:${context}]`, { organizationId: opts.organizationId, ...getSafeExternalErrorDetails(error) });
 }
 
-export function sanitizeExternalError(error: unknown, context: string): Error {
-  logExternalError(context, error);
+export function sanitizeExternalError(error: unknown, context: string, opts: LogOptions = {}): Error {
+  logExternalError(context, error, opts);
   return new Error(GENERIC_MESSAGE);
 }
 
-export async function withSafeError<T>(context: string, fn: () => Promise<T>): Promise<T> {
+export async function withSafeError<T>(context: string, fn: () => Promise<T>, opts: LogOptions = {}): Promise<T> {
   try {
     return await fn();
   } catch (err) {
@@ -94,7 +98,7 @@ export async function withSafeError<T>(context: string, fn: () => Promise<T>): P
       throw err instanceof Error ? err : new Error(message);
     }
     // 想定外: 内部詳細はサーバーログにのみ残し、利用者には汎用メッセージを返す。
-    console.error(`[action:${context}]`, err);
+    logError(`[action:${context}]`, { organizationId: opts.organizationId, error: serializeError(err) });
     throw new Error(GENERIC_MESSAGE);
   }
 }
