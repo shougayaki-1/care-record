@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getActiveOrganizationIds, exportReportsAsJson } from '@/utils/gcs/export';
 import { isGcsBackupConfigured, uploadToGCS } from '@/utils/gcs/upload';
+import { logError, serializeError } from '@/utils/log';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ ok: true, orgs: succeeded, month: monthStr });
   } catch (err) {
-    console.error('[cron:backup-monthly]', err);
+    logError('[cron:backup-monthly]', { error: serializeError(err) });
     return NextResponse.json({ ok: false, error: 'backup_failed' }, { status: 500 });
   }
 }

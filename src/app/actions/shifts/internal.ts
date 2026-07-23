@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { logError, serializeError } from '@/utils/log';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
@@ -187,7 +188,7 @@ export async function createShiftInternal(
     }
     return { success: true, shiftId: shift.id };
   } catch (error) {
-    console.error(error);
+    logError('createShiftInternal failed', { organizationId: payload.organizationId, error: serializeError(error) });
     throw error;
   }
 }
@@ -231,7 +232,7 @@ export async function updateShiftInternal(
     }
     return { success: true };
   } catch (error) {
-    console.error(error);
+    logError('updateShiftInternal failed', { organizationId: payload.organizationId, error: serializeError(error) });
     throw error;
   }
 }

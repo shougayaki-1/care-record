@@ -3,6 +3,7 @@
 import { saveShiftSegments } from '../shiftSegments';
 import { UserFacingError, withSafeError } from '@/utils/errors';
 import { classifyGoogleError, emptyGoogleSyncStats, type SyncErrorKind } from '@/utils/googleSync';
+import { logError, serializeError } from '@/utils/log';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertShiftPermission, createSessionClient, getEffectivePermissions } from '@/utils/supabase/auth';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
@@ -116,7 +117,7 @@ export async function updateShiftTimeOnly(shiftId: string, startAt: string, endA
           if (data) await trySyncSilently(data.organization_id, shiftId, 'sync');
           await recordAuditEvent({ organizationId: actor.organizationId, actorId: actor.userId, action: 'shift.time_update', resourceType: 'shift', resourceId: shiftId });
           return { success: true };
-      } catch (error) { console.error(error); throw error; }
+      } catch (error) { logError('updateShiftTimeOnly failed', { organizationId: actor.organizationId, error: serializeError(error) }); throw error; }
   });
 }
 
@@ -143,7 +144,7 @@ export async function toggleCancelShift(shiftId: string, isCancel: boolean, reas
           if (data) await trySyncSilently(data.organization_id, shiftId, 'sync');
           await recordAuditEvent({ organizationId: actor.organizationId, actorId: actor.userId, action: isCancel ? 'shift.cancel' : 'shift.reopen', resourceType: 'shift', resourceId: shiftId, reason: isCancel ? reason : null });
           return { success: true };
-      } catch (error) { console.error(error); throw error; }
+      } catch (error) { logError('toggleCancelShift failed', { organizationId: actor.organizationId, error: serializeError(error) }); throw error; }
   });
 }
 
@@ -198,7 +199,7 @@ export async function getShifts(organizationId: string, startDate: string, endDa
               const shiftStaffs = (shift.shift_staffs || []) as Array<{ staff_id: string | null }>;
               return assignedClientIds.has(clientId) || Boolean(staffId && shiftStaffs.some((staff) => staff.staff_id === staffId));
           });
-      } catch (error) { console.error(error); throw error; }
+      } catch (error) { logError('getShifts failed', { organizationId, error: serializeError(error) }); throw error; }
   });
 }
 
@@ -230,7 +231,7 @@ export async function deleteShiftsBatch(organizationId: string, shiftIds: string
           }
           return { success: true, deleted: deletableIds.length, failed: outcome.failed, errorKind: outcome.errorKind, ...outcome.stats };
       } catch (error) {
-          console.error('Delete Shifts Batch Error:', error);
+          logError('Delete Shifts Batch Error', { organizationId, error: serializeError(error) });
           throw error;
       }
   });
@@ -265,8 +266,9 @@ export async function deleteShiftCompletely(shiftId: string) {
           return { success: true };
       } catch (error) {
           const se = classifyGoogleError(error);
-          await markShiftGoogleSync(shiftId, 'failed', { error: se.message }).catch(console.error);
-          console.error('Delete Shift Completely Error:', error);
+          await markShiftGoogleSync(shiftId, 'failed', { error: se.message })
+              .catch((err) => logError('markShiftGoogleSync failed', { organizationId: actor.organizationId, error: serializeError(err) }));
+          logError('Delete Shift Completely Error', { organizationId: actor.organizationId, error: serializeError(error) });
           throw error;
       }
   });
@@ -297,7 +299,8 @@ export async function deleteShiftsDbOnly(shiftIds: string[]) {
           }
           return { success: true };
       } catch (error) {
-          console.error('Delete Shifts DB Only Error:', error);
+          // 複数組織にまたがるバッチのため、この時点で単一のorganizationIdは特定できない
+          logError('Delete Shifts DB Only Error', { error: serializeError(error) });
           throw error;
       }
   });

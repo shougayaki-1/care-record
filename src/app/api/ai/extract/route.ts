@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import type { Part } from '@google-cloud/vertexai';
 import { getAuthedUser, assertOrgRole } from '@/utils/supabase/auth';
+import { logError, serializeError } from '@/utils/log';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { getGenerativeModel } from '@/lib/ai/gemini';
 import { MODEL_NAME } from '@/lib/ai/model';
@@ -89,7 +90,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (auditErr) {
     // 監査ログの失敗はリクエストをブロックしない（ログだけ出す）
-    console.error('[ai/extract] Failed to write audit log:', auditErr);
+    logError('[ai/extract] Failed to write audit log', { organizationId, error: serializeError(auditErr) });
   }
 
   const groups = buildProcessingGroups(files.length, grouping);
@@ -172,7 +173,7 @@ export async function POST(request: NextRequest) {
           try {
             parsed = JSON.parse(text) as { records: unknown[] };
           } catch {
-            console.error(`[ai/extract] Gemini response was not valid JSON: ${text.slice(0, 200)}`);
+            logError('[ai/extract] Gemini response was not valid JSON', { organizationId, sample: text.slice(0, 200) });
             throw new Error('AI の応答形式が不正でした');
           }
 
@@ -191,7 +192,7 @@ export async function POST(request: NextRequest) {
         } catch (err) {
           // e. エラーは error イベントとして送信、処理を継続
           const rawMessage = err instanceof Error ? err.message : String(err);
-          console.error(`[ai/extract] Error processing file group [${group.join(',')}]: ${rawMessage}`);
+          logError(`[ai/extract] Error processing file group [${group.join(',')}]`, { organizationId, message: rawMessage });
           sendEvent('error', {
             type: 'error',
             fileIndex,

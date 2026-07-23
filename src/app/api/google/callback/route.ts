@@ -6,6 +6,7 @@ import { encryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { consumeOAuthNonce } from '@/utils/supabase/oauthNonce';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { logExternalError } from '@/utils/errors';
+import { logWarn } from '@/utils/log';
 import type { Database } from '@/types/database.generated';
 import { areExternalIntegrationsEnabled } from '@/lib/env/server';
 
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
     const redirectUrl = `${origin}/app/settings`; // 処理後に戻る画面
 
     if (error || !code || !state) {
-        console.error('Google OAuth Error or missing params:', error);
+        logWarn('Google OAuth Error or missing params', { error });
         return NextResponse.redirect(`${redirectUrl}?error=google_auth_failed`);
     }
 
@@ -32,14 +33,14 @@ export async function GET(request: NextRequest) {
     failResponse.cookies.delete(OAUTH_STATE_COOKIE);
 
     if (!stateCookie) {
-        console.error('Missing OAuth state cookie');
+        logWarn('Missing OAuth state cookie');
         return failResponse;
     }
     const sepIndex = stateCookie.indexOf(':');
     const nonce = sepIndex >= 0 ? stateCookie.slice(0, sepIndex) : '';
     const organizationId = sepIndex >= 0 ? stateCookie.slice(sepIndex + 1) : '';
     if (!nonce || !organizationId || nonce !== state) {
-        console.error('OAuth state mismatch');
+        logWarn('OAuth state mismatch', { organizationId });
         return failResponse;
     }
 
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
             p_org_id: organizationId,
         });
         if (contextError || !oauthContext || typeof oauthContext !== 'object') {
-            console.error('User cannot manage integrations for target organization');
+            logWarn('User cannot manage integrations for target organization', { organizationId });
             return failResponse;
         }
         const oauthNonce = await consumeOAuthNonce({
@@ -74,7 +75,7 @@ export async function GET(request: NextRequest) {
             organizationId,
         });
         if (!oauthNonce) {
-            console.error('OAuth state was expired or already consumed');
+            logWarn('OAuth state was expired or already consumed', { organizationId });
             return failResponse;
         }
 
@@ -102,7 +103,7 @@ export async function GET(request: NextRequest) {
         }
 
         if (!tokens.refresh_token) {
-            console.error('No refresh token received');
+            logWarn('No refresh token received', { organizationId });
             return NextResponse.redirect(`${redirectUrl}?error=no_refresh_token`);
         }
 
@@ -124,7 +125,7 @@ export async function GET(request: NextRequest) {
                 // Keep the old ID for an explicit, audited replacement flow.
                 // A different Google account must never create a replacement
                 // calendar implicitly during reauthorization.
-                logExternalError('google.callback.calendar-check', calendarError);
+                logExternalError('google.callback.calendar-check', calendarError, { organizationId });
                 connectionStatus = 'calendar_missing';
             }
         } else {
@@ -164,7 +165,7 @@ export async function GET(request: NextRequest) {
         return okResponse;
 
     } catch (err) {
-        logExternalError('google.callback', err);
+        logExternalError('google.callback', err, { organizationId });
         const errResponse = NextResponse.redirect(`${redirectUrl}?error=calendar_setup_failed`);
         errResponse.cookies.delete(OAUTH_STATE_COOKIE);
         return errResponse;

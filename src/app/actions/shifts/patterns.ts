@@ -1,6 +1,7 @@
 'use server';
 
 import { withSafeError } from '@/utils/errors';
+import { logError, serializeError } from '@/utils/log';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
 import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentionPolicy';
@@ -78,7 +79,7 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
           await recordAuditEvent({ organizationId: actor.organizationId, actorId: actor.userId, action: 'shift_pattern.update', resourceType: 'shift_pattern', resourceId: patternId });
           return { success: true };
       } catch (error) {
-          console.error('Update Shift Pattern Error:', error);
+          logError('Update Shift Pattern Error', { organizationId: actor.organizationId, error: serializeError(error) });
           throw error;
       }
   });
