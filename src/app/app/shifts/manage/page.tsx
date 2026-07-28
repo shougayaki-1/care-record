@@ -292,7 +292,15 @@ export default function ShiftManagePage() {
             const res = await generateShiftsForMonth(currentOrg.id, targetMonth);
             setGenerating(false);
             setActiveTab('fullCalendar');
-            showToast(`${targetMonth}月のシフト ${res.count} 件を生成しました。続けてGoogleカレンダーへ同期します。`, 'success');
+            const resultSummary = `新規${res.count}件 / 更新${res.updated}件 / 編集済みスキップ${res.skipped}件 / 失敗${res.failed}件`;
+            if (res.failed > 0) {
+                showToast(
+                    `${resultSummary}。ひな形が削除済みのスタッフ・サービス種別を参照している可能性があります。`,
+                    'warning',
+                );
+            } else {
+                showToast(`${resultSummary}。続けてGoogleカレンダーへ同期します。`, 'success');
+            }
             fetchData(true);
             await runUnsyncedSyncLoop();
             fetchData(true);

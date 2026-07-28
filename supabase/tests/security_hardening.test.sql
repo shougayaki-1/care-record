@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path TO public, extensions;
-SELECT plan(55);
+SELECT plan(56);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
@@ -231,6 +231,8 @@ SELECT ok(NOT has_function_privilege('anon', 'public.save_report_versioned(uuid,
   'anonymous users cannot call the versioned report contract RPC');
 SELECT ok(has_function_privilege('authenticated', 'public.save_generated_shift_atomic(uuid,uuid,jsonb)', 'EXECUTE'),
   'authenticated users may call the generated-shift contract RPC');
+SELECT ok(has_function_privilege('authenticated', 'public.create_shift_with_segments_atomic(uuid,jsonb)', 'EXECUTE'),
+  'authenticated users may call the atomic shift creation RPC');
 SELECT ok(NOT has_function_privilege('anon', 'public.transfer_owner_atomic(uuid,uuid,uuid)', 'EXECUTE'),
   'anonymous users cannot call the owner-transfer contract RPC');
 SET LOCAL ROLE authenticated;

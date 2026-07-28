@@ -2,6 +2,7 @@ import type { SaveSegmentInput } from '../shiftSegments';
 import type { GoogleSyncStatus } from '@/utils/googleSync';
 
 export type ShiftUpdateData = {
+  client_id?: string;
   title?: string;
   start_at?: string;
   end_at?: string;

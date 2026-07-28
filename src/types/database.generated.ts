@@ -2725,6 +2725,10 @@ export type Database = {
         Args: { p_name: string; p_organization_id: string }
         Returns: string
       }
+      create_shift_with_segments_atomic: {
+        Args: { p_org_id: string; p_payload: Json }
+        Returns: string
+      }
       create_staff_role_atomic: {
         Args: {
           p_is_unpaid?: boolean
@@ -2801,6 +2805,7 @@ export type Database = {
         Returns: string
       }
       refresh_shift_staffs: { Args: { p_shift_id: string }; Returns: undefined }
+      refresh_shift_title: { Args: { p_shift_id: string }; Returns: undefined }
       remove_report_shift_link: {
         Args: { p_org_id: string; p_report_id: string; p_shift_id: string }
         Returns: undefined

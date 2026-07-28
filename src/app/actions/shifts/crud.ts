@@ -11,7 +11,7 @@ import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentio
 import { uniqueStaffIdsFromSegments } from './helpers';
 import {
   assertShiftsAccessible,
-  createShiftInternal,
+  createShiftWithSegmentsAtomic,
   softDeleteShiftIds,
   upsertAssignmentsForStaffs,
   updateShiftInternal,
@@ -25,16 +25,28 @@ import {
 import type { ShiftPayload, ShiftQueryFilter } from './types';
 import { buildShiftTitle } from '@/utils/shiftTitle';
 
-async function getCurrentShiftTitle(shiftId: string, fallbackTitle?: string): Promise<string | undefined> {
+async function getCurrentShiftTitle(
+  shiftId: string,
+  fallbackTitle?: string,
+  targetClientId?: string,
+): Promise<string | undefined> {
   const supabase = await createSessionClient();
   const { data, error } = await supabase
     .from('shifts')
-    .select('clients(name), shift_staffs(staffs(name))')
+    .select('client_id, clients(name), shift_staffs(staffs(name))')
     .eq('id', shiftId)
     .single();
   if (error || !data) return fallbackTitle;
 
-  const client = Array.isArray(data.clients) ? data.clients[0] : data.clients;
+  let client = Array.isArray(data.clients) ? data.clients[0] : data.clients;
+  if (targetClientId && targetClientId !== data.client_id) {
+      const { data: targetClient } = await supabase
+          .from('clients')
+          .select('name')
+          .eq('id', targetClientId)
+          .maybeSingle();
+      client = targetClient ?? client;
+  }
   const staffNames = (data.shift_staffs ?? []).flatMap((shiftStaff) => {
     const staff = Array.isArray(shiftStaff.staffs) ? shiftStaff.staffs[0] : shiftStaff.staffs;
     return staff?.name ? [staff.name] : [];
@@ -47,21 +59,7 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean | 's
   return withSafeError('createShift', async () => {
       const actor = await assertShiftPermission(payload.organizationId, 'create', { clientId: payload.clientId });
 
-      // セグメントがある場合は shift_staffs が揃う前に同期が走らないよう、内部呼び出しでは同期をスキップする
-      const internalSyncMode = (payload.segments && payload.segments.length > 0) ? 'skip' : awaitSync;
-      const result = await createShiftInternal(payload, internalSyncMode);
-
-      if (payload.segments && payload.segments.length > 0) {
-          await saveShiftSegments(payload.organizationId, result.shiftId, payload.segments);
-          // shift_staffs が揃った後で同期を実行する
-          if (awaitSync !== 'skip') {
-              if (awaitSync) {
-                  await trySyncSilently(payload.organizationId, result.shiftId, 'sync');
-              } else {
-                  trySyncSilently(payload.organizationId, result.shiftId, 'sync');
-              }
-          }
-      }
+      const result = await createShiftWithSegmentsAtomic(payload);
 
       // 自動アサイン: シフト作成時に選択スタッフを assignments に登録（チェックボックス ON 時のみ）
       if (payload.autoAssign && payload.segments && payload.segments.length > 0) {
@@ -72,6 +70,13 @@ export async function createShift(payload: ShiftPayload, awaitSync: boolean | 's
       }
 
       await recordAuditEvent({ organizationId: payload.organizationId, actorId: actor.userId, action: 'shift.create', resourceType: 'shift', resourceId: result.shiftId });
+      if (awaitSync !== 'skip') {
+          if (awaitSync) {
+              await trySyncSilently(payload.organizationId, result.shiftId, 'sync');
+          } else {
+              void trySyncSilently(payload.organizationId, result.shiftId, 'sync');
+          }
+      }
       return result;
   });
 }
@@ -87,11 +92,26 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
       if (payload.organizationId && payload.organizationId !== organizationId) {
           throw new UserFacingError('シフトの事業所は変更できません');
       }
-      // 区間の担当者は別の保存操作で更新される。UI から届く古い・空の
-      // segments を信用せず、DB上の担当者から常にタイトルを再構成する。
-      const title = await getCurrentShiftTitle(shiftId, payload.title);
+      if (payload.clientId !== undefined) {
+          const { data: client, error: clientError } = await supabase
+              .from('clients')
+              .select('id')
+              .eq('id', payload.clientId)
+              .eq('organization_id', organizationId)
+              .is('deleted_at', null)
+              .maybeSingle();
+          if (clientError || !client) {
+              throw new UserFacingError('指定された利用者はこの事業所に所属していません');
+          }
+      }
+      if (payload.segments !== undefined) {
+          await saveShiftSegments(organizationId, shiftId, payload.segments);
+      }
+      const title = await getCurrentShiftTitle(shiftId, payload.title, payload.clientId);
       const result = await updateShiftInternal(shiftId, { ...payload, title }, awaitSync);
-      await recordAuditEvent({ organizationId, actorId: actor.userId, action: 'shift.update', resourceType: 'shift', resourceId: shiftId, details: { fields: Object.keys(payload) } });
+      const fields = Object.keys(payload).filter((field) => field !== 'segments');
+      if (payload.segments !== undefined) fields.push('segments');
+      await recordAuditEvent({ organizationId, actorId: actor.userId, action: 'shift.update', resourceType: 'shift', resourceId: shiftId, details: { fields } });
       return result;
   });
 }

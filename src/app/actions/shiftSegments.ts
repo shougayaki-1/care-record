@@ -77,22 +77,3 @@ export async function saveShiftSegments(
     if (error) throw sanitizeDbError(error, 'saveShiftSegments');
   });
 }
-
-export async function deleteShiftSegment(orgId: string, segmentId: string): Promise<void> {
-  return withSafeError('deleteShiftSegment', async () => {
-    const supabase = await createSessionClient();
-    const { data: seg } = await supabase
-      .from('shift_segments')
-      .select('shift_id')
-      .eq('id', segmentId)
-      .maybeSingle();
-    if (!seg) throw new Error('区間が見つかりません');
-    await assertShiftPermission(orgId, 'edit', { shiftId: seg.shift_id });
-
-    const { error } = await supabase.rpc('delete_shift_segment_atomic', {
-      p_org_id: orgId,
-      p_segment_id: segmentId,
-    });
-    if (error) throw sanitizeDbError(error, 'deleteShiftSegment');
-  });
-}

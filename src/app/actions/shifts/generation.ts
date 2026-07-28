@@ -61,7 +61,12 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
               const isOvernight = isOvernightShift(p.start_time, p.end_time);
 
               let patternCount = 0;
-              occurrences.forEach(() => {
+              occurrences.forEach((dateJST) => {
+                  const baseJstDateStr = jstDateStrFromOccurrence(dateJST);
+                  if ((p.effective_from && baseJstDateStr < p.effective_from)
+                      || (p.effective_until && baseJstDateStr > p.effective_until)) {
+                      return;
+                  }
                   totalNewCount += 1;
                   patternCount += 1;
               });
@@ -131,12 +136,12 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
               )
           `).eq('organization_id', organizationId).is('deleted_at', null);
 
-          if (!patterns || patterns.length === 0) return { success: true, count: 0 };
+          if (!patterns || patterns.length === 0) {
+              return { success: true, count: 0, updated: 0, skipped: 0, failed: 0, failureReasons: [] as string[] };
+          }
 
-          let createdCount = 0;
           let skippedCount = 0;
-          let updatedCount = 0;
-          const tasks: Array<() => Promise<unknown>> = [];
+          const tasks: Array<() => Promise<{ kind: 'created' | 'updated' }>> = [];
 
           for (const p of patterns) {
               const ruleStr = buildPatternRuleString(year, month, p.start_time, p.rrule);
@@ -187,8 +192,8 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                                   { year: yy, month: mm, day: dd, parentStartTime: p.start_time, parentEndTime: p.end_time },
                                   fallbackStaffIds,
                               );
+                              return { kind: 'updated' };
                           });
-                          updatedCount++;
                       } else {
                           skippedCount++;
                       }
@@ -200,25 +205,46 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
                               { year: yy, month: mm, day: dd, parentStartTime: p.start_time, parentEndTime: p.end_time },
                               fallbackStaffIds,
                           );
+                          return { kind: 'created' };
                       });
-                      createdCount++;
                   }
               }
           }
 
           // 部分失敗を握りつぶさず集計する（DB挿入のみ。Google同期は後続のバッチ処理に委ねる）
-          const results: PromiseSettledResult<unknown>[] = [];
+          const results: PromiseSettledResult<{ kind: 'created' | 'updated' }>[] = [];
           const CHUNK_SIZE = 100;
           for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
               const chunk = tasks.slice(i, i + CHUNK_SIZE).map((task) => task());
               results.push(...await Promise.allSettled(chunk));
           }
           const failedCount = results.filter(r => r.status === 'rejected').length;
-          if (failedCount > 0) {
-              results.forEach(r => { if (r.status === 'rejected') logError('Generate Shift DB Error', { organizationId, reason: serializeError(r.reason) }); });
-          }
+          const succeeded = results.filter(
+              (result): result is PromiseFulfilledResult<{ kind: 'created' | 'updated' }> => result.status === 'fulfilled',
+          );
+          const createdCount = succeeded.filter((result) => result.value.kind === 'created').length;
+          const updatedCount = succeeded.filter((result) => result.value.kind === 'updated').length;
+          const failureReasons = results
+              .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+              .map((result) => {
+                  const serialized = serializeError(result.reason);
+                  logError('Generate Shift DB Error', { organizationId, reason: serialized });
+                  if (serialized && typeof serialized === 'object' && 'message' in serialized) {
+                      return String(serialized.message);
+                  }
+                  return String(serialized);
+              })
+              .filter((reason, index, all) => all.indexOf(reason) === index)
+              .slice(0, 3);
 
-          return { success: true, count: createdCount, updated: updatedCount, skipped: skippedCount, failed: failedCount };
+          return {
+              success: true,
+              count: createdCount,
+              updated: updatedCount,
+              skipped: skippedCount,
+              failed: failedCount,
+              failureReasons,
+          };
       } catch (error) {
           logError('Generate Shifts Error', { organizationId, error: serializeError(error) });
           throw error;
