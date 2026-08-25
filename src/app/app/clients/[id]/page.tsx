@@ -21,6 +21,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { callGasApi } from '@/app/actions/gas';
 import { STANDARD_TEMPLATES, COMPREHENSIVE_TEMPLATE, FormItem } from '@/constants/formTemplates';
 import { convertSchemaToReadable, FormItem as HelperFormItem } from '../../../../utils/templateHelper';
+import { insertFormItem } from '@/utils/formItemInsert';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, PageLayout } from '@/components/ui';
@@ -172,8 +173,7 @@ export default function ClientSettingsPage() {
 
     const addField = (insertIndex: number = formItems.length) => {
         const newField: FormItem = { id: crypto.randomUUID(), label: '', type: 'checkbox', required: false, hasDetail: false };
-        const clampedIndex = Math.max(0, Math.min(insertIndex, formItems.length));
-        setFormItems([...formItems.slice(0, clampedIndex), newField, ...formItems.slice(clampedIndex)]);
+        setFormItems(insertFormItem(formItems, newField, insertIndex));
     };
     const removeField = async (index: number) => {
         if (!(await confirm({ message: 'この項目を削除しますか？', confirmText: '削除する', confirmColor: 'error' }))) return;

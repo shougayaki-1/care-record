@@ -47,13 +47,19 @@ describe('FormBuilderTab', () => {
     expect(onUpdateField).toHaveBeenCalledWith(1, 'detailMode', 'always');
   });
 
-  it('insert-between button passes the correct insertIndex', async () => {
+  it('insert-here button passes the correct insertIndex for both the leading and a between-item position', async () => {
     const onAddField = vi.fn();
     render(<FormBuilderTab {...baseProps} formItems={items} onAddField={onAddField} onUpdateField={vi.fn()} />);
     const buttons = screen.getAllByRole('button', { name: /項目を追加|ここに項目を追加/ });
+    // Button order: [before A], [between A/B], [between B/C], [after C], [trailing "項目を追加する"].
     // First "ここに項目を追加" button = insert before index 0.
     await userEvent.click(buttons[0]);
     expect(onAddField).toHaveBeenCalledWith(0);
+
+    // Third button (index 2 in `buttons`) sits between item B and item C (given items A, B, C)
+    // and must request insertion at index 2.
+    await userEvent.click(buttons[2]);
+    expect(onAddField).toHaveBeenCalledWith(2);
   });
 
   it('preview button shows preview UI when provided', async () => {
@@ -82,4 +88,3 @@ describe('FormBuilderTab within FormBuilderTab test helper', () => {
     expect(screen.getByRole('button', { name: '項目を追加する' })).toBeTruthy();
   });
 });
-
