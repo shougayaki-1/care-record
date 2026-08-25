@@ -33,6 +33,7 @@ import {
     type AssignmentPermissionHint,
 } from '@/app/actions/clients';
 import { FormBuilderTab } from '@/components/clients/FormBuilderTab';
+import { FormPreviewDialog } from '@/components/clients/FormPreviewDialog';
 import { IntegrationsTab } from '@/components/clients/IntegrationsTab';
 import { StaffAssignmentTab } from '@/components/clients/StaffAssignmentTab';
 
@@ -52,7 +53,8 @@ export default function ClientSettingsPage() {
     const [tabIndex, setTabIndex] = useState(0);
 
     const [formItems, setFormItems] = useState<FormItem[]>([]);
-    
+    const [openPreview, setOpenPreview] = useState(false);
+
     const [allStaffs, setAllStaffs] = useState<Staff[]>([]);
     const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([]);
     const [roundTripDistances, setRoundTripDistances] = useState<Record<string, string>>({});
@@ -168,9 +170,10 @@ export default function ClientSettingsPage() {
         return undefined;
     }, [wsLoading, currentOrg, fetchClientData]);
 
-    const addField = () => {
+    const addField = (insertIndex: number = formItems.length) => {
         const newField: FormItem = { id: crypto.randomUUID(), label: '', type: 'checkbox', required: false, hasDetail: false };
-        setFormItems([...formItems, newField]);
+        const clampedIndex = Math.max(0, Math.min(insertIndex, formItems.length));
+        setFormItems([...formItems.slice(0, clampedIndex), newField, ...formItems.slice(clampedIndex)]);
     };
     const removeField = async (index: number) => {
         if (!(await confirm({ message: 'この項目を削除しますか？', confirmText: '削除する', confirmColor: 'error' }))) return;
@@ -448,6 +451,7 @@ export default function ClientSettingsPage() {
                         formItems={formItems}
                         onOpenCopy={() => { setOpenCopyDialog(true); setCopyTab(0); }}
                         onAddField={addField}
+                        onOpenPreview={() => setOpenPreview(true)}
                         onRemoveField={removeField}
                         onUpdateField={updateField}
                         onMoveField={moveField}
@@ -458,6 +462,7 @@ export default function ClientSettingsPage() {
                         onMoveOption={moveOption}
                     />
                 )}
+                <FormPreviewDialog open={openPreview} onClose={() => setOpenPreview(false)} formItems={formItems} />
                 {tabIndex === 1 && (
                     <StaffAssignmentTab
                         allStaffs={allStaffs}
