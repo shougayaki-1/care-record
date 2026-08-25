@@ -24,6 +24,7 @@ import { useRequestGeneration } from '@/hooks/useRequestGeneration';
 import { supabase } from '@/lib/supabase';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { checkRecordPermission } from '@/utils/permissions';
+import { groupFormSections } from '@/utils/formSections';
 
 export type FormItem = {
   id: string; label: string; type: 'text' | 'number' | 'checkbox' | 'time' | 'select' | 'section' | 'multicheckbox';
@@ -1083,16 +1084,7 @@ export function useRecordForm() {
     setIsDirty(true);
   }, [formatDatetimeLocal, selectableStaffs, setAiFilledFields, setAnswers, setEndDateTime, setHasAiDraftSource, setIsDirty, setSelectedHelpers, setServiceTime, setStartDateTime]);
 
-  const groupedSections = useMemo(() => {
-    const sections: { title: string; items: FormItem[] }[] = [];
-    let currentSection = { title: '基本項目', items: [] as FormItem[] };
-    template.forEach(item => {
-      if (item.type === 'section') { if (currentSection.items.length > 0) sections.push(currentSection); currentSection = { title: item.label, items: [] }; } 
-      else currentSection.items.push(item);
-    });
-    if (currentSection.items.length > 0 || currentSection.title !== '基本項目') sections.push(currentSection);
-    return sections;
-  }, [template]);
+  const groupedSections = useMemo(() => groupFormSections(template), [template]);
 
   const isAdmin = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'approve', true));
   const isReadOnly = currentStatus === 'approved';

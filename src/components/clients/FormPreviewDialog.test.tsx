@@ -27,7 +27,7 @@ describe('FormPreviewDialog', () => {
     expect(screen.getByText('質問A（編集後）')).toBeTruthy();
   });
 
-  it('answering a question in preview never calls any persistence API (local-only state)', async () => {
+  it('uses local preview state to reveal conditional detail input', async () => {
     const formItems: FormItem[] = [
       { id: 'a', label: 'チェック項目', type: 'checkbox', required: false, hasDetail: true, detailMode: 'conditional' },
     ];

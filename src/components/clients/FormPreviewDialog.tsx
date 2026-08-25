@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 import { DynamicFormField } from '@/components/ui';
 import { AppDialog, AppButton } from '@/components/ui';
 import { Box, Divider, Stack, Typography } from '@/components/ui/mui';
 import type { FormItem } from '@/constants/formTemplates';
+import { groupFormSections } from '@/utils/formSections';
 
 type PreviewAnswers = Record<string, string | number | boolean | string[]>;
 
@@ -15,30 +16,16 @@ type Props = {
   formItems: FormItem[];
 };
 
-// Groups items into sections the same way useRecordForm's groupedSections
-// does, so preview matches the real record screen's layout exactly.
-function groupSections(items: FormItem[]) {
-  const sections: { title: string; items: FormItem[] }[] = [];
-  let currentSection = { title: '基本項目', items: [] as FormItem[] };
-  items.forEach((item) => {
-    if (item.type === 'section') {
-      if (currentSection.items.length > 0) sections.push(currentSection);
-      currentSection = { title: item.label, items: [] };
-    } else {
-      currentSection.items.push(item);
-    }
-  });
-  if (currentSection.items.length > 0 || currentSection.title !== '基本項目') sections.push(currentSection);
-  return sections;
-}
-
 export function FormPreviewDialog({ open, onClose, formItems }: Props) {
   // Local-only answers: never persisted, never touches Supabase/autosave/
   // audit events. Keyed the same way the real record form keys detail
   // values (`${item.id}_detail`), per useRecordForm.ts / RecordDynamicSections.tsx.
   const [answers, setAnswers] = useState<PreviewAnswers>({});
 
-  const sections = useMemo(() => groupSections(formItems), [formItems]);
+  // Same grouping function useRecordForm uses (src/utils/formSections.ts), so
+  // preview and the real record screen never diverge on section layout.
+  // React Compiler handles memoization; no manual useMemo needed here.
+  const sections = groupFormSections(formItems);
 
   const handleAnswerChange = (id: string, value: PreviewAnswers[string]) => {
     setAnswers((prev) => ({ ...prev, [id]: value }));
