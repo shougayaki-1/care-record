@@ -149,10 +149,24 @@ export function mergePermissions(roles: RolePermissions[]): RolePermissions {
   return result;
 }
 
+// シフトの create/edit/delete は 'assigned' に未対応（Option B）。
+// RLS/atomic RPCは 'all' のみを書き込み許可スコープとして扱うため、
+// アプリ層でも 'assigned' が指定された場合は安全側（'none'）へ縮退させる。
+// 'view' は対象外（担当シフトの閲覧は引き続き 'assigned' を許可する）。
+const SHIFT_WRITE_ACTIONS: readonly Exclude<ShiftAction, 'view'>[] = ['create', 'edit', 'delete'];
+
+function downgradeUnsupportedShiftWriteScope(scope: RecordScope): RecordScope {
+  return scope === 'assigned' ? 'none' : scope;
+}
+
 export function normalizePermissions(permissions: Partial<RolePermissions> | null | undefined): RolePermissions {
+  const shifts = { ...EMPTY_PERMISSIONS.shifts, ...(permissions?.shifts ?? {}) };
+  for (const action of SHIFT_WRITE_ACTIONS) {
+    shifts[action] = downgradeUnsupportedShiftWriteScope(shifts[action]);
+  }
   return {
     records: { ...EMPTY_PERMISSIONS.records, ...(permissions?.records ?? {}) },
-    shifts: { ...EMPTY_PERMISSIONS.shifts, ...(permissions?.shifts ?? {}) },
+    shifts,
     internalWork: { ...EMPTY_PERMISSIONS.internalWork, ...(permissions?.internalWork ?? {}) },
     management: { ...EMPTY_PERMISSIONS.management, ...(permissions?.management ?? {}) },
   };

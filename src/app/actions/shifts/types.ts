@@ -1,20 +1,4 @@
 import type { SaveSegmentInput } from '../shiftSegments';
-import type { GoogleSyncStatus } from '@/utils/googleSync';
-
-export type ShiftUpdateData = {
-  client_id?: string;
-  title?: string;
-  start_at?: string;
-  end_at?: string;
-  status?: 'published' | 'cancelled';
-  cancel_reason?: string | null;
-  updated_at?: string;
-  google_event_id?: string | null;
-  google_sync_status?: GoogleSyncStatus;
-  google_sync_error?: string | null;
-  google_synced_at?: string | null;
-  is_modified?: boolean;
-};
 
 export type ShiftPayload = {
   organizationId: string;

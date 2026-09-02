@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergePermissions, checkRecordPermission, checkShiftPermission, checkManagementPermission, PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS, FULL_PERMISSIONS, type RolePermissions } from './permissions';
+import { mergePermissions, normalizePermissions, checkRecordPermission, checkShiftPermission, checkManagementPermission, PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS, FULL_PERMISSIONS, type RolePermissions } from './permissions';
 
 describe('mergePermissions', () => {
   it('returns EMPTY when given no roles', () => {
@@ -52,6 +52,41 @@ describe('checkRecordPermission', () => {
     expect(checkRecordPermission(PRESET_STAFF_PERMISSIONS, 'view', true)).toBe(true);
   });
   it('none: always denies', () => expect(checkRecordPermission(PRESET_STAFF_PERMISSIONS, 'delete', true)).toBe(false));
+});
+
+describe('normalizePermissions (GAP-01 Option B)', () => {
+  it('downgrades unsupported shift write scopes (create/edit/delete=assigned) to none', () => {
+    const legacyRole = {
+      shifts: { view: 'assigned', create: 'assigned', edit: 'assigned', delete: 'assigned' },
+    } as unknown as RolePermissions;
+    const normalized = normalizePermissions(legacyRole);
+    expect(normalized.shifts.create).toBe('none');
+    expect(normalized.shifts.edit).toBe('none');
+    expect(normalized.shifts.delete).toBe('none');
+  });
+
+  it('keeps shifts.view=assigned intact', () => {
+    const normalized = normalizePermissions({ shifts: { view: 'assigned', create: 'none', edit: 'none', delete: 'none' } } as RolePermissions);
+    expect(normalized.shifts.view).toBe('assigned');
+  });
+
+  it('leaves all/none shift write scopes unchanged', () => {
+    const normalized = normalizePermissions(FULL_PERMISSIONS);
+    expect(normalized.shifts.create).toBe('all');
+    expect(normalized.shifts.edit).toBe('all');
+    expect(normalized.shifts.delete).toBe('all');
+  });
+
+  it('never escalates a downgraded role to all — mergePermissions still denies non-all write scopes', () => {
+    const legacyRole = {
+      shifts: { view: 'assigned', create: 'assigned', edit: 'assigned', delete: 'none' },
+    } as unknown as RolePermissions;
+    const merged = mergePermissions([legacyRole]);
+    expect(merged.shifts.create).toBe('none');
+    expect(merged.shifts.edit).toBe('none');
+    expect(checkShiftPermission(merged, 'edit', true)).toBe(false);
+    expect(checkShiftPermission(merged, 'edit', false)).toBe(false);
+  });
 });
 
 describe('checkShiftPermission', () => {
