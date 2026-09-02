@@ -164,7 +164,7 @@ export async function toggleCancelShift(shiftId: string, isCancel: boolean, reas
       const auditAction = isCancel ? 'shift.cancel' : 'shift.reopen';
 
       const { data: outcome, error } = await supabase.rpc('toggle_cancel_shift_atomic', {
-          p_org_id: actor.organizationId, p_shift_id: shiftId, p_is_cancel: isCancel, p_reason: isCancel ? reason : null,
+          p_org_id: actor.organizationId, p_shift_id: shiftId, p_is_cancel: isCancel, p_reason: reason,
       });
       if (error) {
           await recordAuditEvent({

@@ -2966,7 +2966,7 @@ export type Database = {
         Args: {
           p_is_cancel: boolean
           p_org_id: string
-          p_reason: string | null
+          p_reason: string
           p_shift_id: string
         }
         Returns: string

@@ -104,6 +104,15 @@ describe('updateShiftTimeOnly', () => {
 });
 
 describe('toggleCancelShift', () => {
+  it('passes a non-null reason to the RPC when reopening a shift', async () => {
+    mockShiftsFrom({ data: { organization_id: 'org-1' }, error: null });
+    mocks.rpc.mockResolvedValue({ data: 'updated', error: null });
+
+    await expect(toggleCancelShift('shift-1', false, '再開')).resolves.toEqual({ success: true });
+
+    expect(mocks.rpc).toHaveBeenCalledWith('toggle_cancel_shift_atomic', expect.objectContaining({ p_reason: '再開' }));
+  });
+
   it('audits shift.cancel with the reason only after a real DB update, then syncs', async () => {
     mockShiftsFrom({ data: { organization_id: 'org-1' }, error: null });
     mocks.rpc.mockResolvedValue({ data: 'updated', error: null });
