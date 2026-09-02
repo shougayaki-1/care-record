@@ -23,7 +23,8 @@ INSERT INTO public.profiles (id, name) VALUES
   ('d1111111-0000-0000-0000-000000000001', 'Shift Owner'),
   ('d1111111-0000-0000-0000-000000000002', 'Shift All'),
   ('d1111111-0000-0000-0000-000000000003', 'Shift Assigned'),
-  ('d1111111-0000-0000-0000-000000000004', 'Shift Outsider');
+  ('d1111111-0000-0000-0000-000000000004', 'Shift Outsider')
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 INSERT INTO public.organizations (id, name) VALUES
   ('d0000000-0000-0000-0000-00000000000a', 'Shift Contract Org A'),
   ('d0000000-0000-0000-0000-00000000000b', 'Shift Contract Org B');
