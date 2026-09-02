@@ -21,6 +21,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { callGasApi } from '@/app/actions/gas';
 import { STANDARD_TEMPLATES, COMPREHENSIVE_TEMPLATE, FormItem } from '@/constants/formTemplates';
 import { convertSchemaToReadable, FormItem as HelperFormItem } from '../../../../utils/templateHelper';
+import { insertFormItem } from '@/utils/formItemInsert';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, AppDialog, PageLayout } from '@/components/ui';
@@ -33,6 +34,7 @@ import {
     type AssignmentPermissionHint,
 } from '@/app/actions/clients';
 import { FormBuilderTab } from '@/components/clients/FormBuilderTab';
+import { FormPreviewDialog } from '@/components/clients/FormPreviewDialog';
 import { IntegrationsTab } from '@/components/clients/IntegrationsTab';
 import { StaffAssignmentTab } from '@/components/clients/StaffAssignmentTab';
 
@@ -52,7 +54,8 @@ export default function ClientSettingsPage() {
     const [tabIndex, setTabIndex] = useState(0);
 
     const [formItems, setFormItems] = useState<FormItem[]>([]);
-    
+    const [openPreview, setOpenPreview] = useState(false);
+
     const [allStaffs, setAllStaffs] = useState<Staff[]>([]);
     const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([]);
     const [roundTripDistances, setRoundTripDistances] = useState<Record<string, string>>({});
@@ -168,9 +171,9 @@ export default function ClientSettingsPage() {
         return undefined;
     }, [wsLoading, currentOrg, fetchClientData]);
 
-    const addField = () => {
+    const addField = (insertIndex: number = formItems.length) => {
         const newField: FormItem = { id: crypto.randomUUID(), label: '', type: 'checkbox', required: false, hasDetail: false };
-        setFormItems([...formItems, newField]);
+        setFormItems(insertFormItem(formItems, newField, insertIndex));
     };
     const removeField = async (index: number) => {
         if (!(await confirm({ message: 'この項目を削除しますか？', confirmText: '削除する', confirmColor: 'error' }))) return;
@@ -448,6 +451,7 @@ export default function ClientSettingsPage() {
                         formItems={formItems}
                         onOpenCopy={() => { setOpenCopyDialog(true); setCopyTab(0); }}
                         onAddField={addField}
+                        onOpenPreview={() => setOpenPreview(true)}
                         onRemoveField={removeField}
                         onUpdateField={updateField}
                         onMoveField={moveField}
@@ -458,6 +462,7 @@ export default function ClientSettingsPage() {
                         onMoveOption={moveOption}
                     />
                 )}
+                <FormPreviewDialog open={openPreview} onClose={() => setOpenPreview(false)} formItems={formItems} />
                 {tabIndex === 1 && (
                     <StaffAssignmentTab
                         allStaffs={allStaffs}

@@ -1,8 +1,9 @@
 'use client';
 
-import { Box, FormHelperText, Stack, Typography } from '@mui/material';
+import { FormHelperText, Stack, Typography } from '@mui/material';
 import { AppTextField, NumberField } from './Fields';
 import { CheckboxGroupField, RadioGroupField, SwitchField } from './SelectionFields';
+import { shouldShowDetailInput } from '@/utils/formDetail';
 
 export type DynamicFormItem = {
   id: string;
@@ -28,24 +29,17 @@ export interface DynamicFormFieldProps {
 }
 
 const optionsFor = (item: DynamicFormItem) => (item.options ?? '').split(',').map((option) => option.trim()).filter(Boolean);
-const needsDetail = (item: DynamicFormItem, value: DynamicFormValue | undefined) =>
-  Boolean(item.hasDetail) && (item.detailMode === 'always' || value === true || (Array.isArray(value) ? value : [String(value ?? '')]).some((entry) => entry.includes('他')));
 
-export function DynamicFormField({ item, value, detailValue = '', error, disabled, onChange, onDetailChange }: DynamicFormFieldProps) {
-  if (item.type === 'section') return null;
-  const detailField = needsDetail(item, value) && onDetailChange && (
-    <AppTextField
-      label={item.detailLabel || '詳細・補足'}
-      value={detailValue}
-      onChange={(event) => onDetailChange(event.target.value)}
-      disabled={disabled}
-      placeholder="詳細を入力してください"
-    />
-  );
-
+function MainField({ item, value, error, disabled, onChange }: {
+  item: DynamicFormItem;
+  value: DynamicFormValue | undefined;
+  error?: string;
+  disabled?: boolean;
+  onChange: (value: DynamicFormValue) => void;
+}) {
   if (item.type === 'checkbox') {
     return (
-      <Stack spacing={1.5}>
+      <>
         <SwitchField
           label={<Typography fontWeight={value ? 700 : 400}>{item.label}</Typography>}
           labelPlacement="start"
@@ -55,73 +49,82 @@ export function DynamicFormField({ item, value, detailValue = '', error, disable
           disabled={disabled}
         />
         {error && <FormHelperText error>{error}</FormHelperText>}
-        {detailField}
-      </Stack>
+      </>
     );
   }
 
   if (item.type === 'multicheckbox') {
     return (
-      <Stack spacing={1.5}>
-        <CheckboxGroupField
-          label={item.label}
-          options={optionsFor(item)}
-          value={Array.isArray(value) ? value : []}
-          onChange={onChange}
-          getOptionLabel={(option) => option}
-          getOptionValue={(option) => option}
-          required={item.required}
-          error={Boolean(error)}
-          helperText={error}
-        />
-        {detailField}
-      </Stack>
+      <CheckboxGroupField
+        label={item.label}
+        options={optionsFor(item)}
+        value={Array.isArray(value) ? value : []}
+        onChange={onChange}
+        getOptionLabel={(option) => option}
+        getOptionValue={(option) => option}
+        required={item.required}
+        error={Boolean(error)}
+        helperText={error}
+      />
     );
   }
 
   if (item.type === 'select') {
     return (
-      <Stack spacing={1.5}>
-        <RadioGroupField
-          label={item.label}
-          options={optionsFor(item)}
-          value={String(value ?? '')}
-          onChange={onChange}
-          getOptionLabel={(option) => option}
-          getOptionValue={(option) => option}
-          required={item.required}
-          error={Boolean(error)}
-          helperText={error}
-        />
-        {detailField}
-      </Stack>
+      <RadioGroupField
+        label={item.label}
+        options={optionsFor(item)}
+        value={String(value ?? '')}
+        onChange={onChange}
+        getOptionLabel={(option) => option}
+        getOptionValue={(option) => option}
+        required={item.required}
+        error={Boolean(error)}
+        helperText={error}
+      />
     );
   }
 
   if (item.type === 'number') {
     return (
-      <Stack spacing={1.5}>
-        <NumberField label={item.label} value={value === undefined ? '' : String(value)} onChange={(event) => onChange(event.target.value)} required={item.required} error={Boolean(error)} helperText={error} disabled={disabled} />
-        {detailField}
-      </Stack>
+      <NumberField label={item.label} value={value === undefined ? '' : String(value)} onChange={(event) => onChange(event.target.value)} required={item.required} error={Boolean(error)} helperText={error} disabled={disabled} />
     );
   }
 
   return (
-    <Box>
-      <AppTextField
-        label={item.label}
-        type={item.type === 'time' ? 'time' : 'text'}
-        multiline={item.type === 'text'}
-        minRows={item.type === 'text' ? 3 : 1}
-        value={String(value ?? '')}
-        onChange={(event) => onChange(event.target.value)}
-        required={item.required}
-        error={Boolean(error)}
-        helperText={error}
-        disabled={disabled}
-        slotProps={item.type === 'time' ? { inputLabel: { shrink: true } } : undefined}
-      />
-    </Box>
+    <AppTextField
+      label={item.label}
+      type={item.type === 'time' ? 'time' : 'text'}
+      multiline={item.type === 'text'}
+      minRows={item.type === 'text' ? 3 : 1}
+      value={String(value ?? '')}
+      onChange={(event) => onChange(event.target.value)}
+      required={item.required}
+      error={Boolean(error)}
+      helperText={error}
+      disabled={disabled}
+      slotProps={item.type === 'time' ? { inputLabel: { shrink: true } } : undefined}
+    />
+  );
+}
+
+export function DynamicFormField({ item, value, detailValue = '', error, disabled, onChange, onDetailChange }: DynamicFormFieldProps) {
+  if (item.type === 'section') return null;
+
+  const showDetail = shouldShowDetailInput(item, value) && Boolean(onDetailChange);
+
+  return (
+    <Stack spacing={1.5}>
+      <MainField item={item} value={value} error={error} disabled={disabled} onChange={onChange} />
+      {showDetail && onDetailChange && (
+        <AppTextField
+          label={item.detailLabel || '詳細・補足'}
+          value={detailValue}
+          onChange={(event) => onDetailChange(event.target.value)}
+          disabled={disabled}
+          placeholder="詳細を入力してください"
+        />
+      )}
+    </Stack>
   );
 }
