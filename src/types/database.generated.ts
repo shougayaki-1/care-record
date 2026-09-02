@@ -2788,6 +2788,15 @@ export type Database = {
         Args: { p_org_id: string }
         Returns: undefined
       }
+      list_deleted_shift_google_sync_targets: {
+        Args: { p_cursor?: string; p_limit?: number; p_org_id: string }
+        Returns: {
+          google_sync_status: string
+          next_cursor: string
+          remaining: number
+          shift_id: string
+        }[]
+      }
       load_report_autosave_authorized: {
         Args: { p_draft_key: string; p_organization_id: string }
         Returns: Json
@@ -2962,6 +2971,16 @@ export type Database = {
         }
         Returns: number
       }
+      soft_delete_shifts_checked: {
+        Args: {
+          p_org_id: string
+          p_reason: string
+          p_retention_until: string
+          p_shift_ids: string[]
+          p_sync_status: string
+        }
+        Returns: Json
+      }
       toggle_cancel_shift_atomic: {
         Args: {
           p_is_cancel: boolean
@@ -3005,6 +3024,16 @@ export type Database = {
           p_org_id: string
           p_shift_id: string
           p_start_at: string
+        }
+        Returns: string
+      }
+      update_shift_with_segments_atomic: {
+        Args: {
+          p_org_id: string
+          p_payload: Json
+          p_replace_segments?: boolean
+          p_segments?: Json
+          p_shift_id: string
         }
         Returns: string
       }

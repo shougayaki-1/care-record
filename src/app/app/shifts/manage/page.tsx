@@ -202,8 +202,14 @@ export default function ShiftManagePage() {
     const handleDeleteShift = async (shiftId: string) => {
         setSyncProgress({ total: 1, current: 0, currentName: 'Googleカレンダーから予定を削除中...' });
         try {
-            await deleteShiftCompletely(shiftId);
-            showToast('シフトを完全に削除しました');
+            const result = await deleteShiftCompletely(shiftId);
+            if (result.googleSync.status === 'failed') {
+                showToast('シフトはDBから削除しましたが、Googleカレンダーの削除に失敗しました。設定画面から再試行してください。', 'warning');
+            } else if (result.googleSync.status === 'pending') {
+                showToast('シフトはDBから削除しました。Googleカレンダーの削除待ちです。設定画面から同期できます。', 'warning');
+            } else {
+                showToast('シフトをDBとGoogleカレンダーから削除しました');
+            }
             fetchData(true);
         } catch (error) {
             console.error(error);
@@ -345,7 +351,7 @@ export default function ShiftManagePage() {
 
             const shiftIds = targetShifts.map(s => s.id);
             const CHUNK = 20;
-            let deleted = 0, failed = 0;
+            let deleted = 0, failed = 0, pending = 0, processed = 0;
             let errorKind: string | undefined;
 
             for (let i = 0; i < shiftIds.length; i += CHUNK) {
@@ -353,8 +359,10 @@ export default function ShiftManagePage() {
                 const res = await deleteShiftsBatch(currentOrg.id, chunk);
                 deleted += res.deleted;
                 failed += res.failed;
+                processed += res.deleted + (res.alreadyDeleted ?? 0) + res.failed;
+                if (res.pending) pending += res.deleted + (res.alreadyDeleted ?? 0);
                 if (res.errorKind) errorKind = res.errorKind;
-                setSyncProgress({ total, current: Math.min(total, deleted + failed), currentName: `${Math.min(total, deleted + failed)} / ${total} 件 処理済み` });
+                setSyncProgress({ total, current: Math.min(total, processed), currentName: `${Math.min(total, processed)} / ${total} 件 処理済み` });
                 if (errorKind === 'auth') break;
             }
 
@@ -364,6 +372,8 @@ export default function ShiftManagePage() {
                 showToast('Googleカレンダーの認証が切れています。設定画面から再接続後にもう一度お試しください。', 'error');
             } else if (failed > 0) {
                 showToast(`${deleted} 件を消去しました。${failed} 件はGoogleカレンダーから削除できず残っています。通信状況を確認し再度お試しください。`, 'warning');
+            } else if (pending > 0) {
+                showToast(`${deleted} 件をDBから消去しました。${pending} 件はGoogleカレンダーの削除待ちです。設定画面から同期できます。`, 'warning');
             } else {
                 showToast(`${targetMonth}月のシフトを ${deleted} 件、Googleカレンダーを含めて消去しました。`, 'success');
             }

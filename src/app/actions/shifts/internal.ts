@@ -8,7 +8,6 @@ import { getRetentionPolicy, retentionDeadline } from '@/utils/supabase/retentio
 import { computeOccurrenceSegmentDateTimes } from '@/utils/shiftRecurrence';
 import { asJson, asNullableRpcArg } from '@/types/json';
 
-import { trySyncSilently } from './googleSyncInternal';
 import type { ShiftPayload } from './types';
 
 // GAP-01: atomic RPC（update_shift_*_atomic / delete_shift_atomic）が返す
@@ -65,18 +64,33 @@ export async function assertShiftsAccessible(shiftIds: string[]): Promise<void> 
   }
 }
 
+export type CheckedBulkDeleteResult = {
+  requested: number;
+  matched: number;
+  deleted: number;
+  already_deleted: number;
+  failed: number;
+};
+
 export async function softDeleteShiftIds(
   organizationId: string,
   shiftIds: string[],
   reason: string,
-): Promise<number> {
-  if (shiftIds.length === 0) return 0;
-  const actor = await assertShiftPermission(organizationId, 'delete', { shiftIds });
+  syncStatus: 'synced' | 'pending_delete' = 'pending_delete',
+): Promise<CheckedBulkDeleteResult> {
+  if (shiftIds.length === 0) {
+    return { requested: 0, matched: 0, deleted: 0, already_deleted: 0, failed: 0 };
+  }
+  // The checked RPC is deliberately idempotent and must be reachable for a
+  // retry whose rows are already soft-deleted.  Normal SELECT RLS hides those
+  // rows, so the permission helper resolves the tenant with includeDeleted;
+  // the SECURITY DEFINER RPC still re-checks the same-org/delete-all boundary.
+  const actor = await assertShiftPermission(organizationId, 'delete', { shiftIds, includeDeleted: true });
   const policy = await getRetentionPolicy(organizationId, 'shift');
   const supabase = await createSessionClient();
-  const { data, error } = await supabase.rpc('soft_delete_shifts_atomic', {
+  const { data, error } = await supabase.rpc('soft_delete_shifts_checked', {
     p_org_id: organizationId, p_shift_ids: shiftIds, p_reason: reason,
-    p_retention_until: retentionDeadline(policy.years), p_sync_status: 'synced',
+    p_retention_until: retentionDeadline(policy.years), p_sync_status: syncStatus,
   });
   if (error) {
     await recordAuditEvent({
@@ -85,24 +99,36 @@ export async function softDeleteShiftIds(
     });
     throw sanitizeDbError(error, 'action.shifts.bulkSoftDelete');
   }
-  // GET DIAGNOSTICS ROW_COUNT で確認した実削除件数。0件（＝レース等で対象が消えていた）は成功にしない。
-  const deletedCount = typeof data === 'number' ? data : 0;
-  if (deletedCount === 0) {
+  const result = data as CheckedBulkDeleteResult | null;
+  if (!result
+    || result.matched !== result.requested
+    || result.deleted + result.already_deleted !== result.requested
+    || result.failed !== 0) {
     await recordAuditEvent({
       organizationId, actorId: actor.userId, action: 'shift.bulk_soft_delete', resourceType: 'shift',
-      reason, outcome: 'failure', details: { shiftIds, requested: shiftIds.length, deleted: 0 },
+      reason, outcome: 'failure', details: { shiftIds, requested: shiftIds.length, result: data ?? null },
     });
     throw new UserFacingError('対象シフトを削除できませんでした。最新の状態を確認してください');
   }
-  await recordAuditEvent({
-    organizationId,
-    actorId: actor.userId,
-    action: 'shift.bulk_soft_delete',
-    resourceType: 'shift',
-    reason,
-    details: { shiftIds, requested: shiftIds.length, deleted: deletedCount, legalBasis: policy.legalBasis },
-  });
-  return deletedCount;
+  if (result.deleted > 0) {
+    await recordAuditEvent({
+      organizationId,
+      actorId: actor.userId,
+      action: 'shift.bulk_soft_delete',
+      resourceType: 'shift',
+      reason,
+      details: {
+        shiftIds,
+        requested: result.requested,
+        matched: result.matched,
+        deleted: result.deleted,
+        alreadyDeleted: result.already_deleted,
+        failed: result.failed,
+        legalBasis: policy.legalBasis,
+      },
+    });
+  }
+  return result;
 }
 
 export async function upsertAssignmentsForStaffs(
@@ -146,8 +172,11 @@ export async function createShiftWithSegmentsAtomic(payload: ShiftPayload) {
 export async function updateShiftInternal(
   shiftId: string,
   payload: Partial<ShiftPayload>,
-  awaitSync: boolean | 'skip' = true,
+  _awaitSync: boolean | 'skip' = true,
 ): Promise<{ success: true }> {
+  // Kept for the existing public call contract; sync ownership moved to the
+  // audited public Action so this helper cannot start Google work early.
+  void _awaitSync;
   const supabase = await createSessionClient();
   const fieldPayload: Record<string, unknown> = {};
   if (payload.clientId !== undefined) fieldPayload.client_id = payload.clientId;
@@ -162,8 +191,12 @@ export async function updateShiftInternal(
     ?? (await supabase.from('shifts').select('organization_id').eq('id', shiftId).single()).data?.organization_id;
   if (!targetOrgId) throw new UserFacingError('シフトが見つかりません');
 
-  const { data: outcome, error } = await supabase.rpc('update_shift_fields_atomic', {
-    p_org_id: targetOrgId, p_shift_id: shiftId, p_payload: asJson(fieldPayload),
+  const { data: outcome, error } = await supabase.rpc('update_shift_with_segments_atomic', {
+    p_org_id: targetOrgId,
+    p_shift_id: shiftId,
+    p_payload: asJson(fieldPayload),
+    p_replace_segments: payload.segments !== undefined,
+    p_segments: payload.segments === undefined ? null : asJson(payload.segments),
   });
   if (error) {
     logError('updateShiftInternal failed', { organizationId: targetOrgId, error: serializeError(error) });
@@ -171,13 +204,8 @@ export async function updateShiftInternal(
   }
   if (outcome !== 'updated') throw new UserFacingError(shiftWriteFailureMessage(String(outcome)));
 
-  if (awaitSync === 'skip') {
-    // Intentionally skip calendar sync for bulk generation.
-  } else if (awaitSync) {
-    await trySyncSilently(targetOrgId, shiftId, 'sync');
-  } else {
-    void trySyncSilently(targetOrgId, shiftId, 'sync');
-  }
+  // Calendar sync is intentionally owned by the public Action.  It must not
+  // begin until that Action has written its success audit event.
   return { success: true };
 }
 

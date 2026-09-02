@@ -44,15 +44,17 @@ describe('shiftWriteFailureMessage / shiftDeleteFailureMessage', () => {
 });
 
 describe('softDeleteShiftIds', () => {
-  it('returns 0 without calling the RPC when there is nothing to delete', async () => {
-    await expect(softDeleteShiftIds('org-1', [], '理由')).resolves.toBe(0);
+  it('returns an explicit no-op result without calling the RPC when there is nothing to delete', async () => {
+    await expect(softDeleteShiftIds('org-1', [], '理由')).resolves.toEqual({
+      requested: 0, matched: 0, deleted: 0, already_deleted: 0, failed: 0,
+    });
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.recordAuditEvent).not.toHaveBeenCalled();
   });
 
   it('records a success audit with the actual DB row count on success', async () => {
-    mocks.rpc.mockResolvedValue({ data: 2, error: null });
-    await expect(softDeleteShiftIds('org-1', ['s1', 's2'], '理由')).resolves.toBe(2);
+    mocks.rpc.mockResolvedValue({ data: { requested: 2, matched: 2, deleted: 2, already_deleted: 0, failed: 0 }, error: null });
+    await expect(softDeleteShiftIds('org-1', ['s1', 's2'], '理由')).resolves.toMatchObject({ deleted: 2, already_deleted: 0 });
     expect(mocks.recordAuditEvent).toHaveBeenCalledTimes(1);
     expect(mocks.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
       action: 'shift.bulk_soft_delete',
@@ -61,10 +63,16 @@ describe('softDeleteShiftIds', () => {
     expect(mocks.recordAuditEvent.mock.calls[0][0].outcome).toBeUndefined();
   });
 
-  it('never treats a zero-row RPC result as success', async () => {
-    mocks.rpc.mockResolvedValue({ data: 0, error: null });
+  it('never treats an incomplete checked result as success', async () => {
+    mocks.rpc.mockResolvedValue({ data: { requested: 1, matched: 1, deleted: 0, already_deleted: 0, failed: 1 }, error: null });
     await expect(softDeleteShiftIds('org-1', ['s1'], '理由')).rejects.toThrow();
     expect(mocks.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failure' }));
+  });
+
+  it('does not create a new success audit when every target was already deleted', async () => {
+    mocks.rpc.mockResolvedValue({ data: { requested: 2, matched: 2, deleted: 0, already_deleted: 2, failed: 0 }, error: null });
+    await expect(softDeleteShiftIds('org-1', ['s1', 's2'], '理由')).resolves.toMatchObject({ already_deleted: 2 });
+    expect(mocks.recordAuditEvent).not.toHaveBeenCalled();
   });
 
   it('records a failure audit and sanitizes the error when the RPC itself fails', async () => {
@@ -87,10 +95,10 @@ describe('updateShiftInternal', () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it('resolves success only when the RPC reports the row as updated, and syncs afterward', async () => {
+  it('resolves success only when the RPC reports the row as updated, leaving sync to the audited public Action', async () => {
     mocks.rpc.mockResolvedValue({ data: 'updated', error: null });
     await expect(updateShiftInternal('shift-1', basePayload)).resolves.toEqual({ success: true });
-    expect(mocks.trySyncSilently).toHaveBeenCalledWith('org-1', 'shift-1', 'sync');
+    expect(mocks.trySyncSilently).not.toHaveBeenCalled();
   });
 
   it('rejects and skips sync when the RPC reports a non-updated outcome', async () => {

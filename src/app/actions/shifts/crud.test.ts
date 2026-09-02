@@ -26,7 +26,7 @@ vi.mock('./googleSyncInternal', () => ({
   processShiftsSequential: mocks.processShiftsSequential,
 }));
 
-import { deleteShiftCompletely, deleteShiftsDbOnly, toggleCancelShift, updateShiftTimeOnly } from './crud';
+import { deleteShiftCompletely, deleteShiftsBatch, deleteShiftsDbOnly, toggleCancelShift, updateShiftTimeOnly } from './crud';
 
 const ACTOR = { organizationId: 'org-1', userId: 'user-1', isOwner: false, clientIds: [], staffId: 'staff-1' };
 
@@ -51,6 +51,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.assertShiftPermission.mockResolvedValue(ACTOR);
   mocks.getRetentionPolicy.mockResolvedValue({ years: 5, legalBasis: 'law' });
+  mocks.trySyncSilently.mockResolvedValue({ status: 'synced' });
 });
 
 describe('updateShiftTimeOnly', () => {
@@ -138,7 +139,7 @@ describe('deleteShiftCompletely', () => {
     mockShiftsFrom({ data: { organization_id: 'org-1' }, error: null });
     mocks.rpc.mockResolvedValue({ data: 'deleted', error: null });
 
-    await expect(deleteShiftCompletely('shift-1')).resolves.toEqual({ success: true });
+    await expect(deleteShiftCompletely('shift-1')).resolves.toEqual({ success: true, googleSync: { status: 'synced' } });
     expect(mocks.recordAuditEvent).toHaveBeenCalledTimes(1);
     expect(mocks.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'shift.soft_delete' }));
     expect(mocks.recordAuditEvent.mock.calls[0][0].outcome).toBeUndefined();
@@ -166,6 +167,57 @@ describe('deleteShiftCompletely', () => {
     }));
     expect(mocks.trySyncSilently).not.toHaveBeenCalled();
   });
+
+  it('returns a retryable Google-pending status after the DB delete succeeds', async () => {
+    mockShiftsFrom({ data: { organization_id: 'org-1' }, error: null });
+    mocks.rpc.mockResolvedValue({ data: 'deleted', error: null });
+    mocks.trySyncSilently.mockResolvedValueOnce({ status: 'pending', errorKind: 'skipped' });
+
+    await expect(deleteShiftCompletely('shift-1')).resolves.toEqual({
+      success: true,
+      googleSync: { status: 'pending', errorKind: 'skipped' },
+    });
+  });
+
+  it('returns a failed Google status without undoing the committed DB delete', async () => {
+    mockShiftsFrom({ data: { organization_id: 'org-1' }, error: null });
+    mocks.rpc.mockResolvedValue({ data: 'deleted', error: null });
+    mocks.trySyncSilently.mockResolvedValueOnce({ status: 'failed', errorKind: 'transient' });
+
+    await expect(deleteShiftCompletely('shift-1')).resolves.toEqual({
+      success: true,
+      googleSync: { status: 'failed', errorKind: 'transient' },
+    });
+  });
+});
+
+describe('deleteShiftsBatch', () => {
+  it('commits DB deletion and audit before Google deletion, retaining Google failures for recovery', async () => {
+    mocks.rpc.mockResolvedValue({ data: { requested: 1, matched: 1, deleted: 1, already_deleted: 0, failed: 0 }, error: null });
+    mocks.processShiftsSequential.mockResolvedValue({
+      succeeded: 0, failed: 1, failedIds: ['s1'], errorKind: 'transient', stats: { created: 0, updated: 0, deletedRemote: 0, linked: 0, deduped: 0 },
+    });
+
+    const result = await deleteShiftsBatch('org-1', ['s1']);
+
+    expect(mocks.rpc).toHaveBeenCalledWith('soft_delete_shifts_checked', expect.objectContaining({ p_sync_status: 'pending_delete' }));
+    expect(mocks.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      details: expect.objectContaining({ deleted: 1, alreadyDeleted: 0 }),
+    }));
+    expect(mocks.processShiftsSequential).toHaveBeenCalledWith('org-1', [{ id: 's1' }], 'delete');
+    expect(result).toMatchObject({ success: true, deleted: 1, failed: 1, errorKind: 'transient' });
+  });
+
+  it('reports all-already-deleted as a noop while still retrying Google cleanup', async () => {
+    mocks.rpc.mockResolvedValue({ data: { requested: 1, matched: 1, deleted: 0, already_deleted: 1, failed: 0 }, error: null });
+    mocks.processShiftsSequential.mockResolvedValue({
+      succeeded: 1, failed: 0, failedIds: [], errorKind: undefined, stats: { created: 0, updated: 0, deletedRemote: 1, linked: 0, deduped: 0 },
+    });
+
+    await expect(deleteShiftsBatch('org-1', ['s1'])).resolves.toMatchObject({ deleted: 0, alreadyDeleted: 1, noop: true });
+    expect(mocks.recordAuditEvent).not.toHaveBeenCalled();
+    expect(mocks.processShiftsSequential).toHaveBeenCalledWith('org-1', [{ id: 's1' }], 'delete');
+  });
 });
 
 describe('deleteShiftsDbOnly', () => {
@@ -174,7 +226,7 @@ describe('deleteShiftsDbOnly', () => {
       data: [{ id: 's1', organization_id: 'org-1' }, { id: 's2', organization_id: 'org-1' }],
       error: null,
     }));
-    mocks.rpc.mockResolvedValue({ data: 2, error: null });
+    mocks.rpc.mockResolvedValue({ data: { requested: 2, matched: 2, deleted: 2, already_deleted: 0, failed: 0 }, error: null });
 
     await expect(deleteShiftsDbOnly(['s1', 's2'])).resolves.toEqual({ success: true, deleted: 2 });
     expect(mocks.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
@@ -185,7 +237,7 @@ describe('deleteShiftsDbOnly', () => {
 
   it('never reports success when the RPC deletes zero rows', async () => {
     mocks.from.mockReturnValue(chainable({ data: [{ id: 's1', organization_id: 'org-1' }], error: null }));
-    mocks.rpc.mockResolvedValue({ data: 0, error: null });
+    mocks.rpc.mockResolvedValue({ data: { requested: 1, matched: 1, deleted: 0, already_deleted: 0, failed: 1 }, error: null });
 
     await expect(deleteShiftsDbOnly(['s1'])).rejects.toThrow();
     expect(mocks.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failure' }));

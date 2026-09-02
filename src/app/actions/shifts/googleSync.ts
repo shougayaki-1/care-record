@@ -33,6 +33,28 @@ import {
 } from './googleSyncInternal';
 import type { RepairGoogleCalendarSyncOptions } from './types';
 
+type DeletedSyncTarget = {
+  shift_id: string;
+  google_sync_status: 'pending_delete' | 'failed';
+  next_cursor: string | null;
+  remaining: number;
+};
+
+async function listDeletedSyncTargets(
+  organizationId: string,
+  limit: number,
+  cursor: string | null = null,
+): Promise<DeletedSyncTarget[]> {
+  const supabase = await createSessionClient();
+  const { data, error } = await supabase.rpc('list_deleted_shift_google_sync_targets', {
+    p_org_id: organizationId,
+    p_cursor: cursor ?? undefined,
+    p_limit: limit,
+  });
+  if (error) throw error;
+  return (data ?? []) as DeletedSyncTarget[];
+}
+
 export async function getSyncStatus(organizationId: string) {
   return withSafeError('getSyncStatus', async () => {
       await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
@@ -58,7 +80,9 @@ export async function getSyncStatus(organizationId: string) {
           .is('deleted_at', null)
           .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)');
 
-      return { connected, total: total || 0, unsynced: unsynced || 0 };
+      const deletedTargets = await listDeletedSyncTargets(organizationId, 50);
+      const deletedSyncPending = deletedTargets.length + (deletedTargets[0]?.remaining ?? 0);
+      return { connected, total: total || 0, unsynced: unsynced || 0, deletedSyncPending };
   });
 }
 
@@ -76,10 +100,10 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
       const supabase = await createSessionClient();
       const status = await getSyncStatus(organizationId);
       if (!status.connected) {
-          return { processed: 0, succeeded: 0, failed: 0, remaining: status.unsynced, errorKind: 'skipped' as SyncErrorKind, connected: false };
+          return { processed: 0, succeeded: 0, failed: 0, remaining: status.unsynced + status.deletedSyncPending, errorKind: 'skipped' as SyncErrorKind, connected: false };
       }
 
-      const { data: shifts } = await supabase
+      const { data: activeShifts } = await supabase
           .from('shifts')
           .select('id')
           .eq('organization_id', organizationId)
@@ -87,11 +111,37 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
           .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)')
           .limit(limit);
 
-      if (!shifts || shifts.length === 0) {
+      const active = activeShifts ?? [];
+      const deletedTargets = active.length < limit
+          ? await listDeletedSyncTargets(organizationId, limit - active.length)
+          : [];
+      const shifts = [
+          ...active.map((shift) => ({ id: shift.id, action: 'sync' as const })),
+          ...deletedTargets.map((shift) => ({ id: shift.shift_id, action: 'delete' as const })),
+      ];
+
+      if (shifts.length === 0) {
           return { processed: 0, succeeded: 0, failed: 0, remaining: 0, connected: true, ...emptyGoogleSyncStats() };
       }
 
-      const outcome = await processShiftsSequential(organizationId, shifts, 'sync');
+      const syncOutcome = shifts.filter((shift) => shift.action === 'sync').length > 0
+          ? await processShiftsSequential(organizationId, shifts.filter((shift) => shift.action === 'sync'), 'sync')
+          : { succeeded: 0, failed: 0, failedIds: [], stats: emptyGoogleSyncStats(), errorKind: undefined };
+      const deleteOutcome = shifts.filter((shift) => shift.action === 'delete').length > 0
+          ? await processShiftsSequential(organizationId, shifts.filter((shift) => shift.action === 'delete'), 'delete')
+          : { succeeded: 0, failed: 0, failedIds: [], stats: emptyGoogleSyncStats(), errorKind: undefined };
+      const outcome = {
+          succeeded: syncOutcome.succeeded + deleteOutcome.succeeded,
+          failed: syncOutcome.failed + deleteOutcome.failed,
+          stats: {
+              created: syncOutcome.stats.created + deleteOutcome.stats.created,
+              updated: syncOutcome.stats.updated + deleteOutcome.stats.updated,
+              deletedRemote: syncOutcome.stats.deletedRemote + deleteOutcome.stats.deletedRemote,
+              linked: syncOutcome.stats.linked + deleteOutcome.stats.linked,
+              deduped: syncOutcome.stats.deduped + deleteOutcome.stats.deduped,
+          },
+          errorKind: syncOutcome.errorKind ?? deleteOutcome.errorKind,
+      };
 
       await recordAuditEvent({
           organizationId, actorId: actor.userId, action: 'integration.calendar.sync', resourceType: 'organization', resourceId: organizationId,
@@ -99,18 +149,21 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
       });
 
       // 同期後の残件数を再取得（成功分は google_event_id が埋まり減る）
-      const { count: remaining } = await supabase
+      const { count: activeRemaining } = await supabase
           .from('shifts')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', organizationId)
           .is('deleted_at', null)
           .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)');
 
+      const deletedRemainingRows = await listDeletedSyncTargets(organizationId, 50);
       return {
           processed: shifts.length,
           succeeded: outcome.succeeded,
           failed: outcome.failed,
-          remaining: remaining || 0,
+          remaining: (activeRemaining || 0)
+            + deletedRemainingRows.length
+            + (deletedRemainingRows[0]?.remaining ?? 0),
           ...outcome.stats,
           errorKind: outcome.errorKind,
           connected: true
@@ -224,13 +277,17 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
           }
       }
 
-      const { data: shifts } = await supabase
+      const { data: activeShifts } = await supabase
           .from('shifts')
           .select('id, title, start_at, end_at, status, cancel_reason, google_event_id, deleted_at, google_sync_status, shift_staffs(staff_id)')
           .eq('organization_id', organizationId)
           .order('id', { ascending: true })
           .limit(limit);
 
+      const deletedTargets = (activeShifts?.length ?? 0) < limit
+          ? await listDeletedSyncTargets(organizationId, limit - (activeShifts?.length ?? 0))
+          : [];
+      const shifts = [...(activeShifts ?? []), ...deletedTargets.map((target) => ({ id: target.shift_id, deleted_at: 'recovery' }))];
       const stats = emptyGoogleSyncStats();
       let processed = 0;
       let succeeded = 0;
@@ -318,7 +375,7 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
 
 export async function syncSingleShift(organizationId: string, shiftId: string, action: 'sync' | 'delete' = 'sync') {
   return withSafeError('syncSingleShift', async () => {
-      const actor = await assertShiftPermission(organizationId, action === 'delete' ? 'delete' : 'edit', { shiftId });
+      const actor = await assertShiftPermission(organizationId, action === 'delete' ? 'delete' : 'edit', { requireAllScope: true });
       try {
           await syncToGoogleCalendarDirect(organizationId, shiftId, action);
           await recordAuditEvent({
