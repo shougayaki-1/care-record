@@ -1,115 +1,64 @@
-# Deployment runbook
+# デプロイ運用手順書
 
-This is the operational source of truth for application releases. It covers the
-intended personal-maintainer path; the external settings listed at the end have
-not all been applied or verified. Do not treat this document as evidence that a
-release or operational cutover has completed.
+この文書はアプリケーションのリリース運用に関する正本です。個人で保守する場合の手順を示します。末尾に記載した外部サービスの設定には、未適用または未確認の項目があります。この文書を、リリースや運用切替が完了した証拠として扱わないでください。
 
-## Target setup
+## 目標とする構成
 
-- Work from `feature/*` branches opened from `main`, then merge a reviewed PR to
-  `main`. A permanent `staging` branch is optional.
-- Keep the existing `care-record` Production Vercel project and
-  `care-record-staging` Preview project. The target is Production deployments
-  from `main` in `care-record`, and feature-branch Preview deployments in
-  `care-record-staging`.
-- Keep the staging and Production Supabase projects separate. Use the staging
-  project for hosted Auth, Storage, or integration checks that local E2E cannot
-  cover. Use synthetic or anonymized data there.
-- Deploy the application through Vercel Git integration. Do not use a manual
-  application deployment workflow for routine releases.
-- Keep `full-backup.yml` and `backup-freshness.yml` as separate backup and
-  freshness operations. Keep one external `/api/health` monitor after its
-  endpoint and notification path are healthy. A backup or health check does
-  not replace another one.
+- `feature/*` ブランチは `main` から作成し、レビューしたPRを `main` にマージします。常設の `staging` ブランチは任意です。
+- 既存のVercelプロジェクト `care-record`（Production）と `care-record-staging`（Preview）を維持します。目標は、`care-record` では `main` からProductionへ配備し、`care-record-staging` ではfeatureブランチからPreviewへ配備する構成です。
+- StagingとProductionのSupabaseプロジェクトを分けます。ローカルE2Eで確認できないホスト済みAuth、Storage、外部連携の確認にはStagingプロジェクトを使い、合成データまたは匿名化データを使用します。
+- アプリケーションの配備はVercel Git連携で行います。通常のリリースに手動のアプリ配備workflowは使いません。
+- `full-backup.yml` と `backup-freshness.yml` は、バックアップと鮮度確認の別々の運用として維持します。`/api/health` のエンドポイントと通知経路が正常になった後も、外形監視を1系統維持します。バックアップとhealth確認は互いの代わりにはなりません。
 
-Vercel uses its configured Production Branch for Production deployments; other
-branches can receive Preview deployments. Set the Production project's branch
-to `main`, and configure its Preview build filter so feature branches build in
-the staging project only. See [the Vercel Git deployment documentation](https://vercel.com/docs/deployments/git).
+Vercelでは、設定されたProduction BranchからProductionへ配備され、その他のブランチはPreviewへ配備できます。Productionプロジェクトのブランチを `main` に設定し、PreviewのビルドフィルターでfeatureブランチがStagingプロジェクトだけに配備されるようにします。[Vercel Git配備のドキュメント](https://vercel.com/docs/deployments/git)を参照してください。
 
-## One-time setup and cutover
+## 初回設定と切替
 
-1. In GitHub, configure the `main` ruleset or branch protection to require the
-   fixed CI result documented in [testing.md](testing.md). Permit the single
-   maintainer to merge after self-review and successful checks; do not require a
-   second human reviewer for routine changes.
-2. Read back the Vercel settings. In `care-record`, Production Branch should be
-   `main` and its Preview filter should skip feature branches. A skip-Preview
-   filter was applied and read back on 2026-09-23. In `care-record-staging`,
-   keep the Preview-only filter and verify that feature branches produce
-   Preview deployments. Check deployment protection and that Preview cannot
-   access Production secrets or data.
-3. Configure app variables in each Vercel project's correct environment scope
-   using [.env.example](../.env.example) as the variable-name reference. Use
-   separate Supabase refs and keys. Do not put server-only values under a
-   `NEXT_PUBLIC_` name. Verify the Production scope includes
-   `SUPABASE_SERVICE_ROLE_KEY`, which the health endpoint requires.
-4. Reuse the existing GitHub Environments for the backup and health workflows
-   only. The repository passes lowercase `staging` and `production` values; the
-   inspected account has an existing `Production` Environment. Confirm that
-   the workflow resolves to that same Environment, and do not create a second
-   one with a casing-only name difference. Configure the required values in
-   the matching Environment:
+1. GitHubで `main` のrulesetまたはbranch protectionを設定し、[testing.md](testing.md)に記載した固定名のCI判定を必須にします。単独の保守担当者は自己レビューとチェック成功後にマージできる設定とし、通常変更に2人目の人間によるレビューを必須にしません。
+2. Vercelの設定を読み戻して確認します。`care-record` のProduction Branchは `main` とし、Previewフィルターではfeatureブランチを除外します。このPreviewスキップフィルターは2026-09-23に適用し、読み戻して確認済みです。`care-record-staging` はPreview専用フィルターを維持し、featureブランチからPreviewが作られることを確認します。Deployment Protectionと、PreviewがProductionの秘密情報やデータへアクセスできないことも確認します。
+3. [.env.example](../.env.example)を変数名の参照先として、各Vercelプロジェクトの適切な環境スコープにアプリ変数を設定します。Supabaseの参照先と鍵は環境ごとに分けます。サーバー専用値に `NEXT_PUBLIC_` から始まる名前を使わないでください。[`care-record` の環境変数設定](https://vercel.com/shougayaki-1s-projects/care-record/settings/environment-variables)で、`SUPABASE_SERVICE_ROLE_KEY` を**Productionのみ**に設定してください。値はSupabase Dashboardの**本番プロジェクト**の Settings → API Keys で確認し、既存の本番Supabase URLと同じプロジェクトの鍵を使います。ヘルスエンドポイントがこの変数を必要とします。値はVercelの安全な入力欄で設定し、ログ、PR、文書、チャットへ表示・転記しないでください。確認時は変数名と環境スコープだけを読み戻します。変更は既存の配備には反映されず、次のProduction配備から有効になります。
+4. バックアップと外形監視のworkflowでは、既存のGitHub Environmentを再利用します。workflowは小文字の `staging` と `production` を指定しますが、確認済みアカウントには `Production` という既存Environmentがあります。workflowの参照先がこの既存Environmentであることを確認してください。大文字・小文字だけが異なるEnvironmentを追加作成しないでください。
 
-   - `BACKUP_DATABASE_URL` (Supavisor session pooler)
+   [GitHubリポジトリのEnvironments設定](https://github.com/shougayaki-1/care-record/settings/environments)から既存の `Production` Environmentを開き、**Environment secrets → Add secret** で `DISCORD_ALERT_WEBHOOK_URL` を設定してください。workflowがこのEnvironmentを使うことを確認したうえで、値をGitHubの安全なsecret入力欄に登録します。値をログ、PR、文書、チャットへ表示・転記しないでください。読み戻す場合はsecretの登録有無とEnvironment名だけを確認し、secret値は表示しません。
+
+   対応するEnvironmentに次のSecretsを設定します。
+
+   - `BACKUP_DATABASE_URL`（Supavisor session pooler）
    - `DISCORD_ALERT_WEBHOOK_URL`
-   - `VERCEL_AUTOMATION_BYPASS_SECRET` only if Deployment Protection requires
-     it for the health probe
+   - `VERCEL_AUTOMATION_BYPASS_SECRET`（Deployment Protectionがヘルス確認を妨げる場合のみ）
 
-   Configure these Environment variables:
+   次のEnvironment variablesを設定します。
 
    - `GCP_WORKLOAD_IDENTITY_PROVIDER`
    - `GCP_BACKUP_SERVICE_ACCOUNT`
-   - `GCS_BACKUP_BUCKET` and `GCS_REPLICA_BUCKET`
-   - `BACKUP_CONFIG_VERSION` and `BACKUP_KEY_ID`
-   - `HEALTHCHECK_URL` for the external health workflow
+   - `GCS_BACKUP_BUCKET` と `GCS_REPLICA_BUCKET`
+   - `BACKUP_CONFIG_VERSION` と `BACKUP_KEY_ID`
+   - 外形監視workflow用の `HEALTHCHECK_URL`
 
-   See the three workflow files for their exact per-job use. Do not create a
-   cloud E2E Environment or E2E Supabase secrets; E2E uses local Supabase.
-5. Configure the backup module's Workload Identity Federation `github_refs` as
-   exact refs. The current Terraform validation accepts complete branch or tag
-   refs, not wildcard patterns. The scheduled and manual backup workflow runs
-   from `main`; both environment identities may therefore allow
-   `refs/heads/main`, while GitHub Environment selection separates staging from
-   Production. Keep Production limited to `main`.
-6. Review current backup and restore evidence. Repeat a restore rehearsal if the
-   backup method changed or the evidence is due under
-   [backup-restore-bcp.md](compliance/backup-restore-bcp.md). Check the freshness
-   alert path and repair the external health probe and notifications before
-   declaring the cutover operational. Keep the full database backup and
-   freshness monitor. The legacy `keep_alive.yml` was removed from the
-   repository; it was not a health monitor.
+   各jobでの使用箇所は3つのworkflowファイルで確認します。クラウドE2E用のEnvironmentやE2E Supabase secretsは作成しないでください。E2EはローカルSupabaseを使います。
 
-## Routine application release
+   `external-health.yml` は通常、5分ごとに実行されます。Environment secretを登録しただけでは通知の到達を確認したことになりません。安全な方法で通知を実際に発生させ、GitHub Actionsの実行結果とDiscordへの到達を確認してください。通常の成功実行だけでは失敗通知の経路を確認できません。通知が届かなければ原因を調べ、通知経路を確認できるまで切替を完了扱いにしないでください。secret値は実行ログや証跡に含めません。
+5. バックアップmoduleのWorkload Identity Federationにある `github_refs` は完全なrefで設定します。現在のTerraform検証は、branchまたはtagの完全なrefを受け入れ、wildcard patternは受け入れません。定期・手動のバックアップworkflowは `main` から実行されるため、両環境のidentityで `refs/heads/main` を許可できます。GitHub Environmentの選択でStagingとProductionを分け、Productionは `main` に限定します。
+6. 現在のバックアップ・復元の証跡を確認します。バックアップ方式が変わった場合、または証跡の更新時期に達した場合は[backup-restore-bcp.md](compliance/backup-restore-bcp.md)に従って復元リハーサルを繰り返します。鮮度アラートの経路を確認し、運用切替の完了を宣言する前に外形監視と通知を直します。完全データベースバックアップと鮮度監視を維持してください。旧 `keep_alive.yml` はリポジトリから削除済みであり、health monitorではありません。
 
-1. Create a feature branch from current `main`, make the change, and open a PR.
-2. Review the complete diff yourself. Check the CI conclusion and the relevant
-   Preview. If the change needs hosted Auth or integration behavior, use the
-   staging Supabase project and record the Preview URL.
-3. If there is no database change, merge after the checks pass. Vercel Git
-   integration deploys the resulting `main` commit to Production.
-4. Check `/api/health`, sign in, and save one minimal test record. Record the
-   candidate SHA, CI result, deployment URL, and smoke-check result in the PR.
-5. If the release fails, use the application rollback steps below and record
-   the affected deployment and result.
+この切替では、`DISCORD_ALERT_WEBHOOK_URL` の設定後に通知到達を確認し、サービスオーナーの明示承認を得るまでPR #17をマージしたりProduction配備を開始したりしないでください。`main` のbranch protectionにおける必須承認数0という設定は変更しません。今回必要な承認は、この切替とリリースに対する個別の承認です。
 
-Routine releases do not require a new restore drill, legal review, or full
-initial-readiness evidence pass. Run those at initial service operation,
-material system changes, and their scheduled intervals.
+## 通常のアプリケーションリリース
 
-## Database release
+1. 最新の `main` からfeatureブランチを作り、変更を加えてPRを作成します。
+2. 差分全体を自己レビューします。CIの結論と対象Previewを確認します。ホスト済みAuthや外部連携の確認が必要な場合はStaging Supabaseプロジェクトを使い、Preview URLを記録します。
+3. データベース変更がなければ、チェック成功後にPRをマージします。Vercel Git連携により、結果の `main` commitがProductionへ配備されます。今回の切替に関するPR #17とProduction配備は、上記の個別承認を得てから進めます。
+4. `/api/health` を確認し、サインインして最小限のテスト記録を1件保存します。候補SHA、CI結果、配備URL、スモークチェック結果をPRに記録します。
+5. リリースに失敗した場合は、以下のアプリケーション切り戻し手順を使い、対象となった配備と結果を記録します。
 
-Every migration is an explicit manual operation against a named Supabase
-project. Review the candidate SHA, migration files, and target project before
-each apply. The Supabase CLI version below matches the version pinned in CI.
+通常リリースでは、新たな復元訓練、法務レビュー、初回提供向けの全証跡確認は必要ありません。初回のサービス提供、重要なシステム変更、および定期実施の時期に行います。
 
-1. Add a new migration file. Never edit or delete a migration already applied
-   to a shared database. Prefer additive changes that work with both the
-   current and candidate application versions.
-2. Start from the feature branch. Link the CLI to the staging project, then
-   inspect the migration history. Confirm `$STAGING_PROJECT_REF` against the
-   Staging project ref in the Supabase Dashboard before running these commands:
+## データベースのリリース
+
+各migrationは、明示したSupabaseプロジェクトに対して手動で適用します。適用ごとに候補SHA、migrationファイル、対象プロジェクトを確認してください。以下のSupabase CLIバージョンはCIで固定しているバージョンと一致します。
+
+1. 新しいmigrationファイルを追加します。共有データベースに適用済みのmigrationを編集または削除しないでください。現在のアプリと候補アプリの両方で動作する追加的な変更を優先します。
+2. featureブランチから開始します。CLIをStagingプロジェクトに接続し、migration履歴を確認します。次のコマンドを実行する前に、Supabase Dashboardで `$STAGING_PROJECT_REF` がStagingプロジェクトのrefと一致することを確認します。
 
    ```sh
    npx --yes supabase@2.108.0 link --project-ref "$STAGING_PROJECT_REF"
@@ -117,18 +66,14 @@ each apply. The Supabase CLI version below matches the version pinned in CI.
    npx --yes supabase@2.108.0 db push --linked --dry-run
    ```
 
-   Compare the linked migration history and pending migrations with the PR.
-   Apply to staging only after the dry-run matches the reviewed migration set:
+   接続先のmigration履歴と適用待ちmigrationをPRと照合します。dry-runの結果がレビュー済みmigration一式と一致した場合に限り、Stagingへ適用します。
 
    ```sh
    npx --yes supabase@2.108.0 db push --linked
    ```
 
-3. Check the Preview against staging when the migration changes hosted Auth,
-   Storage, or external integrations. Record the result in the PR.
-4. Before Production, confirm `$PRODUCTION_PROJECT_REF` against the Production
-   project ref in the Supabase Dashboard. Confirm a recent successful full
-   backup and passing freshness check, then link and inspect Production:
+3. migrationがホスト済みAuth、Storage、外部連携を変更する場合は、Stagingを使うPreviewで確認します。結果をPRに記録します。
+4. Productionに適用する前に、Supabase Dashboardで `$PRODUCTION_PROJECT_REF` がProductionプロジェクトのrefと一致することを確認します。直近の完全バックアップ成功と鮮度チェック合格を確認してから、Productionへ接続して状態を調べます。
 
    ```sh
    npx --yes supabase@2.108.0 link --project-ref "$PRODUCTION_PROJECT_REF"
@@ -136,102 +81,54 @@ each apply. The Supabase CLI version below matches the version pinned in CI.
    npx --yes supabase@2.108.0 db push --linked --dry-run
    ```
 
-   Apply only after the project, history, and dry-run match the reviewed
-   migration set:
+   対象プロジェクト、履歴、dry-runがレビュー済みmigration一式と一致する場合に限り適用します。
 
    ```sh
    npx --yes supabase@2.108.0 db push --linked
    ```
 
-   Record the project ref, migration names, dry-run, backup run, and apply
-   result in the PR. Stop if any value differs from the intended target.
-5. Merge the PR after the Production schema is compatible with the currently
-   running application. Vercel then deploys the new application from `main`.
-6. Remove old columns, constraints, or functions only in a later release, once
-   all deployed application code has stopped using them.
+   プロジェクトref、migration名、dry-run、バックアップ実行、適用結果をPRに記録します。いずれかの値が意図した対象と異なる場合は作業を中止します。
+5. Productionのschemaが稼働中のアプリと互換であることを確認してからPRをマージします。Vercelはその後、`main` から新しいアプリを配備します。Productionへの変更を行う場合は、本件の個別承認を得てから進めます。
+6. 古いcolumn、constraint、functionは、配備済みのすべてのアプリコードが使わなくなった後、別リリースで削除します。
 
-If Production DB changes cannot safely coexist with the current application,
-stop and split the change into expand, migrate, switch, and contract releases.
-Do not attempt to reverse a migration by editing its applied file.
+Production DBの変更が稼働中アプリと安全に共存できない場合は作業を止め、expand、migrate、switch、contractの各段階に分けてリリースします。適用済みmigrationファイルを書き換えて取り消そうとしないでください。
 
-## Application rollback and database recovery
+## アプリケーションの切り戻しとデータベース復旧
 
-For a bad application deployment, open the previous successful Production
-deployment in Vercel and roll back or promote that deployment using the Vercel
-deployment controls. Check health, sign-in, and a minimal record save afterward.
-Record the deployment used and the result in the PR or incident record.
+アプリケーション配備に問題がある場合は、Vercelで直前の正常なProduction deploymentを開き、Vercelの配備操作を使って切り戻すか、そのdeploymentをpromoteします。その後、health、サインイン、最小限の記録保存を確認します。使用したdeploymentと結果をPRまたはインシデント記録に残します。
 
-An application rollback does not roll back the database. If a migration caused
-data loss or an incompatible schema, stop application changes and follow
-[backup-restore-bcp.md](compliance/backup-restore-bcp.md). Database restore is a
-separate recovery operation with an explicit target, backup generation, and
-evidence record.
+アプリケーションの切り戻しではデータベースは元に戻りません。migrationによってデータ損失または互換性のないschemaが発生した場合は、アプリ変更を止め、[backup-restore-bcp.md](compliance/backup-restore-bcp.md)に従ってください。データベースの復元は、対象、バックアップ世代、証跡記録を明示して行う別の復旧作業です。
 
-## Backup and monitoring operations
+## バックアップと監視の運用
 
-- `full-backup.yml` runs on its schedule and can be dispatched for `staging` or
-  `production`. Use it manually before a Production migration if the latest
-  successful backup is outside the approved freshness window.
-- `backup-freshness.yml` checks the full backup and replica freshness hourly.
-  Keep its alert path working independently from application deployment.
-- `external-health.yml` checks the non-PII `/api/health` endpoint every five
-  minutes. Its GitHub Environment must supply `HEALTHCHECK_URL` and
-  `DISCORD_ALERT_WEBHOOK_URL`; if deployment protection blocks the probe, also
-  configure `VERCEL_AUTOMATION_BYPASS_SECRET` as supported by the workflow.
-  Investigate the endpoint and notification path whenever the workflow fails;
-  a green GitHub run alone does not prove every production function is healthy.
-- Perform a full restore rehearsal before first service operation and then at
-  the cadence in [backup-restore-bcp.md](compliance/backup-restore-bcp.md).
-  Record generation, target project, measured RPO/RTO, and evidence there.
-- The daily business exports in the application serve a separate purpose from
-  the full logical database backup. Keep both.
+- `full-backup.yml` はスケジュール実行され、手動実行では `staging` または `production` を指定できます。Production migrationの前に、直近の成功バックアップが承認済みの鮮度期間を超えている場合は手動実行します。
+- `backup-freshness.yml` は完全バックアップと複製先の鮮度を1時間ごとに確認します。アプリケーション配備とは独立して通知経路を維持します。
+- `external-health.yml` は個人情報を含まない `/api/health` エンドポイントを5分ごとに確認します。GitHub Environmentに `HEALTHCHECK_URL` と `DISCORD_ALERT_WEBHOOK_URL` が必要です。Deployment Protectionが確認を妨げる場合は、workflowがサポートする `VERCEL_AUTOMATION_BYPASS_SECRET` も設定します。workflowが失敗したらエンドポイントと通知経路を調査してください。GitHubの実行がgreenでも、本番機能がすべて正常である証拠にはなりません。
+- 初回のサービス提供前と、その後は[backup-restore-bcp.md](compliance/backup-restore-bcp.md)で定めた周期で完全な復元リハーサルを実施します。世代、対象プロジェクト、実測したRPO/RTO、証跡を記録します。
+- アプリケーションの日次業務exportは完全な論理データベースバックアップとは別の役割があります。両方を維持します。
 
-## Read-only status snapshot
+## 読み取り専用の状況記録
 
-External settings were inspected on 2026-09-23 and 2026-09-24. These facts
-describe the inspected accounts and do not prove a Production deployment from
-this branch:
+外部設定は2026-09-23と2026-09-24に確認しました。以下は確認したアカウントの状態を示すもので、このbranchからProductionへ配備した証拠ではありません。
 
-- GitHub Actions is active. The latest full logical backup and backup freshness
-  runs succeeded.
-- The external health workflow has a failed historical run under investigation.
-  Run `35788093677` failed the HTTP 200 check and failure notification; the HTTP
-  status was not logged. Both public health URLs returned HTTP 200 on
-  2026-09-23. `HEALTHCHECK_URL` was then set to
-  `https://care-record.shoug.org` in the existing `Production` Environment and
-  read back. `DISCORD_ALERT_WEBHOOK_URL` is absent from that Environment's
-  secret list; the notification path remains unverified.
-- PR #17 passed App, empty-database and pgTAP, UI, dependency audit, secret
-  scan, local Supabase E2E, and the final `CI` check on 2026-09-24. Its
-  `care-record-staging` Preview reached READY and requires Vercel SSO.
-- `main` branch protection was configured and read back on 2026-09-24. It
-  requires a PR and the `CI` check, allows zero required approvals for the
-  single maintainer, applies to admins, and blocks force pushes and deletion.
-- The legacy `e2e` GitHub Environment still contains six cloud E2E secrets
-  (`E2E_SUPABASE_ANON_KEY`, `E2E_SUPABASE_SERVICE_ROLE_KEY`,
-  `E2E_SUPABASE_URL`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, and
-  `SUPABASE_PROJECT_ID`). Remove that Environment only after the replacement CI
-  succeeds on a PR and no workflow references it; deleting it also deletes its
-  stored secret values. The replacement CI has now passed, but this deletion
-  has not been approved or performed.
-- Both Vercel projects exist. Staging builds Previews. A filter to skip Preview
-  builds in the Production project was applied and read back on 2026-09-23.
-- The Production Vercel variable listing did not show
-  `SUPABASE_SERVICE_ROLE_KEY` in Production scope. The deployed health endpoint
-  currently returns HTTP 200, so this does not explain the past monitor
-  failure. Verify the key's scope before the next deployment.
+- GitHub Actionsは有効です。直近の完全論理バックアップとバックアップ鮮度確認は成功しました。
+- 外形監視workflowには調査中の失敗履歴があります。run `35788093677` はHTTP 200確認と失敗通知の両方で失敗しましたが、HTTP statusはログに記録されていません。2026-09-23には公開health URLの両方がHTTP 200を返しました。その後、`HEALTHCHECK_URL` に `https://care-record.shoug.org` を設定し、既存の `Production` Environmentで読み戻して確認しました。`DISCORD_ALERT_WEBHOOK_URL` はそのEnvironmentのsecret一覧になく、通知経路は未確認です。
+- PR #17は2026-09-24にApp、空DBとpgTAP、UI、依存監査、secret scan、ローカルSupabase E2E、最終 `CI` checkに合格しました。`care-record-staging` のPreviewはREADYになり、Vercel SSOが必要です。
+- `main` のbranch protectionは2026-09-24に設定し、読み戻して確認しました。PRと `CI` checkを必須とし、単独の保守担当者のため必須承認数を0に設定し、adminにも適用します。force pushと削除は禁止しています。
+- 旧 `e2e` GitHub Environmentには、クラウドE2E用secretが6件残っています（`E2E_SUPABASE_ANON_KEY`、`E2E_SUPABASE_SERVICE_ROLE_KEY`、`E2E_SUPABASE_URL`、`SUPABASE_ACCESS_TOKEN`、`SUPABASE_DB_PASSWORD`、`SUPABASE_PROJECT_ID`）。置き換え後のCIがPRで成功し、参照するworkflowがないことを確認してから削除してください。Environmentを削除すると保存済みのsecret値も削除されます。置き換え後のCIは成功済みですが、この削除は未承認で、実行していません。
+- 2つのVercelプロジェクトが存在します。StagingはPreviewをbuildします。ProductionプロジェクトでPreviewを省略するフィルターは2026-09-23に適用し、読み戻して確認しました。
+- Production Vercelの変数一覧では、`SUPABASE_SERVICE_ROLE_KEY` がProduction scopeにありませんでした。現在配備中のhealth endpointはHTTP 200を返しているため、この不足が過去の監視失敗の原因とは断定できません。次の配備より前にProduction scopeへ設定してください。値は表示・転記せず、変数名とscopeだけを確認します。
 
-Configure the missing environment values, verify alert delivery, and complete
-the Production release checks before marking the release path operational.
+実施担当者は、GitHubの既存 `Production` Environmentに `DISCORD_ALERT_WEBHOOK_URL` を設定し、`care-record` VercelプロジェクトのProduction scopeに `SUPABASE_SERVICE_ROLE_KEY` を設定してください。どちらの値も文書、PR、ログ、チャットへ出さないでください。その後、安全な方法で通知の実到達を確認します。通知確認後にサービスオーナーの明示承認を得るまで、PR #17をマージしたりProduction配備を開始したりしないでください。旧 `e2e` Environmentの削除は、6件のsecret値を消すため別途承認されるまで保留です。
 
-## Specification references checked
+## 仕様確認に使った資料
 
-Context7 documentation was checked on 2026-09-23 before updating this runbook:
+このrunbookの今回の更新にあたり、2026-09-24にContext7で最新の資料を確認しました。
 
-- [Vercel Git deployments](https://vercel.com/docs/deployments/git): configured
-  Production Branch behavior and Preview deployments from other branches.
-- [Supabase CLI reference](https://supabase.com/docs/reference/cli/introduction):
-  local status, start/reset/stop, linked migration listing, and `db push
-  --dry-run` syntax. Project and CI use Supabase CLI 2.108.0.
-- [GitHub Actions job conditions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions):
-  skipped conditional jobs and stable final status checks.
+- [Vercel Git配備](https://vercel.com/docs/deployments/git): Production Branchの動作と、その他のbranchからのPreview配備。
+- [GitHub Environment secrets](https://github.com/github/docs/blob/main/content/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets.md): Environmentを指定したsecret設定方法。
+- [GitHub Environmentsの管理](https://github.com/github/docs/blob/main/content/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments.md): workflowから存在しないEnvironmentを参照した場合の作成動作。
+- [Vercel環境変数](https://vercel.com/docs/environment-variables): Production、Preview、Developmentなどの環境ごとの変数スコープ。
+- [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys): 本番プロジェクトのservice role keyの確認場所と権限。
+- [Supabase CLI reference](https://supabase.com/docs/reference/cli/introduction): local status、start/reset/stop、linked migration listing、`db push --dry-run` のsyntax。ProjectとCIはSupabase CLI 2.108.0を使用します。
+- [GitHub Actions job conditions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions): 条件付きjobの省略と、固定名の最終status checkについて。

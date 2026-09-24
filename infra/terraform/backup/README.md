@@ -1,18 +1,11 @@
-# Backup infrastructure
+# バックアップ基盤
 
-This module provisions separate Tokyo (`asia-northeast1`) and Osaka
-(`asia-northeast2`) backup buckets, a ten-year audit WORM bucket, daily Storage
-Transfer replication, and GitHub Actions Workload Identity Federation. It does
-not create a service-account key.
+このモジュールは、東京（`asia-northeast1`）と大阪（`asia-northeast2`）にそれぞれバックアップ用バケット、10年間保管する監査ログ用WORMバケット、Storage Transferによる日次複製、GitHub ActionsのWorkload Identity Federationを構成します。サービスアカウント鍵は作成しません。
 
-Keep the Terraform state and backup resources separate for `staging` and
-`production`. The staging environment is a GitHub Environment used by the
-backup workflows; it does not require a permanent `staging` Git branch.
+`staging`と`production`では、Terraformのstateとバックアップ用リソースを分けて管理してください。`staging`環境はバックアップワークフローが使うGitHub Environmentであり、`staging`ブランチを常設する必要はありません。
 
-1. Bootstrap one dedicated GCS state bucket per GCP project. Enable uniform
-   bucket-level access, public-access prevention, and object versioning. Do not
-   enable Bucket Lock on the state bucket.
-2. Initialize the environment-specific remote state. For example:
+1. GCPプロジェクトごとに、専用のGCS stateバケットを1つ用意します。バケット単位の均一なアクセス制御、パブリックアクセス防止、オブジェクトのバージョン管理を有効にしてください。stateバケットではBucket Lockを有効にしないでください。
+2. 環境ごとのリモートstateを初期化します。例:
 
    ```sh
    terraform init \
@@ -20,25 +13,9 @@ backup workflows; it does not require a permanent `staging` Git branch.
      -backend-config="prefix=backup/staging"
    ```
 
-3. Copy `terraform.tfvars.example` to an untracked environment-specific tfvars
-   file and replace all placeholders. `github_refs` is an exact allowlist of
-   Git refs; this module currently accepts complete branch or tag refs and does
-   not accept wildcard patterns. The scheduled backup workflow runs from
-   `main`, and manual staging/Production runs select their GitHub Environment
-   from a workflow input. Allow `refs/heads/main` for both environments when
-   they are dispatched from `main`. If a pre-merge test needs another branch,
-   allow that exact ref temporarily and remove it after the change is merged.
-   Keep Production limited to `refs/heads/main`.
-4. Run `terraform validate` and save a plan with
-   `terraform plan -out=backup.tfplan`.
-5. Put the `workload_identity_provider`, `backup_service_account`, and
-   `backup_bucket` outputs in the matching GitHub Environment variables. The
-   backup workflow reads these values from GitHub; it does not use application
-   `.env.local` or Vercel runtime credentials.
-6. Keep `enable_bucket_lock = false` until the retention settings and saved plan
-   have received separate approval. Setting it to `true` is irreversible in
-   GCS.
+3. `terraform.tfvars.example`を、Gitの追跡対象外となる環境別のtfvarsファイルへコピーし、すべてのプレースホルダーを置き換えます。`github_refs`はGit参照名の完全一致による許可リストです。このモジュールが受け付けるのはブランチまたはタグの完全な参照名であり、ワイルドカードは使えません。定期バックアップワークフローは`main`から実行されます。`staging`または`Production`の手動実行では、ワークフローの入力からGitHub Environmentを選びます。`main`から起動する場合は、両環境で`refs/heads/main`を許可してください。マージ前のテストで別のブランチが必要な場合は、その参照名だけを一時的に許可し、変更のマージ後に削除してください。`Production`では`refs/heads/main`だけを許可してください。
+4. `terraform validate`を実行し、`terraform plan -out=backup.tfplan`でplanを保存します。
+5. `workload_identity_provider`、`backup_service_account`、`backup_bucket`の各出力値を、対応するGitHub Environmentの変数に設定します。バックアップワークフローはこれらの値をGitHubから読み込み、アプリケーションの`.env.local`やVercelの実行時認証情報は使いません。
+6. 保持設定と保存済みplanについて別途承認を得るまで、`enable_bucket_lock = false`のままにしてください。GCSで一度`true`にすると元に戻せません。
 
-The transfer job copies new immutable objects daily and never propagates
-deletes. The 26-hour replica freshness alert should compare the newest object in
-both buckets rather than expecting deletions to converge.
+転送ジョブは新しい不変オブジェクトを毎日コピーし、削除は複製先へ反映しません。26時間の複製データ鮮度アラートでは、削除が同期されることを期待せず、両バケットの最新オブジェクトを比較してください。

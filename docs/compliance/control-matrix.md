@@ -21,9 +21,9 @@
 | WEB-01 | ブラウザ防御 | nonce CSP、HSTS等 | implemented | 本番CSP違反ゼロ、ヘッダー試験 |
 | BAK-01 | 独自バックアップ・復旧 | `backup-restore-bcp.md` | pending | 12時間完全バックアップと月次復旧試験で限定提供中RPO 14時間・RTO 4時間を実測 |
 | BCM-01 | インシデント・BCP | 手順・記録テーブル | implemented | 年2回訓練と是正記録 |
-| SUP-01 | 委託・再委託管理 | `vendor_registry` | pending | Supabase/Vercel/Googleの契約・国・exit plan承認 |
+| SUP-01 | 委託・再委託管理 | `vendor_registry` | pending | Supabase/Vercel/Googleの契約・国・サービス終了時の移行・撤退計画の承認 |
 | RET-01 | 記録別保持 | `retention_policies`、legal hold | pending | 専門家確認済み根拠で暫定値を置換 |
-| SDLC-01 | 脆弱性管理 | 統合CIの依存監査・secret scan・SBOM | implemented | High/Criticalゼロ、例外承認 |
+| SDLC-01 | 脆弱性管理 | 統合CIによる依存関係監査・シークレット検査・SBOM作成 | implemented | High/Criticalゼロ、例外承認 |
 | PRI-01 | 本人・利用者向け通知 | Privacy/Terms | pending | 法務レビュー、版管理、再同意試験 |
 | SLA-01 | 開示書・SLA・責任分界 | `service-specification-sla.md` | pending | 顧客との明示合意と改定通知 |
 

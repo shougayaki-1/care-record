@@ -4,7 +4,7 @@
 
 このディレクトリは「準拠を宣言する資料」ではなく、実装・設定・契約・訓練の証跡を揃えるための管理文書です。コードが存在しても、本番適用記録と運用実績がなければ未確認と判定します。
 
-通常のアプリ変更は [デプロイ手順](../deployment-runbook.md) に従い、PRのCI・配備・最小稼働確認を記録します。初回提供・重要な変更の判断は [提供開始チェックリスト](../release-readiness-checklist.md) と [本番証跡チェックリスト](production-evidence-checklist.md)、バックアップ・復元の定期保守は [BCP](backup-restore-bcp.md) を使用します。これらを個々のアプリ配備ごとに繰り返す条件とはしません。
+通常のアプリ変更では [デプロイ手順](../deployment-runbook.md) に従い、PRごとにCI結果、配備結果、最低限の稼働確認を記録します。初回提供や重要な変更の判定には [提供開始チェックリスト](../release-readiness-checklist.md) と [本番証跡チェックリスト](production-evidence-checklist.md) を、バックアップ・復元の定期保守には [BCP](backup-restore-bcp.md) を使用します。これらの確認を個々のアプリ配備のたびに繰り返す必要はありません。
 
 ## 判定
 

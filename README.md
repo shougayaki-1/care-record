@@ -1,13 +1,10 @@
 # CareRecord
 
-CareRecord is a care-record, shift, and reporting application for home-care
-providers. The compliance and operational evidence index is in
-[docs/compliance/README.md](docs/compliance/README.md).
+CareRecordは、訪問介護事業者向けの介護記録・シフト・帳票管理アプリです。準拠状況と運用上の証跡は[docs/compliance/README.md](docs/compliance/README.md)にまとめています。
 
-## Development
+## 開発
 
-Use Node.js 24 and Docker. Install dependencies, start the local Supabase stack,
-and apply the checked-in migrations:
+Node.js 24 と Docker を使います。依存関係をインストールし、ローカル Supabase を起動して、リポジトリで管理するマイグレーションを適用します。
 
 ```sh
 npm ci
@@ -15,75 +12,38 @@ npx --yes supabase@2.108.0 start
 npx --yes supabase@2.108.0 db reset
 ```
 
-Copy `.env.example` to `.env.local`. Set `APP_ENV=local`, turn off external
-integrations for ordinary local work, and use the local API URL, anon key, and
-service-role key shown by `npx --yes supabase@2.108.0 status --output env`.
-Keep `.env.local` untracked. Do not use a hosted project's credentials for local
-development or E2E tests.
+`.env.example` を `.env.local` にコピーします。`APP_ENV=local` を設定し、通常のローカル作業では外部連携を無効にしてください。`npx --yes supabase@2.108.0 status --output env` が表示するローカル API URL、anon key、service-role キーを設定します。`.env.local` は Git で追跡しないでください。ローカル開発や E2E にホスト済みプロジェクトの認証情報を使わないでください。
 
 ```sh
 npm run dev
 ```
 
-See [development setup](docs/development.md) and
-[test instructions](docs/testing.md) for the full workflow.
+詳しい手順は[開発環境のセットアップ](docs/development.md)と[テスト手順](docs/testing.md)を参照してください。
 
-## Release flow
+## リリース手順
 
-The routine path is `feature/*` → pull request → `main`. A permanent `staging`
-branch is not required. One maintainer opens the PR, reviews the diff and check
-results, and records a short release note in the PR. The release record includes
-the candidate SHA, relevant CI result, any database migration result, and the
-deployment URL and smoke-check result.
+通常は `feature/*` から PR を作成し、`main` に統合します。常設の `staging` ブランチは必須ではありません。一人の担当メンテナーが PR を作成し、差分と検査結果を確認したうえで、PR に短いリリースノートを記録します。リリース記録には候補 SHA、関連する CI 結果、該当する場合はデータベースマイグレーションの結果、デプロイ URL とスモークテストの結果を含めます。
 
-Vercel Git integration is the intended application deployment path. Keep the
-existing `care-record` Production project and `care-record-staging` Preview
-project, with separate Supabase projects and environment values. The intended
-mapping is Production from `main` in `care-record` and feature-branch Previews in
-`care-record-staging`. Project presence has been checked; the Production
-project mappings and remaining setup checks are recorded in the
-[deployment runbook](docs/deployment-runbook.md); verify them before treating
-this path as operational.
+アプリは Vercel の Git 連携でデプロイする方針です。既存の `care-record` Production 用プロジェクトと `care-record-staging` Preview 用プロジェクトを維持し、Supabase プロジェクトと環境変数はそれぞれ分けます。想定構成では、`care-record` が `main` のコミットを Production にデプロイし、`care-record-staging` が feature ブランチの Preview をデプロイします。両プロジェクトの存在とブランチ設定は確認済みです。残るセットアップ確認事項は[デプロイ手順](docs/deployment-runbook.md)に記載しています。このデプロイ経路を運用可能とみなす前に、設定を確認してください。
 
-Database changes use a manual, backward-compatible, database-first release:
+データベース変更は、後方互換性を保ち、データベースを先に更新する手動リリース手順で行います。
 
-1. Review the migration diff and candidate SHA. Apply the migration to the
-   existing staging database and check the relevant Preview behavior.
-2. Confirm the linked Supabase project, migration history, and dry-run. Check a
-   recent Production backup before applying the same migration to Production.
-3. Apply the compatible migration to Production while the current application
-   still works with the expanded schema.
-4. Merge the PR. Vercel deploys the `main` commit through Git integration.
-5. Check `/api/health`, sign-in, and one minimal record save. Use an expand,
-   migrate, contract sequence for changes that remove or rename schema.
+1. マイグレーションの差分と候補 SHA を確認します。既存の staging データベースにマイグレーションを適用し、対応する Preview の動作を確認します。
+2. Production に適用する前に、link 済みの Supabase プロジェクト、マイグレーション履歴、dry-run を確認します。Production の最新バックアップも確認します。
+3. 現行アプリが拡張後のスキーマでも動作する状態で、互換性のあるマイグレーションを Production に適用します。
+4. PR をマージします。Vercel の Git 連携が `main` のコミットをデプロイします。
+5. `/api/health`、サインイン、最小限の記録保存を確認します。スキーマの削除や名前変更を伴う変更は、expand、migrate、contract の順に進めます。
 
-Application rollback and database recovery are separate operations. Reverting a
-Vercel application deployment does not reverse a database migration. Detailed
-initial setup, migration, release, monitoring, and rollback steps are in the
-[deployment runbook](docs/deployment-runbook.md).
+アプリのロールバックとデータベースの復旧は別の操作です。Vercel のアプリデプロイを戻しても、データベースマイグレーションは元に戻りません。初期設定、マイグレーション、リリース、監視、ロールバックの詳細は[デプロイ手順](docs/deployment-runbook.md)を参照してください。
 
-## Checks
+## 検査
 
-The PR runs the configured basic CI checks and any heavier checks selected for
-the changed files. Local Supabase E2E uses synthetic data and no cloud E2E
-secrets. See [testing](docs/testing.md) for the current scripts and selection
-rules, and the [deployment runbook](docs/deployment-runbook.md) for the
-external branch-rule status.
+PR では設定済みの基本 CI 検査を実行し、変更ファイルに応じて追加の検査を選択します。ローカル Supabase を使う E2E では合成データを使用し、クラウド E2E 用のシークレットは使いません。現在のスクリプトと検査対象の選択規則は[テスト手順](docs/testing.md)、外部のブランチ保護の設定状況は[デプロイ手順](docs/deployment-runbook.md)を参照してください。
 
-Routine release checks are intentionally short. Use the
-[release-readiness checklist](docs/release-readiness-checklist.md) for initial
-service operation and material changes, and the
-[deployment runbook](docs/deployment-runbook.md) for regular releases and
-periodic operations.
+通常のリリースで行う検査は必要な範囲に絞っています。サービスの初回運用開始や重要な変更時は[リリース準備チェックリスト](docs/release-readiness-checklist.md)を、通常のリリースや定期運用は[デプロイ手順](docs/deployment-runbook.md)を参照してください。
 
-## Security-sensitive configuration
+## セキュリティ上重要な設定
 
-Set staging and Production variables in their corresponding Vercel projects;
-keep their Supabase keys, service-role keys, OAuth credentials, and integration
-secrets separate. Never expose server-only values with a `NEXT_PUBLIC_` prefix.
-The names and purpose of application variables are listed in `.env.example`.
-The active Google token-encryption key must be a random 32-byte value encoded as
-base64; keep older keyring entries for decrypting existing tokens during key
-rotation. The GAS endpoint must reject stale timestamps and reused nonces and
-verify `X-CareRecord-Signature` as HMAC-SHA256 over
-`<timestamp>.<nonce>.<request-body>` using `GAS_SHARED_SECRET`.
+staging と Production の環境変数は、それぞれ対応する Vercel プロジェクトに設定します。Supabase のキー、service-role key、OAuth 認証情報、連携用シークレットは環境ごとに分けてください。サーバー専用の値に `NEXT_PUBLIC_` を付けないでください。アプリケーション変数の名前と用途は `.env.example` に記載しています。
+
+現在使う Google トークンの暗号化キーは、base64 でエンコードしたランダムな 32 バイト値にしてください。キーをローテーションする間は、既存トークンの復号に必要な古いキーリングの項目も残してください。GAS エンドポイントは期限切れの timestamp と再利用された nonce を拒否し、`GAS_SHARED_SECRET` を使って `<timestamp>.<nonce>.<request-body>` に対する HMAC-SHA256 として `X-CareRecord-Signature` を検証する必要があります。
