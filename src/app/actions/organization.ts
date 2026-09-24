@@ -31,26 +31,6 @@ export async function updateOrganizationDriveFolder(orgId: string, folderId: str
     return { success: true };
 }
 
-export async function updateTravelCostSettings(orgId: string, rateYenPerKm: number) {
-    const { userId } = await assertOrgPermission(orgId, 'organization');
-    const rate = Number(rateYenPerKm);
-    if (!Number.isFinite(rate) || rate < 0 || rate > 10000) {
-        throw new Error('交通費単価は0〜10000円で入力してください');
-    }
-    const sessionClient = await createSessionClient();
-    const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'travel_rate', p_value: String(rate) });
-    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
-    await recordAuditEvent({
-        organizationId: orgId,
-        actorId: userId,
-        action: 'organization.travel_cost_update',
-        resourceType: 'organization',
-        resourceId: orgId,
-        details: { rateYenPerKm: rate },
-    });
-    return { success: true, rateYenPerKm: rate };
-}
-
 export async function disconnectGoogleCalendar(orgId: string, reauthToken: string) {
     const { userId } = await assertOrgPermission(orgId, 'integrations');
     const reauth = await consumeReauthGrant('external_secret_change', reauthToken);

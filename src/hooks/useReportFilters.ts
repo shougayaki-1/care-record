@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 export function useReportFilters() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const isExportView = searchParams.get('view') === 'export';
   const [filterClientId, setFilterClientId] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [startDate, setStartDate] = useState(() => {
@@ -30,12 +31,13 @@ export function useReportFilters() {
     const orderParam = searchParams.get('order');
     const orderByParam = searchParams.get('orderBy');
 
-    setOnlyPending(statusParam === 'unapproved');
+    setOnlyPending(statusParam === 'unapproved' && !isExportView);
     if (periodParam === 'current_month') {
       const now = new Date();
       const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
       const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      const formatDate = (date: Date) => date.toISOString().split('T')[0];
+      // Keep calendar dates in local time; toISOString() shifts them back a day in JST.
+      const formatDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       setStartDate(formatDate(firstDay));
       setEndDate(formatDate(lastDay));
     } else {
@@ -44,10 +46,10 @@ export function useReportFilters() {
     }
     setFilterShiftId(shiftParam || null);
     if (clientIdParam) setFilterClientId(clientIdParam);
-    if (recordStatusParam) setFilterStatus(recordStatusParam);
+    setFilterStatus(recordStatusParam || (isExportView ? 'approved' : 'all'));
     if (orderParam === 'asc' || orderParam === 'desc') setOrder(orderParam);
     if (orderByParam) setOrderBy(orderByParam);
-  }, [searchParams]);
+  }, [searchParams, isExportView]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -60,10 +62,22 @@ export function useReportFilters() {
     if (filterShiftId) params.set('shiftId', filterShiftId);
     if (order !== 'desc') params.set('order', order);
     if (orderBy !== 'start_at') params.set('orderBy', orderBy);
+    if (isExportView) params.set('view', 'export');
+    if (searchParams.get('period') === 'current_month') {
+      const now = new Date();
+      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
+      // Preserve the named shortcut only while its dates are unchanged. Once edited,
+      // from/to become the source of truth and the URL must not reset them on reload.
+      if (startDate === monthStart && endDate === monthEnd) params.set('period', 'current_month');
+    }
 
     const nextQuery = params.toString();
     if (nextQuery === searchParams.toString()) return;
-    router.replace(nextQuery ? `/app/reports?${nextQuery}` : '/app/reports', { scroll: false });
+    const timer = window.setTimeout(() => {
+      router.replace(nextQuery ? `/app/reports?${nextQuery}` : '/app/reports', { scroll: false });
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [
     endDate,
     filterClientId,
@@ -75,6 +89,7 @@ export function useReportFilters() {
     router,
     searchParams,
     startDate,
+    isExportView,
   ]);
 
   return {
@@ -94,5 +109,6 @@ export function useReportFilters() {
     orderBy,
     setOrderBy,
     isCurrentMonth: searchParams.get('period') === 'current_month',
+    isExportView,
   };
 }

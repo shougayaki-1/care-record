@@ -22,18 +22,18 @@ export default function RecordPage() {
     router, showToast, currentOrg, clientId, shiftId, segmentId,
     autosaveState, clientName, template, answers, selectableStaffs, staffRoles, serviceTypes,
     selectedHelpers, actualStaffs, actualServiceTypeId, startDateTime, endDateTime,
-    serviceTime, travelTime, roundTripDistanceKm, travelCostRateYenPerKm, images,
+    serviceTime, travelTime, travelExpenses, images,
     aiFilledFields, isSpanningMonth, selectedPart, originalShiftTimes,
     currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting,
     shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId,
     dismissShiftSuggestion, setShiftSuggestions, setLinkedShifts,
     setActualServiceTypeId, setActualStaffs, setStartDateTime, setEndDateTime,
-    setServiceTime, setTravelTime, setRoundTripDistanceKm,
-    setDistanceTouched, setIsDirty, setOpenCloseDialog,
+    setServiceTime, setTravelTime, setTravelExpenses,
+    setIsDirty, setOpenCloseDialog,
     formatTimeForLabel, formatSegmentLabel, handlePartChange, handleChange, handleAnswerChange,
     handleImageUpload, handleDeleteReport, handleDraftSave, handleSubmit, handlePendingSave,
     handleApprove, handleRemand, handleClose, handleDialogDiscard, handleDialogSaveDraft,
-    handleAiExtracted, groupedSections, isAdmin, isReadOnly, canDeleteRecord, travelCostYen,
+    handleAiExtracted, groupedSections, isAdmin, isReadOnly, canDeleteRecord,
     requiresSegmentSelection, aiClients, aiHelpers, handleStaffChange,
   } = useRecordForm();
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}><CircularProgress /></Box>;
@@ -79,6 +79,7 @@ export default function RecordPage() {
                 {autosaveState === 'saving' ? '入力内容を保存中です…' : autosaveState === 'saved' ? '入力内容は自動保存されています' : '自動保存に失敗しました。通信を確認して入力を続けてください。'}
               </Alert>
             )}
+            {currentReportId && actualStaffs.some((staff) => !travelExpenses[staff.staff_id]) && <Alert severity="warning">この記録にはスタッフ別の交通費がありません。精算前に確認してください。</Alert>}
             
             {isSpanningMonth && (
               <MonthSplitTabs
@@ -154,9 +155,8 @@ export default function RecordPage() {
               endDateTime={endDateTime}
               serviceTime={serviceTime}
               travelTime={travelTime}
-              roundTripDistanceKm={roundTripDistanceKm}
-              travelCostYen={travelCostYen}
-              travelCostRateYenPerKm={travelCostRateYenPerKm}
+              travelExpenses={travelExpenses}
+              applyDefaultTravelCosts={!currentReportId}
               errors={errors}
               aiFilledFields={aiFilledFields}
               disabled={isReadOnly}
@@ -167,7 +167,7 @@ export default function RecordPage() {
               onEndChange={(value) => handleChange(setEndDateTime, value)}
               onServiceTimeChange={(value) => handleChange(setServiceTime, value)}
               onTravelTimeChange={(value) => handleChange(setTravelTime, value)}
-              onDistanceChange={(value) => { setDistanceTouched(true); handleChange(setRoundTripDistanceKm, value); }}
+              onTravelExpenseChange={(staffId, expense) => { setTravelExpenses((previous) => ({ ...previous, [staffId]: expense })); setIsDirty(true); }}
             />
 
             <RecordDynamicSections

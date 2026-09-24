@@ -13,6 +13,7 @@ export type Database = {
         Row: {
           client_id: string
           created_at: string
+          default_travel_cost_yen: number | null
           ghost_staff_id: string | null
           helper_id: string | null
           id: string
@@ -22,6 +23,7 @@ export type Database = {
         Insert: {
           client_id: string
           created_at?: string
+          default_travel_cost_yen?: number | null
           ghost_staff_id?: string | null
           helper_id?: string | null
           id?: string
@@ -31,6 +33,7 @@ export type Database = {
         Update: {
           client_id?: string
           created_at?: string
+          default_travel_cost_yen?: number | null
           ghost_staff_id?: string | null
           helper_id?: string | null
           id?: string
@@ -2818,6 +2821,15 @@ export type Database = {
         Args: {
           p_client_id: string
           p_distances?: Json
+          p_organization_id: string
+          p_staff_ids: string[]
+        }
+        Returns: undefined
+      }
+      replace_client_assignments_with_costs_authorized: {
+        Args: {
+          p_client_id: string
+          p_costs: Json
           p_organization_id: string
           p_staff_ids: string[]
         }

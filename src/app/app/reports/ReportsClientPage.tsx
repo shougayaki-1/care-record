@@ -17,6 +17,7 @@ import TagIcon from '@mui/icons-material/Tag';
 import ArticleIcon from '@mui/icons-material/Article';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RestoreIcon from '@mui/icons-material/Restore';
+import SettingsIcon from '@mui/icons-material/Settings';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'; // ★追加: 警告アイコン
 import { useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -32,11 +33,12 @@ import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/t
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { InnerPageHeader, PageBody, PageLayout, TablePageSkeleton } from '@/components/ui';
-import { checkRecordPermission } from '@/utils/permissions';
+import { checkManagementPermission, checkRecordPermission } from '@/utils/permissions';
 import { buildRecordPath } from '@/utils/recordNavigation';
 import { getReportStatusChipColor, getReportStatusLabel, type ReportStatus } from '@/utils/reportStatus';
 import {
   buildReportsCsv,
+  buildTravelSettlementCsv,
   getReportData,
   getReportHelperNames as getHelperNames,
 } from '@/utils/reportsExport';
@@ -84,6 +86,7 @@ export default function ReportsClientPage() {
     orderBy,
     setOrderBy,
     isCurrentMonth,
+    isExportView,
   } = useReportFilters();
   const [selected, setSelected] = useState<readonly string[]>([]);
   
@@ -247,6 +250,30 @@ export default function ReportsClientPage() {
         link.click();
         document.body.removeChild(link);
       } catch (e) { console.error(e); showToast('エクスポート中にエラーが発生しました', 'error'); } finally { setProcessing(false); }
+  };
+
+  const handleExportTravelCosts = async () => {
+      const targetReports = getTargetReports();
+      const { csv, missingCount, itemCount } = buildTravelSettlementCsv(targetReports);
+      if (missingCount > 0) {
+        showToast(`${missingCount}件の承認済み記録にスタッフ別交通費がありません。記録を確認してください。`, 'warning');
+        return;
+      }
+      if (itemCount === 0) { showToast('出力できる承認済みの交通費がありません', 'warning'); return; }
+      try {
+        await auditReportExport(currentOrg!.id, targetReports.filter((report) => report.status === 'approved').map((report) => report.id), 'csv');
+        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `travel_settlement_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (error) {
+        console.error(error);
+        showToast('交通費の出力に失敗しました', 'error');
+      }
   };
 
   const handleBulkDownloadPDF = async () => {
@@ -470,6 +497,7 @@ export default function ReportsClientPage() {
   if (onlyPending) headerTitle = "未承認・差戻し";
   if (isCurrentMonth) headerTitle = "今月の記録";
   if (filterShiftId) headerTitle = "シフト内の記録";
+  if (isExportView) headerTitle = "帳票・出力";
 
   if (wsLoading || !currentOrg) return <TablePageSkeleton />;
   const canApproveRecords = checkRecordPermission(currentOrg.effectivePermissions, 'approve', true);
@@ -477,7 +505,7 @@ export default function ReportsClientPage() {
 
   return (
     <PageLayout>
-        <InnerPageHeader icon={<TagIcon />} title={headerTitle} />
+        <InnerPageHeader icon={<TagIcon />} title={headerTitle} actions={isExportView && checkManagementPermission(currentOrg.effectivePermissions, 'integrations') ? <Button size="small" startIcon={<SettingsIcon />} onClick={() => router.push('/app/settings?tab=google')}>出力先の設定</Button> : undefined} />
 
        <PageBody maxWidth={false}>
            {reports.length >= 500 && (
@@ -505,7 +533,7 @@ export default function ReportsClientPage() {
                         <Typography sx={{ display: { xs: 'none', sm: 'block' } }}>～</Typography>
                         <TextField type="date" label="終了日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'background.paper', width: { xs: '100%', sm: 'auto' } }} />
                     </Box>
-                    <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />
+                    {!isExportView && <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />}
                     <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none', width: { xs: '100%', md: 'auto' } }}>検索</Button>
                 </Stack>
               </Stack>
@@ -518,23 +546,23 @@ export default function ReportsClientPage() {
                    </Typography>
                </Box>
                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}>
-                 <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing}>CSV</Button>
-                 <Button variant="outlined" size="small" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF}>PDF</Button>
+                 {isExportView && <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing}>CSV</Button>}
+                 {isExportView && <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportTravelCosts} disabled={processing}>交通費精算CSV</Button>}
+                 {isExportView && <Button variant="outlined" size="small" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF}>PDF</Button>}
                  {selected.length > 0 ? (
                     <>
-                        <Divider orientation="vertical" flexItem />
-                        <Button variant="contained" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
+                        {isExportView && <Button variant="contained" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
                             {gasProgress ? '作成中...' : '帳票作成(GAS)'}
-                        </Button>
-                        {canApproveRecords && <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>}
-                        {canApproveRecords && <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</Button>}
-                        {canDeleteRecords && <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</Button>}
+                        </Button>}
+                        {!isExportView && canApproveRecords && <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>}
+                        {!isExportView && canApproveRecords && <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</Button>}
+                        {!isExportView && canDeleteRecords && <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</Button>}
                     </>
-                 ) : (
+                 ) : isExportView ? (
                      <Button variant="outlined" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
                         {gasProgress ? '作成中...' : '全件帳票作成'}
                      </Button>
-                 )}
+                 ) : null}
                </Stack>
            </Box>
 

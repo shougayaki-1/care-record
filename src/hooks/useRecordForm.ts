@@ -32,7 +32,8 @@ export type FormItem = {
 };
 
 export type FormAnswers = Record<string, string | number | boolean | string[]>;
-export type HelperProfile = { id: string; name: string; defaultRoundTripDistanceKm?: number };
+export type HelperProfile = { id: string; name: string; defaultTravelCostYen: number | null };
+export type TravelExpense = { method: 'car' | 'public_transport' | 'other' | 'none'; amountYen: string };
 export type StaffRoleOption = { id: string; name: string };
 export type ServiceTypeOption = { id: string; name: string };
 export type ActualStaffInput = { staff_id: string; staff_role_id: string | null };
@@ -73,9 +74,7 @@ type FormState = {
   endDateTime: string;
   serviceTime: string;
   travelTime: string;
-  roundTripDistanceKm: string;
-  travelCostRateYenPerKm: number;
-  distanceTouched: boolean;
+  travelExpenses: Record<string, TravelExpense>;
   images: { id: string; url: string }[];
   aiFilledFields: Set<string>;
   hasAiDraftSource: boolean;
@@ -142,9 +141,7 @@ const formInitialState: FormState = {
   endDateTime: '',
   serviceTime: '',
   travelTime: '0',
-  roundTripDistanceKm: '0',
-  travelCostRateYenPerKm: 20,
-  distanceTouched: false,
+  travelExpenses: {},
   images: [],
   aiFilledFields: new Set(),
   hasAiDraftSource: false,
@@ -182,7 +179,7 @@ function formReducer(state: FormState, action: FormAction): FormState {
     case 'SET_ANSWERS':
       return { ...state, answers: resolveStateValue(action.value, state.answers) };
     case 'CLEAR_ANSWERS':
-      return { ...state, answers: {} };
+      return { ...state, answers: {}, travelExpenses: {} };
     case 'AI_FILL':
       return {
         ...state,
@@ -272,9 +269,7 @@ export function useRecordForm() {
     endDateTime,
     serviceTime,
     travelTime,
-    roundTripDistanceKm,
-    travelCostRateYenPerKm,
-    distanceTouched,
+    travelExpenses,
     images,
     aiFilledFields,
     hasAiDraftSource,
@@ -284,11 +279,6 @@ export function useRecordForm() {
   } = formState;
   const { currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting } = uiState;
   const { shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId } = shiftState;
-  const travelCostRateRef = useRef(travelCostRateYenPerKm);
-
-  useEffect(() => {
-    travelCostRateRef.current = travelCostRateYenPerKm;
-  }, [travelCostRateYenPerKm]);
 
   const setFormField = useCallback(<K extends keyof FormState>(field: K, value: SetStateValue<FormState[K]>) => {
     formDispatch({ type: 'SET_FIELD', field, value });
@@ -313,9 +303,7 @@ export function useRecordForm() {
   const setEndDateTime = useCallback((value: SetStateValue<string>) => setFormField('endDateTime', value), [setFormField]);
   const setServiceTime = useCallback((value: SetStateValue<string>) => setFormField('serviceTime', value), [setFormField]);
   const setTravelTime = useCallback((value: SetStateValue<string>) => setFormField('travelTime', value), [setFormField]);
-  const setRoundTripDistanceKm = useCallback((value: SetStateValue<string>) => setFormField('roundTripDistanceKm', value), [setFormField]);
-  const setTravelCostRateYenPerKm = useCallback((value: SetStateValue<number>) => setFormField('travelCostRateYenPerKm', value), [setFormField]);
-  const setDistanceTouched = useCallback((value: SetStateValue<boolean>) => setFormField('distanceTouched', value), [setFormField]);
+  const setTravelExpenses = useCallback((value: SetStateValue<Record<string, TravelExpense>>) => setFormField('travelExpenses', value), [setFormField]);
   const setImages = useCallback((value: SetStateValue<{ id: string; url: string }[]>) => setFormField('images', value), [setFormField]);
   const setAiFilledFields = useCallback((value: SetStateValue<Set<string>>) => setFormField('aiFilledFields', value), [setFormField]);
   const setHasAiDraftSource = useCallback((value: SetStateValue<boolean>) => setFormField('hasAiDraftSource', value), [setFormField]);
@@ -442,6 +430,7 @@ export function useRecordForm() {
           router.replace(`/app/record/${clientId}?shiftId=${shiftId}&draftKey=${encodeURIComponent(draftKey)}`);
           setupTimeForPart(part, originalShiftTimes.start_at, originalShiftTimes.end_at);
           setAnswers({});
+          setTravelExpenses({});
           setCurrentStatus('draft');
       }
   };
@@ -455,7 +444,6 @@ export function useRecordForm() {
         { data: tmpl },
         { data: staffsData },
         { data: assignmentRows },
-        { data: orgData },
         { data: serviceTypeData },
         { data: staffRoleData },
       ] = await Promise.all([
@@ -470,13 +458,8 @@ export function useRecordForm() {
           .order('name', { ascending: true }),
         supabase
           .from('assignments')
-          .select('staff_id, round_trip_distance_km')
+          .select('staff_id, default_travel_cost_yen')
           .eq('client_id', clientId),
-        supabase
-          .from('organizations')
-          .select('travel_cost_rate_yen_per_km')
-          .eq('id', currentOrg.id)
-          .maybeSingle(),
         supabase
           .from('service_types')
           .select('id, name')
@@ -503,11 +486,10 @@ export function useRecordForm() {
         setTemplate(schema.filter(i => !['service_time', 'travel_time', 'round_trip_distance_km', 'travel_cost_yen'].includes(i.id)));
       }
 
-      const distanceByStaffId = new Map((assignmentRows || []).map((assignment) => [assignment.staff_id, Number(assignment.round_trip_distance_km || 0)]));
-      const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id, defaultRoundTripDistanceKm: distanceByStaffId.get(s.id) || 0 }));
+      const costByStaffId = new Map((assignmentRows || []).map((assignment) => [assignment.staff_id, assignment.default_travel_cost_yen]));
+      const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id, defaultTravelCostYen: costByStaffId.get(s.id) ?? null }));
       setSelectableStaffs(allStaffs);
 
-      setTravelCostRateYenPerKm(Number(orgData?.travel_cost_rate_yen_per_km ?? 20));
       setServiceTypes((serviceTypeData ?? []) as ServiceTypeOption[]);
       setStaffRoles((staffRoleData ?? []) as StaffRoleOption[]);
 
@@ -516,11 +498,10 @@ export function useRecordForm() {
         if (myStaffRecord) {
             setSelectedHelpers([myStaffRecord.name]);
             setActualStaffs([{ staff_id: myStaffRecord.id, staff_role_id: null }]);
-            setRoundTripDistanceKm(String(myStaffRecord.defaultRoundTripDistanceKm || 0));
         }
       }
     } catch (error) { console.error('Error fetching base data:', error); }
-  }, [clientId, currentOrg, setActualStaffs, setClientName, setRoundTripDistanceKm, setSelectableStaffs, setSelectedHelpers, setServiceTypes, setStaffRoles, setTemplate, setTravelCostRateYenPerKm, shiftId, userId]);
+  }, [clientId, currentOrg, setActualStaffs, setClientName, setSelectableStaffs, setSelectedHelpers, setServiceTypes, setStaffRoles, setTemplate, shiftId, userId]);
 
   const loadExistingData = useCallback(async (targetId: string, isCurrent: () => boolean = () => true) => {
     if (!targetId) return;
@@ -590,11 +571,16 @@ export function useRecordForm() {
       const data = (v?.data || {}) as FormAnswers & { service_time?: string; travel_time?: string; round_trip_distance_km?: string; _helpers?: string[] };
       setServiceTime(data.service_time || '');
       setTravelTime(data.travel_time || '0');
-      setRoundTripDistanceKm(data.round_trip_distance_km || '0');
-      setTravelCostRateYenPerKm(Number(data.travel_cost_rate_yen_per_km || travelCostRateRef.current || 20));
-      setDistanceTouched(false);
       if (actualStaffError) console.error('report_actual_staffs load error:', actualStaffError);
       const typedActualStaffRows = (actualStaffRows ?? []) as unknown as Array<{ staff_id: string; staff_role_id: string | null; staff?: { name: string } | { name: string }[] | null }>;
+      const travelRows = (v?.data as { travel_expenses?: Array<{ staff_id: string; method: TravelExpense['method']; amount_yen: number | null }> } | null)?.travel_expenses;
+      if (Array.isArray(travelRows)) {
+        setTravelExpenses(Object.fromEntries(travelRows.map((row) => [row.staff_id, { method: row.method, amountYen: row.amount_yen == null ? '' : String(row.amount_yen) }])));
+      } else if (typedActualStaffRows.length === 1 && data.travel_cost_yen !== undefined) {
+        setTravelExpenses({ [typedActualStaffRows[0].staff_id]: { method: 'car', amountYen: String(data.travel_cost_yen) } });
+      } else {
+        setTravelExpenses({});
+      }
       if (typedActualStaffRows.length > 0) {
         setActualStaffs(typedActualStaffRows.map((staff) => ({ staff_id: staff.staff_id, staff_role_id: staff.staff_role_id ?? null })));
         setSelectedHelpers(typedActualStaffRows.map((staff) => {
@@ -611,13 +597,18 @@ export function useRecordForm() {
       console.error(e);
       showToast('記録の読み込みに失敗しました', 'error');
     }
-  }, [showToast, formatDatetimeLocal, currentOrg, setActualServiceTypeId, setActualStaffs, setAnswers, setCurrentStatus, setDistanceTouched, setEndDateTime, setImages, setIsDirty, setIsSpanningMonth, setOriginalShiftTimes, setRoundTripDistanceKm, setSelectedHelpers, setSelectedPart, setSelectedSegmentId, setServiceTime, setStartDateTime, setTravelCostRateYenPerKm, setTravelTime]);
+  }, [showToast, formatDatetimeLocal, currentOrg, setActualServiceTypeId, setActualStaffs, setAnswers, setCurrentStatus, setEndDateTime, setImages, setIsDirty, setIsSpanningMonth, setOriginalShiftTimes, setSelectedHelpers, setSelectedPart, setSelectedSegmentId, setServiceTime, setStartDateTime, setTravelExpenses, setTravelTime]);
 
   useEffect(() => {
-    if (currentReportId || distanceTouched || selectableStaffs.length === 0 || selectedHelpers.length === 0) return;
-    const staff = selectableStaffs.find((helper) => helper.name === selectedHelpers[0]);
-    if (staff) setRoundTripDistanceKm(String(staff.defaultRoundTripDistanceKm || 0));
-  }, [currentReportId, distanceTouched, selectableStaffs, selectedHelpers, setRoundTripDistanceKm]);
+    if (currentReportId || selectableStaffs.length === 0 || selectedHelpers.length === 0) return;
+    setTravelExpenses((previous) => {
+      const next = { ...previous };
+      for (const staff of selectableStaffs.filter((helper) => selectedHelpers.includes(helper.name))) {
+        if (!next[staff.id]) next[staff.id] = { method: 'car', amountYen: staff.defaultTravelCostYen == null ? '' : String(staff.defaultTravelCostYen) };
+      }
+      return next;
+    });
+  }, [currentReportId, selectableStaffs, selectedHelpers, setTravelExpenses]);
 
   useEffect(() => {
     autosaveRestoredRef.current = false;
@@ -795,7 +786,7 @@ export function useRecordForm() {
         endDateTime: string;
         serviceTime: string;
         travelTime: string;
-        roundTripDistanceKm: string;
+        travelExpenses: Record<string, TravelExpense>;
       }>;
       if (payload.answers) setAnswers(payload.answers);
       if (payload.selectedHelpers) setSelectedHelpers(payload.selectedHelpers);
@@ -805,7 +796,7 @@ export function useRecordForm() {
       if (payload.endDateTime) setEndDateTime(payload.endDateTime);
       if (payload.serviceTime !== undefined) setServiceTime(payload.serviceTime);
       if (payload.travelTime !== undefined) setTravelTime(payload.travelTime);
-      if (payload.roundTripDistanceKm !== undefined) setRoundTripDistanceKm(payload.roundTripDistanceKm);
+      if (payload.travelExpenses) setTravelExpenses(payload.travelExpenses);
       autosaveRevisionRef.current = saved.autosave_revision ?? 0;
       setIsDirty(true);
       setAutosaveState('saved');
@@ -817,7 +808,7 @@ export function useRecordForm() {
     return () => {
       cancelled = true;
     };
-  }, [currentOrg, currentStatus, draftKey, loading, recordScopeKey, setActualServiceTypeId, setActualStaffs, setAnswers, setEndDateTime, setIsDirty, setRoundTripDistanceKm, setSelectedHelpers, setServiceTime, setStartDateTime, setTravelTime, showToast]);
+  }, [currentOrg, currentStatus, draftKey, loading, recordScopeKey, setActualServiceTypeId, setActualStaffs, setAnswers, setEndDateTime, setIsDirty, setSelectedHelpers, setServiceTime, setStartDateTime, setTravelExpenses, setTravelTime, showToast]);
 
   useEffect(() => {
     if (!isDirty || loading || !currentOrg || currentStatus === 'approved') return;
@@ -840,7 +831,7 @@ export function useRecordForm() {
           endDateTime,
           serviceTime,
           travelTime,
-          roundTripDistanceKm,
+          travelExpenses,
         },
       }).then((result) => {
         if (cancelled) return;
@@ -856,7 +847,7 @@ export function useRecordForm() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, currentStatus, draftKey, endDateTime, isDirty, loading, recordScopeKey, roundTripDistanceKm, selectedHelpers, serviceTime, startDateTime, travelTime]);
+  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, currentStatus, draftKey, endDateTime, isDirty, loading, recordScopeKey, selectedHelpers, serviceTime, startDateTime, travelExpenses, travelTime]);
 
   useEffect(() => {
     if (!currentReportId || !currentOrg) return;
@@ -921,18 +912,41 @@ export function useRecordForm() {
       }
   }, [confirm, currentOrg, currentReportId, currentStatus, router, showToast]);
 
+  const getTravelExpense = useCallback((staffId: string): TravelExpense => {
+    const configured = travelExpenses[staffId];
+    if (configured) return configured;
+    if (currentReportId) return { method: 'car', amountYen: '' };
+    const defaultYen = selectableStaffs.find((staff) => staff.id === staffId)?.defaultTravelCostYen;
+    return { method: 'car', amountYen: defaultYen == null ? '' : String(defaultYen) };
+  }, [currentReportId, selectableStaffs, travelExpenses]);
+
+  const travelExpenseRows = useMemo(() => actualStaffs.map((staff) => {
+    const expense = getTravelExpense(staff.staff_id);
+    return {
+      staff_id: staff.staff_id,
+      staff_name: selectableStaffs.find((candidate) => candidate.id === staff.staff_id)?.name ?? '',
+      method: expense.method,
+      amount_yen: expense.amountYen === '' ? null : Number(expense.amountYen),
+    };
+  }), [actualStaffs, getTravelExpense, selectableStaffs]);
+
   const validate = useCallback(() => {
     const ne: Record<string, string> = {};
     if (!serviceTime) ne['serviceTime'] = '必須項目です';
     if (selectedHelpers.length === 0) ne['helpers'] = '担当スタッフを選択してください';
     if (actualStaffs.length !== selectedHelpers.length) ne['helpers'] = '担当スタッフをスタッフ名簿から選択してください';
+    for (const expense of travelExpenseRows) {
+      if (expense.amount_yen === null || !Number.isInteger(expense.amount_yen) || expense.amount_yen < 0 || expense.amount_yen > 100000) {
+        ne[`travel_${expense.staff_id}`] = '交通費を0〜100000円で入力してください';
+      }
+    }
     template.forEach(item => {
       const val = answers[item.id];
       if (item.required && (!val || (Array.isArray(val) && val.length === 0))) ne[item.id] = '必須項目です';
     });
     setErrors(ne);
     return Object.keys(ne).length === 0;
-  }, [actualStaffs.length, answers, selectedHelpers.length, serviceTime, setErrors, template]);
+  }, [actualStaffs.length, answers, selectedHelpers.length, serviceTime, setErrors, template, travelExpenseRows]);
 
   const saveReport = useCallback(async (status: ReportStatus, skipValidation = false) => {
     if (shiftId && shiftSegments.length > 0 && !selectedSegmentId) {
@@ -942,15 +956,13 @@ export function useRecordForm() {
     if (!skipValidation && !validate()) { showToast('入力不備があります', 'error'); window.scrollTo({ top: 0, behavior: 'smooth' }); return false; }
     setSubmitting(true);
     try {
-      const distanceKm = parseFloat(roundTripDistanceKm || '0') || 0;
       const finalData = {
         ...answers,
         _helpers: selectedHelpers,
         service_time: serviceTime,
         travel_time: travelTime,
-        round_trip_distance_km: roundTripDistanceKm,
-        travel_cost_rate_yen_per_km: travelCostRateYenPerKm,
-        travel_cost_yen: Math.round(distanceKm * travelCostRateYenPerKm),
+        travel_expenses: travelExpenseRows,
+        travel_cost_yen: travelExpenseRows.reduce((sum, expense) => sum + (expense.amount_yen ?? 0), 0),
       };
       if (!currentOrg) throw new Error('事業所が選択されていません');
       const result = await saveReportAction({
@@ -973,6 +985,7 @@ export function useRecordForm() {
       });
       const targetReportId = result.reportId;
       contentVersionRef.current = result.version;
+      setTravelExpenses(Object.fromEntries(travelExpenseRows.map((expense) => [expense.staff_id, { method: expense.method, amountYen: expense.amount_yen == null ? '' : String(expense.amount_yen) }])));
       if (!currentReportId) setCurrentReportId(targetReportId);
       if (status === 'draft') setHasAiDraftSource(false);
       setIsDirty(false);
@@ -996,7 +1009,7 @@ export function useRecordForm() {
       return false;
     }
     finally { setSubmitting(false); }
-  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, draftKey, endDateTime, hasAiDraftSource, roundTripDistanceKm, router, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setSubmitting, shiftId, shiftSegments.length, showToast, startDateTime, travelCostRateYenPerKm, travelTime, validate]);
+  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, draftKey, endDateTime, hasAiDraftSource, router, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setSubmitting, setTravelExpenses, shiftId, shiftSegments.length, showToast, startDateTime, travelExpenseRows, travelTime, validate]);
 
   const handleDraftSave = useCallback(async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); } }, [saveReport, showToast]);
   const handleSubmit = useCallback(async () => {
@@ -1097,7 +1110,6 @@ export function useRecordForm() {
   const isAdmin = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'approve', true));
   const isReadOnly = currentStatus === 'approved';
   const canDeleteRecord = Boolean(currentOrg && checkRecordPermission(currentOrg.effectivePermissions, 'delete', true));
-  const travelCostYen = Math.round((parseFloat(roundTripDistanceKm || '0') || 0) * travelCostRateYenPerKm);
   const requiresSegmentSelection = Boolean(shiftId && shiftSegments.length > 1 && !selectedSegmentId && !currentReportId);
   const aiClients = useMemo(() => [{ id: clientId as string, name: clientName }], [clientId, clientName]);
   const aiHelpers = useMemo(() => selectableStaffs.map(s => ({ id: s.id, name: s.name })), [selectableStaffs]);
@@ -1109,17 +1121,13 @@ export function useRecordForm() {
           const existing = staff ? actualStaffs.find((actualStaff) => actualStaff.staff_id === staff.id) : null;
           return staff ? { staff_id: staff.id, staff_role_id: existing?.staff_role_id ?? null } : null;
       }).filter((staff): staff is ActualStaffInput => Boolean(staff)));
-      if (!currentReportId && !distanceTouched) {
-          const staff = selectableStaffs.find((helper) => helper.name === value[0]);
-          if (staff) setRoundTripDistanceKm(String(staff.defaultRoundTripDistanceKm || 0));
-      }
       setIsDirty(true);
       if (errors.helpers) {
           const newErrors = { ...errors };
           delete newErrors.helpers;
           setErrors(newErrors);
       }
-  }, [actualStaffs, currentReportId, distanceTouched, errors, selectableStaffs, setActualStaffs, setErrors, setIsDirty, setRoundTripDistanceKm, setSelectedHelpers]);
+  }, [actualStaffs, errors, selectableStaffs, setActualStaffs, setErrors, setIsDirty, setSelectedHelpers]);
 
   const dismissShiftSuggestion = useCallback((id: string) => {
     shiftDispatch({ type: 'DISMISS_SUGGESTION', id });
@@ -1130,18 +1138,18 @@ export function useRecordForm() {
     router, showToast, currentOrg, clientId, shiftId, segmentId,
     autosaveState, clientName, template, answers, selectableStaffs, staffRoles, serviceTypes,
     selectedHelpers, actualStaffs, actualServiceTypeId, startDateTime, endDateTime,
-    serviceTime, travelTime, roundTripDistanceKm, travelCostRateYenPerKm, images,
+    serviceTime, travelTime, travelExpenses, images,
     aiFilledFields, isSpanningMonth, selectedPart, originalShiftTimes,
     currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting,
     shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId,
     setShiftSuggestions, setLinkedShifts, setSelectedSegmentId, dismissShiftSuggestion,
     setActualServiceTypeId, setActualStaffs, setStartDateTime, setEndDateTime,
-    setServiceTime, setTravelTime, setRoundTripDistanceKm, setTravelCostRateYenPerKm,
-    setDistanceTouched, setIsDirty, setOpenCloseDialog,
+    setServiceTime, setTravelTime, setTravelExpenses,
+    setIsDirty, setOpenCloseDialog,
     formatTimeForLabel, formatSegmentLabel, handlePartChange, handleChange, handleAnswerChange,
     handleImageUpload, handleDeleteReport, handleDraftSave, handleSubmit, handlePendingSave,
     handleApprove, handleRemand, handleClose, handleDialogDiscard, handleDialogSaveDraft,
-    handleAiExtracted, groupedSections, isAdmin, isReadOnly, canDeleteRecord, travelCostYen,
+    handleAiExtracted, groupedSections, isAdmin, isReadOnly, canDeleteRecord,
     requiresSegmentSelection, aiClients, aiHelpers, handleStaffChange,
   };
 }

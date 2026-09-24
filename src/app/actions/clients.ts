@@ -137,7 +137,7 @@ export async function saveClientAssignments(
   organizationId: string,
   clientId: string,
   staffIds: string[],
-  distancesByStaffId: Record<string, number> = {},
+  costsByStaffId: Record<string, number> = {},
 ) {
   return withSafeError('saveClientAssignments', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'clients');
@@ -145,15 +145,18 @@ export async function saveClientAssignments(
     await assertClientOrg(supabase, clientId, organizationId);
     if (staffIds.length > 200) throw new UserFacingError('担当者数が多すぎます');
     const uniqueStaffIds = Array.from(new Set(staffIds.filter(Boolean)));
-    const distances = Object.fromEntries(uniqueStaffIds.map((staffId) => [
-      staffId,
-      Math.min(Math.max(Number(distancesByStaffId[staffId] || 0), 0), 1000),
-    ]));
-    const { error } = await supabase.rpc('replace_client_assignments_authorized', {
+    const costs: Record<string, number> = {};
+    for (const staffId of uniqueStaffIds) {
+      if (!(staffId in costsByStaffId)) continue;
+      const cost = costsByStaffId[staffId];
+      if (!Number.isInteger(cost) || cost < 0 || cost > 100000) throw new UserFacingError('通常の交通費は0〜100000円の整数で入力してください');
+      costs[staffId] = cost;
+    }
+    const { error } = await supabase.rpc('replace_client_assignments_with_costs_authorized', {
       p_organization_id: organizationId,
       p_client_id: clientId,
       p_staff_ids: uniqueStaffIds,
-      p_distances: distances,
+      p_costs: costs,
     });
     if (error) throw sanitizeDbError(error, 'action.clients');
     await recordAuditEvent({

@@ -147,8 +147,44 @@ export async function saveReport(input: SaveReportInput) {
   if (JSON.stringify(input.values).length > 1_000_000) {
     throw new Error('記録内容が大きすぎます');
   }
+  const expenses = input.values.travel_expenses;
+  if (!(input.status === 'draft' && expenses === undefined) && (!Array.isArray(expenses) || expenses.length !== (input.actualStaffs ?? []).length)) {
+    throw new Error('スタッフ別の交通費が不正です');
+  }
+  const staffIds = new Set((input.actualStaffs ?? []).map((staff) => staff.staff_id));
+  if (input.status !== 'draft' && staffIds.size === 0) throw new Error('担当スタッフを選択してください');
+  const expenseIds = new Set<string>();
+  let expenseTotal = 0;
+  for (const row of Array.isArray(expenses) ? expenses : []) {
+    if (!row || typeof row !== 'object' || typeof row.staff_id !== 'string' || !staffIds.has(row.staff_id) || expenseIds.has(row.staff_id)) {
+      throw new Error('スタッフ別の交通費が不正です');
+    }
+    expenseIds.add(row.staff_id);
+    if (!['car', 'public_transport', 'other', 'none'].includes(row.method)
+      || typeof row.staff_name !== 'string' || row.staff_name.length > 100
+      || (row.amount_yen !== null && (!Number.isInteger(row.amount_yen) || row.amount_yen < 0 || row.amount_yen > 100000))
+      || (input.status !== 'draft' && row.amount_yen === null)
+      || (row.method === 'none' && row.amount_yen !== 0)) {
+      throw new Error('スタッフ別の交通費が不正です');
+    }
+    expenseTotal += row.amount_yen ?? 0;
+  }
+  if (expenses !== undefined && expenseTotal !== input.values.travel_cost_yen) throw new Error('交通費合計が不正です');
   const user = await getAuthedUser();
   const supabase = await createSessionClient();
+  let safeValues = input.values;
+  if (Array.isArray(expenses) && staffIds.size > 0) {
+    const { data: staffRows, error: staffError } = await supabase.from('staffs')
+      .select('id, name')
+      .eq('organization_id', input.organizationId)
+      .in('id', [...staffIds]);
+    if (staffError || (staffRows ?? []).length !== staffIds.size) throw new Error('担当スタッフを確認できませんでした');
+    const names = new Map((staffRows ?? []).map((staff) => [staff.id, staff.name]));
+    safeValues = {
+      ...input.values,
+      travel_expenses: expenses.map((row) => ({ ...row, staff_name: names.get(row.staff_id) })),
+    };
+  }
   if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 0) {
     throw new Error('記録の版番が不正です');
   }
@@ -164,7 +200,7 @@ export async function saveReport(input: SaveReportInput) {
     p_start_at: input.startAt,
     p_end_at: input.endAt,
     p_status: input.status,
-    p_values: asJson(input.values),
+    p_values: asJson(safeValues),
     p_expected_version: input.expectedVersion,
     p_idempotency_key: input.idempotencyKey,
     p_session_id: user.sessionId,
