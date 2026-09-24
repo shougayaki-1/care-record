@@ -41,7 +41,7 @@ Vercelでは、設定されたProduction BranchからProductionへ配備され�
 5. バックアップmoduleのWorkload Identity Federationにある `github_refs` は完全なrefで設定します。現在のTerraform検証は、branchまたはtagの完全なrefを受け入れ、wildcard patternは受け入れません。定期・手動のバックアップworkflowは `main` から実行されるため、両環境のidentityで `refs/heads/main` を許可できます。GitHub Environmentの選択でStagingとProductionを分け、Productionは `main` に限定します。
 6. 現在のバックアップ・復元の証跡を確認します。バックアップ方式が変わった場合、または証跡の更新時期に達した場合は[backup-restore-bcp.md](compliance/backup-restore-bcp.md)に従って復元リハーサルを繰り返します。鮮度アラートの経路を確認し、運用切替の完了を宣言する前に外形監視と通知を直します。完全データベースバックアップと鮮度監視を維持してください。旧 `keep_alive.yml` はリポジトリから削除済みであり、health monitorではありません。
 
-この切替では、`DISCORD_ALERT_WEBHOOK_URL` の設定後に通知到達を確認し、サービスオーナーの明示承認を得るまでPR #17をマージしたりProduction配備を開始したりしないでください。`main` のbranch protectionにおける必須承認数0という設定は変更しません。今回必要な承認は、この切替とリリースに対する個別の承認です。
+この切替では、`DISCORD_ALERT_WEBHOOK_URL` の設定後に通知経路を確認し、サービスオーナーの明示承認を得てからPR #17をマージしてProductionへ配備します。通知テストと今回のリリースに対する承認は2026-09-24に得ました。`main` のbranch protectionにおける必須承認数0という設定は変更しません。
 
 ## 通常のアプリケーションリリース
 
@@ -107,19 +107,19 @@ Production DBの変更が稼働中アプリと安全に共存できない場合�
 - 初回のサービス提供前と、その後は[backup-restore-bcp.md](compliance/backup-restore-bcp.md)で定めた周期で完全な復元リハーサルを実施します。世代、対象プロジェクト、実測したRPO/RTO、証跡を記録します。
 - アプリケーションの日次業務exportは完全な論理データベースバックアップとは別の役割があります。両方を維持します。
 
-## 読み取り専用の状況記録
+## 読み取り専用の状況記録（2026-09-24、PR #17の配備前）
 
 外部設定は2026-09-23と2026-09-24に確認しました。以下は確認したアカウントの状態を示すもので、このbranchからProductionへ配備した証拠ではありません。
 
 - GitHub Actionsは有効です。直近の完全論理バックアップとバックアップ鮮度確認は成功しました。
-- 外形監視workflowには調査中の失敗履歴があります。run `35788093677` はHTTP 200確認と失敗通知の両方で失敗しましたが、HTTP statusはログに記録されていません。2026-09-23には公開health URLの両方がHTTP 200を返しました。その後、`HEALTHCHECK_URL` に `https://care-record.shoug.org` を設定し、既存の `Production` Environmentで読み戻して確認しました。`DISCORD_ALERT_WEBHOOK_URL` はそのEnvironmentのsecret一覧になく、通知経路は未確認です。
+- 外形監視workflowには過去の失敗履歴があります。run `35788093677` はHTTP 200確認と失敗通知の両方で失敗しましたが、HTTP statusはログに記録されておらず、当時の原因は断定できません。`HEALTHCHECK_URL` は既存の `Production` Environmentで `https://care-record.shoug.org` に設定済みです。2026-09-24には `DISCORD_ALERT_WEBHOOK_URL` の登録をsecret名だけで確認しました。通常の[監視run `35987554237`](https://github.com/shougayaki-1/care-record/actions/runs/35987554237)は成功しました。通知テストの[run `35987690858`](https://github.com/shougayaki-1/care-record/actions/runs/35987690858)では一時的なテスト用URLにより監視本体を意図的に失敗させ、Discord通知ステップは成功しました。監視URLを元に戻し、[run `35987818853`](https://github.com/shougayaki-1/care-record/actions/runs/35987818853)の成功を確認しました。通知ステップの成功はWebhookがリクエストを受理したことを示し、個々の利用者がメッセージを読んだ証拠ではありません。
 - PR #17は2026-09-24にApp、空DBとpgTAP、UI、依存監査、secret scan、ローカルSupabase E2E、最終 `CI` checkに合格しました。`care-record-staging` のPreviewはREADYになり、Vercel SSOが必要です。
 - `main` のbranch protectionは2026-09-24に設定し、読み戻して確認しました。PRと `CI` checkを必須とし、単独の保守担当者のため必須承認数を0に設定し、adminにも適用します。force pushと削除は禁止しています。
 - 旧 `e2e` GitHub Environmentには、クラウドE2E用secretが6件残っています（`E2E_SUPABASE_ANON_KEY`、`E2E_SUPABASE_SERVICE_ROLE_KEY`、`E2E_SUPABASE_URL`、`SUPABASE_ACCESS_TOKEN`、`SUPABASE_DB_PASSWORD`、`SUPABASE_PROJECT_ID`）。置き換え後のCIがPRで成功し、参照するworkflowがないことを確認してから削除してください。Environmentを削除すると保存済みのsecret値も削除されます。置き換え後のCIは成功済みですが、この削除は未承認で、実行していません。
 - 2つのVercelプロジェクトが存在します。StagingはPreviewをbuildします。ProductionプロジェクトでPreviewを省略するフィルターは2026-09-23に適用し、読み戻して確認しました。
-- Production Vercelの変数一覧では、`SUPABASE_SERVICE_ROLE_KEY` がProduction scopeにありませんでした。現在配備中のhealth endpointはHTTP 200を返しているため、この不足が過去の監視失敗の原因とは断定できません。次の配備より前にProduction scopeへ設定してください。値は表示・転記せず、変数名とscopeだけを確認します。
+- Production Vercelの変数一覧には当初 `SUPABASE_SERVICE_ROLE_KEY` がProduction scopeになく、PreviewとDevelopmentのみに存在しました。2026-09-24にProduction scopeへの追加を変数名とscopeだけで確認しました。値は表示・転記していません。設定は次のProduction配備から有効になります。現在配備中のhealth endpointがHTTP 200を返していたことと、過去の監視失敗との因果関係は断定できません。
 
-実施担当者は、GitHubの既存 `Production` Environmentに `DISCORD_ALERT_WEBHOOK_URL` を設定し、`care-record` VercelプロジェクトのProduction scopeに `SUPABASE_SERVICE_ROLE_KEY` を設定してください。どちらの値も文書、PR、ログ、チャットへ出さないでください。その後、安全な方法で通知の実到達を確認します。通知確認後にサービスオーナーの明示承認を得るまで、PR #17をマージしたりProduction配備を開始したりしないでください。旧 `e2e` Environmentの削除は、6件のsecret値を消すため別途承認されるまで保留です。
+GitHubの既存 `Production` Environmentに `DISCORD_ALERT_WEBHOOK_URL`、`care-record` VercelプロジェクトのProduction scopeに `SUPABASE_SERVICE_ROLE_KEY` が登録されたことを、値を表示せず確認しました。通知テストとサービスオーナーのリリース承認も完了しています。PR #17のマージ後はProduction配備、health、サインイン、最小限の記録保存を確認し、結果をPRに記録してください。旧 `e2e` Environmentの削除は、6件のsecret値を消すため今回の切替では実施しません。
 
 ## 仕様確認に使った資料
 

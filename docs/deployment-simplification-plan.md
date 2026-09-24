@@ -1,14 +1,14 @@
 # 個人開発向けデプロイ運用の整理計画
 
 作成日: 2026-09-23
-状態: [ドラフトPR #17](https://github.com/shougayaki-1/care-record/pull/17)で実装と検証を進めています。Productionの監視URL、VercelのPreviewフィルター、`main` の必須CI設定は完了しました。監視通知の到達確認とProduction配備は未完了です。
+状態（2026-09-24、配備前）: [PR #17](https://github.com/shougayaki-1/care-record/pull/17)で実装とCI検証を完了しました。Productionの監視URL、VercelのPreviewフィルター、`main` の必須CI設定、監視通知テスト、必要な環境変数の登録確認も完了しました。Production配備後の確認結果はPRのリリース記録に残します。
 
 ## 2026-09-24時点の実施状況
 
 - PRの変更: アプリ配備用workflowと仮の `keep_alive.yml` を削除し、基本CI、条件付き検査、ローカルSupabase E2Eを `ci.yml` に統合しました。文書もこの運用に合わせて更新しました。PR #17はドラフトであり、リモートの `main` への配備を示すものではありません。
 - ローカル検証: lint、型チェック、本番build、service roleの使用検査、unit 250件、UI 17件、CI判定対象のテスト10件が成功しました。依存関係を更新し、`npm ci` とHigh以上を失敗扱いにする依存監査も成功しました。監査にはModerateの指摘が5件残っています。全E2Eは更新前に20件成功しました。更新後は20件中18件が成功し、モバイルの遷移判定で失敗した2件を修正した後、該当ファイルの6件を再実行して成功しました。
-- 外部サービスの状態: GitHub Actionsは有効で、Full logical backupとBackup freshnessの直近実行は成功しました。PR #17のApp、DB、UI、依存監査、secret scan、ローカルSupabase E2E、最終の `CI` check、Staging Previewは2026-09-24に成功しました。`main` のbranch protectionにはPR経由と `CI` 成功を必須に設定し、読み戻して確認しました。GitHubの外形監視にはHTTP確認と通知の失敗履歴があります。`HEALTHCHECK_URL` とVercel ProductionのPreviewフィルターは2026-09-23に設定し、読み戻して確認しましたが、Discord通知の到達は未確認です。
-- 未完了: 外形監視のDiscord通知到達とProduction環境変数のscopeを確認し、本番配備後の検証を終えるまでは運用切替を完了扱いにしません。作業担当者はGitHubの既存 `Production` Environmentにsecret `DISCORD_ALERT_WEBHOOK_URL` を設定し、`care-record` VercelプロジェクトのProduction環境に `SUPABASE_SERVICE_ROLE_KEY` を設定してください。値は表示・転記せず、通知の到達を確認します。確認後、サービスオーナーの明示承認を得るまではPR #17をマージしたりProduction配備を開始したりしません。旧 `e2e` Environmentの削除は、そこに保存された6件のsecret値も消えるため、承認・実施ともに保留です。詳細な確認時点と結果は[deployment-runbook.md](deployment-runbook.md)を参照してください。
+- 外部サービスの状態: GitHub Actionsは有効で、Full logical backupとBackup freshnessの直近実行は成功しました。PR #17のApp、DB、UI、依存監査、secret scan、ローカルSupabase E2E、最終の `CI` check、Staging Previewは2026-09-24に成功しました。`main` のbranch protectionにはPR経由と `CI` 成功を必須に設定し、読み戻して確認しました。`HEALTHCHECK_URL` とVercel ProductionのPreviewフィルターは2026-09-23に設定しました。2026-09-24にはDiscord通知テストと監視URL復元後の正常実行に成功しました。
+- 配備前に確認済み: GitHubの既存 `Production` Environmentにsecret `DISCORD_ALERT_WEBHOOK_URL`、`care-record` VercelプロジェクトのProduction scopeに `SUPABASE_SERVICE_ROLE_KEY` が登録されたことを、値を表示せず確認しました。サービスオーナーは通知テストとPR #17のマージ・本番配備を承認しました。本番配備後の検証結果はPRへ記録します。旧 `e2e` Environmentには6件のsecret値が残り、今回の切替では削除しません。詳細な結果は[deployment-runbook.md](deployment-runbook.md)を参照してください。
 
 ## 目的と到達点
 
@@ -122,10 +122,10 @@ Actionsが停止している場合は、先にCIと既存の定期処理を稼�
 GitHub CLIとVercel CLIで読み取った結果です。以下は観測内容であり、移行完了の記録ではありません。
 
 - GitHub Actionsは稼働中です。2026-09-22の完全DBバックアップと鮮度監視に成功履歴があります。READMEにある課金停止中という説明は、現在の状態と一致しません。
-- 外形監視には連続した失敗履歴があります。run `35788093677` はHTTP 200判定と失敗通知の両方で失敗しましたが、HTTPコードが記録されておらず、原因は断定できません。現時点で `care-record.shoug.org/api/health` と `care-record.vercel.app/api/health` はHTTP 200です。`Production` Environmentで不足していた `HEALTHCHECK_URL` は `https://care-record.shoug.org` に設定し、読み戻して確認しました。`DISCORD_ALERT_WEBHOOK_URL` は同EnvironmentのSecrets一覧にありません。通知経路は未確認で、今回は通知を送っていません。
+- 外形監視には過去の失敗履歴があります。run `35788093677` はHTTP 200判定と失敗通知の両方で失敗しましたが、HTTPコードが記録されておらず、当時の原因は断定できません。`HEALTHCHECK_URL` は `https://care-record.shoug.org` に設定済みです。2026-09-24に `DISCORD_ALERT_WEBHOOK_URL` のsecret名を確認し、通常監視の成功、意図的な失敗時の通知ステップ成功、URL復元後の監視成功を確認しました。実行IDは[deployment-runbook.md](deployment-runbook.md)に記録しています。
 - 2026-09-23時点では `main` に通常のbranch protectionもrulesetもありませんでした。PR #17の `CI` 成功後、2026-09-24にbranch protectionを設定し、PR必須、`CI` 必須、承認者0人、adminにも適用、force pushと削除を禁止する設定を読み戻して確認しました。
 - Vercelの `care-record` と `care-record-staging` はGitHubに接続済みです。両プロジェクトのProduction Branchは `main`、Node.jsは24.xです。
 - StagingにはPreviewのみをbuildするIgnored Build Stepがあります。ProductionプロジェクトにはPreviewを省略する設定を追加し、APIで読み戻して確認しました。
-- Productionプロジェクトの環境変数metadataには `SUPABASE_SERVICE_ROLE_KEY` のProduction scopeがありません。秘密値は表示・転記していません。現在の配備のhealthはHTTP 200であり、過去の監視失敗の原因とは断定できません。次の配備前に、この変数がProduction scopeに設定されていることを確認する必要があります。
+- Productionプロジェクトの環境変数metadataでは当初 `SUPABASE_SERVICE_ROLE_KEY` のProduction scopeがありませんでした。2026-09-24に追加後の変数名とscopeを確認しました。秘密値は表示・転記していません。現在配備中のhealthがHTTP 200だったことと、過去の監視失敗の原因との関係は断定できません。
 - リモート `staging` に `main` 未統合のcommitはありません（ahead 0 / behind 5）。ブランチ自体は削除していません。
 - 作業開始時のローカルHEADは `3cbae88`、リモート `main` は `a1da955` でした。差分はリポジトリガイドと過去の監査文書の追加でした。PR #17の作業ブランチには `a1da955` が取り込まれています。
