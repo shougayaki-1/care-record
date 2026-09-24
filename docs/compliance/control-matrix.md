@@ -23,7 +23,7 @@
 | BCM-01 | インシデント・BCP | 手順・記録テーブル | implemented | 年2回訓練と是正記録 |
 | SUP-01 | 委託・再委託管理 | `vendor_registry` | pending | Supabase/Vercel/Googleの契約・国・exit plan承認 |
 | RET-01 | 記録別保持 | `retention_policies`、legal hold | pending | 専門家確認済み根拠で暫定値を置換 |
-| SDLC-01 | 脆弱性管理 | Security workflow、SBOM | implemented | High/Criticalゼロ、例外承認 |
+| SDLC-01 | 脆弱性管理 | 統合CIの依存監査・secret scan・SBOM | implemented | High/Criticalゼロ、例外承認 |
 | PRI-01 | 本人・利用者向け通知 | Privacy/Terms | pending | 法務レビュー、版管理、再同意試験 |
 | SLA-01 | 開示書・SLA・責任分界 | `service-specification-sla.md` | pending | 顧客との明示合意と改定通知 |
 

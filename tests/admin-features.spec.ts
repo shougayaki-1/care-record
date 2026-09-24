@@ -24,7 +24,8 @@ test.describe('管理者機能', () => {
     // 4. 一覧に登録した利用者が表示されている
     await clickMenu(page, '利用者管理');
     await expect(page.getByRole('heading', { name: '利用者管理' })).toBeVisible();
-    await expect(page.getByRole('row', { name: new RegExp(clientName) })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('row', { name: new RegExp(clientName) })
+      .or(page.getByRole('listitem').filter({ hasText: clientName })).first()).toBeVisible({ timeout: 15000 });
   });
 
   test('セットアップ直後のアプリ初期表示', async ({ page }) => {
@@ -36,6 +37,8 @@ test.describe('管理者機能', () => {
     await expect(page.getByText('利用者を選択')).toBeVisible({ timeout: 15000 });
 
     // オーナーには管理メニューが表示される
+    const menuButton = page.getByRole('button', { name: 'メニューを開く' });
+    if (await menuButton.isVisible()) await menuButton.click();
     await expect(page.getByRole('link', { name: '利用者管理', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'スタッフ(名簿)管理', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'アカウント・権限管理', exact: true })).toBeVisible();

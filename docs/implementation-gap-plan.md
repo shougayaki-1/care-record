@@ -2,6 +2,8 @@
 
 最終更新: 2026-07-16
 
+> この文書は2026-07-16時点の計画と調査結果を保存した履歴です。以下の「現在」や検査結果を現行の状態とみなさないでください。配備・CIの現行手順は [system-decisions.md](system-decisions.md)、[deployment-runbook.md](deployment-runbook.md)、[testing.md](testing.md) を参照してください。旧 `security.yml` / `playwright.yml` を有効化する項目は、統合した `ci.yml` に置き換えられました。
+
 ## 目的
 
 [system-decisions.md](system-decisions.md) と現行実装の差分を、提供開始を阻む順に整理します。本書の`確認済み`は静的なリポジトリ確認の結果であり、本番設定や実環境の適合を意味しません。
@@ -19,7 +21,9 @@
 | Production build | 未実行 | 提供判定前に必須 |
 | 依存脆弱性監査 | 未実行 | 提供判定前に必須 |
 
-## Phase -1: CI復旧（最優先・全Phaseの前提）
+## Phase -1: CI復旧（2026-07-16時点の計画・現在のCI方式に置換済み）
+
+> 以下の項目は当時の記録です。`security.yml` / `playwright.yml`の再有効化ではなく、現在の変更パス選択と固定名`CI`最終判定を使います。実行条件は[testing.md](testing.md)を参照してください。
 
 決定（2026-07-16）: lint修正とCI復旧はPhase 2ではなく最初に行う。以降のすべてのPhaseの変更をCIで守るため。
 

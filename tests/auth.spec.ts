@@ -1,11 +1,9 @@
 import { test, expect } from '@playwright/test';
 
-const BASE_URL = 'http://localhost:3000';
-
 test.describe('認証フォームのテスト', () => {
   
   test('未登録アドレスでログインしようとするとエラーになる', async ({ page }) => {
-    await page.goto(BASE_URL);
+    await page.goto('/');
 
     // 入力
     await page.getByLabel('メールアドレス').fill('nobody@example.com');
@@ -20,7 +18,7 @@ test.describe('認証フォームのテスト', () => {
   });
 
   test('バリデーション: パスワードが短すぎる場合', async ({ page }) => {
-    await page.goto(BASE_URL);
+    await page.goto('/');
     
     // タブ切り替え
     await page.getByRole('tab', { name: '新規登録' }).click();

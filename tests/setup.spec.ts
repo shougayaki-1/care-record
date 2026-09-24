@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerTermsHandler, signUp } from './helpers';
+import { acceptTerms, signUp } from './helpers';
 
 // 毎回異なるメールアドレスを生成する関数
 const randomEmail = () => `test-${Date.now()}@example.com`;
@@ -13,12 +13,11 @@ test.describe('セットアップウィザード', () => {
     const orgName = 'テスト事業所自動作成';
 
     // 1. トップページへ
-    await page.goto('http://localhost:3000');
-    // 利用規約モーダルはいつ開いてもよいよう自動処理する
-    await registerTermsHandler(page);
+    await page.goto('/?next=/setup');
 
     // 2. 新規登録 → /setup へ
     await signUp(page, email, password);
+    await acceptTerms(page);
 
     // 3. プロフィール入力（handle_new_user が氏名を補完するため通常スキップ）
     const welcome = page.getByText('ようこそ！');

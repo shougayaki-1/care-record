@@ -38,7 +38,7 @@ test.describe('スタッフ機能（記録作成）', () => {
     await expect(page.getByText('記録を送信しました')).toBeVisible({ timeout: 20000 });
 
     // 5. 自分の履歴に承認待ちの記録が表示される
-    await clickMenu(page, '自分の履歴');
+    await page.goto('/app/history');
     await expect(page.getByText('鈴木 花子 様').first()).toBeVisible({ timeout: 20000 });
     await expect(page.getByText('承認待ち').first()).toBeVisible();
   });

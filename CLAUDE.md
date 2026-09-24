@@ -18,8 +18,17 @@
 - `npm run lint` / `npm run typecheck`
 - `npm run test:unit`（Vitest, src/**/*.test.ts）
 - `npm run test:ui`（Storybook ブラウザテスト）
-- `npm run test:e2e`（Playwright。E2E_TEST_ENV=true と専用Supabase環境が必須。無断実行しない）
-- Supabase ローカル: `supabase start` / `supabase migration new <name>`
+- `npm run test:e2e:critical` / `npm run test:e2e`（Playwright。使い捨てのローカルSupabaseで実行し、ホスト済み環境の認証情報を使用しない）
+- CI分類テスト: `npm run test:ci-scope`
+- Supabase CLI 2.108.0: `npx --yes supabase@2.108.0 start` / `db reset` / `status --output env`
+- 新規migration: `npx --yes supabase@2.108.0 migration new <name>`
+
+## 開発・リリースフロー
+
+- 通常の変更は`main`から作った`feature/*` branchで実装し、PRを自己レビューしてから`main`に統合する。常設`staging` branchは必須ではない。
+- アプリ配備はVercel Git連携を使う。既存のProductionとPreview用Vercel projectは分離して使い、実際のbranch filterと必須CI設定は[デプロイ手順](docs/deployment-runbook.md)で確認する。
+- DB変更は新規・後方互換migrationをStaging、Productionの順に手動適用する。Production適用前にProject ref、migration history、dry-run、backup freshnessを確認し、動作中のアプリと互換性を保つ。
+- CIの変更パスごとの実行条件、E2Eガードと検査コマンドは[テスト手順](docs/testing.md)を参照する。
 
 ## ディレクトリ地図
 
@@ -71,3 +80,13 @@
 - テスト・ビルドを実行していない場合、「確認済み」と報告しない。
 - 詳細ルール: .claude/rules/（frontend / supabase / security / testing）
 - 設計背景: docs/architecture.md、環境構築: docs/development.md、機能一覧: docs/feature-overview.md
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

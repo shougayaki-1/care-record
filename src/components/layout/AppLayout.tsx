@@ -153,7 +153,8 @@ const TopAppBar = React.memo(function TopAppBar({
   const [notifAnchor, setNotifAnchor] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
+    let cancelled = false;
+    let channel: ReturnType<typeof supabase.channel> | undefined;
     const fetchUser = async () => {
       let resolvedUserId = userId;
       if (!resolvedUserId) {
@@ -169,6 +170,7 @@ const TopAppBar = React.memo(function TopAppBar({
           .eq('user_id', resolvedUserId)
           .eq('is_read', false),
       ]);
+      if (cancelled) return;
 
       if (profile) {
         setUserName(profile.name);
@@ -176,16 +178,20 @@ const TopAppBar = React.memo(function TopAppBar({
       }
       setUnreadCount(count || 0);
 
-      const channel = supabase.channel('notifications')
+      // A channel topic is reused by Supabase while removal is still pending.
+      // Give each mounted subscription its own topic before adding callbacks.
+      channel = supabase.channel(`notifications:${resolvedUserId}:${crypto.randomUUID()}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${resolvedUserId}` }, () => {
           setUnreadCount(prev => prev + 1);
         })
         .subscribe();
 
-      cleanup = () => { supabase.removeChannel(channel); };
     };
     void fetchUser();
-    return () => { cleanup?.(); };
+    return () => {
+      cancelled = true;
+      if (channel) void supabase.removeChannel(channel);
+    };
   }, [userId]);
 
   const handleSwitchOrg = useCallback((id: string) => {

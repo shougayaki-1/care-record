@@ -1,7 +1,8 @@
 import { Page, expect } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 
 export const generateUser = () => {
-  const id = Date.now().toString().slice(-6);
+  const id = randomUUID().slice(0, 8);
   return {
     email: `user${id}@example.com`,
     password: 'Test!1234',
@@ -10,18 +11,13 @@ export const generateUser = () => {
   };
 };
 
-/**
- * 利用規約モーダルはルートレイアウトのマウント時チェックで非同期に開くため、
- * どの操作中に現れてもクリックを遮る可能性がある。
- * addLocatorHandler で「表示されて操作を遮ったら同意して閉じる」を自動化する。
- */
-export const registerTermsHandler = async (page: Page) => {
+/** 新規登録後、セットアップ操作の前に利用規約への同意を完了する。 */
+export const acceptTerms = async (page: Page) => {
   const dialog = page.getByRole('dialog', { name: '利用規約への同意' });
-  await page.addLocatorHandler(dialog, async () => {
-    await dialog.getByRole('checkbox').check();
-    await dialog.getByRole('button', { name: '同意してサービスを利用する' }).click();
-    await expect(dialog).toBeHidden();
-  });
+  await expect(dialog).toBeVisible({ timeout: 30_000 });
+  await dialog.getByRole('checkbox').check();
+  await dialog.getByRole('button', { name: '同意してサービスを利用する' }).click();
+  await expect(dialog).toBeHidden();
 };
 
 /** 新規登録タブからアカウントを作成し、/setup へ遷移するまで待つ */
@@ -35,8 +31,8 @@ export const signUp = async (page: Page, email: string, password: string) => {
 
 export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUser>) => {
   await page.goto('/?next=/setup');
-  await registerTermsHandler(page);
   await signUp(page, user.email, user.password);
+  await acceptTerms(page);
 
   // handle_new_user トリガーで profiles.name にメールアドレスが入るため、
   // 通常「ようこそ！」(氏名入力) はスキップされて「事業所の設定」から始まる。
@@ -76,10 +72,10 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
     await waitForWorkspaceReady();
   }
 
-  // /app はワークスペース解決後 /app/record へ自動リダイレクトされる
+  // /app の表示が先に完了しても URL 更新が遅れることがあるため、記録画面へ明示的に移動する。
   await expect(page).toHaveURL(/\/app(?:\/record)?$/, { timeout: 30000 });
   if (new URL(page.url()).pathname === '/app') {
-    await page.getByRole('link', { name: '記録を作成', exact: true }).click();
+    await page.goto('/app/record');
     await expect(page).toHaveURL(/\/app\/record$/, { timeout: 30000 });
   }
   await expect(organizationSelector).toBeVisible({ timeout: 15000 });
@@ -91,7 +87,12 @@ export const clickMenu = async (page: Page, name: string) => {
   if (await menuButton.isVisible()) {
     await menuButton.click();
   }
-  await page.getByRole('link', { name, exact: true }).click();
+  const link = page.getByRole('link', { name, exact: true });
+  const href = await link.getAttribute('href');
+  await link.click();
+  if (href?.startsWith('/')) {
+    await expect(page).toHaveURL(url => `${url.pathname}${url.search}` === href, { timeout: 30_000 });
+  }
 };
 
 /** ヘッダーのアカウントメニューからログアウトし、ログイン画面へ戻るまで待つ */
