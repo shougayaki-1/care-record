@@ -13,7 +13,9 @@
     "build-storybook": "storybook build",
     "test:ui": "vitest run --project storybook",
     "test:unit": "vitest run --project unit",
-    "test:e2e": "playwright test",
+    "test:e2e": "node scripts/e2e/run-local.mjs all",
+    "test:e2e:critical": "node scripts/e2e/run-local.mjs critical",
+    "test:ci-scope": "node --test scripts/ci/classify-changes.test.mjs",
     "security:audit": "npm audit --omit=dev --audit-level=high",
     "security:service-role": "node scripts/security/check-service-role-usage.mjs",
     "security:sbom": "npm sbom --package-lock-only --omit=dev --sbom-format=cyclonedx"
@@ -39,15 +41,15 @@
     "googleapis": "^171.4.0",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
-    "next": "16.2.9",
+    "next": "16.3.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "rrule": "^2.8.1",
-    "sharp": "^0.34.5",
+    "sharp": "0.35.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@next/bundle-analyzer": "^16.2.9",
+    "@next/bundle-analyzer": "16.3.6",
     "@playwright/test": "^1.61.0",
     "@storybook/addon-a11y": "^10.4.6",
     "@storybook/addon-docs": "^10.4.6",
@@ -58,15 +60,15 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@vitest/browser-playwright": "^4.1.9",
+    "@vitest/browser-playwright": "4.1.11",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.9",
+    "eslint-config-next": "16.3.6",
     "jsdom": "^29.1.1",
     "playwright": "^1.61.0",
     "storybook": "^10.4.6",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.1.9"
+    "vitest": "4.1.11"
   }
 }

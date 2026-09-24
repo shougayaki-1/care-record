@@ -21,6 +21,19 @@ const eslintConfig = defineConfig([
       }],
     },
   },
+  {
+    // These auth and organization transitions intentionally reload the document
+    // so client state and session cookies are rebuilt together.
+    files: [
+      "src/app/app/profile/page.tsx",
+      "src/app/app/settings/page.tsx",
+      "src/app/setup/page.tsx",
+      "src/context/WorkspaceContext.tsx",
+    ],
+    rules: {
+      "@next/next/no-location-assign-relative-destination": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

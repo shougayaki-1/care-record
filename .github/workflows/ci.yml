@@ -4,9 +4,13 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 18 * * 1'
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,14 +24,39 @@ env:
   SUPABASE_SERVICE_ROLE_KEY: ci-test-service-role-key
 
 jobs:
+  scope:
+    name: Select checks
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.changes.outputs.core }}
+      database: ${{ steps.changes.outputs.database }}
+      databaseUpgrade: ${{ steps.changes.outputs.databaseUpgrade }}
+      ui: ${{ steps.changes.outputs.ui }}
+      e2eCritical: ${{ steps.changes.outputs.e2eCritical }}
+      e2eAll: ${{ steps.changes.outputs.e2eAll }}
+      dependencies: ${{ steps.changes.outputs.dependencies }}
+      secretScan: ${{ steps.changes.outputs.secretScan }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Select checks from changed files
+        id: changes
+        run: node scripts/ci/classify-changes.mjs
+
   quality:
-    name: Lint and typecheck
+    name: App checks
+    needs: scope
+    if: needs.scope.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run lint -- --max-warnings=0
@@ -35,21 +64,16 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run security:service-role
-
-  unit:
-    name: Unit tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
+      - run: npm run test:ci-scope
       - run: npm run test:unit
+      - run: npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
 
   database:
     name: Empty database migrations and pgTAP
+    needs: scope
+    if: needs.scope.outputs.database == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -75,6 +99,8 @@ jobs:
 
   database-upgrade:
     name: Existing database migration upgrade
+    needs: scope
+    if: needs.scope.outputs.databaseUpgrade == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -132,30 +158,112 @@ jobs:
         if: ${{ always() }}
         run: supabase stop --no-backup --workdir /tmp/care-record-baseline
 
-  build:
-    name: Production build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-
   ui:
     name: Storybook UI tests
+    needs: scope
+    if: needs.scope.outputs.ui == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - run: npm run test:ui
+
+  e2e:
+    name: Local Supabase E2E
+    needs: scope
+    if: needs.scope.outputs.e2eCritical == 'true' || needs.scope.outputs.e2eAll == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.108.0
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run the selected local E2E suite
+        env:
+          E2E_ALL: ${{ needs.scope.outputs.e2eAll }}
+        run: |
+          if [[ "$E2E_ALL" == 'true' ]]; then
+            npm run test:e2e
+          else
+            npm run test:e2e:critical
+          fi
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  dependencies:
+    name: Dependency audit and SBOM
+    needs: scope
+    if: needs.scope.outputs.dependencies == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run security:audit
+      - name: Generate CycloneDX SBOM
+        if: ${{ always() }}
+        run: npm run --silent security:sbom > care-record-sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: sbom-${{ github.sha }}
+          path: care-record-sbom.cdx.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+  secret-scan:
+    name: Secret scan
+    needs: scope
+    if: needs.scope.outputs.secretScan == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  final:
+    name: CI
+    needs: [scope, quality, database, database-upgrade, ui, e2e, dependencies, secret-scan]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the selected checks to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -e '
+            .scope.result == "success"
+            and all(.[]; .result == "success" or .result == "skipped")
+            and (.scope.outputs.core != "true" or .quality.result == "success")
+            and (.scope.outputs.database != "true" or .database.result == "success")
+            and (.scope.outputs.databaseUpgrade != "true" or .["database-upgrade"].result == "success")
+            and (.scope.outputs.ui != "true" or .ui.result == "success")
+            and ((.scope.outputs.e2eCritical != "true" and .scope.outputs.e2eAll != "true") or .e2e.result == "success")
+            and (.scope.outputs.dependencies != "true" or .dependencies.result == "success")
+            and (.scope.outputs.secretScan != "true" or .["secret-scan"].result == "success")
+          '

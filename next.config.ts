@@ -19,14 +19,11 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   // 型付きルーティングを無効化してエラーを回避
   typedRoutes: false,
-  // App Router のクライアント側セグメントキャッシュ（ブラウザの戻る/進む操作でも
-  // 再利用される）を無効化する。/app/* は Cache-Control: no-store の認証済み
-  // 画面であり、常に最新のデータを取得する必要がある。既定値（動的セグメント
-  // 30秒）のままだと、短時間で複数の動的ルート（例: /app/clients/[id] →
-  // /app/record → /app/record/[clientId]）を行き来した際に、ブラウザの
-  // 「戻る」操作でキャッシュされた別ページの内容が表示されることがある。
+  // 認証済み画面の動的セグメントは遷移時に再利用しない。
+  // Next.js 16 では static の最小値が30秒なので、許容される最短値にする。
+  // staleTimes はブラウザの戻る/進むキャッシュには影響しない。
   experimental: {
-    staleTimes: { dynamic: 0, static: 0 },
+    staleTimes: { dynamic: 0, static: 30 },
   },
   // PDFライブラリのための設定 (既存)
   webpack: (config) => {

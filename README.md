@@ -1,107 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CareRecord
 
-## Release readiness
+CareRecordは、訪問介護事業者向けの介護記録・シフト・帳票管理アプリです。準拠状況と運用上の証跡は[docs/compliance/README.md](docs/compliance/README.md)にまとめています。
 
-- [Approved system decisions](docs/system-decisions.md)
-- [Release readiness checklist](docs/release-readiness-checklist.md)
-- [Implementation gap plan](docs/implementation-gap-plan.md)
+## 開発
 
-## Getting Started
+Node.js 24 と Docker を使います。依存関係をインストールし、ローカル Supabase を起動して、リポジトリで管理するマイグレーションを適用します。
 
-First, run the development server:
+```sh
+npm ci
+npx --yes supabase@2.108.0 start
+npx --yes supabase@2.108.0 db reset
+```
 
-```bash
+`.env.example` を `.env.local` にコピーします。`APP_ENV=local` を設定し、通常のローカル作業では外部連携を無効にしてください。`npx --yes supabase@2.108.0 status --output env` が表示するローカル API URL、anon key、service-role キーを設定します。`.env.local` は Git で追跡しないでください。ローカル開発や E2E にホスト済みプロジェクトの認証情報を使わないでください。
+
+```sh
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+詳しい手順は[開発環境のセットアップ](docs/development.md)と[テスト手順](docs/testing.md)を参照してください。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## リリース手順
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+通常は `feature/*` から PR を作成し、`main` に統合します。常設の `staging` ブランチは必須ではありません。一人の担当メンテナーが PR を作成し、差分と検査結果を確認したうえで、PR に短いリリースノートを記録します。リリース記録には候補 SHA、関連する CI 結果、該当する場合はデータベースマイグレーションの結果、デプロイ URL とスモークテストの結果を含めます。
 
-## Development and deployment flow
+アプリは Vercel の Git 連携でデプロイする方針です。既存の `care-record` Production 用プロジェクトと `care-record-staging` Preview 用プロジェクトを維持し、Supabase プロジェクトと環境変数はそれぞれ分けます。想定構成では、`care-record` が `main` のコミットを Production にデプロイし、`care-record-staging` が feature ブランチの Preview をデプロイします。両プロジェクトの存在とブランチ設定は確認済みです。残るセットアップ確認事項は[デプロイ手順](docs/deployment-runbook.md)に記載しています。このデプロイ経路を運用可能とみなす前に、設定を確認してください。
 
-This project separates local development, staging, and production so that testing never uses production data or credentials.
+データベース変更は、後方互換性を保ち、データベースを先に更新する手動リリース手順で行います。
 
-| Environment | Database | Vercel project | Deployment trigger |
-| --- | --- | --- | --- |
-| Local | Local Supabase started by the CLI | None | `npm run dev` |
-| Staging | `care-record-staging` (`xhvvfovvlqzlkirpjocv`) | `care-record-staging` | Push to `staging` |
-| Production | Production Supabase project | `care-record` | Push or merge to `main` |
+1. マイグレーションの差分と候補 SHA を確認します。既存の staging データベースにマイグレーションを適用し、対応する Preview の動作を確認します。
+2. Production に適用する前に、link 済みの Supabase プロジェクト、マイグレーション履歴、dry-run を確認します。Production の最新バックアップも確認します。
+3. 現行アプリが拡張後のスキーマでも動作する状態で、互換性のあるマイグレーションを Production に適用します。
+4. PR をマージします。Vercel の Git 連携が `main` のコミットをデプロイします。
+5. `/api/health`、サインイン、最小限の記録保存を確認します。スキーマの削除や名前変更を伴う変更は、expand、migrate、contract の順に進めます。
 
-### Routine workflow
+アプリのロールバックとデータベースの復旧は別の操作です。Vercel のアプリデプロイを戻しても、データベースマイグレーションは元に戻りません。初期設定、マイグレーション、リリース、監視、ロールバックの詳細は[デプロイ手順](docs/deployment-runbook.md)を参照してください。
 
-1. Create a feature branch from `staging` and develop locally.
-2. Run the checks below locally.
-3. Merge or push the validated change to `staging`. Vercel creates a Preview deployment in the `care-record-staging` project.
-4. Verify the staging URL and, when database migrations are included, apply and verify those migrations on the staging Supabase project first.
-5. Merge `staging` into `main` only after staging verification. This is the production release point.
+## 検査
 
-```bash
-npm run lint -- --max-warnings=0
-npm run typecheck
-npm run test:unit
-npm run build
-```
+PR では設定済みの基本 CI 検査を実行し、変更ファイルに応じて追加の検査を選択します。ローカル Supabase を使う E2E では合成データを使用し、クラウド E2E 用のシークレットは使いません。現在のスクリプトと検査対象の選択規則は[テスト手順](docs/testing.md)、外部のブランチ保護の設定状況は[デプロイ手順](docs/deployment-runbook.md)を参照してください。
 
-### Supabase migrations
+通常のリリースで行う検査は必要な範囲に絞っています。サービスの初回運用開始や重要な変更時は[リリース準備チェックリスト](docs/release-readiness-checklist.md)を、通常のリリースや定期運用は[デプロイ手順](docs/deployment-runbook.md)を参照してください。
 
-Migrations are intentionally applied manually from a trusted local machine; the regular release flow does not depend on GitHub Actions.
+## セキュリティ上重要な設定
 
-Before applying a migration, link the CLI to the intended project and confirm the history. Never run these commands while linked to the wrong environment.
+staging と Production の環境変数は、それぞれ対応する Vercel プロジェクトに設定します。Supabase のキー、service-role key、OAuth 認証情報、連携用シークレットは環境ごとに分けてください。サーバー専用の値に `NEXT_PUBLIC_` を付けないでください。アプリケーション変数の名前と用途は `.env.example` に記載しています。
 
-```bash
-# Confirm local and remote migration history.
-npx supabase migration list --linked
-
-# Review what would be applied, then apply it.
-npx supabase db push --linked --dry-run
-npx supabase db push --linked
-```
-
-Apply to staging first. Apply the same migration to production only after staging verification and with an up-to-date production backup.
-
-### Environment variables
-
-- Keep local secrets in `.env.local`; never commit that file.
-- Configure staging values only in the `care-record-staging` Vercel project, under **Preview**.
-- Configure production values only in the `care-record` Vercel project, under **Production**.
-- Do not copy Supabase keys, service-role keys, or external-service secrets between the two projects.
-- Staging currently disables paid/external integrations with `EXTERNAL_INTEGRATIONS_ENABLED=false` and `AI_IMPORT_ENABLED=false`.
-- Production must use its own Supabase URL, anon key, service-role key, and `EXPECTED_SUPABASE_PROJECT_ID`.
-
-The staging project uses Vercel's Git integration, so everyday staging deployments do not consume GitHub Actions minutes. Its Vercel setting builds pre-production branches only, preventing `main` from being deployed by the staging project. The manual GitHub Actions deployment workflow is retained for recovery only; do not use it for the normal release path while GitHub Actions billing is disabled.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
-## Security-sensitive deployment steps
-
-Before deploying an application build that uses the compliance foundation:
-
-1. Apply `supabase/migrations/202606190001_compliance_foundation.sql` to the target Supabase project.
-2. Configure all server-only variables documented in `.env.example`.
-3. Generate `GOOGLE_TOKEN_ENCRYPTION_KEY` as a 32-byte random value encoded with base64.
-4. Configure the GAS endpoint to reject requests unless the timestamp is recent, the nonce is unused, and `X-CareRecord-Signature` matches the HMAC-SHA256 signature made with `GAS_SHARED_SECRET`.
-5. Deploy the application only after the migration and secrets are ready. The migration adds columns used by the updated server actions.
-
-Do not expose `GAS_API_URL`, `GAS_SHARED_SECRET`, `GOOGLE_TOKEN_ENCRYPTION_KEY`, `AUDIT_IP_HASH_SALT`, or the Supabase service-role key with a `NEXT_PUBLIC_` prefix.
+現在使う Google トークンの暗号化キーは、base64 でエンコードしたランダムな 32 バイト値にしてください。キーをローテーションする間は、既存トークンの復号に必要な古いキーリングの項目も残してください。GAS エンドポイントは期限切れの timestamp と再利用された nonce を拒否し、`GAS_SHARED_SECRET` を使って `<timestamp>.<nonce>.<request-body>` に対する HMAC-SHA256 として `X-CareRecord-Signature` を検証する必要があります。

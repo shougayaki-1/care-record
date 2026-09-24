@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { generateUser, setupNewOrg, clickMenu, logout, login, registerClient, registerStaff, signUp } from './helpers';
+import { acceptTerms, generateUser, setupNewOrg, clickMenu, logout, login, registerClient, registerStaff, signUp } from './helpers';
 
 test.describe('統合フロー', () => {
   test.slow();
@@ -27,8 +27,11 @@ test.describe('統合フロー', () => {
     await roleDialog.getByLabel('ロール名').fill(roleName);
     // 「記録」行の 閲覧/作成 を「全体」に設定する
     const recordRow = roleDialog.getByRole('row', { name: /^記録/ });
-    await recordRow.getByRole('button', { name: '全体' }).nth(0).click();
-    await recordRow.getByRole('button', { name: '全体' }).nth(1).click();
+    const recordControls = await recordRow.isVisible()
+      ? recordRow
+      : roleDialog.getByRole('heading', { name: '記録' }).locator('..');
+    await recordControls.getByRole('button', { name: '全体' }).nth(0).click();
+    await recordControls.getByRole('button', { name: '全体' }).nth(1).click();
     await roleDialog.getByRole('button', { name: '作成', exact: true }).click();
     await expect(page.getByText('ロールを作成しました')).toBeVisible({ timeout: 15000 });
 
@@ -59,6 +62,7 @@ test.describe('統合フロー', () => {
     await page.goto(inviteUrl);
     await page.getByRole('button', { name: '新規登録して参加' }).click();
     await signUp(page, staffEmail, 'Test!1234');
+    await acceptTerms(page);
 
     // 5. セットアップ（参加フロー）。氏名はトリガー補完によりスキップされることがある
     const welcome = page.getByText('ようこそ！');

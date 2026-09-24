@@ -1,13 +1,13 @@
 # CareRecord システム方針決定書
 
-最終更新: 2026-07-16  
+最終更新: 2026-09-23
 状態: 承認済み
 
 ## 位置付け
 
 本書は、提供開始に向けて確定したシステム上の意思決定の正本です。実装、テスト、運用設定、ほかの設計文書が本書と矛盾する場合は、本書を優先し、矛盾を解消します。法令・契約・組織体制に関する判断は本書の対象外です。
 
-本番提供の判定は [release-readiness-checklist.md](release-readiness-checklist.md)、実装差分と順序は [implementation-gap-plan.md](implementation-gap-plan.md) を参照します。
+本番提供の判定は [release-readiness-checklist.md](release-readiness-checklist.md)、日常の配備は [deployment-runbook.md](deployment-runbook.md) を参照します。[implementation-gap-plan.md](implementation-gap-plan.md) は2026-07-16時点の差分計画であり、現在の配備・CI手順は本書とrunbookを正とします。
 
 ## 1. リリース原則
 
@@ -30,13 +30,15 @@
 
 ## 2. 環境分離と基盤
 
-| 環境 | Supabase | データ | 用途 |
-|---|---|---|---|
-| Development | Supabase CLIによるローカル環境 | 合成・ダミーデータのみ | 日常開発、マイグレーション、単体・DB試験 |
-| Staging | Supabase Freeの独立Project | 匿名化・合成データのみ | 本番相当E2E、復元試験 |
-| Production | Supabase Freeの独立Project | 実データ | 限定提供、本番運用 |
+| 環境 | Supabase | Vercel（想定） | データ | 用途 |
+|---|---|---|---|---|
+| Development | Supabase CLIによるローカル環境 | なし | 合成・ダミーデータのみ | 日常開発、マイグレーション、単体・DB・E2E試験 |
+| Staging | Supabase Freeの独立Project | `care-record-staging` の Preview | 合成・匿名化データのみ | 必要なホスト済みAuth・Storage・連携確認、復元試験 |
+| Production | Supabase Freeの独立Project | `care-record` の `main` Production | 実データ | 限定提供、本番運用 |
 
 - Supabase Project、Vercel Project、GCP bucket、OAuth認証情報、暗号鍵、Cron秘密情報、監査ログ、バックアップ先を環境間で共有しない。
+- 常設の`staging` Git branchは要求しない。feature branchからPRを作り、`main`に統合する。
+- Productionは`main`のVercel Git配備を使う。Stagingの既存Projectはfeature branch Previewと、ホスト済みサービスが必要な確認のために残す。ライブ設定の確認状態は[deployment-runbook.md](deployment-runbook.md)に記録する。
 - 非本番環境からProductionのDB、Auth、Storage、GCSへ接続できないようにする。
 - ProductionとStagingは東京リージョンを優先し、GCSの別系統バックアップは大阪に配置する。
 - 本番の必須環境変数が未設定、不正、別環境向けの場合はデプロイまたは起動を失敗させる。ダミー値で継続しない。
@@ -184,12 +186,22 @@ GCS正本化・マルウェア検査・PDF/HEIC対応は初期提供の必須要
 
 ## 15. 変更、CI、監視
 
-- Production反映にはlint、型、単体、UI・アクセシビリティ、本番ビルド、DB再構築、RLS拒否、主要E2E、依存脆弱性、秘密情報スキャン、バックアップ確認を要求する。
+- 変更は`feature/*` branchで作業し、PR上で差分と結果を自己レビューしてから`main`へ統合する。個人保守の通常変更に2人目のレビュー担当者は要求しない。
+- PRの基本CIはlint、型、単体テスト、本番build、service role利用検査を含む。DB・認可・UI・E2E等の重い検査は関連変更で実行し、条件付きjobの省略がmergeを妨げない固定名の最終判定を使う。依存監査とSBOM、秘密情報検査はPRまたは定期実行で維持する。現在のコマンドと選択条件は[testing.md](testing.md)に記載する。
+- DB migrationはStaging、Productionの順に手動適用する。Productionではmigration history、dry-run、直近のbackup freshnessを確認し、動作中アプリと互換なschemaだけを先行適用してからPRをmergeする。
+- 日常リリースの記録は候補SHA、関連check、migration適用結果、配備URL、最小の稼働確認をPRに残す。初回提供・重要変更は[release-readiness-checklist.md](release-readiness-checklist.md)の証跡を使う。
 - DB変更は追加、移行、切替、旧構造削除の段階方式とし、旧・新版の後方互換期間を持つ。
 - 危険な機能は機能フラグで停止でき、限定事業所から段階配信する。
 - 認証失敗、権限拒否、別組織ID試行、5xx、応答時間、容量、バックアップ、監査保全、Cron、Google同期、ファイル検査、service role、CSP違反、利用量を監視する。
 - 依存関係は週次確認し、lockfile、SBOM、段階配信を使用する。
 - 秘密情報・暗号鍵は定期交換ではなく、漏えい疑い、別環境投入、権限者変更、安全性低下、外部サービス要求等のイベント発生時に交換する。
+
+### 15.1 日常配備の順序
+
+- 通常のアプリ配備はVercel Git連携に任せ、Production Branchを`main`にする。手動のアプリ配備workflowは使わない。
+- E2Eは専用クラウドDBではなく、一時的なローカルSupabase環境で合成データを使う。Production資格情報をE2Eへ渡さない。
+- `/api/health`外形監視、完全DB backup、backup freshnessは定期運用として配備経路から分ける。外形監視は1系統を使い、完全backupとfreshness検査を残す。
+- Staging / Productionの接続、branch filter、環境変数、`main`のcheck rulesは外部サービス設定であり、確認状況を[deployment-runbook.md](deployment-runbook.md)に記録する。文書やローカル変更だけで有効化済みとは扱わない。
 
 ## 参考
 

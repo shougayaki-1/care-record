@@ -29,23 +29,42 @@ jobs:
     env:
       APP_ENV: ${{ github.event.inputs.environment || 'production' }}
       HEALTHCHECK_URL: ${{ vars.HEALTHCHECK_URL }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
       DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
       EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - uses: actions/checkout@v5
       - name: Probe the non-PII health endpoint
         shell: bash
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           : "${HEALTHCHECK_URL:?HEALTHCHECK_URL is required}"
           endpoint="${HEALTHCHECK_URL%/}/api/health"
-          status="$(curl --silent --show-error --location --max-time 20 \
-            --retry 2 --retry-all-errors --output health-response.json \
-            --write-out '%{http_code}' "$endpoint")"
-          test "$status" = '200'
-          jq -e '.ok == true and .service == "care-record" and
+          curl_args=(--silent --output health-response.json --write-out '%{http_code}'
+            --connect-timeout 10 --max-time 20 --max-filesize 16384
+            --retry 2 --retry-all-errors --retry-max-time 45)
+          if [[ -n "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]]; then
+            curl_args+=(--header "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}")
+          fi
+
+          # Do not follow redirects while sending the bypass header.
+          curl_status=0
+          status="$(curl "${curl_args[@]}" "$endpoint")" || curl_status=$?
+          if [[ "$curl_status" -ne 0 ]]; then
+            echo "Health probe request failed (curl exit $curl_status; HTTP ${status:-000})." >&2
+            exit "$curl_status"
+          fi
+          if [[ "$status" != '200' ]]; then
+            echo "Health endpoint returned HTTP $status." >&2
+            exit 1
+          fi
+          if ! jq -e '.ok == true and .service == "care-record" and
             (.database.capacity | IN("normal", "warning", "restricted", "critical"))' \
-            health-response.json >/dev/null
+            health-response.json >/dev/null 2>&1; then
+            echo 'Health endpoint returned an invalid or unhealthy payload.' >&2
+            exit 1
+          fi
       - name: Notify when database capacity crosses a threshold
         shell: bash
         run: |

@@ -9,11 +9,19 @@ export async function proxy(request: NextRequest) {
   const nonce = createNonce();
   const developmentEval = process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : '';
   const wasmEval = " 'wasm-unsafe-eval'";
-  // ローカル開発の `supabase start` は http(s)://127.0.0.1:54321 を使うため、
-  // 本番/stagingのCSPを緩めずに開発時だけクライアント側のSupabase接続を許可する。
-  const developmentSupabase = process.env.NODE_ENV === 'development'
-    ? ' http://127.0.0.1:54321 ws://127.0.0.1:54321'
-    : '';
+  // Local E2E uses a disposable Supabase stack with a different loopback port.
+  // Accept that exact origin only in development; hosted CSP is unchanged.
+  let developmentSupabase = '';
+  if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    try {
+      const localApi = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL);
+      if (localApi.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(localApi.hostname)) {
+        developmentSupabase = ` ${localApi.origin} ${localApi.origin.replace(/^http:/, 'ws:')}`;
+      }
+    } catch {
+      // An invalid URL remains blocked by CSP and fails environment validation.
+    }
+  }
   const csp = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${wasmEval}${developmentEval}`,
