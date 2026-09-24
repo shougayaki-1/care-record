@@ -1,14 +1,14 @@
 # 個人開発向けデプロイ運用の整理計画
 
 作成日: 2026-09-23
-状態: ローカル実装・一部検証済み。Production監視URLとVercel Preview filterは設定済み。CI必須設定、監視通知の成功、本番配備は未完了。
+状態: 実装を[ドラフトPR #17](https://github.com/shougayaki-1/care-record/pull/17)で検証済み。Production監視URL、Vercel Preview filter、mainのCI必須設定は完了。監視通知の成功と本番配備は未完了。
 
-## 2026-09-23時点の実施状況
+## 2026-09-24時点の実施状況
 
-- ローカル変更: application deploy workflowとplaceholder `keep_alive.yml`を削除し、基本CI・条件付き検査・ローカルSupabase E2Eを`ci.yml`へ統合した。文書もこの運用に更新した。これらは現在の作業treeの内容であり、remote `main`への配備を示さない。
+- PR変更: application deploy workflowとplaceholder `keep_alive.yml`を削除し、基本CI・条件付き検査・ローカルSupabase E2Eを`ci.yml`へ統合した。文書もこの運用に更新した。ドラフトPR #17であり、remote `main`への配備を示さない。
 - ローカル検証: lint、型チェック、本番build、service role使用検査、unit 250件、UI 17件、CI判定範囲のテスト10件が成功した。依存関係を更新し、`npm ci`とHigh以上を失敗扱いにする依存監査も成功した。監査にはModerateの指摘が5件残る。全件E2Eは更新前に20件成功。更新後は20件中18件が成功し、モバイルの遷移判定で失敗した2件を修正して該当ファイルの6件を再実行し成功した。
-- 外部状態: GitHub Actionsは有効で、Full logical backupとBackup freshnessの直近実行は成功した。GitHubの外形監視にはHTTP確認と通知が失敗した履歴がある。`HEALTHCHECK_URL`とVercelのProduction Preview filterは2026-09-23に設定・再読込したが、Discord通知成功は未確認である。`main`にbranch protection/rulesetはない。
-- 未完了: 固定名`CI` checkを`main`で必須にし、外形監視のDiscord通知とProduction環境変数scopeを確認し、必要なworkflow成功記録を確認するまで運用切替完了とは扱わない。詳細な読み取り結果と時点は[deployment-runbook.md](deployment-runbook.md)を参照する。
+- 外部状態: GitHub Actionsは有効で、Full logical backupとBackup freshnessの直近実行は成功した。PR #17のApp、DB、UI、依存監査、secret scan、ローカルSupabase E2E、最終`CI`とStaging Previewは2026-09-24に成功した。`main`のbranch protectionでPR経由と`CI`成功を必須に設定し、再読込した。GitHubの外形監視にはHTTP確認と通知が失敗した履歴がある。`HEALTHCHECK_URL`とVercelのProduction Preview filterは2026-09-23に設定・再読込したが、Discord通知成功は未確認である。
+- 未完了: 外形監視のDiscord通知とProduction環境変数scopeを確認し、本番配備後の検証を終えるまで運用切替完了とは扱わない。詳細な読み取り結果と時点は[deployment-runbook.md](deployment-runbook.md)を参照する。
 
 ## 目的と到達点
 
@@ -114,13 +114,13 @@ PR に候補 SHA、必要な DB 適用結果、配備 URL、確認結果を短�
 - https://vercel.com/kb/guide/deploying-next-and-userbase-with-vercel
 - https://vercel.com/kb/guide/how-do-i-use-the-ignored-build-step-field-on-vercel
 
-## 外部設定の確認記録（2026-09-23）
+## 外部設定の確認記録（2026-09-23〜24）
 
 GitHub CLI と Vercel CLI による読み取り結果。以下は観測結果であり、移行完了の記録ではない。
 
 - GitHub Actions は稼働中。2026-09-22 の完全 DB バックアップと鮮度監視に成功履歴があり、README の課金停止中という説明は現状と一致しない。
 - 外形監視には連続した失敗履歴がある。run `35788093677` は HTTP 200 判定と失敗通知の両方で失敗していたが、HTTP コードが記録されておらず原因は断定できない。現時点の `care-record.shoug.org/api/health` と `care-record.vercel.app/api/health` は HTTP 200。`Production` Environment に欠けていた `HEALTHCHECK_URL` は `https://care-record.shoug.org` に設定し、読み戻して確認した。`DISCORD_ALERT_WEBHOOK_URL` は同 Environment のSecrets一覧に存在せず、通知経路は未検証。今回は通知を送信していない。
-- main に通常の branch protection も ruleset も設定されていない。新しい `CI` チェックがリモートで成功した後、必須チェックに設定する必要がある。
+- 2026-09-23時点で main に通常の branch protection も ruleset もなかった。PR #17の`CI`成功後、2026-09-24にbranch protectionを設定し、PR必須・`CI`必須・承認者0人・adminにも適用・force pushと削除を禁止する設定を読み戻した。
 - Vercel の `care-record` と `care-record-staging` は GitHub 接続済みで、Production Branch は両方 main、Node.js は 24.x。
 - Staging は Preview のみ build する Ignored Build Step がある。本番プロジェクトには Preview を省略する設定を追加し、APIで読み戻して確認した。
 - 本番プロジェクトの環境変数メタデータに `SUPABASE_SERVICE_ROLE_KEY` の Production スコープがない。秘密値は表示・転記していない。現在の配備の health は HTTP 200 であり、過去の監視失敗の原因とは断定しない。次の配備前に必要な環境変数の Production スコープを確認する必要がある。

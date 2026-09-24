@@ -188,8 +188,9 @@ evidence record.
 
 ## Read-only status snapshot
 
-External settings were inspected on 2026-09-23. These facts describe the
-inspected accounts at that time and do not prove a deployment from this branch:
+External settings were inspected on 2026-09-23 and 2026-09-24. These facts
+describe the inspected accounts and do not prove a Production deployment from
+this branch:
 
 - GitHub Actions is active. The latest full logical backup and backup freshness
   runs succeeded.
@@ -200,13 +201,19 @@ inspected accounts at that time and do not prove a deployment from this branch:
   `https://care-record.shoug.org` in the existing `Production` Environment and
   read back. `DISCORD_ALERT_WEBHOOK_URL` is absent from that Environment's
   secret list; the notification path remains unverified.
-- The `main` branch has no classic branch protection or ruleset.
+- PR #17 passed App, empty-database and pgTAP, UI, dependency audit, secret
+  scan, local Supabase E2E, and the final `CI` check on 2026-09-24. Its
+  `care-record-staging` Preview reached READY and requires Vercel SSO.
+- `main` branch protection was configured and read back on 2026-09-24. It
+  requires a PR and the `CI` check, allows zero required approvals for the
+  single maintainer, applies to admins, and blocks force pushes and deletion.
 - The legacy `e2e` GitHub Environment still contains six cloud E2E secrets
   (`E2E_SUPABASE_ANON_KEY`, `E2E_SUPABASE_SERVICE_ROLE_KEY`,
   `E2E_SUPABASE_URL`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, and
   `SUPABASE_PROJECT_ID`). Remove that Environment only after the replacement CI
   succeeds on a PR and no workflow references it; deleting it also deletes its
-  stored secret values.
+  stored secret values. The replacement CI has now passed, but this deletion
+  has not been approved or performed.
 - Both Vercel projects exist. Staging builds Previews. A filter to skip Preview
   builds in the Production project was applied and read back on 2026-09-23.
 - The Production Vercel variable listing did not show
@@ -214,9 +221,8 @@ inspected accounts at that time and do not prove a deployment from this branch:
   currently returns HTTP 200, so this does not explain the past monitor
   failure. Verify the key's scope before the next deployment.
 
-Configure the missing branch and environment values, then verify them in the
-live services before marking the release path operational. This record is not
-an assertion that those changes have been made.
+Configure the missing environment values, verify alert delivery, and complete
+the Production release checks before marking the release path operational.
 
 ## Specification references checked
 
