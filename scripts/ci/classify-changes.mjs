@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, appendFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const codePath = /^(src|tests|scripts|supabase|public|\.github\/workflows|\.storybook)\//;
 const appConfigPath = /^(\.env\.example|package\.json|package-lock\.json|next\.config\.[^/]+|tsconfig\.json|eslint\.config\.[^/]+|postcss\.config\.[^/]+|tailwind\.config\.[^/]+|vitest\.config\.[^/]+|playwright\.config\.[^/]+|next-env\.d\.ts|\.nvmrc|AGENTS\.md)$/;
@@ -89,7 +91,7 @@ function changedPathsForEvent() {
     .filter(Boolean);
 }
 
-if (process.env.GITHUB_OUTPUT) {
+if (process.env.GITHUB_OUTPUT && process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const result = classifyFiles(changedPathsForEvent(), process.env.GITHUB_EVENT_NAME);
   appendFileSync(process.env.GITHUB_OUTPUT, `${Object.entries(result).map(([key, value]) => `${key}=${value}`).join('\n')}\n`);
   process.stdout.write(`${Object.entries(result).map(([key, value]) => `${key}=${value}`).join('\n')}\n`);
