@@ -85,6 +85,7 @@ test.describe('統合フロー', () => {
     await expect(page.getByText(staffName).first()).toBeVisible({ timeout: 15000 });
 
     await page.getByLabel('サービス提供').fill('1');
+    await page.getByLabel('精算額').fill('0');
     await page.getByRole('button', { name: '送信' }).click();
     await page.getByRole('button', { name: '送信する' }).click();
     await expect(page.getByText('記録を送信しました')).toBeVisible({ timeout: 20000 });
