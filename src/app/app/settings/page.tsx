@@ -72,7 +72,7 @@ function SettingsContent() {
     const [connectingCal, setConnectingCal] = useState(false);
     const [repairingCal, setRepairingCal] = useState(false);
     const [resyncingCal, setResyncingCal] = useState(false); // ★追加: 強制全件再同期中ステート
-    const [syncStatus, setSyncStatus] = useState<{ total: number; unsynced: number } | null>(null);
+    const [syncStatus, setSyncStatus] = useState<{ total: number; unsynced: number; deletedSyncPending: number } | null>(null);
     const [syncProgress, setSyncProgress] = useState<{ total: number; current: number } | null>(null);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
@@ -397,7 +397,7 @@ function SettingsContent() {
         if (!currentOrg || !canRepairCalendarSync) return;
         try {
             const s = await getSyncStatus(currentOrg.id);
-            setSyncStatus({ total: s.total, unsynced: s.unsynced });
+            setSyncStatus({ total: s.total, unsynced: s.unsynced, deletedSyncPending: s.deletedSyncPending });
         } catch (e) {
             console.error('getSyncStatus error', e);
         }
@@ -414,6 +414,8 @@ function SettingsContent() {
     const reportSyncResult = (done: number, failed: number, errorKind?: string) => {
         if (errorKind === 'auth') {
             showToast('Googleカレンダーの認証が切れています。「連携を解除」後に再接続してください。', 'error');
+        } else if (errorKind === 'skipped') {
+            showToast('DBの変更は保持されていますが、Googleカレンダー未連携のため同期待ちです。設定画面から連携してください。', 'warning');
         } else if (failed > 0) {
             showToast(`同期が一部失敗しました（成功 ${done} 件 / 失敗 ${failed} 件）。通信状況を確認し、しばらくしてから再度お試しください。`, 'warning');
         } else {
@@ -439,7 +441,7 @@ function SettingsContent() {
         setRepairingCal(true);
         try {
             const status = await getSyncStatus(currentOrg.id);
-            const total = status.unsynced;
+            const total = status.unsynced + status.deletedSyncPending;
             if (total === 0) { showToast('未同期の予定はありません。', 'info'); return; }
             setSyncProgress({ total, current: 0 });
             let done = 0, failed = 0, processed = 0;
@@ -677,9 +679,11 @@ function SettingsContent() {
 
                                                 {/* 同期ステータス */}
                                                 {canRepairCalendarSync && syncStatus && (
-                                                    syncStatus.unsynced > 0 ? (
+                                                    syncStatus.unsynced > 0 || syncStatus.deletedSyncPending > 0 ? (
                                                         <Alert severity="warning" sx={{ mt: 1 }}>
-                                                            未同期の予定が <strong>{syncStatus.unsynced} 件</strong> あります（全 {syncStatus.total} 件中）。「未同期を同期」で解消できます。
+                                                            {syncStatus.unsynced > 0 && <>未同期の予定が <strong>{syncStatus.unsynced} 件</strong> あります（全 {syncStatus.total} 件中）。 </>}
+                                                            {syncStatus.deletedSyncPending > 0 && <> DB削除済みのうち <strong>{syncStatus.deletedSyncPending} 件</strong> はGoogleカレンダー側の削除待ちまたは失敗です。</>}
+                                                            「未同期を同期」で解消できます。
                                                         </Alert>
                                                     ) : (
                                                         <Alert severity="success" sx={{ mt: 1 }}>

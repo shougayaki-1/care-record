@@ -270,19 +270,20 @@ export async function trySyncSilently(
   organizationId: string,
   shiftId: string,
   action: 'sync' | 'delete',
-) {
+): Promise<{ status: 'synced' | 'pending' | 'failed'; errorKind?: SyncErrorKind }> {
   try {
     await syncToGoogleCalendarDirect(organizationId, shiftId, action);
+    return { status: 'synced' };
   } catch (error) {
     const syncError = classifyGoogleError(error);
-    if (syncError.kind !== 'skipped') {
-      await markShiftGoogleSync(shiftId, 'failed', { error: syncError.message })
-        .catch((err) => logError('markShiftGoogleSync failed', { organizationId, error: serializeError(err) }));
-      logError(`Google Calendar sync (${action}) failed for shift ${shiftId} [${syncError.kind}]`, {
-        organizationId,
-        message: syncError.message,
-      });
-    }
+    if (syncError.kind === 'skipped') return { status: 'pending', errorKind: syncError.kind };
+    await markShiftGoogleSync(shiftId, 'failed', { error: syncError.message })
+      .catch((err) => logError('markShiftGoogleSync failed', { organizationId, error: serializeError(err) }));
+    logError(`Google Calendar sync (${action}) failed for shift ${shiftId} [${syncError.kind}]`, {
+      organizationId,
+      message: syncError.message,
+    });
+    return { status: 'failed', errorKind: syncError.kind };
   }
 }
 
@@ -306,6 +307,7 @@ export async function processShiftsSequential(
       const syncError = classifyGoogleError(error);
       if (syncError.kind === 'skipped') {
         succeeded += 1;
+        errorKind ??= syncError.kind;
         continue;
       }
       await markShiftGoogleSync(shift.id, 'failed', { error: syncError.message })

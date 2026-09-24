@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path TO public, extensions;
-SELECT plan(56);
+SELECT plan(71);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
@@ -235,6 +235,40 @@ SELECT ok(has_function_privilege('authenticated', 'public.create_shift_with_segm
   'authenticated users may call the atomic shift creation RPC');
 SELECT ok(NOT has_function_privilege('anon', 'public.transfer_owner_atomic(uuid,uuid,uuid)', 'EXECUTE'),
   'anonymous users cannot call the owner-transfer contract RPC');
+
+-- GAP-01: シフト時刻変更・キャンセル切替・フィールド更新・単体削除の atomic RPC。
+-- 影響行数(ROW_COUNT)で成功を確認するための RPC で、authenticated には実行権限を
+-- 付与しつつ PUBLIC/anon には一切許可しない（既存 atomic RPC と同じ契約）。
+SELECT ok(has_function_privilege('authenticated', 'public.update_shift_time_atomic(uuid,uuid,timestamptz,timestamptz)', 'EXECUTE'),
+  'authenticated users may call the shift time-update atomic RPC');
+SELECT ok(NOT has_function_privilege('anon', 'public.update_shift_time_atomic(uuid,uuid,timestamptz,timestamptz)', 'EXECUTE'),
+  'anonymous users cannot call the shift time-update atomic RPC');
+SELECT ok(has_function_privilege('authenticated', 'public.toggle_cancel_shift_atomic(uuid,uuid,boolean,text)', 'EXECUTE'),
+  'authenticated users may call the shift cancel-toggle atomic RPC');
+SELECT ok(NOT has_function_privilege('anon', 'public.toggle_cancel_shift_atomic(uuid,uuid,boolean,text)', 'EXECUTE'),
+  'anonymous users cannot call the shift cancel-toggle atomic RPC');
+SELECT ok(has_function_privilege('authenticated', 'public.update_shift_fields_atomic(uuid,uuid,jsonb)', 'EXECUTE'),
+  'authenticated users may call the shift field-update atomic RPC');
+SELECT ok(has_function_privilege('authenticated', 'public.delete_shift_atomic(uuid,uuid,text,timestamptz,text)', 'EXECUTE'),
+  'authenticated users may call the single shift-delete atomic RPC');
+SELECT ok(NOT has_function_privilege('anon', 'public.delete_shift_atomic(uuid,uuid,text,timestamptz,text)', 'EXECUTE'),
+  'anonymous users cannot call the single shift-delete atomic RPC');
+SELECT ok(has_function_privilege('authenticated', 'public.list_deleted_shift_google_sync_targets(uuid,uuid,integer)', 'EXECUTE'),
+  'authenticated users may enumerate only deleted Google sync recovery targets through the bounded RPC');
+SELECT ok(NOT has_function_privilege('anon', 'public.list_deleted_shift_google_sync_targets(uuid,uuid,integer)', 'EXECUTE'),
+  'anonymous users cannot enumerate deleted Google sync recovery targets');
+SELECT ok(has_function_privilege('authenticated', 'public.soft_delete_shifts_checked(uuid,uuid[],text,timestamptz,text)', 'EXECUTE'),
+  'authenticated users may call the checked bulk shift-delete RPC');
+SELECT ok(NOT has_function_privilege('anon', 'public.soft_delete_shifts_checked(uuid,uuid[],text,timestamptz,text)', 'EXECUTE'),
+  'anonymous users cannot call the checked bulk shift-delete RPC');
+SELECT ok(has_function_privilege('authenticated', 'public.update_shift_with_segments_atomic(uuid,uuid,jsonb,boolean,jsonb)', 'EXECUTE'),
+  'authenticated users may call the atomic shift fields-and-segments RPC');
+SELECT ok(NOT has_function_privilege('anon', 'public.update_shift_with_segments_atomic(uuid,uuid,jsonb,boolean,jsonb)', 'EXECUTE'),
+  'anonymous users cannot call the atomic shift fields-and-segments RPC');
+SELECT ok(NOT has_function_privilege('anon', 'public.soft_delete_shifts_atomic(uuid,uuid[],text,timestamptz,text)', 'EXECUTE'),
+  'anonymous users cannot call the legacy bulk shift-delete compatibility RPC');
+SELECT ok(has_function_privilege('authenticated', 'public.soft_delete_shifts_atomic(uuid,uuid[],text,timestamptz,text)', 'EXECUTE'),
+  'authenticated users retain the legacy bulk shift-delete compatibility RPC');
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000001","role":"authenticated","session_id":"rls-owner-session"}', true);
 

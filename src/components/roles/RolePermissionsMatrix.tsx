@@ -57,10 +57,12 @@ const RECORD_ROWS: Array<{ label: string; action: RecordAction; allowAssigned: b
   { label: '承認', action: 'approve', allowAssigned: false },
 ];
 
+// シフトの作成・編集・削除は「担当」に未対応（Option B）。DB側もowner/'all'ロールのみ
+// 書き込みを許可するため、UIでも選択肢から外し permissions.ts の正規化と矛盾させない。
 const SHIFT_ROWS: Array<{ label: string; action: ShiftAction; allowAssigned: boolean }> = [
   { label: '閲覧', action: 'view',   allowAssigned: true },
-  { label: '作成', action: 'create', allowAssigned: true },
-  { label: '編集', action: 'edit',   allowAssigned: true },
+  { label: '作成', action: 'create', allowAssigned: false },
+  { label: '編集', action: 'edit',   allowAssigned: false },
   { label: '削除', action: 'delete', allowAssigned: false },
 ];
 

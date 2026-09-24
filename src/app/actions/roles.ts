@@ -1,7 +1,7 @@
 'use server';
 
 import { sanitizeDbError, withSafeError } from '@/utils/errors';
-import { PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS, type RolePermissions } from '@/utils/permissions';
+import { normalizePermissions, PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS, type RolePermissions } from '@/utils/permissions';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { assertOwnerForDangerousPermissions, assertRoleManagerRemains } from '@/utils/supabase/roleSafety';
@@ -39,6 +39,8 @@ export async function getOrgRolesFull(orgId: string) {
 export async function createOrgRole(orgId: string, name: string, color: string | null, permissions: RolePermissions): Promise<{ id: string }> {
   return withSafeError('createOrgRole', async () => {
     const { userId, isOwner } = await assertOrgPermission(orgId, 'roles');
+    // シフトの create/edit/delete='assigned' は非対応（Option B）。保存前に安全側へ縮退する。
+    permissions = normalizePermissions(permissions);
     assertOwnerForDangerousPermissions(permissions, isOwner);
     const supabase = await createSessionClient();
     const { data, error } = await supabase.rpc('mutate_organization_role_authorized', {
@@ -64,7 +66,9 @@ export async function updateOrgRole(orgId: string, roleId: string, patch: RolePa
     if (readError) throw sanitizeDbError(readError, 'action.roles.update.read');
     if (!existing) throw new Error('対象のロールが見つかりません');
     const beforePermissions = existing.permissions as RolePermissions;
-    const effectivePermissions = patch.permissions ?? beforePermissions;
+    // シフトの create/edit/delete='assigned' は非対応（Option B）。保存前に安全側へ縮退する
+    // （既存ロールに残る書き込み系assignedも、更新のたびに正規化されて安全側へ寄る）。
+    const effectivePermissions = normalizePermissions(patch.permissions ?? beforePermissions);
     assertOwnerForDangerousPermissions(effectivePermissions, isOwner);
     if (patch.permissions) await assertRoleManagerRemains(orgId, { updatedRole: { roleId, permissions: patch.permissions } });
     const { error } = await supabase.rpc('mutate_organization_role_authorized', {

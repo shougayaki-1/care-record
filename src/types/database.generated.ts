@@ -2742,6 +2742,16 @@ export type Database = {
         Args: { p_decision: string; p_org_id: string; p_request_id: string }
         Returns: Json
       }
+      delete_shift_atomic: {
+        Args: {
+          p_org_id: string
+          p_reason: string
+          p_retention_until: string
+          p_shift_id: string
+          p_sync_status: string
+        }
+        Returns: string
+      }
       delete_shift_segment_atomic: {
         Args: { p_org_id: string; p_segment_id: string }
         Returns: undefined
@@ -2777,6 +2787,15 @@ export type Database = {
       leave_organization_atomic: {
         Args: { p_org_id: string }
         Returns: undefined
+      }
+      list_deleted_shift_google_sync_targets: {
+        Args: { p_cursor?: string; p_limit?: number; p_org_id: string }
+        Returns: {
+          google_sync_status: string
+          next_cursor: string
+          remaining: number
+          shift_id: string
+        }[]
       }
       load_report_autosave_authorized: {
         Args: { p_draft_key: string; p_organization_id: string }
@@ -2952,6 +2971,25 @@ export type Database = {
         }
         Returns: number
       }
+      soft_delete_shifts_checked: {
+        Args: {
+          p_org_id: string
+          p_reason: string
+          p_retention_until: string
+          p_shift_ids: string[]
+          p_sync_status: string
+        }
+        Returns: Json
+      }
+      toggle_cancel_shift_atomic: {
+        Args: {
+          p_is_cancel: boolean
+          p_org_id: string
+          p_reason: string
+          p_shift_id: string
+        }
+        Returns: string
+      }
       transfer_owner_atomic: {
         Args: {
           p_current_owner_id: string
@@ -2975,6 +3013,29 @@ export type Database = {
       update_organization_setting: {
         Args: { p_org_id: string; p_setting: string; p_value: string }
         Returns: undefined
+      }
+      update_shift_fields_atomic: {
+        Args: { p_org_id: string; p_payload: Json; p_shift_id: string }
+        Returns: string
+      }
+      update_shift_time_atomic: {
+        Args: {
+          p_end_at: string
+          p_org_id: string
+          p_shift_id: string
+          p_start_at: string
+        }
+        Returns: string
+      }
+      update_shift_with_segments_atomic: {
+        Args: {
+          p_org_id: string
+          p_payload: Json
+          p_replace_segments?: boolean
+          p_segments?: Json
+          p_shift_id: string
+        }
+        Returns: string
       }
       upsert_client_form_authorized: {
         Args: { p_client_id: string; p_organization_id: string; p_schema: Json }
