@@ -70,25 +70,40 @@ export function FormBuilderTab({
   })[type];
   return (
     <Box>
-      <Box display="flex" justifyContent="flex-end" gap={1} mb={2} sx={{ flexWrap: 'wrap', '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
-        <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={onOpenCopy}>
+      <Stack spacing={2} mb={3}>
+        <Box>
+          <Typography component="h2" variant="h6" fontWeight="bold">設問</Typography>
+          <Typography variant="body2" color="text.secondary">
+            設問を開いて内容を編集できます。追加した設問はすぐ下に表示されます。
+          </Typography>
+        </Box>
+        <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={onOpenCopy} sx={{ alignSelf: { xs: 'stretch', sm: 'flex-start' } }}>
           テンプレート読込 / コピー
         </Button>
-      </Box>
-      <Stack spacing={1} pb={2}>
+      </Stack>
+      <Stack spacing={0} pb={2}>
         {formItems.map((item, index) => (
           <Box key={item.id}>
           <Card sx={{ overflow: 'visible', borderLeft: item.type === 'section' ? '6px solid' : 'none', borderLeftColor: 'primary.main', bgcolor: item.type === 'section' ? 'background.tint' : 'background.paper' }}>
-            <CardContent sx={{ p: '16px !important' }}>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <Button onClick={() => setExpandedId(expandedId === item.id ? null : item.id)} aria-expanded={expandedId === item.id} endIcon={<ExpandMoreIcon sx={{ transform: expandedId === item.id ? 'rotate(180deg)' : undefined }} />} sx={{ flexGrow: 1, justifyContent: 'space-between', textAlign: 'left', minWidth: 0, textTransform: 'none' }}>
-                  <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label || '新しい設問'} · {typeLabel(item.type)}</Box>
-                </Button>
+            <CardContent sx={{ p: '0 !important' }}>
+              <Button
+                onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                aria-expanded={expandedId === item.id}
+                endIcon={<ExpandMoreIcon sx={{ transform: expandedId === item.id ? 'rotate(180deg)' : undefined }} />}
+                sx={{ width: '100%', px: { xs: 2, sm: 2.5 }, py: 2, justifyContent: 'space-between', textAlign: 'left', textTransform: 'none', color: 'text.primary', '& .MuiButton-endIcon': { flexShrink: 0, ml: 2 } }}
+              >
+                <Box component="span" sx={{ display: 'flex', flexDirection: 'column', minWidth: 0, alignItems: 'flex-start' }}>
+                  <Typography component="span" variant="caption" color="text.secondary">{index + 1}番目の設問 · {typeLabel(item.type)}</Typography>
+                  <Typography component="span" variant="subtitle1" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{item.label || '新しい設問'}</Typography>
+                </Box>
+              </Button>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: { xs: 2, sm: 2.5 }, py: 0.75, borderTop: '1px solid', borderColor: 'divider' }}>
+                <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>順番</Typography>
                 <IconButton size="small" aria-label={`${item.label || '設問'}を上へ`} onClick={() => onMoveField(index, 'up')} disabled={index === 0}><ArrowUpwardIcon fontSize="small" /></IconButton>
                 <IconButton size="small" aria-label={`${item.label || '設問'}を下へ`} onClick={() => onMoveField(index, 'down')} disabled={index === formItems.length - 1}><ArrowDownwardIcon fontSize="small" /></IconButton>
-              </Stack>
+              </Box>
               <Collapse in={expandedId === item.id} unmountOnExit>
-              <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2}>
+              <Stack direction={{ xs: 'column', md: 'row' }} alignItems="flex-start" spacing={2} sx={{ p: { xs: 2, sm: 2.5 }, borderTop: '1px solid', borderColor: 'divider' }}>
                 <Stack direction={{ xs: 'row', md: 'column' }} spacing={0.5} sx={{ width: { xs: '100%', md: 'auto' }, justifyContent: { xs: 'space-between', md: 'flex-start' } }}>
                   <IconButton color="error" size="small" aria-label="設問を削除" onClick={() => onRemoveField(index)}><DeleteIcon fontSize="small" /></IconButton>
                 </Stack>
@@ -144,7 +159,11 @@ export function FormBuilderTab({
               </Collapse>
             </CardContent>
           </Card>
-          <Button size="small" startIcon={<AddCircleIcon />} onClick={() => addAt(index + 1)} sx={{ ml: 2, my: 0.5 }}>下に追加</Button>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.5, px: 1 }}>
+            <Box sx={{ flex: 1, borderTop: '1px dashed', borderColor: 'divider' }} />
+            <Button size="small" variant="outlined" startIcon={<AddCircleIcon />} onClick={() => addAt(index + 1)} sx={{ flexShrink: 0 }}>下に設問を追加</Button>
+            <Box sx={{ flex: 1, borderTop: '1px dashed', borderColor: 'divider' }} />
+          </Box>
           </Box>
         ))}
         {formItems.length === 0 && <Button variant="outlined" startIcon={<AddCircleIcon />} onClick={() => addAt(0)}>最初の設問を追加</Button>}
