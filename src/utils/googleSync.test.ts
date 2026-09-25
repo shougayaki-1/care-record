@@ -4,6 +4,8 @@ import {
     SyncError,
     type SyncErrorKind,
     classifyGoogleError,
+    googleConnectionStateFromError,
+    googleSyncErrorMessage,
     buildJstIsoString,
     buildFloatingDate,
     emptyGoogleSyncStats,
@@ -90,7 +92,7 @@ describe('classifyGoogleError', () => {
     describe('HTTP ステータスコードによる分類', () => {
         it.each<[number, SyncErrorKind]>([
             [401, 'auth'],
-            [403, 'auth'],
+            [403, 'forbidden'],
             [429, 'rate_limit'],
             [500, 'transient'],
             [502, 'transient'],
@@ -118,6 +120,22 @@ describe('classifyGoogleError', () => {
                 },
             });
             expect(se.kind).toBe('rate_limit');
+        });
+
+        it('403 の複数理由に含まれるレート制限を検出する', () => {
+            expect(classifyGoogleError({ response: { status: 403, data: { error: {
+                errors: [{ reason: 'forbidden' }, { reason: 'userRateLimitExceeded' }],
+            } } } }).kind).toBe('rate_limit');
+        });
+
+        it('invalid_client の401はユーザーの再認証では解消しない', () => {
+            expect(classifyGoogleError({ response: { status: 401, data: { error: 'invalid_client' } } }).kind).toBe('misconfigured');
+        });
+
+        it('Calendar API無効化は再認証ではなく管理者の設定確認を案内する', () => {
+            expect(classifyGoogleError({ response: { status: 403, data: { error: {
+                errors: [{ reason: 'accessNotConfigured' }],
+            } } } }).kind).toBe('misconfigured');
         });
 
         it('文字列の code は無視し、response.status / status を見る', () => {
@@ -153,6 +171,26 @@ describe('classifyGoogleError', () => {
         expect(se.kind).toBe('permanent');
         expect(se.message).toBe('unknown error');
         expect(se.code).toBe(418);
+    });
+});
+
+describe('Google connection recovery guidance', () => {
+    it.each([
+        [new SyncError('expired', 'auth', 400), 'reauth_required'],
+        [new SyncError('forbidden', 'forbidden', 403), 'forbidden'],
+        [new SyncError('busy', 'rate_limit', 403), 'temporarily_unavailable'],
+        [new SyncError('network', 'transient'), 'temporarily_unavailable'],
+        [new SyncError('missing', 'permanent', 404), 'calendar_missing'],
+        [new SyncError('client', 'misconfigured', 401), 'misconfigured'],
+    ])('maps %s without misreporting authentication expiry', (error, state) => {
+        expect(googleConnectionStateFromError(error)).toBe(state);
+    });
+
+    it('preserves the existing connection when reauthentication is needed', () => {
+        expect(googleSyncErrorMessage('auth')).toContain('Googleを再認証');
+        expect(googleSyncErrorMessage('auth')).toContain('連携の解除は不要');
+        expect(googleSyncErrorMessage('forbidden')).toContain('編集権限');
+        expect(googleSyncErrorMessage('transient')).toContain('再認証は不要');
     });
 });
 

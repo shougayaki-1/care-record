@@ -1,5 +1,7 @@
 'use client';
 
+import { GOOGLE_CONNECTION_LABELS, googleConnectionMessage, googleSyncErrorMessage } from '@/utils/googleSync';
+
 import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
 import {
@@ -161,11 +163,14 @@ function SettingsContent() {
         const errorMsg = searchParams.get('error');
 
         if (successMsg === 'calendar_connected') {
-            showToast('Googleカレンダーを作成し連携しました！', 'success');
+            showToast('Googleカレンダーの連携・認証を更新しました。', 'success');
             // パラメータを消去（replaceはエラーを防ぐため今回はシンプルにURLを上書き）
             window.history.replaceState(null, '', '/app/settings');
         } else if (errorMsg) {
-            showToast(`連携に失敗しました (${errorMsg})`, 'error');
+            const state = errorMsg.startsWith('google_') ? errorMsg.slice('google_'.length) : '';
+            const message = Object.hasOwn(GOOGLE_CONNECTION_LABELS, state)
+                ? googleConnectionMessage(state as GoogleConnectionState) : null;
+            showToast(message || 'Googleカレンダーの連携に失敗しました。もう一度お試しください。', 'error');
             window.history.replaceState(null, '', '/app/settings');
         }
     }, [searchParams, showToast]);
@@ -407,8 +412,9 @@ function SettingsContent() {
 
     // 同期結果のメッセージ
     const reportSyncResult = (done: number, failed: number, errorKind?: string) => {
-        if (errorKind === 'auth') {
-            showToast('Googleカレンダーの認証が切れています。「連携を解除」後に再接続してください。', 'error');
+        const message = googleSyncErrorMessage(errorKind);
+        if (message) {
+            showToast(message, 'warning');
         } else if (failed > 0) {
             showToast(`同期が一部失敗しました（成功 ${done} 件 / 失敗 ${failed} 件）。通信状況を確認し、しばらくしてから再度お試しください。`, 'warning');
         } else {
@@ -419,8 +425,8 @@ function SettingsContent() {
     const reportRepairResult = (res: Awaited<ReturnType<typeof repairGoogleCalendarSync>>) => {
         if (!res.connected) {
             showToast('Googleカレンダーが連携されていません。「連携する」から接続してください。', 'warning');
-        } else if (res.errorKind === 'auth') {
-            showToast('Googleカレンダーの認証が切れています。「連携を解除」後に再接続してください。', 'error');
+        } else if (res.errorKind) {
+            showToast(googleSyncErrorMessage(res.errorKind)!, 'warning');
         } else if (res.failed > 0) {
             showToast(`同期修復が一部失敗しました（成功 ${res.succeeded} 件 / 失敗 ${res.failed} 件）。`, 'warning');
         } else {
@@ -627,7 +633,7 @@ function SettingsContent() {
                                         <Typography variant="body2" color="text.secondary">事業所ごとの専用カレンダーを自動作成し、シフトを同期します（OAuth直接連携）</Typography>
                                     </Box>
                                     <Chip
-                                        label={googleCalendarId ? (googleConnectionState === 'healthy' ? '連携・正常' : googleConnectionState === 'reauth_required' ? '再認証が必要' : googleConnectionState === 'calendar_missing' ? 'カレンダー要確認' : '接続を確認中') : '未連携'}
+                                        label={googleCalendarId ? GOOGLE_CONNECTION_LABELS[googleConnectionState] : '未連携'}
                                         color={googleCalendarId && googleConnectionState === 'healthy' ? 'success' : googleCalendarId ? 'warning' : 'default'}
                                         size="small"
                                         icon={<LinkIcon />}
@@ -650,16 +656,21 @@ function SettingsContent() {
                                                 </Typography>
 
                                                 {/* 同期ステータス */}
+                                                {googleConnectionMessage(googleConnectionState) && (
+                                                    <Alert severity="warning">
+                                                        {googleConnectionMessage(googleConnectionState)}
+                                                    </Alert>
+                                                )}
                                                 {canRepairCalendarSync && syncStatus && (
                                                     syncStatus.unsynced > 0 ? (
                                                         <Alert severity="warning" sx={{ mt: 1 }}>
                                                             未同期の予定が <strong>{syncStatus.unsynced} 件</strong> あります（全 {syncStatus.total} 件中）。「未同期を同期」で解消できます。
                                                         </Alert>
-                                                    ) : (
+                                                    ) : googleConnectionState === 'healthy' ? (
                                                         <Alert severity="success" sx={{ mt: 1 }}>
                                                             すべての予定（{syncStatus.total} 件）がGoogleカレンダーと同期済みです。
                                                         </Alert>
-                                                    )
+                                                    ) : null
                                                 )}
 
                                                 {canRepairCalendarSync && syncProgress && (
