@@ -40,7 +40,7 @@ import {
   buildReportsCsv,
   buildTravelSettlementCsv,
   getReportData,
-  getReportHelperNames as getHelperNames,
+  getReportHelperNames as getExportHelperNames,
 } from '@/utils/reportsExport';
 import { useReportFilters } from '@/hooks/useReportFilters';
 
@@ -53,9 +53,35 @@ type Report = {
   clients: { id: string; name: string; organization_id: string };
   helper: { name: string };
   approved_by_user?: { name: string };
-  report_values: { data: ReportValuesData } | { data: ReportValuesData }[];
+  report_values: { helpers: string[] | null } | { helpers: string[] | null }[] | null;
 };
 type ClientData = { id: string; name: string };
+type ExportReport = Omit<Report, 'report_values'> & {
+  report_values: { data: ReportValuesData } | { data: ReportValuesData }[];
+};
+
+const REPORT_PAGE_SIZE = 50;
+
+function getHelperNames(report: Report): string {
+  const values = Array.isArray(report.report_values) ? report.report_values[0] : report.report_values;
+  const helpers = values?.helpers;
+  if (Array.isArray(helpers) && helpers.length > 0) return helpers.join(', ');
+  return report.helper?.name || '不明';
+}
+
+async function loadReportValues(reports: Report[]): Promise<ExportReport[]> {
+  const valuesById = new Map<string, ReportValuesData>();
+  for (let start = 0; start < reports.length; start += REPORT_PAGE_SIZE) {
+    const ids = reports.slice(start, start + REPORT_PAGE_SIZE).map((report) => report.id);
+    const { data, error } = await supabase.from('report_values').select('report_id, data').in('report_id', ids);
+    if (error) throw error;
+    for (const row of data ?? []) valuesById.set(row.report_id, row.data as ReportValuesData);
+  }
+  return reports.map((report) => {
+    const value = valuesById.get(report.id);
+    return { ...report, report_values: value ? { data: value } : [] };
+  });
+}
 
 export default function ReportsClientPage() {
   const router = useRouter();
@@ -66,6 +92,7 @@ export default function ReportsClientPage() {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
   const [reports, setReports] = useState<Report[]>([]);
+  const [page, setPage] = useState(0);
   const [clients, setClients] = useState<ClientData[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -113,10 +140,11 @@ export default function ReportsClientPage() {
       }
 
       let query = supabase.from('reports').select(`
-          *, clients!inner ( id, name, organization_id ),
+          id, start_at, end_at, created_at, updated_at, status, approved_at, segment_id,
+          clients!inner ( id, name, organization_id ),
           helper:profiles!reports_helper_id_fkey ( name ),
           approved_by_user:profiles!reports_approved_by_fkey ( name ),
-          report_values ( data ),
+          report_values ( helpers: data->_helpers ),
           segment:shift_segments ( service_type:service_types ( name ) )
         `).eq('clients.organization_id', currentOrg.id).is('deleted_at', null).neq('status', 'draft');
 
@@ -139,6 +167,7 @@ export default function ReportsClientPage() {
           return 0;
       });
       setReports(sortedData);
+      setPage(0);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order, filterShiftId]);
 
@@ -149,6 +178,10 @@ export default function ReportsClientPage() {
       fetchReports();
     }
   }, [wsLoading, currentOrg, fetchClients, fetchReports]);
+
+  const pageCount = Math.max(1, Math.ceil(reports.length / REPORT_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleReports = reports.slice(currentPage * REPORT_PAGE_SIZE, (currentPage + 1) * REPORT_PAGE_SIZE);
 
   const handleSelectAllClick = (event: React.ChangeEvent<HTMLInputElement>) => { if (event.target.checked) { setSelected(reports.map(n => n.id)); return; } setSelected([]); };
   const handleClick = (event: React.MouseEvent<unknown>, id: string) => {
@@ -235,8 +268,9 @@ export default function ReportsClientPage() {
         const clientIds = Array.from(new Set(targetReports.map(r => r.clients.id)));
         const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
 
+        const exportReports = await loadReportValues(targetReports);
         const csvContent = buildReportsCsv(
-          targetReports,
+          exportReports,
           (templates ?? []).map((template) => ({
             schema: template.schema as HelperFormItem[] | null,
           })),
@@ -286,7 +320,8 @@ export default function ReportsClientPage() {
 
       try {
         await auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'pdf');
-        const pdfReports = await Promise.all(targetReports.map(async (report) => {
+        const exportReports = await loadReportValues(targetReports);
+        const pdfReports = await Promise.all(exportReports.map(async (report) => {
           const data = getReportData(report);
           if (!data) return null;
           const { data: tmplData } = await supabase.from('form_templates').select('schema').eq('client_id', report.clients.id).maybeSingle();
@@ -294,7 +329,7 @@ export default function ReportsClientPage() {
           const pdfData: PdfReportData = {
             id: report.id, 
             clientName: report.clients.name, 
-            helperName: getHelperNames(report),
+            helperName: getExportHelperNames(report),
             startAt: report.start_at, endAt: report.end_at, 
             data: data, 
             template: (tmplData?.schema as HelperFormItem[]) || []
@@ -374,15 +409,7 @@ export default function ReportsClientPage() {
   const handleCreateGasPdf = async () => {
       const targetReports = getTargetReports();
       if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
-
-      const clientGroups: Record<string, Report[]> = {};
-      targetReports.forEach(r => {
-          const cid = r.clients.id;
-          if (!clientGroups[cid]) clientGroups[cid] = [];
-          clientGroups[cid].push(r);
-      });
-
-      const clientIds = Object.keys(clientGroups);
+      const clientIds = Array.from(new Set(targetReports.map((report) => report.clients.id)));
       const { data: clientsInfo } = await supabase.from('clients').select('id, name, google_template_id, google_folder_id').in('id', clientIds);
       
       const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
@@ -405,6 +432,13 @@ export default function ReportsClientPage() {
       let lastOpenedFolderUrl: string | null = null;
 
       try {
+          const exportReports = await loadReportValues(targetReports);
+          const clientGroups: Record<string, ExportReport[]> = {};
+          exportReports.forEach((report) => {
+              const clientId = report.clients.id;
+              if (!clientGroups[clientId]) clientGroups[clientId] = [];
+              clientGroups[clientId].push(report);
+          });
           let processedCount = 0;
           const now = new Date();
           const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
@@ -460,7 +494,7 @@ export default function ReportsClientPage() {
                   const end = new Date(report.end_at);
                   
                   flatData['利用者名'] = client.name;
-                  flatData['担当ヘルパー名'] = getHelperNames(report);
+                  flatData['担当ヘルパー名'] = getExportHelperNames(report);
                   flatData['開始日付'] = `${start.getFullYear()}/${start.getMonth()+1}/${start.getDate()}`;
                   flatData['開始時刻'] = `${start.getHours()}:${String(start.getMinutes()).padStart(2,'0')}`;
                   flatData['終了日付'] = `${end.getFullYear()}/${end.getMonth()+1}/${end.getDate()}`;
@@ -579,7 +613,7 @@ export default function ReportsClientPage() {
              <>
              {isMobile && (
                <Stack divider={<Divider />} sx={{ borderTop: 1, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
-                 {reports.map((row) => {
+                 {visibleReports.map((row) => {
                    const start = new Date(row.start_at);
                    const end = new Date(row.end_at);
                    const isAbnormal = isAbnormalReport(row);
@@ -638,7 +672,7 @@ export default function ReportsClientPage() {
                    </TableRow>
                  </TableHead>
                  <TableBody>
-                   {reports.map((row) => {
+                   {visibleReports.map((row) => {
                      const start = new Date(row.start_at);
                      const end = new Date(row.end_at);
                      const isAbnormal = isAbnormalReport(row);
@@ -681,6 +715,13 @@ export default function ReportsClientPage() {
                  </TableBody>
                </Table>
              </TableContainer>
+             {pageCount > 1 && (
+               <Stack direction="row" spacing={2} alignItems="center" justifyContent="center" sx={{ mt: 2 }}>
+                 <Button variant="outlined" size="small" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>前へ</Button>
+                 <Typography variant="body2">{currentPage + 1} / {pageCount} ページ</Typography>
+                 <Button variant="outlined" size="small" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>次へ</Button>
+               </Stack>
+             )}
              </>
            )}
        </PageBody>

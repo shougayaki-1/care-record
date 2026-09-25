@@ -213,7 +213,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
 
           // 部分失敗を握りつぶさず集計する（DB挿入のみ。Google同期は後続のバッチ処理に委ねる）
           const results: PromiseSettledResult<{ kind: 'created' | 'updated' }>[] = [];
-          const CHUNK_SIZE = 100;
+          const CHUNK_SIZE = 10;
           for (let i = 0; i < tasks.length; i += CHUNK_SIZE) {
               const chunk = tasks.slice(i, i + CHUNK_SIZE).map((task) => task());
               results.push(...await Promise.allSettled(chunk));
