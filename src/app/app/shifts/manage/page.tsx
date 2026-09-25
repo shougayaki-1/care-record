@@ -16,6 +16,7 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import BuildIcon from '@mui/icons-material/Build';
 import SyncIcon from '@mui/icons-material/Sync';
+import SettingsIcon from '@mui/icons-material/Settings';
 import type FullCalendar from '@fullcalendar/react';
 import type { EventDropArg } from '@fullcalendar/core';
 import type { EventResizeDoneArg } from '@fullcalendar/interaction';
@@ -35,7 +36,7 @@ import { useShiftData, type ShiftDateRange } from '@/hooks/useShiftData';
 import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
 import type { DatesSetArg } from '@fullcalendar/core';
-import { checkShiftPermission } from '@/utils/permissions';
+import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
 import { buildRecordPath } from '@/utils/recordNavigation';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -146,12 +147,9 @@ export default function ShiftManagePage() {
     useEffect(() => {
         if (!wsLoading && currentOrg) {
             queueMicrotask(() => void fetchMasterData());
-            const canUseOrgWideTabs = currentOrg.effectivePermissions.shifts.view === 'all';
-            if (!canUseOrgWideTabs && (activeTab === 'fullCalendar' || activeTab === 'patterns')) {
-                queueMicrotask(() => setActiveTab('myShift'));
-            }
+            if (currentOrg.effectivePermissions.shifts.view !== 'all') router.replace('/app/shifts/my');
         }
-    }, [wsLoading, currentOrg, fetchMasterData, activeTab]);
+    }, [wsLoading, currentOrg, fetchMasterData, router]);
 
     useEffect(() => {
         if (wsLoading || !currentOrg) return;
@@ -458,6 +456,7 @@ export default function ShiftManagePage() {
             <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 2, sm: 3 }, pt: 2, flexShrink: 0 }}>
                 <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} flexDirection={{ xs: 'column', sm: 'row' }} gap={1} mb={1}>
                     <Typography variant="h6" fontWeight="bold">全体シフト管理</Typography>
+                    {checkManagementPermission(currentOrg.effectivePermissions, 'organization') && <Button size="small" variant="text" startIcon={<SettingsIcon />} onClick={() => router.push('/app/settings?tab=rules')}>勤務・記録ルール</Button>}
                     {canCreateShift && activeTab === 'fullCalendar' && (
                         <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setShiftModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>単発シフトを追加</Button>
                     )}
@@ -468,7 +467,6 @@ export default function ShiftManagePage() {
                 <Tabs value={activeTab} onChange={handleTabChange} variant="scrollable" allowScrollButtonsMobile>
                     {canUseOrgWideTabs && <Tab label="基本パターン(ひな形)" value="patterns" />}
                     {canUseOrgWideTabs && <Tab label="全体カレンダー" value="fullCalendar" />}
-                    <Tab label="自分のシフト" value="myShift" />
                     <Tab label="スタッフ別" value="byStaff" />
                     <Tab label="利用者別" value="byClient" />
                 </Tabs>

@@ -29,6 +29,7 @@ test.describe('スタッフ機能（記録作成）', () => {
     // 3. 記録を入力
     await page.getByLabel('サービス提供').fill('1.5');
     await page.getByLabel('移動', { exact: true }).fill('0.5');
+    await page.getByLabel('精算額').fill('0');
     // チェック項目はSwitchFieldで描画される（環境によりrole=checkbox/switchのどちらにもなる）
     await page.getByRole('checkbox', { name: '水分補給' }).or(page.getByRole('switch', { name: '水分補給' })).first().check();
 

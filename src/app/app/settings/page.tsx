@@ -6,7 +6,7 @@ import {
   Box, Typography, Alert, CircularProgress, LinearProgress, Stack, Divider,
   Chip, Tabs, Tab
 } from '@/components/ui/mui';
-import { AppButton, AppDialog, AppTextField, NumberField, PageBody, PageLayout } from '@/components/ui';
+import { AppButton, AppDialog, AppTextField, PageBody, PageLayout } from '@/components/ui';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SaveIcon from '@mui/icons-material/Save';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
@@ -22,7 +22,7 @@ import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
-import { deleteOrganization, disconnectGoogleCalendar, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName, updateTravelCostSettings } from '@/app/actions/organization';
+import { deleteOrganization, disconnectGoogleCalendar, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName } from '@/app/actions/organization';
 import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -52,6 +52,8 @@ type GasResponse = {
 };
 
 // URLパラメータを扱うコンポーネントはSuspenseで囲む必要があるため、中身を分離
+const SETTINGS_TABS = ['basic', 'google', 'rules', 'danger'] as const;
+
 function SettingsContent() {
     const { currentOrg, loading: wsLoading, refreshWorkspace } = useWorkspace();
     const router = useRouter();
@@ -59,13 +61,23 @@ function SettingsContent() {
     const { showToast } = useToast();
     const confirm = useConfirm();
 
-    const [tabIndex, setTabIndex] = useState(0);
+    const [tabIndex, setTabIndex] = useState(() => Math.max(0, SETTINGS_TABS.indexOf(searchParams.get('tab') as typeof SETTINGS_TABS[number])));
+
+    useEffect(() => {
+        const nextIndex = SETTINGS_TABS.indexOf(searchParams.get('tab') as typeof SETTINGS_TABS[number]);
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- URL is the source for deep links to a settings section.
+        setTabIndex(Math.max(0, nextIndex));
+    }, [searchParams]);
+
+    const handleTabChange = (_: React.SyntheticEvent, nextIndex: number) => {
+        setTabIndex(nextIndex);
+        router.replace(`/app/settings?tab=${SETTINGS_TABS[nextIndex]}`, { scroll: false });
+    };
     const [orgName, setOrgName] = useState('');
     const [googleFolderId, setGoogleFolderId] = useState<string | null>(null);
     const [googleCalendarId, setGoogleCalendarId] = useState<string | null>(null);
     const [googleConnectionState, setGoogleConnectionState] = useState<GoogleConnectionState>('disconnected');
     const [driveUrl, setDriveUrl] = useState('');
-    const [travelCostRate, setTravelCostRate] = useState('20');
     
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
@@ -100,7 +112,7 @@ function SettingsContent() {
         if (!currentOrg) return;
         const { data } = await supabase
             .from('organizations')
-            .select('name, google_folder_id, google_calendar_id, google_connection_status, travel_cost_rate_yen_per_km')
+            .select('name, google_folder_id, google_calendar_id, google_connection_status')
             .eq('id', currentOrg.id)
             .single();
         
@@ -109,7 +121,6 @@ function SettingsContent() {
             setGoogleFolderId(data.google_folder_id);
             setGoogleCalendarId(data.google_calendar_id);
             setGoogleConnectionState((data.google_connection_status as GoogleConnectionState | null) || (data.google_calendar_id ? 'temporarily_unavailable' : 'disconnected'));
-            setTravelCostRate(String(data.travel_cost_rate_yen_per_km ?? 20));
             if(data.google_folder_id) {
                 setDriveUrl(`https://drive.google.com/drive/folders/${data.google_folder_id}`);
             }
@@ -305,22 +316,6 @@ function SettingsContent() {
             setMessage({ type: 'error', text: '連携に失敗しました。GASの設定を確認してください。' });
         } finally {
             setConnecting(false);
-        }
-    };
-
-    const handleSaveTravelCost = async () => {
-        if (!currentOrg) return;
-        setSaving(true);
-        setMessage(null);
-        try {
-            await updateTravelCostSettings(currentOrg.id, Number(travelCostRate));
-            setMessage({ type: 'success', text: '交通費設定を保存しました' });
-            setTimeout(() => setMessage(null), 3000);
-        } catch (e) {
-            console.error(e);
-            setMessage({ type: 'error', text: e instanceof Error ? e.message : '保存失敗' });
-        } finally {
-            setSaving(false);
         }
     };
 
@@ -535,10 +530,10 @@ function SettingsContent() {
                     <SettingsIcon sx={{ color: 'action.active' }} />
                     <Typography variant="h6" fontWeight="bold" color="text.primary">事業所設定</Typography>
                 </Stack>
-                <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="scrollable" allowScrollButtonsMobile>
+                <Tabs value={tabIndex} onChange={handleTabChange} variant="scrollable" allowScrollButtonsMobile aria-label="事業所設定">
                     <Tab label="基本設定" />
                     <Tab label="Google連携" />
-                    <Tab label="勤務・帳票ルール" />
+                    <Tab label="勤務・記録ルール" />
                     <Tab label="危険な設定" />
                 </Tabs>
             </Box>
@@ -567,27 +562,6 @@ function SettingsContent() {
                                 </Stack>
                             </Box>
 
-                            {/* 交通費設定 */}
-                            {canEditOrganization && (
-                                <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
-                                    <Typography variant="h6" fontWeight="bold" gutterBottom>交通費設定</Typography>
-                                    <Typography variant="body2" color="text.secondary" mb={2}>
-                                        記録画面の交通費は、往復距離 × 1kmあたり単価で算出します。
-                                    </Typography>
-                                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                                        <NumberField
-                                            label="1kmあたり単価"
-                                            value={travelCostRate}
-                                            onChange={(e) => setTravelCostRate(e.target.value)}
-                                            sx={{ maxWidth: { sm: 240 } }}
-                                            slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">円/km</Typography> }, htmlInput: { inputMode: 'decimal', step: '1', min: 0 } }}
-                                        />
-                                        <AppButton startIcon={<SaveIcon />} onClick={handleSaveTravelCost} disabled={saving}>
-                                            保存
-                                        </AppButton>
-                                    </Stack>
-                                </Box>
-                            )}
                         </Stack>
                     )}
 

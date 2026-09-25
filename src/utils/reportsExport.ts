@@ -38,6 +38,29 @@ export function getReportHelperNames(report: ReportForCsvExport): string {
   return fallbackName || '不明';
 }
 
+export function buildTravelSettlementCsv(reports: ReportForCsvExport[]): { csv: string; missingCount: number; itemCount: number } {
+  const rows: string[][] = [['訪問日', '利用者', 'スタッフ', '移動手段', '精算額(円)', '記録ID']];
+  let missingCount = 0;
+  const methodLabel: Record<string, string> = { car: '車', public_transport: '公共交通機関', other: 'その他', none: '交通費なし' };
+  for (const report of reports.filter((item) => item.status === 'approved')) {
+    const data = getReportData(report) as unknown as { travel_expenses?: Array<{ staff_id: string; staff_name: string; method: string; amount_yen: number | null }> } | null;
+    const expenses = data?.travel_expenses;
+    if (!Array.isArray(expenses) || expenses.length === 0 || expenses.some((expense) => expense.amount_yen == null || !expense.staff_name)) {
+      missingCount++;
+      continue;
+    }
+    for (const expense of expenses) {
+      const visitDate = new Date(report.start_at).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+      rows.push([visitDate, report.clients.name, expense.staff_name, methodLabel[expense.method] ?? 'その他', String(expense.amount_yen), report.id]);
+    }
+  }
+  const escapeCell = (cell: string) => {
+    const safe = /^[=+\-@\t\r]/.test(cell) ? `'${cell}` : cell;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
+  return { csv: '\uFEFF' + rows.map((row) => row.map(escapeCell).join(',')).join('\n'), missingCount, itemCount: rows.length - 1 };
+}
+
 function buildDynamicColumns(templates: Array<{ schema: FormItem[] | null }>): CsvColumnDef[] {
   const dynamicColumns: CsvColumnDef[] = [];
   const seenHeaders = new Set<string>();

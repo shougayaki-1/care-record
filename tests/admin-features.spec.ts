@@ -14,7 +14,7 @@ test.describe('管理者機能', () => {
     await expect(page.getByText('利用者を追加しました。記録フォーム、担当スタッフ、帳票・連携の順に設定してください。')).toBeVisible();
 
     // 2. 記録フォームタブで新しい項目を追加
-    await page.getByRole('button', { name: '項目を追加する' }).click();
+    await page.getByRole('button', { name: '下に追加' }).last().click();
     await page.getByLabel('質問内容').last().fill('テスト独自の記録項目');
 
     // 3. 保存

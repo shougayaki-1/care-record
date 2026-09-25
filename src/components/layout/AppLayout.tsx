@@ -33,6 +33,7 @@ import KeyIcon from '@mui/icons-material/Key';
 import BackupIcon from '@mui/icons-material/Backup';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import ArticleIcon from '@mui/icons-material/Article';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
@@ -41,7 +42,7 @@ import { supabase } from '@/lib/supabase';
 import { markNotificationRead } from '@/app/actions/user';
 import { logoutCurrentUser } from '@/utils/clientLogout';
 import IdleTimeout from '@/components/auth/IdleTimeout';
-import { checkManagementPermission, checkShiftPermission, type ManagementArea } from '@/utils/permissions';
+import { checkManagementPermission, type ManagementArea } from '@/utils/permissions';
 import { FeatureFlagsProvider } from '@/context/FeatureFlagsContext';
 
 const SIDEBAR_WIDTH = 256;
@@ -367,7 +368,7 @@ const NavDrawer = React.memo(function NavDrawer({
   };
 
   const isAdmin = Object.values(currentOrg.effectivePermissions.management).some(Boolean);
-  const canViewShiftManagement = checkShiftPermission(currentOrg.effectivePermissions, 'view', true);
+  const canViewShiftManagement = currentOrg.effectivePermissions.shifts.view === 'all';
   const canViewReports = checkManagementPermission(currentOrg.effectivePermissions, 'reports');
   const canManageOrganization = checkManagementPermission(currentOrg.effectivePermissions, 'organization')
     || checkManagementPermission(currentOrg.effectivePermissions, 'integrations')
@@ -477,6 +478,10 @@ const NavDrawer = React.memo(function NavDrawer({
                     {navButton('今月の記録', <CalendarMonthIcon fontSize="small" />, '/app/reports?period=current_month', { key: 'period', val: 'current_month' })}
                   </List>
                 </Collapse>
+                <Typography sx={categoryStyle}>帳票</Typography>
+                <List disablePadding>
+                  {navButton('帳票・出力', <ArticleIcon fontSize="small" />, '/app/reports?view=export', { key: 'view', val: 'export' })}
+                </List>
               </>
             )}
 
@@ -552,7 +557,7 @@ export default function AppLayout({ children, aiImportEnabled }: { children: Rea
   }, [sidebarOpen]);
   const matchedRoute = PROTECTED_MANAGEMENT_ROUTES.find(({ prefix }) => pathname.startsWith(prefix));
   const shiftAccessDenied = Boolean(
-    currentOrg && pathname.startsWith('/app/shifts/manage') && !checkShiftPermission(currentOrg.effectivePermissions, 'view', true)
+    currentOrg && pathname.startsWith('/app/shifts/manage') && currentOrg.effectivePermissions.shifts.view !== 'all'
   );
   const settingsAccessDenied = Boolean(
     currentOrg && pathname.startsWith('/app/settings') && !(

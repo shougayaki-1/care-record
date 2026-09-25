@@ -55,7 +55,7 @@ export default function ClientSettingsPage() {
     
     const [allStaffs, setAllStaffs] = useState<Staff[]>([]);
     const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([]);
-    const [roundTripDistances, setRoundTripDistances] = useState<Record<string, string>>({});
+    const [defaultTravelCosts, setDefaultTravelCosts] = useState<Record<string, string>>({});
     const [permissionHints, setPermissionHints] = useState<AssignmentPermissionHint[]>([]);
     
     const [templateId, setTemplateId] = useState('');
@@ -89,7 +89,7 @@ export default function ClientSettingsPage() {
                         .order('sort_order', { ascending: true, nullsFirst: false })
                         .order('name', { ascending: true })
                     : Promise.resolve(null),
-                supabase.from('assignments').select('staff_id, helper_id, round_trip_distance_km').eq('client_id', clientId),
+                supabase.from('assignments').select('staff_id, helper_id, default_travel_cost_yen').eq('client_id', clientId),
             ]);
 
             if (client) {
@@ -120,12 +120,12 @@ export default function ClientSettingsPage() {
                         .map((assignment) => assignment.staff_id || staffIdByUserId.get(assignment.helper_id))
                         .filter((id): id is string => Boolean(id));
                     setAssignedStaffIds(ids);
-                    const distances: Record<string, string> = {};
+                    const costs: Record<string, string> = {};
                     assigns.forEach((assignment) => {
                         const staffId = assignment.staff_id || staffIdByUserId.get(assignment.helper_id);
-                        if (staffId) distances[staffId] = String(assignment.round_trip_distance_km ?? 0);
+                        if (staffId) costs[staffId] = assignment.default_travel_cost_yen == null ? '' : String(assignment.default_travel_cost_yen);
                     });
-                    setRoundTripDistances(distances);
+                    setDefaultTravelCosts(costs);
                 }
             }
 
@@ -168,9 +168,10 @@ export default function ClientSettingsPage() {
         return undefined;
     }, [wsLoading, currentOrg, fetchClientData]);
 
-    const addField = () => {
+    const addField = (index: number) => {
         const newField: FormItem = { id: crypto.randomUUID(), label: '', type: 'checkbox', required: false, hasDetail: false };
-        setFormItems([...formItems, newField]);
+        setFormItems((items) => [...items.slice(0, index), newField, ...items.slice(index)]);
+        return newField.id;
     };
     const removeField = async (index: number) => {
         if (!(await confirm({ message: 'この項目を削除しますか？', confirmText: '削除する', confirmColor: 'error' }))) return;
@@ -179,9 +180,7 @@ export default function ClientSettingsPage() {
         setFormItems(newItems);
     };
     const updateField = (index: number, key: keyof FormItem, value: FormItem[keyof FormItem]) => {
-        const newItems = [...formItems];
-        newItems[index] = { ...newItems[index], [key]: value };
-        setFormItems(newItems);
+        setFormItems((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: value } : item));
     };
     const moveField = (index: number, direction: 'up' | 'down') => {
         if (direction === 'up' && index === 0) return;
@@ -189,6 +188,13 @@ export default function ClientSettingsPage() {
         const newItems = [...formItems];
         const targetIndex = direction === 'up' ? index - 1 : index + 1;
         [newItems[index], newItems[targetIndex]] = [newItems[targetIndex], newItems[index]];
+        setFormItems(newItems);
+    };
+    const moveFieldTo = (index: number, targetIndex: number) => {
+        if (index === targetIndex || targetIndex < 0 || targetIndex >= formItems.length) return;
+        const newItems = [...formItems];
+        const [item] = newItems.splice(index, 1);
+        newItems.splice(targetIndex, 0, item);
         setFormItems(newItems);
     };
 
@@ -238,10 +244,10 @@ export default function ClientSettingsPage() {
         setMessage(null);
         try {
             if (!currentOrg) throw new Error('事業所が選択されていません');
-            const distancePayload = Object.fromEntries(
-                assignedStaffIds.map((staffId) => [staffId, Number(roundTripDistances[staffId] || 0)])
+            const costPayload = Object.fromEntries(
+                assignedStaffIds.filter((staffId) => defaultTravelCosts[staffId] !== undefined && defaultTravelCosts[staffId] !== '').map((staffId) => [staffId, Number(defaultTravelCosts[staffId])])
             );
-            await saveClientAssignments(currentOrg.id, clientId, assignedStaffIds, distancePayload);
+            await saveClientAssignments(currentOrg.id, clientId, assignedStaffIds, costPayload);
 
             setMessage({ type: 'success', text: '担当スタッフを更新しました！' });
             setTimeout(() => setMessage(null), 3000);
@@ -451,6 +457,7 @@ export default function ClientSettingsPage() {
                         onRemoveField={removeField}
                         onUpdateField={updateField}
                         onMoveField={moveField}
+                        onMoveFieldTo={moveFieldTo}
                         getOptions={getOptionsArray}
                         onUpdateOption={updateOption}
                         onAddOption={addOption}
@@ -463,8 +470,8 @@ export default function ClientSettingsPage() {
                         allStaffs={allStaffs}
                         assignedStaffIds={assignedStaffIds}
                         setAssignedStaffIds={setAssignedStaffIds}
-                        roundTripDistances={roundTripDistances}
-                        setRoundTripDistances={setRoundTripDistances}
+                        defaultTravelCosts={defaultTravelCosts}
+                        setDefaultTravelCosts={setDefaultTravelCosts}
                         permissionHints={permissionHints}
                     />
                 )}

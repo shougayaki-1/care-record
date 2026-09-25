@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { FormItem } from './templateHelper';
-import { buildReportsCsv, getReportData, getReportHelperNames, type ReportForCsvExport } from './reportsExport';
+import { buildReportsCsv, buildTravelSettlementCsv, getReportData, getReportHelperNames, type ReportForCsvExport } from './reportsExport';
 
 const report: ReportForCsvExport = {
   id: 'report-1',
@@ -64,5 +64,22 @@ describe('report export helpers', () => {
     expect(header).toContain('介助_食事,介助_移動,完了,備考,備考_詳細');
     expect(row).toContain('承認済,client-1,利用者A,実施担当A, 実施担当B,入力担当');
     expect(row).toContain(',○,,○,"声かけ""実施",');
+  });
+
+  it('exports one settlement row per staff and flags legacy records without a breakdown', () => {
+    const withExpenses: ReportForCsvExport = {
+      ...report,
+      report_values: { data: {
+        travel_expenses: [
+          { staff_id: 's1', staff_name: '職員A', method: 'car', amount_yen: 240 },
+          { staff_id: 's2', staff_name: '=危険', method: 'public_transport', amount_yen: 460 },
+        ],
+      } as unknown as ReportForCsvExport['report_values'] extends { data: infer D } ? D : never },
+    };
+    const result = buildTravelSettlementCsv([withExpenses, report]);
+    expect(result.itemCount).toBe(2);
+    expect(result.missingCount).toBe(1);
+    expect(result.csv).toContain('"車","240"');
+    expect(result.csv).toContain('"\'=危険","公共交通機関","460"');
   });
 });
