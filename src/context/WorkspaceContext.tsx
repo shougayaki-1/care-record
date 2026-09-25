@@ -6,9 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { usePathname } from 'next/navigation';
 import { CircularProgress, Box } from '@mui/material';
 import { setLastOrganization } from '@/app/actions/user';
-import { ensureSessionActivity } from '@/app/actions/auth';
 import { FULL_PERMISSIONS, mergePermissions, type RolePermissions } from '@/utils/permissions';
-import { ensureSessionActivityWithRetry } from '@/utils/sessionActivity';
 
 export type OrganizationRole = 'owner' | 'member';
 
@@ -67,26 +65,8 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         return;
       }
 
-      // この記録はRLSの必須条件であるため、初回の組織クエリより先に完了させる。
-      // 同じ検証済みアクセストークンで一時障害だけを短時間リトライする。
-      const activityResult = await ensureSessionActivityWithRetry(
-        () => ensureSessionActivity(session.access_token),
-      );
-      if (activityResult.status !== 'ready') {
-        if (!isCurrent()) return;
-        setOrgList([]);
-        setCurrentOrg(null);
-        setUserId(null);
-        if (activityResult.status === 'invalid_session') {
-          setStatus('session_expired');
-          setErrorMessage('セッションを確認できませんでした。再度ログインしてください。');
-        } else {
-          setStatus('error');
-          setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
-        }
-        return;
-      }
-
+      // 保護されたルートの Proxy がセッション活動と失効を検証する。
+      // ログイン時には活動記録を登録済みなので、画面初期化時の再登録は不要。
       // 本人のJWTを使ったRLS付きクエリ。Server ActionのCookie反映競合を避ける。
       // organization_member_roles を JOIN することで 3RTT → 2RTT に削減。
       const [{ data: members, error: memberError }, { data: profile, error: profileError }] = await Promise.all([

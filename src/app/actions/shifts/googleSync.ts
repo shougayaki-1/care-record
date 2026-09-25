@@ -33,17 +33,22 @@ import {
 } from './googleSyncInternal';
 import type { RepairGoogleCalendarSyncOptions } from './types';
 
+// 呼び出し元で権限確認済みのセッションクライアントを使い、バッチごとの
+// 全シフト件数集計と追加の権限確認を避ける。
+async function hasCalendarConnection(supabase: Awaited<ReturnType<typeof createSessionClient>>, organizationId: string) {
+  const { data: orgData } = await supabase
+    .from('organizations')
+    .select('google_calendar_id, google_refresh_token')
+    .eq('id', organizationId)
+    .single();
+  return !!(orgData?.google_calendar_id && orgData?.google_refresh_token);
+}
+
 export async function getSyncStatus(organizationId: string) {
   return withSafeError('getSyncStatus', async () => {
       await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
       const supabase = await createSessionClient();
-      const { data: orgData } = await supabase
-          .from('organizations')
-          .select('google_calendar_id, google_refresh_token')
-          .eq('id', organizationId)
-          .single();
-
-      const connected = !!(orgData?.google_calendar_id && orgData?.google_refresh_token);
+      const connected = await hasCalendarConnection(supabase, organizationId);
 
       const { count: total } = await supabase
           .from('shifts')
@@ -74,9 +79,9 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
       }
       const actor = await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
       const supabase = await createSessionClient();
-      const status = await getSyncStatus(organizationId);
-      if (!status.connected) {
-          return { processed: 0, succeeded: 0, failed: 0, remaining: status.unsynced, errorKind: 'skipped' as SyncErrorKind, connected: false };
+      const connected = await hasCalendarConnection(supabase, organizationId);
+      if (!connected) {
+          return { processed: 0, succeeded: 0, failed: 0, remaining: 0, errorKind: 'skipped' as SyncErrorKind, connected: false };
       }
 
       const { data: shifts } = await supabase
@@ -98,19 +103,20 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
           details: { mode: 'unsynced_batch', processed: shifts.length, succeeded: outcome.succeeded, failed: outcome.failed },
       });
 
-      // 同期後の残件数を再取得（成功分は google_event_id が埋まり減る）
-      const { count: remaining } = await supabase
+      // 呼び出し元は残件の有無だけを使う。毎回の exact count は避ける。
+      const { data: nextShift } = await supabase
           .from('shifts')
-          .select('id', { count: 'exact', head: true })
+          .select('id')
           .eq('organization_id', organizationId)
           .is('deleted_at', null)
-          .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)');
+          .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)')
+          .limit(1);
 
       return {
           processed: shifts.length,
           succeeded: outcome.succeeded,
           failed: outcome.failed,
-          remaining: remaining || 0,
+          remaining: nextShift?.length ? 1 : 0,
           ...outcome.stats,
           errorKind: outcome.errorKind,
           connected: true
@@ -130,8 +136,8 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
       }
       const actor = await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
       const supabase = await createSessionClient();
-      const status = await getSyncStatus(organizationId);
-      if (!status.connected) {
+      const connected = await hasCalendarConnection(supabase, organizationId);
+      if (!connected) {
           return { processed: 0, succeeded: 0, failed: 0, nextCursor: cursor, remaining: 0, errorKind: 'skipped' as SyncErrorKind, connected: false };
       }
 

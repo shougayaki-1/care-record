@@ -45,6 +45,15 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
         },
     });
 
+    // 公開ページはセッション検証を要しない。CSP は同じように付与する。
+    // Server Action の認証・認可は各 Action 内で検証する。
+    const path = request.nextUrl.pathname;
+    const isProtected = path.startsWith('/app') || path.startsWith('/super-admin');
+    if (!isProtected) {
+        response.headers.set('Content-Security-Policy', csp);
+        return response;
+    }
+
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!supabaseUrl || !supabaseAnonKey) {
@@ -96,9 +105,7 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
 
     // 多層防御: 認証が必要なルートは未認証ならトップへリダイレクト
     // （各ページ/サーバアクションでも認可するが、ここで早期に弾く）
-    const path = request.nextUrl.pathname;
-    const isProtected = path.startsWith('/app') || path.startsWith('/super-admin');
-    if (isProtected && !user) {
+    if (!user) {
         const url = request.nextUrl.clone();
         url.pathname = '/';
         url.search = `next=${encodeURIComponent(path)}`;
@@ -106,7 +113,7 @@ export async function updateSession(request: NextRequest, nonce: string, csp: st
     }
 
     // ブラウザが書き換えられるCookieではなく、DB上のセッション活動を検証する。
-    if (isProtected && user) {
+    if (user) {
         const { data: { session } } = await supabase.auth.getSession();
         const sessionId = session?.access_token ? authSessionId(session.access_token) : null;
         const idleCutoff = new Date(Date.now() - SESSION_IDLE_MS).toISOString();

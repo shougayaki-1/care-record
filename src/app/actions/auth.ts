@@ -6,10 +6,7 @@
 // パスワードログインをサーバーで行うことで、上記を確実に一元化する（@supabase/ssr のサーバーログインパターン）。
 
 import { cookies } from 'next/headers';
-import { createSessionClient, getAuthedUser, registerSessionActivity, revokeCurrentSession, touchCurrentSession, SESSION_ABSOLUTE_HOURS } from '@/utils/supabase/auth';
-import { serviceRoleForServerSessions } from '@/utils/supabase/serviceRole';
-import { decodeJwtSessionId } from '@/utils/jwt';
-import { createHash } from 'crypto';
+import { createSessionClient, getAuthedUser, registerSessionActivity, revokeCurrentSession, touchCurrentSession } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import {
   isLoginRateLimited,
@@ -19,10 +16,7 @@ import {
 import { validatePassword } from '@/utils/passwordPolicy';
 import { issueReauthGrant as createReauthGrant, type ReauthPurpose } from '@/utils/supabase/reauth';
 import { beginStepUpReauth as createStepUpReauth } from '@/utils/supabase/stepupReauth';
-import { classifySessionActivityAuthentication, type SessionActivityResult } from '@/utils/sessionActivity';
 import { STEPUP_GRANT_COOKIE, STEPUP_NONCE_COOKIE } from '@/utils/authConstants';
-
-const supabaseAdmin = serviceRoleForServerSessions();
 
 export type LoginResult =
   | { ok: true }
@@ -160,40 +154,6 @@ export async function recordLogout(): Promise<void> {
 /** アイドルタイムアウト用。ブラウザCookieではなくサーバー側セッション活動を更新する。 */
 export async function heartbeatSession(): Promise<void> {
   await touchCurrentSession();
-}
-
-/**
- * クライアント側セッションが user_session_activity に未登録の場合（デプロイ前のセッション等）に登録する。
- * access_token をサーバーへ送り、Auth サーバーで検証した上で upsert する。
- */
-export async function ensureSessionActivity(accessToken: string): Promise<SessionActivityResult> {
-  try {
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(accessToken);
-    // Auth rejects malformed, expired, or revoked tokens with a 4xx response.
-    // Network and 5xx failures must remain retryable so a valid user is not logged out.
-    const authErrorStatus = error && typeof error.status === 'number' ? error.status : null;
-    if (authErrorStatus !== null) {
-      return classifySessionActivityAuthentication(authErrorStatus, Boolean(user), true);
-    }
-    if (error) return classifySessionActivityAuthentication(null, Boolean(user), true);
-    if (!user) return classifySessionActivityAuthentication(null, false);
-    const sessionId = decodeJwtSessionId(accessToken);
-    if (!sessionId) return { status: 'invalid_session' };
-    const sessionHash = createHash('sha256').update(accessToken).digest('hex');
-    const absoluteExpiresAt = new Date(Date.now() + SESSION_ABSOLUTE_HOURS * 60 * 60 * 1000).toISOString();
-    const { error: upsertError } = await supabaseAdmin.from('user_session_activity').upsert({
-      auth_session_id: sessionId,
-      session_hash: sessionHash,
-      user_id: user.id,
-      last_activity: new Date().toISOString(),
-      absolute_expires_at: absoluteExpiresAt,
-      revoked_at: null,
-    }, { onConflict: 'auth_session_id', ignoreDuplicates: false });
-    return upsertError ? { status: 'transient_error' } : { status: 'ready' };
-  } catch (error) {
-    console.error('session activity registration failed', error);
-    return { status: 'transient_error' };
-  }
 }
 
 /** OAuth コールバックなど、確立済みセッションのログイン成功を記録する。 */

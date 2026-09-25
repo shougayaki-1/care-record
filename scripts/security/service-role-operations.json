@@ -61,7 +61,7 @@
     "targets": ["user_session_activity", "reauth_grants"],
     "authorization": "Verified user ID, auth session ID, purpose, expiry and token hash",
     "audit": "Authentication and protected operations emit purpose-specific audit events",
-    "consumers": ["src/app/actions/auth.ts", "src/utils/supabase/reauth.ts"]
+    "consumers": ["src/utils/supabase/reauth.ts"]
   },
   {
     "accessor": "serviceRoleForRetentionDryRun",
