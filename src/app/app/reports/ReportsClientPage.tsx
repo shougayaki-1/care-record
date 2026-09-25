@@ -288,14 +288,16 @@ export default function ReportsClientPage() {
 
   const handleExportTravelCosts = async () => {
       const targetReports = getTargetReports();
-      const { csv, missingCount, itemCount } = buildTravelSettlementCsv(targetReports);
-      if (missingCount > 0) {
-        showToast(`${missingCount}件の承認済み記録にスタッフ別交通費がありません。記録を確認してください。`, 'warning');
-        return;
-      }
-      if (itemCount === 0) { showToast('出力できる承認済みの交通費がありません', 'warning'); return; }
+      if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
       try {
-        await auditReportExport(currentOrg!.id, targetReports.filter((report) => report.status === 'approved').map((report) => report.id), 'csv');
+        const exportReports = await loadReportValues(targetReports);
+        const { csv, missingCount, itemCount } = buildTravelSettlementCsv(exportReports);
+        if (missingCount > 0) {
+          showToast(`${missingCount}件の承認済み記録にスタッフ別交通費がありません。記録を確認してください。`, 'warning');
+          return;
+        }
+        if (itemCount === 0) { showToast('出力できる承認済みの交通費がありません', 'warning'); return; }
+        await auditReportExport(currentOrg!.id, exportReports.filter((report) => report.status === 'approved').map((report) => report.id), 'csv');
         const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
         const link = document.createElement('a');
         link.href = url;
