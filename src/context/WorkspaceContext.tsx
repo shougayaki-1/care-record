@@ -37,6 +37,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const pathname = usePathname();
   const shouldLoadWorkspace = pathname.startsWith('/app') || pathname.startsWith('/super-admin');
   const fetchSeq = useRef(0);
+  const loadedWorkspaceUserId = useRef<string | null>(null);
   const [currentOrg, setCurrentOrg] = useState<Workspace | null>(null);
   const [orgList, setOrgList] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(shouldLoadWorkspace);
@@ -57,6 +58,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       const { data: { session }, error: sessionError } = sessionResult;
       if (sessionError || !session?.user) {
         if (!isCurrent()) return;
+        loadedWorkspaceUserId.current = null;
         setOrgList([]);
         setCurrentOrg(null);
         setUserId(null);
@@ -86,6 +88,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
 
       if (memberError || profileError) {
         if (!isCurrent()) return;
+        loadedWorkspaceUserId.current = null;
         console.error('Workspace lookup failed', { memberError, profileError });
         const authErr = memberError || profileError;
         if (authErr?.code === '401' || authErr?.message?.toLowerCase().includes('jwt')) {
@@ -112,6 +115,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
 
       if (parsedMembers.some(({ organization, role }) => !organization || !['owner', 'member'].includes(role))) {
         if (!isCurrent()) return;
+        loadedWorkspaceUserId.current = session.user.id;
         setStatus('forbidden');
         setErrorMessage('所属情報または権限設定に不整合があります。管理者へ連絡してください。');
         return;
@@ -131,6 +135,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
 
       if (list.length === 0) {
         if (!isCurrent()) return;
+        loadedWorkspaceUserId.current = session.user.id;
         setOrgList([]);
         setCurrentOrg(null);
         setStatus('no_membership');
@@ -141,9 +146,11 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       setOrgList(list);
       const target = list.find(o => o.id === profile?.last_organization_id) || list[0];
       setCurrentOrg(target);
+      loadedWorkspaceUserId.current = session.user.id;
       setStatus('ready');
     } catch (error) {
       if (!isCurrent()) return;
+      loadedWorkspaceUserId.current = null;
       console.error('Workspace fetch error:', error);
       setStatus('error');
       setErrorMessage('所属情報を取得できませんでした。時間をおいて再試行してください。');
@@ -155,6 +162,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   useEffect(() => {
     if (!shouldLoadWorkspace) {
       fetchSeq.current += 1;
+      loadedWorkspaceUserId.current = null;
       queueMicrotask(() => {
         setCurrentOrg(null);
         setOrgList([]);
@@ -170,6 +178,9 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log(`[WorkspaceProvider] Auth event: ${event}`);
       if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // A background tab can emit TOKEN_REFRESHED when it becomes active again.
+        // Keep the current page mounted when the loaded workspace belongs to that user.
+        if (event !== 'INITIAL_SESSION' && session?.user.id === loadedWorkspaceUserId.current) return;
         // Authの内部ロック解放後に読み込む。コールバック内でAuth APIを再入させない。
         setTimeout(() => void fetchWorkspaces(session), 0);
       } else if (event === 'SIGNED_OUT') {
@@ -183,6 +194,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
           setCurrentOrg(null);
           setOrgList([]);
           setUserId(null);
+          loadedWorkspaceUserId.current = null;
           setLoading(false);
           setStatus('session_expired');
           setErrorMessage(null);
