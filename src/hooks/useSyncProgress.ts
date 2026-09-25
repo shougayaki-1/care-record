@@ -1,5 +1,7 @@
 'use client';
 
+import { googleSyncErrorMessage } from '@/utils/googleSync';
+
 import { useState, useCallback } from 'react';
 import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift';
 
@@ -23,8 +25,9 @@ export const useSyncProgress = ({
     const [resyncingCal, setResyncingCal] = useState(false);
 
     const reportSyncResult = useCallback((done: number, failed: number, errorKind?: string) => {
-        if (errorKind === 'auth') {
-            showToast('Googleカレンダーの認証が切れています。設定画面から連携を再接続してください。', 'error');
+        const message = googleSyncErrorMessage(errorKind);
+        if (message) {
+            showToast(message, 'warning');
         } else if (failed > 0) {
             showToast(`同期が一部失敗しました（成功 ${done} 件 / 失敗 ${failed} 件）。通信状況を確認し、しばらくしてから再同期してください。`, 'warning');
         } else {
@@ -35,8 +38,8 @@ export const useSyncProgress = ({
     const reportRepairResult = useCallback((res: Awaited<ReturnType<typeof repairGoogleCalendarSync>>) => {
         if (!res.connected) {
             showToast('Googleカレンダーが連携されていません。設定画面から接続してください。', 'warning');
-        } else if (res.errorKind === 'auth') {
-            showToast('Googleカレンダーの認証が切れています。設定画面から連携を再接続してください。', 'error');
+        } else if (res.errorKind) {
+            showToast(googleSyncErrorMessage(res.errorKind)!, 'warning');
         } else if (res.failed > 0) {
             showToast(`同期修復が一部失敗しました（成功 ${res.succeeded} 件 / 失敗 ${res.failed} 件）。`, 'warning');
         } else {
@@ -81,7 +84,7 @@ export const useSyncProgress = ({
             await refreshUnsyncedCount();
         }
         reportSyncResult(done, failed, errorKind);
-        return failed === 0 && errorKind !== 'auth';
+        return failed === 0 && !errorKind;
     }, [currentOrg, showToast, refreshUnsyncedCount, reportSyncResult]);
 
     const runForceSyncLoop = useCallback(async (): Promise<boolean> => {
@@ -96,7 +99,7 @@ export const useSyncProgress = ({
             const res = await repairGoogleCalendarSync(currentOrg.id);
             setSyncProgress({ total: 1, current: 1, currentName: '同期修復が完了しました' });
             reportRepairResult(res);
-            return res.connected && res.failed === 0 && res.errorKind !== 'auth';
+            return res.connected && res.failed === 0 && !res.errorKind;
         } finally {
             setSyncProgress(null);
             await refreshUnsyncedCount();

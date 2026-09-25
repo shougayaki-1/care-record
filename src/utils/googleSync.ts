@@ -10,13 +10,15 @@ import type { calendar_v3 } from 'googleapis';
 
 /**
  * Googleカレンダー同期で発生したエラーを種別付きで表現する。
- * - auth      : 認証切れ・権限不足（再認証が必要。リトライ不可）
+ * - auth      : トークン失効（再認証が必要。リトライ不可）
+ * - forbidden : カレンダーのアクセス権不足（再認証だけでは解消しない）
+ * - misconfigured : OAuthクライアント等の設定不備
  * - rate_limit: レート制限（待機してリトライ可能）
  * - transient : 一時的なサーバー/ネットワーク障害（リトライ可能）
  * - permanent : それ以外の恒久的なエラー（リトライ不可）
  * - skipped   : 連携未設定など、同期対象外のため何もしなかった
  */
-export type SyncErrorKind = 'auth' | 'rate_limit' | 'transient' | 'permanent' | 'skipped';
+export type SyncErrorKind = 'auth' | 'forbidden' | 'misconfigured' | 'rate_limit' | 'transient' | 'permanent' | 'skipped';
 
 export class SyncError extends Error {
     kind: SyncErrorKind;
@@ -49,28 +51,75 @@ export function classifyGoogleError(e: unknown): SyncError {
     const msg = (typeof errorField === 'object' ? errorField?.message : undefined)
         || err?.response?.data?.error_description
         || err?.message;
+    // These are application configuration errors, including HTTP 401 responses.
+    // Asking the user to reconnect cannot fix an invalid OAuth client secret.
+    if (oauthErrorCode && /^(invalid_client|unauthorized_client|invalid_scope|redirect_uri_mismatch)$/.test(oauthErrorCode)) {
+        return new SyncError(msg || oauthErrorCode, 'misconfigured', code);
+    }
     // OAuth のトークン失効: invalid_grant(HTTP 400)はコードチェック前に判定が必要
     if (oauthErrorCode && /invalid_grant|invalid_token/i.test(oauthErrorCode)) {
         return new SyncError(msg || oauthErrorCode, 'auth', code);
     }
-    if (typeof msg === 'string' && /invalid_grant|invalid_token|unauthorized/i.test(msg)) {
+    if (typeof msg === 'string' && /\b(invalid_grant|invalid_token|unauthorized)\b/i.test(msg) && code !== 403) {
         return new SyncError(msg, 'auth', code);
     }
-    const googleReason = typeof errorField === 'object' ? errorField?.errors?.[0]?.reason : undefined;
+    const googleReasons = typeof errorField === 'object' ? (errorField?.errors || []).map(error => error.reason || '') : [];
     if (code === 401) return new SyncError(msg || 'auth error', 'auth', code);
     if (code === 403) {
-        if (googleReason && /rateLimitExceeded|userRateLimitExceeded|quotaExceeded/i.test(googleReason)) {
-            return new SyncError(msg || googleReason, 'rate_limit', code);
+        if (googleReasons.some(reason => /^(rateLimitExceeded|userRateLimitExceeded|quotaExceeded|dailyLimitExceeded)$/i.test(reason))) {
+            return new SyncError(msg || 'rate limit', 'rate_limit', code);
         }
-        if (googleReason && /dailyLimitExceeded/i.test(googleReason)) {
-            return new SyncError(msg || googleReason, 'rate_limit', code);
+        if (googleReasons.some(reason => /^(accessNotConfigured|serviceDisabled)$/i.test(reason))) {
+            return new SyncError(msg || 'API is not enabled', 'misconfigured', code);
         }
-        return new SyncError(msg || 'permission denied', 'auth', code);
+        return new SyncError(msg || 'permission denied', 'forbidden', code);
     }
     if (code === 429) return new SyncError(msg || 'rate limit', 'rate_limit', code);
     if (typeof code === 'number' && code >= 500) return new SyncError(msg || 'server error', 'transient', code);
     if (code === undefined) return new SyncError(msg || 'network error', 'transient'); // ネットワーク断などコード無しは一時障害扱い
     return new SyncError(msg || 'unknown error', 'permanent', code);
+}
+
+export type GoogleConnectionState = 'disconnected' | 'healthy' | 'reauth_required' | 'calendar_missing' | 'forbidden' | 'misconfigured' | 'temporarily_unavailable';
+
+export const GOOGLE_CONNECTION_LABELS: Record<GoogleConnectionState, string> = {
+    disconnected: '未連携',
+    healthy: '連携・正常',
+    reauth_required: '再認証が必要',
+    calendar_missing: 'カレンダー要確認',
+    forbidden: 'アクセス権を確認',
+    misconfigured: '連携設定を確認',
+    temporarily_unavailable: '一時的に接続できません',
+};
+
+export function googleConnectionMessage(state: GoogleConnectionState): string | null {
+    if (state === 'healthy') return null;
+    if (state === 'calendar_missing') return '連携先のカレンダーが見つからないか、アクセスできません。元のGoogleアカウントとカレンダーの共有設定を確認してください。';
+    if (state === 'disconnected') return googleSyncErrorMessage('skipped');
+    return googleSyncErrorMessage(state === 'reauth_required' ? 'auth' : state === 'temporarily_unavailable' ? 'transient' : state);
+}
+
+export function googleConnectionStateFromError(error: unknown): GoogleConnectionState {
+    const classified = classifyGoogleError(error);
+    if (classified.kind === 'auth') return 'reauth_required';
+    if (classified.kind === 'forbidden') return 'forbidden';
+    if (classified.kind === 'rate_limit' || classified.kind === 'transient') return 'temporarily_unavailable';
+    if (classified.code === 404) return 'calendar_missing';
+    return 'misconfigured';
+}
+
+/** Shared guidance: reconnect only when it can actually resolve the error. */
+export function googleSyncErrorMessage(kind?: string): string | null {
+    switch (kind) {
+        case 'auth': return 'Googleの認証が無効になっています。設定画面の「Googleを再認証」を実行してください。連携の解除は不要です。';
+        case 'forbidden': return 'Googleカレンダーへのアクセス権がありません。連携したGoogleアカウントのカレンダー編集権限を確認してください。';
+        case 'misconfigured': return 'Google連携の設定に問題があります。管理者にOAuth設定・Calendar APIの有効化を確認してください。';
+        case 'rate_limit': return 'Google側で利用制限が発生しています。時間をおいて再試行してください。再認証は不要です。';
+        case 'transient': return 'Googleとの通信に一時的な問題が発生しています。時間をおいて再試行してください。再認証は不要です。';
+        case 'permanent': return 'Googleカレンダーへの同期に失敗しました。設定画面で接続状態を確認してください。';
+        case 'skipped': return 'Googleカレンダーが連携されていません。設定画面から接続してください。';
+        default: return null;
+    }
 }
 
 /**
