@@ -38,6 +38,7 @@ import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport
 import type { DatesSetArg } from '@fullcalendar/core';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
 import { buildRecordPath } from '@/utils/recordNavigation';
+import { googleSyncErrorMessage } from '@/utils/googleSync';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { FetchedPatternData } from '@/hooks/useShiftData';
@@ -358,8 +359,8 @@ export default function ShiftManagePage() {
 
             setSyncProgress(null);
 
-            if (errorKind === 'auth') {
-                showToast('Googleカレンダーの認証が切れています。設定画面から再接続後にもう一度お試しください。', 'error');
+            if (errorKind) {
+                showToast(googleSyncErrorMessage(errorKind) || 'Googleカレンダーから削除できませんでした。', 'warning');
             } else if (failed > 0) {
                 showToast(`${deleted} 件を消去しました。${failed} 件はGoogleカレンダーから削除できず残っています。通信状況を確認し再度お試しください。`, 'warning');
             } else {

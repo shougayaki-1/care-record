@@ -7,13 +7,14 @@ import { assertOrgPermission, createSessionClient } from '@/utils/supabase/auth'
 import { storeOAuthNonce } from '@/utils/supabase/oauthNonce';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { google } from 'googleapis';
-import { classifyGoogleError } from '@/utils/googleSync';
+import { googleConnectionStateFromError, type GoogleConnectionState } from '@/utils/googleSync';
+import { withRetry } from '@/utils/googleRetry';
 import { sanitizeDbError, withSafeError } from '@/utils/errors';
 import { consumeReauthGrant } from '@/utils/supabase/reauth';
 import { asNullableRpcArg } from '@/types/json';
 import { areExternalIntegrationsEnabled } from '@/lib/env/server';
 
-export type GoogleConnectionState = 'disconnected' | 'healthy' | 'reauth_required' | 'calendar_missing' | 'forbidden' | 'misconfigured' | 'temporarily_unavailable';
+export type { GoogleConnectionState } from '@/utils/googleSync';
 
 export async function getGoogleConnectionHealth(organizationId: string): Promise<{ state: GoogleConnectionState }> {
     return withSafeError('getGoogleConnectionHealth', async () => {
@@ -31,13 +32,10 @@ export async function getGoogleConnectionHealth(organizationId: string): Promise
     try {
         const oauth = getGoogleOAuthClient();
         oauth.setCredentials({ refresh_token: decryptGoogleToken(org.google_refresh_token) });
-        await google.calendar({ version: 'v3', auth: oauth }).calendars.get({ calendarId: org.google_calendar_id });
+        const calendar = google.calendar({ version: 'v3', auth: oauth });
+        await withRetry(() => calendar.calendars.get({ calendarId: org.google_calendar_id! }), 2);
     } catch (error) {
-        const classified = classifyGoogleError(error);
-        state = classified.kind === 'auth' ? 'reauth_required'
-            : classified.kind === 'rate_limit' || classified.kind === 'transient' ? 'temporarily_unavailable'
-            : classified.code === 404 ? 'calendar_missing'
-            : 'misconfigured';
+        state = googleConnectionStateFromError(error);
     }
     const { error: updateError } = await supabase.rpc('update_google_connection_health', {
         p_org_id: organizationId, p_status: state, p_error_code: asNullableRpcArg(state === 'healthy' ? null : state),

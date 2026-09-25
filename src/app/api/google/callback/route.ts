@@ -9,6 +9,8 @@ import { logExternalError } from '@/utils/errors';
 import { logWarn } from '@/utils/log';
 import type { Database } from '@/types/database.generated';
 import { areExternalIntegrationsEnabled } from '@/lib/env/server';
+import { googleConnectionStateFromError } from '@/utils/googleSync';
+import { withRetry } from '@/utils/googleRetry';
 
 export async function GET(request: NextRequest) {
     if (!areExternalIntegrationsEnabled()) {
@@ -117,16 +119,18 @@ export async function GET(request: NextRequest) {
         // wrong remote calendar and falsely reports everything as synchronized.
         const calendarApi = google.calendar({ version: 'v3', auth: oauth2Client });
         let calendarId = orgData.google_calendar_id;
-        let connectionStatus = 'healthy';
+        const connectionStatus = 'healthy';
         if (calendarId) {
             try {
-                await calendarApi.calendars.get({ calendarId });
+                await withRetry(() => calendarApi.calendars.get({ calendarId: calendarId! }), 2);
             } catch (calendarError) {
-                // Keep the old ID for an explicit, audited replacement flow.
-                // A different Google account must never create a replacement
-                // calendar implicitly during reauthorization.
+                // A temporary failure or a different Google account must not
+                // replace the stored credential for the existing calendar.
                 logExternalError('google.callback.calendar-check', calendarError, { organizationId });
-                connectionStatus = 'calendar_missing';
+                const state = googleConnectionStateFromError(calendarError);
+                const response = NextResponse.redirect(`${redirectUrl}?error=google_${state}`);
+                response.cookies.delete(OAUTH_STATE_COOKIE);
+                return response;
             }
         } else {
             const calendarRes = await calendarApi.calendars.insert({
@@ -160,7 +164,7 @@ export async function GET(request: NextRequest) {
         });
 
         // 7. 成功したら設定画面へリダイレクト（使い捨て state Cookie を破棄）
-        const okResponse = NextResponse.redirect(`${redirectUrl}?${connectionStatus === 'healthy' ? 'success=calendar_connected' : 'error=google_calendar_missing'}`);
+        const okResponse = NextResponse.redirect(`${redirectUrl}?success=calendar_connected`);
         okResponse.cookies.delete(OAUTH_STATE_COOKIE);
         return okResponse;
 

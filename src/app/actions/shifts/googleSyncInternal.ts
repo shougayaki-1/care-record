@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { withRetry } from '@/utils/googleRetry';
+
 import { type calendar_v3, google } from 'googleapis';
 
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
@@ -33,24 +35,7 @@ export type BatchOutcome = {
   errorKind?: SyncErrorKind;
 };
 
-export async function withRetry<T>(fn: () => Promise<T>, retries = 4): Promise<T> {
-  let attempt = 0;
-  for (;;) {
-    try {
-      return await fn();
-    } catch (error) {
-      const syncError = classifyGoogleError(error);
-      attempt += 1;
-      if (
-        attempt > retries
-        || (syncError.kind !== 'rate_limit' && syncError.kind !== 'transient')
-      ) throw syncError;
-      const backoff = Math.min(8000, 400 * 2 ** (attempt - 1))
-        + Math.floor(Math.random() * 300);
-      await new Promise((resolve) => setTimeout(resolve, backoff));
-    }
-  }
-}
+export { withRetry } from '@/utils/googleRetry';
 
 async function listGoogleEventsByShiftId(
   calendarApi: GoogleCalendarClient,
