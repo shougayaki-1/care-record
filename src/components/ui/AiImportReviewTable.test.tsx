@@ -32,9 +32,9 @@ describe('AiImportReviewTable', () => {
     />);
 
     expect(screen.getByRole('button', { name: '選択した記録を下書き保存' })).toHaveProperty('disabled', true);
-    fireEvent.click(screen.getByRole('button', { name: '内容を確認・修正' }));
-    expect(screen.getByText('記録内容')).toBeTruthy();
-    expect(screen.getByText('移動時間: 2 時間')).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: '内容を確認・修正' })[0]);
+    expect(screen.getByDisplayValue('記録内容')).toBeTruthy();
+    expect(screen.getByDisplayValue('2')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '原本と照合して確認済みにする' }));
     expect(onRowChange).toHaveBeenCalledWith('row-1', { status: 'confirmed' });
   });
@@ -49,8 +49,24 @@ describe('AiImportReviewTable', () => {
       onSaveSelected={vi.fn()}
       saving={false}
     />);
-    expect(screen.getByText(/原本要確認/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '内容を確認・修正' }));
+    expect(screen.getAllByText(/原本要確認/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('button', { name: '内容を確認・修正' })[0]);
     expect(screen.getByText(/原本PDFはこの画面に保存されていません/)).toBeTruthy();
+  });
+
+  it('shows an AI warning beside its matching form field', () => {
+    render(<AiImportReviewTable
+      rows={[{ ...row, result: { ...row.result!, warnings: ['特記事項: 文字が不鮮明です', '原本全体の確認が必要です'] } }]}
+      clients={[{ id: 'client-1', name: '利用者' }]}
+      helpers={[{ id: 'helper-1', name: 'スタッフ' }]}
+      formTemplate={[{ id: 'note', label: '特記事項', type: 'text', required: false }]}
+      onRowChange={vi.fn()}
+      onSaveSelected={vi.fn()}
+      saving={false}
+    />);
+    fireEvent.click(screen.getAllByRole('button', { name: '内容を確認・修正' })[0]);
+    expect(screen.getByText('特記事項: 文字が不鮮明です')).toBeTruthy();
+    expect(screen.getByText('原本全体の確認が必要です')).toBeTruthy();
+    expect(screen.queryByText('AIが確定できなかった項目です')).toBeNull();
   });
 });

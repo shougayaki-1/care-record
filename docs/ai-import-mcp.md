@@ -18,7 +18,7 @@ Supabase AuthのOAuth 2.1サーバーを使う。`/oauth/consent` に既存ロ�
 
 OAuthトークンはそのままだと通常の `authenticated` ロールを持ち、MCPツール以外のData APIも呼べる。Custom Access Token Hookで `client_id` を持つOAuthトークンを `mcp_import` ロールへ切り替える。このロールは `list_mcp_workspaces` と `submit_mcp_candidate` の実行権限だけを持ち、一般テーブルへの権限は持たない。候補登録RPCもロール・`client_id`・事業所所属・サイズ・件数を検証する。通常のアプリセッションは `authenticated` のまま。OAuthスコープ自体はDBアクセスを制限しない。
 
-利用者は「AIアプリとの接続」でOAuth許可を確認・解除できる。解除すると更新トークンは失効するが、発行済みJWTは有効期限まで利用できる可能性がある。PDFや画像をAIサービスに添付する場合、原本の取り扱いはそのサービスの契約・設定にも依存するため、同意画面で明示している。
+利用者はアカウント設定の「AIアプリとの接続」でOAuth許可を確認・解除できる。解除すると更新トークンは失効するが、発行済みJWTは有効期限まで利用できる可能性がある。PDFや画像をAIサービスに添付する場合、原本の取り扱いはそのサービスの契約・設定にも依存するため、同意画面で明示している。
 
 ローカルの `supabase/config.toml` でOAuthサーバーと動的クライアント登録を有効にしている。本番に接続する前に、Supabase Dashboardの **Authentication → OAuth Server** で同機能を有効にし、Authorization Pathを `/oauth/consent` に設定する。MCP Edge Functionの認証には非対称JWT署名鍵（ES256またはRS256）が必要。OAuth同意画面とMCPエンドポイントを公開HTTPSで提供する。
 
@@ -46,7 +46,7 @@ MCP関数は `supabase/functions/_shared/default-form-template.json` を返す�
 1. ChatGPT WorkまたはClaudeのMCP接続先に上記MCP URLを登録し、CareRecordへログインして同意画面で接続を許可する。
 2. 個人情報を伏せたテストPDFを添付して上記の依頼文を送る。AIが3つのMCPツールを実行し、候補IDを返すことを確認する。
 3. CareRecordの「AI取込候補」で原本を照合し、必要な修正後に確認済みへ変更して下書き保存する。
-4. 保存した記録を開き、AI由来の警告が表示されることを確認する。最後に「AIアプリとの接続」で接続一覧と解除を確認する。
+4. 保存した記録を開き、AI取込の注意表示を確認する。最後にアカウント設定の「AIアプリとの接続」で接続一覧と解除を確認する。
 
 ## 現時点の検証範囲
 

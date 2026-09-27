@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Box, Button, CircularProgress, Stack, Typography } from '@/components/ui/mui';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { supabase } from '@/lib/supabase';
+import Link from 'next/link';
 
 type Grant = { client: { id: string; name: string; uri: string }; scopes: string[]; granted_at: string };
 
@@ -42,6 +43,7 @@ export default function AiConnectionsPage() {
   return <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 760 }}>
     <Stack spacing={2}>
       <Typography variant="h5" fontWeight="bold">AIアプリとの接続</Typography>
+      <Button component={Link} href="/app/profile" variant="text" sx={{ alignSelf: 'flex-start' }}>アカウント設定に戻る</Button>
       <Alert severity="info">接続したAIアプリは、所属事業所とフォームを参照し、読み取り候補を送信できます。紙やPDFは接続先のAIサービスへ渡されます。接続を解除すると再認証はできなくなりますが、発行済みアクセストークンは有効期限まで使える場合があります。</Alert>
       {error && <Alert severity="error">{error}</Alert>}
       {loading ? <CircularProgress /> : grants.length === 0 ? <Alert severity="info">接続中のAIアプリはありません。</Alert> : grants.map((grant) => (
