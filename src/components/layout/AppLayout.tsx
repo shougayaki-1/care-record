@@ -330,6 +330,10 @@ const TopAppBar = React.memo(function TopAppBar({
             <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
             <ListItemText primary="設定" />
           </MenuItem>
+          <MenuItem onClick={() => { setAccountAnchor(null); router.push('/app/ai-connections'); }}>
+            <ListItemIcon><KeyIcon fontSize="small" /></ListItemIcon>
+            <ListItemText primary="AIアプリとの接続" />
+          </MenuItem>
           <MenuItem onClick={handleLogout}>
             <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
             <ListItemText primary="ログアウト" />
@@ -451,7 +455,6 @@ const NavDrawer = React.memo(function NavDrawer({
         <List disablePadding>
           {navButton('記録を作成', <EditNoteIcon fontSize="small" />, '/app/record')}
           {navButton('AI取込候補', <AutoFixHighIcon fontSize="small" />, '/app/ai-candidates')}
-          {navButton('AIアプリとの接続', <KeyIcon fontSize="small" />, '/app/ai-connections')}
           {aiImportEnabled && navButton('AI一括取込', <AutoFixHighIcon fontSize="small" />, '/app/ai-import')}
           {navButton('内勤を記録', <WorkHistoryIcon fontSize="small" />, '/app/internal-work')}
           {navButton('自分の履歴', <HistoryIcon fontSize="small" />, '/app/history')}

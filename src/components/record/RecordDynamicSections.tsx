@@ -3,7 +3,7 @@
 import { memo, useCallback } from 'react';
 
 import { DynamicFormField } from '@/components/ui';
-import { Box, Divider, Stack, Typography } from '@/components/ui/mui';
+import { Alert, Box, Divider, Stack, Typography } from '@/components/ui/mui';
 import type { FormAnswers, FormItem } from '@/hooks/useRecordForm';
 
 type FormFieldItemProps = {
@@ -11,6 +11,7 @@ type FormFieldItemProps = {
   value: FormAnswers[string] | undefined;
   detailValue: string;
   error?: string;
+  warning?: string;
   isAiFilled: boolean;
   disabled: boolean;
   onAnswerChange: (id: string, value: FormAnswers[string]) => void;
@@ -21,6 +22,7 @@ const FormFieldItem = memo(function FormFieldItem({
   value,
   detailValue,
   error,
+  warning,
   isAiFilled,
   disabled,
   onAnswerChange,
@@ -33,7 +35,7 @@ const FormFieldItem = memo(function FormFieldItem({
   }, [item.id, onAnswerChange]);
 
   return (
-    <Box sx={{ p: { xs: 2, sm: 3 }, bgcolor: error ? 'background.danger' : isAiFilled ? 'background.aiHighlight' : 'transparent' }}>
+    <Box sx={{ p: { xs: 2, sm: 3 }, bgcolor: error ? 'background.danger' : warning || isAiFilled ? 'background.aiHighlight' : 'transparent' }}>
       <DynamicFormField
         item={item}
         value={value}
@@ -43,6 +45,7 @@ const FormFieldItem = memo(function FormFieldItem({
         onChange={handleChange}
         onDetailChange={handleDetailChange}
       />
+      {warning && <Alert severity="warning" sx={{ mt: 1 }}>{warning}</Alert>}
     </Box>
   );
 });
@@ -51,6 +54,7 @@ type RecordDynamicSectionsProps = {
   sections: Array<{ title: string; items: FormItem[] }>;
   answers: FormAnswers;
   errors: Record<string, string>;
+  warnings?: Record<string, string>;
   aiFilledFields: Set<string>;
   disabled: boolean;
   onAnswerChange: (id: string, value: FormAnswers[string]) => void;
@@ -60,6 +64,7 @@ export function RecordDynamicSections({
   sections,
   answers,
   errors,
+  warnings = {},
   aiFilledFields,
   disabled,
   onAnswerChange,
@@ -78,6 +83,7 @@ export function RecordDynamicSections({
             value={answers[item.id]}
             detailValue={String(answers[`${item.id}_detail`] ?? '')}
             error={errors[item.id]}
+            warning={warnings[item.id]}
             isAiFilled={aiFilledFields.has(item.id)}
             disabled={disabled}
             onAnswerChange={onAnswerChange}
