@@ -1,5 +1,9 @@
--- Run after migrations with a privileged local connection:
--- psql -v ON_ERROR_STOP=1 -f supabase/tests/mcp_role_security.sql
+-- Run after migrations with a privileged local connection.
+-- This is also run by `supabase test db` as a pgTAP contract.
+begin;
+create extension if not exists pgtap with schema extensions;
+set search_path to public, extensions;
+select plan(1);
 do $$
 declare
   allowed_functions text[];
@@ -39,3 +43,6 @@ begin
   end if;
 end;
 $$;
+select pass('MCP OAuth role has only the intended privileges');
+select * from finish();
+rollback;
