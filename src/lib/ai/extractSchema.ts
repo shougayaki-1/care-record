@@ -10,6 +10,7 @@ export const MetaSchema = z.object({
   helper_names: z.array(z.string()).describe('スタッフ名リスト（候補照合用）'),
   client_id_candidate: z.string().nullable().describe('利用者候補ID。一致候補がなければ null'),
   helper_id_candidates: z.array(z.string()).describe('スタッフ候補IDリスト。一致候補がなければ []'),
+  travel_time_hours: z.number().finite().nonnegative().nullable().optional().describe('紙面の移動(加算)時間。読めなければ null'),
 });
 
 export type Meta = z.infer<typeof MetaSchema>;

@@ -9,6 +9,63 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      ai_import_provenance: {
+        Row: {
+          report_id: string
+          candidate_id: string
+          organization_id: string
+          reviewed_by: string
+          source: string
+          source_file_name: string
+          reviewed_at: string
+        }
+        Insert: {
+          report_id: string
+          candidate_id: string
+          organization_id: string
+          reviewed_by: string
+          source?: string
+          source_file_name?: string
+          reviewed_at?: string
+        }
+        Update: {
+          report_id?: string
+          candidate_id?: string
+          organization_id?: string
+          reviewed_by?: string
+          source?: string
+          source_file_name?: string
+          reviewed_at?: string
+        }
+        Relationships: []
+      }
+      ai_import_candidates: {
+        Row: {
+          created_at: string
+          created_by: string
+          id: string
+          organization_id: string
+          payload: Json
+          source_file_name: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          organization_id: string
+          payload: Json
+          source_file_name?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          organization_id?: string
+          payload?: Json
+          source_file_name?: string
+        }
+        Relationships: []
+      }
       assignments: {
         Row: {
           client_id: string

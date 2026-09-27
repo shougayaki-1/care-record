@@ -1,10 +1,15 @@
 'use client';
 
+import { useState } from 'react';
 import {
   Box,
   Button,
   Checkbox,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   IconButton,
   MenuItem,
@@ -19,6 +24,7 @@ import {
   Tooltip,
   Typography,
 } from '@/components/ui/mui';
+import { DynamicFormField, type DynamicFormValue } from './DynamicFormField';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
@@ -26,6 +32,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import ImageIcon from '@mui/icons-material/Image';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
+import type { FormItem } from '@/lib/ai/extractPrompt';
 
 export type ReviewRow = {
   id: string;
@@ -33,12 +40,15 @@ export type ReviewRow = {
   fileName: string;
   fileType: string;
   previewUrl: string | null;
+  sourceFiles?: { fileName: string; fileType: string; previewUrl: string | null }[];
+  sourceKind?: 'ai_chat';
   fileCount: number;
   result: ExtractionResult | null;
   errorMessage?: string;
   date: string;
   startAt: string;
   endAt: string;
+  travelTime?: string;
   clientId: string | null;
   helperId: string | null;
   status: 'pending' | 'confirmed' | 'skipped' | 'error';
@@ -49,6 +59,7 @@ export type AiImportReviewTableProps = {
   rows: ReviewRow[];
   clients: { id: string; name: string }[];
   helpers: { id: string; name: string }[];
+  formTemplate: FormItem[];
   onRowChange: (id: string, changes: Partial<ReviewRow>) => void;
   onSaveSelected: (ids: string[]) => Promise<void>;
   saving: boolean;
@@ -60,23 +71,49 @@ const confidenceLabel: Record<string, string> = {
   low: '低',
 };
 
-const confidenceColor: Record<string, 'success' | 'warning' | 'error'> = {
-  high: 'success',
-  medium: 'warning',
-  low: 'error',
-};
-
 export function AiImportReviewTable({
   rows,
   clients,
   helpers,
+  formTemplate,
   onRowChange,
   onSaveSelected,
   saving,
 }: AiImportReviewTableProps) {
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const reviewRow = rows.find((row) => row.id === reviewId);
+  const reviewStart = reviewRow ? new Date(`${reviewRow.date}T${reviewRow.startAt}:00`) : null;
+  const reviewEnd = reviewRow ? new Date(`${reviewRow.date}T${reviewRow.endAt}:00`) : null;
+  const reviewTravelTime = reviewRow?.travelTime?.trim() ?? '';
+  const canConfirmReview = Boolean(
+    reviewRow?.result && reviewRow.clientId && reviewRow.helperId &&
+    reviewStart && reviewEnd && Number.isFinite(reviewStart.getTime()) &&
+    Number.isFinite(reviewEnd.getTime()) && reviewEnd > reviewStart &&
+    (!reviewTravelTime || (Number.isFinite(Number(reviewTravelTime)) && Number(reviewTravelTime) >= 0)),
+  );
   const confirmedIds = rows
-    .filter((r) => r.status === 'confirmed')
+    .filter((r) => r.status === 'confirmed' && r.saveStatus !== 'saved')
     .map((r) => r.id);
+
+  const changeValue = (row: ReviewRow, item: FormItem, value: DynamicFormValue) => {
+    if (!row.result) return;
+    const values = { ...row.result.values };
+    if (item.type === 'number') {
+      if (value === '' || typeof value !== 'string' || !Number.isFinite(Number(value))) delete values[item.id];
+      else values[item.id] = Number(value);
+    } else {
+      values[item.id] = value;
+    }
+    onRowChange(row.id, { result: { ...row.result, values } });
+  };
+
+  const changeDetail = (row: ReviewRow, item: FormItem, value: string) => {
+    if (!row.result) return;
+    const values = { ...row.result.values };
+    if (value) values[`${item.id}_detail`] = value;
+    else delete values[`${item.id}_detail`];
+    onRowChange(row.id, { result: { ...row.result, values } });
+  };
 
   const handleSave = () => {
     void onSaveSelected(confirmedIds);
@@ -109,9 +146,10 @@ export function AiImportReviewTable({
               <TableCell>日付</TableCell>
               <TableCell>開始</TableCell>
               <TableCell>終了</TableCell>
+              <TableCell>移動時間(h)</TableCell>
               <TableCell>利用者</TableCell>
               <TableCell>スタッフ</TableCell>
-              <TableCell>信頼度</TableCell>
+              <TableCell>AI自己評価</TableCell>
               <TableCell>操作</TableCell>
             </TableRow>
           </TableHead>
@@ -138,17 +176,16 @@ export function AiImportReviewTable({
                   <TableCell padding="checkbox">
                     <Checkbox
                       checked={isConfirmed}
-                      disabled={isSkipped || isError || row.saveStatus === 'saved'}
-                      onChange={(e) =>
-                        onRowChange(row.id, {
-                          status: e.target.checked ? 'confirmed' : 'pending',
-                        })
-                      }
+                      disabled
+                      inputProps={{ 'aria-label': `${row.fileName}の確認状態` }}
                     />
                   </TableCell>
 
                   {/* プレビュー */}
                   <TableCell>
+                    {row.sourceKind === 'ai_chat' ? (
+                      <Typography variant="caption" color="warning.main">AI取込<br />原本要確認</Typography>
+                    ) : (
                     <Tooltip title={row.fileName || 'アップロードファイル'}>
                       <Box
                         sx={{
@@ -164,7 +201,7 @@ export function AiImportReviewTable({
                           bgcolor: 'background.default',
                         }}
                       >
-                        {row.previewUrl ? (
+                        {row.previewUrl && row.fileType !== 'application/pdf' ? (
                           <Box
                             component="img"
                             src={row.previewUrl}
@@ -178,6 +215,7 @@ export function AiImportReviewTable({
                         )}
                       </Box>
                     </Tooltip>
+                    )}
                     {row.fileCount > 1 && (
                       <Typography variant="caption" color="text.secondary">
                         {row.fileCount}枚
@@ -255,6 +293,19 @@ export function AiImportReviewTable({
                     />
                   </TableCell>
 
+                  {/* 移動時間 */}
+                  <TableCell>
+                    <TextField
+                      type="number"
+                      value={row.travelTime ?? ''}
+                      size="small"
+                      disabled={isSkipped || isError || row.saveStatus === 'saved'}
+                      onChange={(e) => onRowChange(row.id, { travelTime: e.target.value })}
+                      sx={{ width: 90 }}
+                      slotProps={{ htmlInput: { min: 0, step: 0.25, style: { padding: '4px 6px' } } }}
+                    />
+                  </TableCell>
+
                   {/* 利用者 */}
                   <TableCell>
                     <FormControl size="small" sx={{ minWidth: 130 }}>
@@ -312,8 +363,8 @@ export function AiImportReviewTable({
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                       {row.result ? (
                         <Chip
-                          label={confidenceLabel[row.result.confidence] ?? row.result.confidence}
-                          color={confidenceColor[row.result.confidence] ?? 'default'}
+                          label={`${confidenceLabel[row.result.confidence] ?? row.result.confidence}（参考）`}
+                          color="default"
                           size="small"
                         />
                       ) : (
@@ -330,21 +381,19 @@ export function AiImportReviewTable({
                   {/* 操作ボタン */}
                   <TableCell>
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
-                      {!isConfirmed && !isSkipped && !isError && row.saveStatus !== 'saved' && (
+                      {!isSkipped && !isError && row.saveStatus !== 'saved' && (
                         <Button
                           size="small"
                           variant="outlined"
-                          onClick={() =>
-                            onRowChange(row.id, { status: 'confirmed' })
-                          }
+                          onClick={() => setReviewId(row.id)}
                         >
-                          確認済みに
+                          内容を確認・修正
                         </Button>
                       )}
                       {!isSkipped && row.saveStatus !== 'saved' && (
                         <IconButton
                           size="small"
-                          title="スキップ"
+                          title={row.sourceKind === 'ai_chat' ? '候補を破棄' : 'スキップ'}
                           onClick={() =>
                             onRowChange(row.id, { status: 'skipped' })
                           }
@@ -370,6 +419,69 @@ export function AiImportReviewTable({
           </TableBody>
         </Table>
       </TableContainer>
+
+      <Dialog open={Boolean(reviewRow)} onClose={() => setReviewId(null)} maxWidth="lg" fullWidth>
+        <DialogTitle>原本と抽出内容を確認</DialogTitle>
+        <DialogContent dividers>
+          {reviewRow?.result && (
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) minmax(0, 1fr)' }, gap: 2 }}>
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>{reviewRow.fileName}</Typography>
+                {reviewRow.sourceKind === 'ai_chat' && (
+                  <Typography variant="body2" color="warning.main" sx={{ mb: 2 }}>
+                    AIチャットで読み取った候補です。原本PDFはこの画面に保存されていません。AIチャット側の原本と、日付・丸印・特記事項を照合してください。
+                  </Typography>
+                )}
+                {(reviewRow.sourceFiles ?? [{ fileName: reviewRow.fileName, fileType: reviewRow.fileType, previewUrl: reviewRow.previewUrl }]).map((source, index) => (
+                  <Box key={`${source.fileName}-${index}`} sx={{ mb: 2 }}>
+                    {reviewRow.fileCount > 1 && <Typography variant="caption">{index + 1}枚目: {source.fileName}</Typography>}
+                    {source.previewUrl && (source.fileType === 'application/pdf' ? (
+                      <Box component="iframe" src={source.previewUrl} title={source.fileName} sx={{ width: '100%', height: 560, border: 1, borderColor: 'divider' }} />
+                    ) : (
+                      <Box component="img" src={source.previewUrl} alt={source.fileName} sx={{ width: '100%', maxHeight: 560, objectFit: 'contain' }} />
+                    ))}
+                  </Box>
+                ))}
+              </Box>
+              <Box sx={{ maxHeight: 600, overflowY: 'auto', pr: 1 }}>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  記録日時: {reviewRow.date || '未入力'} {reviewRow.startAt || '未入力'}〜{reviewRow.endAt || '未入力'}
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>移動時間: {reviewRow.travelTime || '未入力'} 時間</Typography>
+                <Typography variant="body2" sx={{ mb: 2 }}>
+                  利用者: {clients.find((candidate) => candidate.id === reviewRow.clientId)?.name ?? '未選択'} ／
+                  スタッフ: {helpers.find((candidate) => candidate.id === reviewRow.helperId)?.name ?? '未選択'}
+                </Typography>
+                {reviewRow.result.warnings.length > 0 && (
+                  <Typography variant="body2" color="warning.main" sx={{ mb: 2 }}>
+                    要確認: {reviewRow.result.warnings.join(' / ')}
+                  </Typography>
+                )}
+                {formTemplate.filter((item) => item.type !== 'section').map((item) => (
+                  <Box key={item.id} sx={{ mb: 2, p: 1.5, border: 1, borderColor: item.id in reviewRow.result!.values ? 'divider' : 'warning.light', borderRadius: 1 }}>
+                    <DynamicFormField
+                      item={item}
+                      value={reviewRow.result!.values[item.id]}
+                      detailValue={String(reviewRow.result!.values[`${item.id}_detail`] ?? '')}
+                      onChange={(value) => changeValue(reviewRow, item, value)}
+                      onDetailChange={(value) => changeDetail(reviewRow, item, value)}
+                    />
+                    {!(item.id in reviewRow.result!.values) && <Typography variant="caption" color="warning.main">AIが確定できなかった項目です</Typography>}
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          {!canConfirmReview && <Typography variant="caption" color="error">利用者・スタッフ・日時・移動時間を確認してください</Typography>}
+          <Button onClick={() => setReviewId(null)}>閉じる</Button>
+          <Button variant="contained" disabled={!canConfirmReview} onClick={() => {
+            if (reviewRow) onRowChange(reviewRow.id, { status: 'confirmed' });
+            setReviewId(null);
+          }}>原本と照合して確認済みにする</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
