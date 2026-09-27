@@ -85,6 +85,11 @@ jobs:
         run: supabase start
       - name: Rebuild from an empty database
         run: supabase db reset
+      # CLI 2.108.0 hardcodes ECR for this image; shared runners can hit its pull limit.
+      - name: Prepare Postgres Meta image for type generation
+        run: |
+          docker pull ghcr.io/supabase/postgres-meta:v0.96.1
+          docker tag ghcr.io/supabase/postgres-meta:v0.96.1 public.ecr.aws/supabase/postgres-meta:v0.96.1
       - name: Verify generated database types are current
         run: |
           node scripts/db/generate-types-local.mjs > /tmp/database.generated.ts
