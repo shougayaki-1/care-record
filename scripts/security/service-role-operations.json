@@ -78,13 +78,5 @@
     "authorization": "Verified user ID with an SSO identity; nonce is hashed and consumed exactly once",
     "audit": "Successful completion issues a purpose-specific reauth grant via issueGrantToken",
     "consumers": ["src/utils/supabase/stepupReauth.ts"]
-  },
-  {
-    "accessor": "serviceRoleForAiImportProvenance",
-    "purpose": "Record provenance for a user-reviewed MCP import candidate",
-    "targets": ["ai_import_provenance"],
-    "authorization": "Authenticated reviewer owns the candidate and has record edit permission for its organization and client",
-    "audit": "Provenance row links the created draft to the reviewer and original AI candidate identifier",
-    "consumers": ["src/app/actions/aiCandidates.ts"]
   }
 ]

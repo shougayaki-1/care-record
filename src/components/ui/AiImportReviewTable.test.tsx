@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AiImportReviewTable, type ReviewRow } from './AiImportReviewTable';
 
@@ -68,5 +68,25 @@ describe('AiImportReviewTable', () => {
     expect(screen.getByText('特記事項: 文字が不鮮明です')).toBeTruthy();
     expect(screen.getByText('原本全体の確認が必要です')).toBeTruthy();
     expect(screen.queryByText('AIが確定できなかった項目です')).toBeNull();
+  });
+
+  it('sends a submitted AI record to approval from the review dialog without a draft step', async () => {
+    const onApproveRow = vi.fn().mockResolvedValue(true);
+    render(<AiImportReviewTable
+      rows={[{ ...row, sourceKind: 'ai_chat', travelMethod: 'none', travelCostYen: '0' }]}
+      clients={[{ id: 'client-1', name: '利用者' }]}
+      helpers={[{ id: 'helper-1', name: 'スタッフ' }]}
+      formTemplate={[{ id: 'note', label: '特記事項', type: 'text', required: false }]}
+      onRowChange={vi.fn()}
+      onSaveSelected={vi.fn()}
+      onApproveRow={onApproveRow}
+      workflow="review_submissions"
+      saving={false}
+    />);
+    expect(screen.getAllByText('送信済み・要確認').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '選択した記録を下書き保存' })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: '内容を確認・修正' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: '内容を確認して承認' }));
+    await waitFor(() => expect(onApproveRow).toHaveBeenCalledWith('row-1'));
   });
 });

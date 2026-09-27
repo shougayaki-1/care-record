@@ -14,4 +14,3 @@ export const serviceRoleForOAuthNonce = () => supabaseAdmin;
 export const serviceRoleForServerSessions = () => supabaseAdmin;
 export const serviceRoleForRetentionDryRun = () => supabaseAdmin;
 export const serviceRoleForStepupReauth = () => supabaseAdmin;
-export const serviceRoleForAiImportProvenance = () => supabaseAdmin;

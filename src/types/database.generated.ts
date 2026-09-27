@@ -53,6 +53,7 @@ export type Database = {
           reviewed_by: string
           source: string
           source_file_name: string
+          submitted_by: string | null
         }
         Insert: {
           candidate_id: string
@@ -62,6 +63,7 @@ export type Database = {
           reviewed_by: string
           source?: string
           source_file_name?: string
+          submitted_by?: string | null
         }
         Update: {
           candidate_id?: string
@@ -71,6 +73,7 @@ export type Database = {
           reviewed_by?: string
           source?: string
           source_file_name?: string
+          submitted_by?: string | null
         }
         Relationships: [
           {
@@ -2769,6 +2772,21 @@ export type Database = {
         Args: { p_org_id: string; p_report_id: string; p_shift_id: string }
         Returns: undefined
       }
+      approve_ai_import_candidate: {
+        Args: {
+          p_candidate_id: string
+          p_client_id: string
+          p_end_at: string
+          p_organization_id: string
+          p_session_id: string
+          p_staff_id: string
+          p_start_at: string
+          p_travel_cost_yen: number
+          p_travel_method: string
+          p_values: Json
+        }
+        Returns: string
+      }
       complete_google_oauth_connection: {
         Args: {
           p_calendar_id: string
@@ -2829,6 +2847,10 @@ export type Database = {
         Args: { p_org_id: string; p_segment_id: string }
         Returns: undefined
       }
+      discard_ai_import_candidate: {
+        Args: { p_candidate_id: string; p_organization_id: string }
+        Returns: undefined
+      }
       discard_report_autosave_authorized: {
         Args: { p_draft_key: string; p_organization_id: string }
         Returns: undefined
@@ -2853,6 +2875,10 @@ export type Database = {
         Returns: Json
       }
       get_invitation_preview: { Args: { p_code: string }; Returns: Json }
+      get_mcp_self_staff_names: {
+        Args: { p_organization_id: string }
+        Returns: string[]
+      }
       get_my_org_id: { Args: never; Returns: string }
       is_org_admin: { Args: { _org_id: string }; Returns: boolean }
       is_org_member: { Args: { _org_id: string }; Returns: boolean }

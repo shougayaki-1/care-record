@@ -17,12 +17,14 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { CalendarPageSkeleton, InnerPageHeader, PageLayout } from '@/components/ui';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 import { getMyReportHistory } from '@/app/actions/reports';
+import { getMyAiSubmissions } from '@/app/actions/aiCandidates';
 import { buildRecordPath } from '@/utils/recordNavigation';
 
 type Report = {
     id: string; start_at: string; status: 'pending' | 'approved' | 'remanded';
     client_id: string; clients: { name: string; } | null;
 };
+type AiSubmission = Awaited<ReturnType<typeof getMyAiSubmissions>>[number];
 
 // 簡易カレンダーコンポーネント
 const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month: number, events: Report[], onSelect: (report: Report) => void }) => {
@@ -88,6 +90,7 @@ export default function HistoryPage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const [viewMode, setViewMode] = useState(0); // 0: List, 1: Calendar
     const [reports, setReports] = useState<Report[]>([]);
+    const [aiSubmissions, setAiSubmissions] = useState<AiSubmission[]>([]);
     const [filterDate, setFilterDate] = useState('');
     const [currentMonth, setCurrentMonth] = useState(new Date()); // カレンダー表示用
 
@@ -104,11 +107,16 @@ export default function HistoryPage() {
                 endAt = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1).toISOString();
             }
             try {
-                const result = await getMyReportHistory(currentOrg.id, { startAt, endAt, limit: 100 });
+                const [result, submissions] = await Promise.all([
+                    getMyReportHistory(currentOrg.id, { startAt, endAt, limit: 100 }),
+                    getMyAiSubmissions(currentOrg.id),
+                ]);
                 setReports(result.status === 'ok' ? result.items : []);
+                setAiSubmissions(submissions);
             } catch (error) {
                 console.error('Failed to load own report history', error);
                 setReports([]);
+                setAiSubmissions([]);
             }
         };
 
@@ -147,6 +155,17 @@ export default function HistoryPage() {
                             />
                         </Paper>
                         <Stack spacing={2}>
+                            {aiSubmissions.filter((item) => !filterDate || item.recordDate === filterDate).map((item) => (
+                                <Card key={item.id} variant="outlined" sx={{ borderRadius: 2, p: { xs: 1.5, sm: 2 } }}>
+                                    <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
+                                        <Box sx={{ minWidth: 0 }}>
+                                            <Typography variant="body2" color="text.secondary">{item.recordDate || new Date(item.createdAt).toLocaleDateString()} · AI送信</Typography>
+                                            <Typography variant="h6" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{item.clientName || item.sourceFileName || '利用者未特定'}</Typography>
+                                        </Box>
+                                        <Chip label="送信済み・管理者確認待ち" color="warning" size="small" />
+                                    </Stack>
+                                </Card>
+                            ))}
                             {reports.map((report) => (
                                 <Card key={report.id} variant="outlined" sx={{ borderRadius: 2 }}>
                                     <CardActionArea onClick={() => handleEdit(report)} sx={{ p: { xs: 1.5, sm: 2 } }}>
@@ -170,7 +189,7 @@ export default function HistoryPage() {
                                     </CardActionArea>
                                 </Card>
                             ))}
-                            {reports.length === 0 && (
+                            {reports.length === 0 && aiSubmissions.length === 0 && (
                                 <Box textAlign="center" py={5} color="text.secondary">
                                     <Typography>記録がありません</Typography>
                                 </Box>
