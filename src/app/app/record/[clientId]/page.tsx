@@ -1,5 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+
 import { Alert, Box, Button, CircularProgress, Container, IconButton, Stack, Typography } from '@/components/ui/mui';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
@@ -36,6 +39,17 @@ export default function RecordPage() {
     handleAiExtracted, groupedSections, isAdmin, isReadOnly, canDeleteRecord,
     requiresSegmentSelection, aiClients, aiHelpers, handleStaffChange,
   } = useRecordForm();
+  const [mcpProvenance, setMcpProvenance] = useState<{ reportId: string; found: boolean } | null>(null);
+  const hasMcpProvenance = Boolean(currentReportId && mcpProvenance?.reportId === currentReportId && mcpProvenance.found);
+  useEffect(() => {
+    let active = true;
+    if (!currentReportId) return;
+    void supabase.from('ai_import_provenance').select('report_id')
+      .eq('report_id', currentReportId).maybeSingle().then(({ data }) => {
+        if (active) setMcpProvenance({ reportId: currentReportId, found: Boolean(data) });
+      });
+    return () => { active = false; };
+  }, [currentReportId]);
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}><CircularProgress /></Box>;
 
   return (
@@ -77,6 +91,11 @@ export default function RecordPage() {
             {currentStatus !== 'approved' && autosaveState !== 'idle' && (
               <Alert severity={autosaveState === 'error' ? 'warning' : 'info'}>
                 {autosaveState === 'saving' ? '入力内容を保存中です…' : autosaveState === 'saved' ? '入力内容は自動保存されています' : '自動保存に失敗しました。通信を確認して入力を続けてください。'}
+              </Alert>
+            )}
+            {hasMcpProvenance && (
+              <Alert severity="warning">
+                AIが紙の記録から作成した下書きです。送信・承認前に原本と照合し、特に日付・チェック・丸印・特記事項を確認してください。
               </Alert>
             )}
             {currentReportId && actualStaffs.some((staff) => !travelExpenses[staff.staff_id]) && <Alert severity="warning">この記録にはスタッフ別の交通費がありません。精算前に確認してください。</Alert>}

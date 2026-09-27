@@ -20,6 +20,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import PersonIcon from '@mui/icons-material/Person';
 import { AiImportReviewTable, AppButton, AppTextField, DateTimeField, DynamicFormField, InnerPageHeader, PageLayout, type ReviewRow } from '@/components/ui';
+import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
 import { ManualCallout, ManualDefinitionList, ManualDemoFrame, ManualScreenHighlight, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
 
 const clients = [
@@ -291,6 +292,7 @@ function AiImportDemo() {
             rows={rows}
             clients={clients}
             helpers={helpers}
+            formTemplate={DEFAULT_TEMPLATE}
             saving={false}
             onRowChange={(id, changes) => setRows((current) => current.map((row) => row.id === id ? { ...row, ...changes } : row))}
             onSaveSelected={async () => undefined}

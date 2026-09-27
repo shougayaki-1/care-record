@@ -319,8 +319,6 @@ export default function AiImportPage() {
             (aiMeta.helper_names.length > 0
               ? matchName(aiMeta.helper_names[0], helpers)
               : null);
-          const autoConfirm =
-            result.confidence === 'high' && clientId !== null && helperId !== null;
 
           const row: ReviewRow = {
             id: crypto.randomUUID(),
@@ -335,7 +333,7 @@ export default function AiImportPage() {
             endAt: aiMeta.end_at,
             clientId,
             helperId,
-            status: autoConfirm ? 'confirmed' : 'pending',
+            status: 'pending',
           };
           setRows((prev) => [...prev, row]);
         },
@@ -628,6 +626,7 @@ export default function AiImportPage() {
             rows={rows}
             clients={clients}
             helpers={helpers}
+            formTemplate={DEFAULT_TEMPLATE}
             onRowChange={handleRowChange}
             onSaveSelected={handleSaveSelected}
             saving={saving}

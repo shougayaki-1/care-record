@@ -9,6 +9,86 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      ai_import_candidates: {
+        Row: {
+          created_at: string
+          created_by: string
+          id: string
+          organization_id: string
+          payload: Json
+          source_file_name: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          organization_id: string
+          payload: Json
+          source_file_name?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          organization_id?: string
+          payload?: Json
+          source_file_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_import_candidates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_import_provenance: {
+        Row: {
+          candidate_id: string
+          organization_id: string
+          report_id: string
+          reviewed_at: string
+          reviewed_by: string
+          source: string
+          source_file_name: string
+        }
+        Insert: {
+          candidate_id: string
+          organization_id: string
+          report_id: string
+          reviewed_at?: string
+          reviewed_by: string
+          source?: string
+          source_file_name?: string
+        }
+        Update: {
+          candidate_id?: string
+          organization_id?: string
+          report_id?: string
+          reviewed_at?: string
+          reviewed_by?: string
+          source?: string
+          source_file_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_import_provenance_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_import_provenance_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: true
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       assignments: {
         Row: {
           client_id: string
@@ -2781,6 +2861,13 @@ export type Database = {
         Args: { p_org_id: string }
         Returns: undefined
       }
+      list_mcp_workspaces: {
+        Args: never
+        Returns: {
+          id: string
+          name: string
+        }[]
+      }
       load_report_autosave_authorized: {
         Args: { p_draft_key: string; p_organization_id: string }
         Returns: Json
@@ -2795,6 +2882,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      mcp_access_token_hook: { Args: { event: Json }; Returns: Json }
       mutate_organization_role_authorized: {
         Args: {
           p_action: string
@@ -2963,6 +3051,14 @@ export type Database = {
           p_sync_status: string
         }
         Returns: number
+      }
+      submit_mcp_candidate: {
+        Args: {
+          p_organization_id: string
+          p_payload: Json
+          p_source_file_name: string
+        }
+        Returns: string
       }
       transfer_owner_atomic: {
         Args: {

@@ -44,7 +44,7 @@ export const DEFAULT_TEMPLATE: FormItem[] = [
   { id: 'clothes_mending', label: '衣類の整理・補修', type: 'multicheckbox', options: '衣類の整理,被服の補修', required: false },
   { id: 'proxy_service', label: '代行業務', type: 'multicheckbox', options: '買物,銀行,郵便局,薬受け取り,他', required: false, hasDetail: true },
   { id: 'goods_organize', label: '物品整理', type: 'multicheckbox', options: '医薬品,衣料品,食料品,他', required: false, hasDetail: true },
-  { id: 'laundry', label: '洗濯', type: 'multicheckbox', options: '干す,収納', required: false },
+  { id: 'laundry', label: '洗濯', type: 'multicheckbox', options: '干す,取込,収納', required: false },
   { id: 'consultation', label: '相談援助', type: 'multicheckbox', options: '相談援助,情報収集,提供', required: false },
   { id: 'watching', label: '見守り', type: 'checkbox', required: false },
   { id: 'other_note', label: 'その他', type: 'text', required: false },
