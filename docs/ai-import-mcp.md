@@ -25,7 +25,7 @@ OAuthトークンはそのままだと通常の `authenticated` ロールを持�
 ## 展開前の確認
 
 - OAuth対応のSupabase CLI、Docker、非対称JWT署名鍵を用意する。今回使用したCLI 2.108.0ではローカルAuthのOAuth APIは動作したが、ゲートウェイ直下の公式発見URLは404だった。外部MCPクライアントの接続は公開環境で検証する。
-- マイグレーション `20260926000001_mcp_ai_import_candidates.sql`、`20260927000001_isolate_mcp_oauth.sql`、`20260927000002_ai_sent_review.sql`、`20260927000003_ai_review_rollout_compat.sql` を順に適用し、`supabase/tests/mcp_role_security.sql` で実効権限を確認する。`00003` は旧アプリの下書き保存が候補削除を必要とするための切替用権限で、新アプリの稼働確認後に別migrationで廃止する。
+- マイグレーション `20260926000001_mcp_ai_import_candidates.sql`、`20260927000001_isolate_mcp_oauth.sql`、`20260927000002_ai_sent_review.sql`、`20260927000003_ai_review_rollout_compat.sql` を順に適用し、新アプリの稼働確認後に `20260927000004_ai_review_cutover.sql` で旧アプリ用の候補削除権限を廃止する。`supabase/tests/mcp_role_security.sql` で最終的な実効権限を確認する。
 - Edge Functionの環境変数 `APP_ORIGIN` にアプリの公開オリジンを設定する。例: `https://care.example.com`。未設定でも候補作成はできるが、MCPの応答に確認画面URLは付かない。
 - **OAuth接続を有効化する前に**、本番Dashboardの Custom Access Token Hook を `public.mcp_access_token_hook` に設定し、発行したOAuthトークンの `role` が `mcp_import` になることを確認する。Hookが無効のままOAuthを公開すると、通常ユーザー権限のトークンが発行される。
 - `supabase config push` で設定を反映し、Dashboardと公開OAuth発見URLでOAuthサーバー・Hookが実際に有効になったことを確認する。その後 `supabase functions deploy care-record-mcp` を行う。`verify_jwt = false` は未認証のOAuth発見リクエストを関数へ通すために必要で、各ツールは関数内でトークン検証を受ける。
