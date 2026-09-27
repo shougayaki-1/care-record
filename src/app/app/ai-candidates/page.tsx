@@ -6,11 +6,12 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { supabase } from '@/lib/supabase';
-import { saveAiCandidateAsDraft } from '@/app/actions/aiCandidates';
-import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
+import { approveAiCandidate } from '@/app/actions/aiCandidates';
+import { DEFAULT_TEMPLATE, type FormItem } from '@/constants/formTemplates';
 import { AiImportReviewTable, type ReviewRow } from '@/components/ui/AiImportReviewTable';
 import { RawExtractionResponseSchema } from '@/lib/ai/mcpCandidateSchema';
 import { normalizeExtraction } from '@/lib/ai/normalizeExtraction';
+import { checkManagementPermission } from '@/utils/permissions';
 
 type Candidate = {
   id: string;
@@ -21,11 +22,13 @@ type NamedId = { id: string; name: string };
 
 export default function AiCandidatesPage() {
   const { currentOrg } = useWorkspace();
+  const canReview = Boolean(currentOrg && checkManagementPermission(currentOrg.effectivePermissions, 'reports'));
   const { showToast } = useToast();
   const confirm = useConfirm();
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [clients, setClients] = useState<NamedId[]>([]);
   const [helpers, setHelpers] = useState<NamedId[]>([]);
+  const [templatesByClient, setTemplatesByClient] = useState<Record<string, FormItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -55,8 +58,20 @@ export default function AiCandidatesPage() {
       }
       const clientRows = (clientResult.data ?? []) as NamedId[];
       const helperRows = (helperResult.data ?? []) as NamedId[];
+      const { data: templateRows, error: templateError } = clientRows.length > 0
+        ? await supabase.from('form_templates').select('client_id, schema').in('client_id', clientRows.map((client) => client.id))
+        : { data: [], error: null };
+      if (!active) return;
+      if (templateError) {
+        setLoadError('記録フォームを読み込めませんでした。');
+        setLoading(false);
+        return;
+      }
+      const templates = Object.fromEntries((templateRows ?? []).filter((item) => Array.isArray(item.schema))
+        .map((item) => [item.client_id, item.schema as FormItem[]]));
       setClients(clientRows);
       setHelpers(helperRows);
+      setTemplatesByClient(templates);
       const nextRows: ReviewRow[] = ((candidateResult.data ?? []) as Candidate[]).map((candidate, index) => {
         const parsed = RawExtractionResponseSchema.safeParse({ records: [candidate.payload] });
         if (!parsed.success) {
@@ -67,7 +82,9 @@ export default function AiCandidatesPage() {
             clientId: null, helperId: null, status: 'error' as const,
           };
         }
-        const result = normalizeExtraction(parsed.data.records[0], DEFAULT_TEMPLATE, clientRows, helperRows);
+        const raw = parsed.data.records[0];
+        const namedClient = clientRows.find((client) => client.name.normalize('NFKC').replace(/\s+/g, '') === raw.meta.client_name?.normalize('NFKC').replace(/\s+/g, ''));
+        const result = normalizeExtraction(raw, namedClient ? templates[namedClient.id] ?? DEFAULT_TEMPLATE : DEFAULT_TEMPLATE, clientRows, helperRows);
         const matchedClient = clientRows.find((client) => client.id === result.meta.client_id_candidate)
           ?? clientRows.find((client) => client.name.normalize('NFKC').replace(/\s+/g, '') === result.meta.client_name?.normalize('NFKC').replace(/\s+/g, ''));
         const matchedHelper = helperRows.find((helper) => result.meta.helper_id_candidates.includes(helper.id))
@@ -88,13 +105,12 @@ export default function AiCandidatesPage() {
   }, [currentOrg]);
 
   const handleRowChange = useCallback((id: string, changes: Partial<ReviewRow>) => {
-    if (changes.status === 'skipped' && currentOrg) {
+    if (changes.status === 'skipped' && currentOrg && canReview) {
       void (async () => {
-        const accepted = await confirm({ message: 'このAI取込候補を破棄しますか？' });
+        const accepted = await confirm({ message: 'このAI送信を却下しますか？', confirmText: '却下する', confirmColor: 'error' });
         if (!accepted) return;
-        const { error } = await supabase.from('ai_import_candidates')
-          .delete().eq('id', id).eq('organization_id', currentOrg.id);
-        if (error) showToast('候補を破棄できませんでした', 'error');
+        const { error } = await supabase.rpc('discard_ai_import_candidate', { p_organization_id: currentOrg.id, p_candidate_id: id });
+        if (error) showToast('AI送信を却下できませんでした', 'error');
         else setRows((previous) => previous.filter((row) => row.id !== id));
       })();
       return;
@@ -104,18 +120,20 @@ export default function AiCandidatesPage() {
       const contentChanged = Object.keys(changes).some((key) => key !== 'status');
       return { ...row, ...changes, ...(contentChanged ? { status: 'pending' as const } : {}) };
     }));
-  }, [confirm, currentOrg, showToast]);
+  }, [canReview, confirm, currentOrg, showToast]);
 
-  const handleSaveSelected = useCallback(async (ids: string[]) => {
-    if (!currentOrg) return;
+  const handleApproveRow = useCallback(async (id: string): Promise<boolean> => {
+    if (!currentOrg || !canReview) return false;
+    const row = rows.find((item) => item.id === id);
+    if (!row?.result || !row.clientId || !row.helperId || !row.travelMethod || row.travelCostYen === undefined) {
+      showToast('利用者・スタッフ・交通費を確認してください', 'error');
+      return false;
+    }
     setSaving(true);
-    const outcomes = await Promise.allSettled(ids.map(async (id) => {
-      const row = rows.find((item) => item.id === id);
-      if (!row?.result || !row.clientId || !row.helperId) throw new Error('利用者・スタッフを確認してください');
-      const helper = helpers.find((item) => item.id === row.helperId);
-      if (!helper) throw new Error('スタッフを確認してください');
+    try {
       const start = new Date(`${row.date}T${row.startAt}:00`);
       const end = new Date(`${row.date}T${row.endAt}:00`);
+      if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && end < start) end.setDate(end.getDate() + 1);
       if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) {
         throw new Error('日時を確認してください');
       }
@@ -123,49 +141,53 @@ export default function AiCandidatesPage() {
       if (travelTime && (!Number.isFinite(Number(travelTime)) || Number(travelTime) < 0)) {
         throw new Error('移動時間を確認してください');
       }
-      await saveAiCandidateAsDraft({
+      await approveAiCandidate({
         candidateId: id,
         organizationId: currentOrg.id,
         clientId: row.clientId,
-        startAt: `${row.date}T${row.startAt}:00`,
-        endAt: `${row.date}T${row.endAt}:00`,
+        startAt: start.toISOString(),
+        endAt: end.toISOString(),
+        staffId: row.helperId,
+        travelMethod: row.travelMethod,
+        travelCostYen: Number(row.travelCostYen),
         values: {
           ...row.result.values,
-          _helpers: [helper.name],
           ...(travelTime ? { travel_time: travelTime } : {}),
         },
       });
-      return id;
-    }));
-    setRows((previous) => previous.map((row) => {
-      const index = ids.indexOf(row.id);
-      if (index < 0) return row;
-      return { ...row, saveStatus: outcomes[index].status === 'fulfilled' ? 'saved' : 'error' };
-    }));
-    const savedCount = outcomes.filter((item) => item.status === 'fulfilled').length;
-    const errorCount = outcomes.length - savedCount;
-    if (savedCount) showToast(`${savedCount}件を下書き保存しました`, 'success');
-    if (errorCount) showToast(`${errorCount}件の保存・更新に失敗しました`, 'error');
-    setSaving(false);
-  }, [currentOrg, helpers, rows, showToast]);
+      setRows((previous) => previous.filter((item) => item.id !== id));
+      showToast('AI送信を確認し、提供記録を承認しました', 'success');
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '承認できませんでした', 'error');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }, [canReview, currentOrg, rows, showToast]);
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 } }}>
       <Stack spacing={2}>
-        <Typography variant="h5" fontWeight="bold">AI取込候補の確認</Typography>
+        <Typography variant="h5" fontWeight="bold">AI送信の確認</Typography>
         <Alert severity="warning">
-          ここに表示される内容は、ChatGPTやClaudeなどが読み取った未確認の候補です。原本PDFをAIチャットで開き、日付・チェック・丸印・特記事項を照合してください。確認するまで記録本体には保存されません。
+          職員がAIから送信した記録です。原本とAIの読み取り結果を照合し、必要な修正と交通費の確認を行ってから承認してください。
         </Alert>
         {!currentOrg ? <Alert severity="info">事業所を選択してください。</Alert> : loading ? <CircularProgress /> : loadError ? <Alert severity="error">{loadError}</Alert> : rows.length === 0 ? (
-          <Alert severity="info">この事業所には確認待ちのAI取込候補がありません。</Alert>
+          <Alert severity="info">この事業所には確認待ちのAI送信がありません。</Alert>
+        ) : !canReview ? (
+          <Alert severity="info">AIから送信済みの記録が {rows.length} 件あります。管理者の確認をお待ちください。</Alert>
         ) : (
           <AiImportReviewTable
             rows={rows}
             clients={clients}
             helpers={helpers}
             formTemplate={DEFAULT_TEMPLATE}
+            templatesByClient={templatesByClient}
             onRowChange={handleRowChange}
-            onSaveSelected={handleSaveSelected}
+            onSaveSelected={async () => {}}
+            onApproveRow={handleApproveRow}
+            workflow="review_submissions"
             saving={saving}
           />
         )}

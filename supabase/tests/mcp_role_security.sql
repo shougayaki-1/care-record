@@ -24,12 +24,26 @@ begin
   select array_agg(p.proname order by p.proname) into allowed_functions
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and has_function_privilege('mcp_import', p.oid, 'EXECUTE');
-  if allowed_functions is distinct from array['list_mcp_workspaces', 'submit_mcp_candidate'] then
+  if allowed_functions is distinct from array['get_mcp_self_staff_names', 'list_mcp_workspaces', 'submit_mcp_candidate'] then
     raise exception 'Unexpected MCP RPC privileges: %', allowed_functions;
   end if;
   if has_table_privilege('authenticated', 'public.ai_import_candidates', 'INSERT')
     or has_function_privilege('authenticated', 'public.submit_mcp_candidate(uuid,text,jsonb)', 'EXECUTE') then
     raise exception 'Browser sessions can forge MCP candidates';
+  end if;
+  -- The deployed app still deletes its own candidate after saving a draft.
+  -- This compatibility grant is removed in the post-cutover migration.
+  if not has_table_privilege('authenticated', 'public.ai_import_candidates', 'DELETE')
+    or not exists (
+      select 1 from pg_policies
+      where schemaname = 'public' and tablename = 'ai_import_candidates'
+        and policyname = 'Delete own AI import candidates'
+        and position('created_by' in qual) > 0
+        and position('is_session_active' in qual) > 0
+        and position('is_org_member' in qual) > 0
+        and position('client_id' in qual) > 0
+    ) then
+    raise exception 'Legacy candidate deletion is not restricted to the active sender';
   end if;
   if not has_function_privilege('supabase_auth_admin', 'public.mcp_access_token_hook(jsonb)', 'EXECUTE')
     or not has_schema_privilege('supabase_auth_admin', 'public', 'USAGE') then

@@ -29,6 +29,8 @@ export type ReviewRow = {
   travelTime?: string;
   clientId: string | null;
   helperId: string | null;
+  travelMethod?: 'car' | 'public_transport' | 'other' | 'none' | '';
+  travelCostYen?: string;
   status: 'pending' | 'confirmed' | 'skipped' | 'error';
   saveStatus?: 'saving' | 'saved' | 'error';
 };
@@ -38,8 +40,11 @@ export type AiImportReviewTableProps = {
   clients: { id: string; name: string }[];
   helpers: { id: string; name: string }[];
   formTemplate: FormItem[];
+  templatesByClient?: Record<string, FormItem[]>;
   onRowChange: (id: string, changes: Partial<ReviewRow>) => void;
   onSaveSelected: (ids: string[]) => Promise<void>;
+  onApproveRow?: (id: string) => Promise<boolean>;
+  workflow?: 'draft_import' | 'review_submissions';
   saving: boolean;
 };
 
@@ -87,22 +92,32 @@ const statusLabel = (row: ReviewRow) => row.saveStatus === 'saved' ? '保存済�
   : row.status === 'error' ? '読取失敗'
   : row.status === 'skipped' ? 'スキップ' : '要確認';
 
-export function AiImportReviewTable({ rows, clients, helpers, formTemplate, onRowChange, onSaveSelected, saving }: AiImportReviewTableProps) {
+const statusColor = (row: ReviewRow, reviewingSubmissions: boolean) => row.status === 'error' || row.saveStatus === 'error' ? 'error'
+  : !reviewingSubmissions && (row.status === 'confirmed' || row.saveStatus === 'saved') ? 'success' : 'warning';
+
+export function AiImportReviewTable({ rows, clients, helpers, formTemplate, templatesByClient, onRowChange, onSaveSelected, onApproveRow, workflow = 'draft_import', saving }: AiImportReviewTableProps) {
+  const reviewingSubmissions = workflow === 'review_submissions';
   const [reviewId, setReviewId] = useState<string | null>(null);
   const reviewRow = rows.find((row) => row.id === reviewId);
   const start = reviewRow ? new Date(`${reviewRow.date}T${reviewRow.startAt}:00`) : null;
   const end = reviewRow ? new Date(`${reviewRow.date}T${reviewRow.endAt}:00`) : null;
+  if (start && end && Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && end < start) end.setDate(end.getDate() + 1);
   const travel = reviewRow?.travelTime?.trim() ?? '';
+  const cost = reviewRow?.travelCostYen?.trim() ?? '';
+  const validExpense = Boolean(reviewRow?.travelMethod && cost !== '' && Number.isInteger(Number(cost)) && Number(cost) >= 0 && Number(cost) <= 100000 &&
+    (reviewRow.travelMethod !== 'none' || Number(cost) === 0));
   const canConfirm = Boolean(reviewRow?.result && reviewRow.clientId && reviewRow.helperId && start && end &&
     Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && end > start &&
-    (!travel || (Number.isFinite(Number(travel)) && Number(travel) >= 0)));
+    (!travel || (Number.isFinite(Number(travel)) && Number(travel) >= 0)) &&
+    (!reviewingSubmissions || validExpense));
   const confirmedIds = rows.filter((row) => row.status === 'confirmed' && row.saveStatus !== 'saved').map((row) => row.id);
-  const sections = groupSections(formTemplate);
-  const { fields, meta, unmatched } = locateWarnings(reviewRow?.result?.warnings ?? [], formTemplate);
+  const activeTemplate = reviewRow?.clientId ? templatesByClient?.[reviewRow.clientId] ?? formTemplate : formTemplate;
+  const sections = groupSections(activeTemplate);
+  const { fields, meta, unmatched } = locateWarnings(reviewRow?.result?.warnings ?? [], activeTemplate);
 
   const changeAnswer = (id: string, value: FormAnswers[string]) => {
     if (!reviewRow?.result) return;
-    const item = formTemplate.find((field) => field.id === id);
+    const item = activeTemplate.find((field) => field.id === id);
     const values = { ...reviewRow.result.values };
     if (item?.type === 'number') {
       if (value === '' || !Number.isFinite(Number(value))) delete values[id];
@@ -118,7 +133,7 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, onRo
     )}
     {row.saveStatus !== 'saved' && row.status !== 'skipped' && (
       <Button size="small" color="inherit" onClick={() => onRowChange(row.id, { status: 'skipped' })}>
-        {row.sourceKind === 'ai_chat' ? '破棄' : 'スキップ'}
+        {reviewingSubmissions ? '却下' : row.sourceKind === 'ai_chat' ? '破棄' : 'スキップ'}
       </Button>
     )}
     {row.status === 'skipped' && <Button size="small" onClick={() => onRowChange(row.id, { status: 'pending' })}>戻す</Button>}
@@ -126,17 +141,17 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, onRo
 
   return <Box>
     <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} spacing={1} sx={{ mb: 2 }}>
-      <Typography variant="body2" color="text.secondary">{rows.length} 件（確認済み: {confirmedIds.length} 件）</Typography>
-      <Button variant="contained" size="small" startIcon={<SaveIcon />} disabled={confirmedIds.length === 0 || saving} onClick={() => void onSaveSelected(confirmedIds)}>
+      <Typography variant="body2" color="text.secondary">{reviewingSubmissions ? `${rows.length} 件のAI送信が確認待ちです` : `${rows.length} 件（確認済み: ${confirmedIds.length} 件）`}</Typography>
+      {!reviewingSubmissions && <Button variant="contained" size="small" startIcon={<SaveIcon />} disabled={confirmedIds.length === 0 || saving} onClick={() => void onSaveSelected(confirmedIds)}>
         選択した記録を下書き保存
-      </Button>
+      </Button>}
     </Stack>
 
     <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' } }}>
       {rows.map((row) => <Box key={row.id} sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'background.paper' }}>
         <Stack spacing={1.5}>
           <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Chip label={statusLabel(row)} size="small" color={row.status === 'confirmed' || row.saveStatus === 'saved' ? 'success' : row.status === 'error' || row.saveStatus === 'error' ? 'error' : 'warning'} variant="outlined" />
+            <Chip label={reviewingSubmissions && row.status !== 'error' ? '送信済み・要確認' : statusLabel(row)} size="small" color={statusColor(row, reviewingSubmissions)} variant="outlined" />
             <Typography variant="caption" color="text.secondary">{row.result?.confidence ? `AI自己評価: ${row.result.confidence}` : ''}</Typography>
           </Stack>
           <Typography variant="body2">{row.date || '日付未入力'} {row.startAt || '--:--'} 〜 {row.endAt || '--:--'}</Typography>
@@ -155,7 +170,7 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, onRo
             <TableCell key={label} sx={{ fontWeight: 'bold', color: 'text.secondary' }}>{label}</TableCell>)}
         </TableRow></TableHead>
         <TableBody>{rows.map((row) => <TableRow key={row.id} hover sx={{ opacity: row.status === 'skipped' ? 0.55 : 1, '&:last-child td': { border: 0 } }}>
-          <TableCell><Chip label={statusLabel(row)} size="small" color={row.status === 'confirmed' || row.saveStatus === 'saved' ? 'success' : row.status === 'error' || row.saveStatus === 'error' ? 'error' : 'warning'} variant="outlined" /></TableCell>
+          <TableCell><Chip label={reviewingSubmissions && row.status !== 'error' ? '送信済み・要確認' : statusLabel(row)} size="small" color={statusColor(row, reviewingSubmissions)} variant="outlined" /></TableCell>
           <TableCell>
             <Typography variant="body2">{row.date || '日付未入力'} {row.startAt || '--:--'} 〜 {row.endAt || '--:--'}</Typography>
             {row.sourceKind === 'ai_chat' && <Typography variant="caption" color="warning.main">AI取込・原本要確認</Typography>}
@@ -198,6 +213,12 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, onRo
                 </Select>{meta.helper && <Alert severity="warning" sx={{ mt: 1 }}>{meta.helper}</Alert>}</FormControl>
                 <TextField fullWidth type="number" label="移動時間（時間）" value={reviewRow.travelTime ?? ''} onChange={(event) => onRowChange(reviewRow.id, { travelTime: event.target.value })} color={meta.travel ? 'warning' : undefined} helperText={meta.travel} slotProps={{ htmlInput: { min: 0, step: 0.25 } }} />
               </Stack>
+              {reviewingSubmissions && <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <FormControl fullWidth><Typography variant="subtitle2" gutterBottom>交通手段</Typography><Select value={reviewRow.travelMethod ?? ''} displayEmpty onChange={(event) => onRowChange(reviewRow.id, { travelMethod: event.target.value as ReviewRow['travelMethod'], ...(event.target.value === 'none' ? { travelCostYen: '0' } : {}) })}>
+                  <MenuItem value="">選択してください</MenuItem><MenuItem value="car">車</MenuItem><MenuItem value="public_transport">公共交通機関</MenuItem><MenuItem value="other">その他</MenuItem><MenuItem value="none">交通費なし</MenuItem>
+                </Select></FormControl>
+                <TextField fullWidth type="number" label="交通費（円）" value={reviewRow.travelCostYen ?? ''} onChange={(event) => onRowChange(reviewRow.id, { travelCostYen: event.target.value })} slotProps={{ htmlInput: { min: 0, max: 100000, step: 1 } }} />
+              </Stack>}
             </Stack>
           </Box>
           {unmatched.map((warning, index) => <Alert key={`${warning}-${index}`} severity="warning">{warning}</Alert>)}
@@ -205,9 +226,17 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, onRo
         </Stack>}
       </DialogContent>
       <DialogActions>
-        {!canConfirm && <Typography variant="caption" color="error">利用者・スタッフ・日時・移動時間を確認してください</Typography>}
+        {!canConfirm && <Typography variant="caption" color="error">利用者・スタッフ・日時・移動時間{reviewingSubmissions ? '・交通費' : ''}を確認してください</Typography>}
         <Button onClick={() => setReviewId(null)}>閉じる</Button>
-        <Button variant="contained" disabled={!canConfirm} onClick={() => { if (reviewRow) onRowChange(reviewRow.id, { status: 'confirmed' }); setReviewId(null); }}>原本と照合して確認済みにする</Button>
+        <Button variant="contained" disabled={!canConfirm || saving} onClick={() => {
+          if (!reviewRow) return;
+          if (reviewingSubmissions && onApproveRow) {
+            void onApproveRow(reviewRow.id).then((approved) => { if (approved) setReviewId(null); });
+          } else {
+            onRowChange(reviewRow.id, { status: 'confirmed' });
+            setReviewId(null);
+          }
+        }}>{reviewingSubmissions ? '内容を確認して承認' : '原本と照合して確認済みにする'}</Button>
       </DialogActions>
     </Dialog>
   </Box>;

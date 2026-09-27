@@ -454,7 +454,6 @@ const NavDrawer = React.memo(function NavDrawer({
         <Typography sx={categoryStyle}>記録</Typography>
         <List disablePadding>
           {navButton('記録を作成', <EditNoteIcon fontSize="small" />, '/app/record')}
-          {navButton('AI取込候補', <AutoFixHighIcon fontSize="small" />, '/app/ai-candidates')}
           {aiImportEnabled && navButton('AI一括取込', <AutoFixHighIcon fontSize="small" />, '/app/ai-import')}
           {navButton('内勤を記録', <WorkHistoryIcon fontSize="small" />, '/app/internal-work')}
           {navButton('自分の履歴', <HistoryIcon fontSize="small" />, '/app/history')}
@@ -480,6 +479,7 @@ const NavDrawer = React.memo(function NavDrawer({
                   <List disablePadding>
                     {navButton('全件表示', <TagIcon fontSize="small" />, '/app/reports')}
                     {navButton('未承認・差戻し', <WarningAmberIcon fontSize="small" color="warning" />, '/app/reports?status=unapproved', { key: 'status', val: 'unapproved' })}
+                    {navButton('AI送信・要確認', <AutoFixHighIcon fontSize="small" />, '/app/ai-candidates')}
                     {navButton('今月の記録', <CalendarMonthIcon fontSize="small" />, '/app/reports?period=current_month', { key: 'period', val: 'current_month' })}
                   </List>
                 </Collapse>

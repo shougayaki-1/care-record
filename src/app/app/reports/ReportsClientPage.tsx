@@ -92,6 +92,7 @@ export default function ReportsClientPage() {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
   const [reports, setReports] = useState<Report[]>([]);
+  const [aiSentCount, setAiSentCount] = useState(0);
   const [page, setPage] = useState(0);
   const [clients, setClients] = useState<ClientData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -178,6 +179,18 @@ export default function ReportsClientPage() {
       fetchReports();
     }
   }, [wsLoading, currentOrg, fetchClients, fetchReports]);
+
+  useEffect(() => {
+    if (!currentOrg) return;
+    let active = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- A workspace switch invalidates the previous workspace's count.
+    setAiSentCount(0);
+    void supabase.from('ai_import_candidates').select('id', { count: 'exact', head: true })
+      .eq('organization_id', currentOrg.id).then(({ count, error }) => {
+        if (active && !error) setAiSentCount(count ?? 0);
+      });
+    return () => { active = false; };
+  }, [currentOrg]);
 
   const pageCount = Math.max(1, Math.ceil(reports.length / REPORT_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
@@ -544,6 +557,11 @@ export default function ReportsClientPage() {
         <InnerPageHeader icon={<TagIcon />} title={headerTitle} actions={isExportView && checkManagementPermission(currentOrg.effectivePermissions, 'integrations') ? <Button size="small" startIcon={<SettingsIcon />} onClick={() => router.push('/app/settings?tab=google')}>出力先の設定</Button> : undefined} />
 
        <PageBody maxWidth={false}>
+           {!isExportView && aiSentCount > 0 && <Alert severity="warning" sx={{ mb: 2 }} action={
+             <Button color="inherit" size="small" onClick={() => router.push('/app/ai-candidates')}>確認する</Button>
+           }>
+             AIから送信された記録が {aiSentCount} 件、管理者の確認を待っています。
+           </Alert>}
            {reports.length >= 500 && (
              <Alert severity="info" sx={{ mb: 2 }}>
                最初の500件を表示しています。日付や利用者で絞り込んでください。
