@@ -3,18 +3,34 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+function currentMonthDates() {
+  const now = new Date();
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return {
+    start: `${month}-01`,
+    end: `${month}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`,
+  };
+}
+
+function datesFromUrl(params: Pick<URLSearchParams, 'get'>, isExportView: boolean) {
+  const month = currentMonthDates();
+  if (params.get('period') === 'current_month') return month;
+  const isPending = !isExportView && (params.get('status') === 'unapproved' || params.get('recordStatus') === 'pending');
+  return {
+    start: params.get('from') ?? (isPending ? '' : month.start),
+    end: params.get('to') ?? '',
+  };
+}
+
 export function useReportFilters() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isExportView = searchParams.get('view') === 'export';
   const [filterClientId, setFilterClientId] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [startDate, setStartDate] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  });
-  const [endDate, setEndDate] = useState('');
-  const [onlyPending, setOnlyPending] = useState(false);
+  const [filterStatus, setFilterStatus] = useState(() => searchParams.get('recordStatus') || (isExportView ? 'approved' : 'all'));
+  const [startDate, setStartDate] = useState(() => datesFromUrl(searchParams, isExportView).start);
+  const [endDate, setEndDate] = useState(() => datesFromUrl(searchParams, isExportView).end);
+  const [onlyPending, setOnlyPending] = useState(() => searchParams.get('status') === 'unapproved' && !isExportView);
   const [filterShiftId, setFilterShiftId] = useState<string | null>(null);
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const [orderBy, setOrderBy] = useState('start_at');
@@ -22,28 +38,16 @@ export function useReportFilters() {
   /* eslint-disable react-hooks/set-state-in-effect -- URL navigation is the external state source. */
   useEffect(() => {
     const statusParam = searchParams.get('status');
-    const periodParam = searchParams.get('period');
     const shiftParam = searchParams.get('shiftId');
     const clientIdParam = searchParams.get('clientId');
-    const fromParam = searchParams.get('from');
-    const toParam = searchParams.get('to');
     const recordStatusParam = searchParams.get('recordStatus');
     const orderParam = searchParams.get('order');
     const orderByParam = searchParams.get('orderBy');
 
     setOnlyPending(statusParam === 'unapproved' && !isExportView);
-    if (periodParam === 'current_month') {
-      const now = new Date();
-      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      // Keep calendar dates in local time; toISOString() shifts them back a day in JST.
-      const formatDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      setStartDate(formatDate(firstDay));
-      setEndDate(formatDate(lastDay));
-    } else {
-      if (fromParam) setStartDate(fromParam);
-      if (toParam) setEndDate(toParam);
-    }
+    const dates = datesFromUrl(searchParams, isExportView);
+    setStartDate(dates.start);
+    setEndDate(dates.end);
     setFilterShiftId(shiftParam || null);
     if (clientIdParam) setFilterClientId(clientIdParam);
     setFilterStatus(recordStatusParam || (isExportView ? 'approved' : 'all'));
@@ -51,6 +55,15 @@ export function useReportFilters() {
     if (orderByParam) setOrderBy(orderByParam);
   }, [searchParams, isExportView]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  const updateFilterStatus = (value: string) => {
+    if (value === 'pending' && startDate === currentMonthDates().start && !endDate) setStartDate('');
+    setFilterStatus(value);
+  };
+  const updateOnlyPending = (value: boolean) => {
+    if (value && startDate === currentMonthDates().start && !endDate) setStartDate('');
+    setOnlyPending(value);
+  };
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -64,9 +77,7 @@ export function useReportFilters() {
     if (orderBy !== 'start_at') params.set('orderBy', orderBy);
     if (isExportView) params.set('view', 'export');
     if (searchParams.get('period') === 'current_month') {
-      const now = new Date();
-      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-      const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
+      const { start: monthStart, end: monthEnd } = currentMonthDates();
       // Preserve the named shortcut only while its dates are unchanged. Once edited,
       // from/to become the source of truth and the URL must not reset them on reload.
       if (startDate === monthStart && endDate === monthEnd) params.set('period', 'current_month');
@@ -96,13 +107,13 @@ export function useReportFilters() {
     filterClientId,
     setFilterClientId,
     filterStatus,
-    setFilterStatus,
+    setFilterStatus: updateFilterStatus,
     startDate,
     setStartDate,
     endDate,
     setEndDate,
     onlyPending,
-    setOnlyPending,
+    setOnlyPending: updateOnlyPending,
     filterShiftId,
     order,
     setOrder,

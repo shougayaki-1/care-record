@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import {
-  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, MenuItem, Select, Stack, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, TextField, Typography,
+  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
+  FormControl, MenuItem, Select, Stack, TextField, Typography,
 } from '@/components/ui/mui';
 import SaveIcon from '@mui/icons-material/Save';
+import { RecordListTable, type RecordListRow } from '@/components/record/RecordListTable';
 import { RecordDynamicSections } from '@/components/record/RecordDynamicSections';
 import type { FormAnswers } from '@/hooks/useRecordForm';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
@@ -92,7 +92,7 @@ const statusLabel = (row: ReviewRow) => row.saveStatus === 'saved' ? '保存済�
   : row.status === 'error' ? '読取失敗'
   : row.status === 'skipped' ? 'スキップ' : '要確認';
 
-const statusColor = (row: ReviewRow, reviewingSubmissions: boolean) => row.status === 'error' || row.saveStatus === 'error' ? 'error'
+const statusColor = (row: ReviewRow, reviewingSubmissions: boolean): 'error' | 'success' | 'warning' => row.status === 'error' || row.saveStatus === 'error' ? 'error'
   : !reviewingSubmissions && (row.status === 'confirmed' || row.saveStatus === 'saved') ? 'success' : 'warning';
 
 export function AiImportReviewTable({ rows, clients, helpers, formTemplate, templatesByClient, onRowChange, onSaveSelected, onApproveRow, workflow = 'draft_import', saving }: AiImportReviewTableProps) {
@@ -139,6 +139,24 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
     {row.status === 'skipped' && <Button size="small" onClick={() => onRowChange(row.id, { status: 'pending' })}>戻す</Button>}
   </Stack>;
 
+  const listRows: RecordListRow[] = rows.map((row) => ({
+    id: row.id,
+    status: reviewingSubmissions && row.status !== 'error' ? '送信済み・要確認' : statusLabel(row),
+    statusColor: statusColor(row, reviewingSubmissions),
+    muted: row.status === 'skipped',
+    start: `${row.date || '日付未入力'} ${row.startAt || '--:--'}`,
+    end: row.endAt || '--:--',
+    client: clients.find((item) => item.id === row.clientId)?.name ?? '利用者未選択',
+    helper: helpers.find((item) => item.id === row.helperId)?.name ?? 'スタッフ未選択',
+    detail: <>
+      {row.sourceKind === 'ai_chat' && <Typography variant="caption" color="warning.main" display="block">AI取込・原本要確認</Typography>}
+      {row.result?.confidence && <Typography variant="caption" color="text.secondary" display="block">AI自己評価: {{ high: '高', medium: '中', low: '低' }[row.result.confidence]}</Typography>}
+      {row.fileCount > 1 && <Typography variant="caption" color="text.secondary" display="block">{row.fileCount}枚</Typography>}
+      {row.errorMessage && <Typography variant="caption" color="error" display="block">{row.errorMessage}</Typography>}
+    </>,
+    actions: renderActions(row),
+  }));
+
   return <Box>
     <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} spacing={1} sx={{ mb: 2 }}>
       <Typography variant="body2" color="text.secondary">{reviewingSubmissions ? `${rows.length} 件のAI送信が確認待ちです` : `${rows.length} 件（確認済み: ${confirmedIds.length} 件）`}</Typography>
@@ -147,42 +165,7 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
       </Button>}
     </Stack>
 
-    <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' } }}>
-      {rows.map((row) => <Box key={row.id} sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'background.paper' }}>
-        <Stack spacing={1.5}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Chip label={reviewingSubmissions && row.status !== 'error' ? '送信済み・要確認' : statusLabel(row)} size="small" color={statusColor(row, reviewingSubmissions)} variant="outlined" />
-            <Typography variant="caption" color="text.secondary">{row.result?.confidence ? `AI自己評価: ${row.result.confidence}` : ''}</Typography>
-          </Stack>
-          <Typography variant="body2">{row.date || '日付未入力'} {row.startAt || '--:--'} 〜 {row.endAt || '--:--'}</Typography>
-          <Typography variant="body2">{clients.find((item) => item.id === row.clientId)?.name ?? '利用者未選択'} ／ {helpers.find((item) => item.id === row.helperId)?.name ?? 'スタッフ未選択'}</Typography>
-          {row.sourceKind === 'ai_chat' && <Typography variant="caption" color="warning.main">AI取込・原本要確認</Typography>}
-          {row.errorMessage && <Alert severity="error">{row.errorMessage}</Alert>}
-          {renderActions(row)}
-        </Stack>
-      </Box>)}
-    </Stack>
-
-    <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto', border: 1, borderColor: 'divider' }}>
-      <Table size="small" sx={{ minWidth: 680 }}>
-        <TableHead sx={{ bgcolor: 'background.muted' }}><TableRow>
-          {['状態', '開始 〜 終了日時', '利用者', '担当', 'AI自己評価', '操作'].map((label) =>
-            <TableCell key={label} sx={{ fontWeight: 'bold', color: 'text.secondary' }}>{label}</TableCell>)}
-        </TableRow></TableHead>
-        <TableBody>{rows.map((row) => <TableRow key={row.id} hover sx={{ opacity: row.status === 'skipped' ? 0.55 : 1, '&:last-child td': { border: 0 } }}>
-          <TableCell><Chip label={reviewingSubmissions && row.status !== 'error' ? '送信済み・要確認' : statusLabel(row)} size="small" color={statusColor(row, reviewingSubmissions)} variant="outlined" /></TableCell>
-          <TableCell>
-            <Typography variant="body2">{row.date || '日付未入力'} {row.startAt || '--:--'} 〜 {row.endAt || '--:--'}</Typography>
-            {row.sourceKind === 'ai_chat' && <Typography variant="caption" color="warning.main">AI取込・原本要確認</Typography>}
-            {row.fileCount > 1 && <Typography variant="caption" color="text.secondary" display="block">{row.fileCount}枚</Typography>}
-          </TableCell>
-          <TableCell>{clients.find((item) => item.id === row.clientId)?.name ?? '未選択'}</TableCell>
-          <TableCell>{helpers.find((item) => item.id === row.helperId)?.name ?? '未選択'}</TableCell>
-          <TableCell>{row.result ? <Chip label={{ high: '高', medium: '中', low: '低' }[row.result.confidence]} size="small" variant="outlined" /> : '—'}</TableCell>
-          <TableCell>{renderActions(row)}</TableCell>
-        </TableRow>)}</TableBody>
-      </Table>
-    </TableContainer>
+    <RecordListTable rows={listRows} emptyMessage="確認待ちのAI送信がありません" />
 
     <Dialog open={Boolean(reviewRow)} onClose={() => setReviewId(null)} maxWidth="lg" fullWidth>
       <DialogTitle>提供記録の確認・修正</DialogTitle>
