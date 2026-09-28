@@ -4,23 +4,18 @@ import { useEffect, useState, useCallback } from 'react';
 import type { ReactElement } from 'react';
 import type { DocumentProps } from '@react-pdf/renderer';
 import {
-  Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Button,
-  CircularProgress, Stack, TextField, MenuItem, Checkbox, TableSortLabel, Switch, FormControlLabel, Divider,
-  LinearProgress, Tooltip, Alert
+  Box, Typography, Button, CircularProgress, Stack, TextField, MenuItem,
+  Switch, FormControlLabel, LinearProgress, Alert
 } from '@/components/ui/mui';
 import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import SearchIcon from '@mui/icons-material/Search';
-import FilterListIcon from '@mui/icons-material/FilterList';
 import TagIcon from '@mui/icons-material/Tag';
 import ArticleIcon from '@mui/icons-material/Article';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RestoreIcon from '@mui/icons-material/Restore';
 import SettingsIcon from '@mui/icons-material/Settings';
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'; // ★追加: 警告アイコン
-import { useTheme } from '@mui/material/styles';
-import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { supabase } from '@/lib/supabase';
 import type { PdfReportData } from '@/components/pdf/ServiceRecordDocument';
@@ -43,6 +38,8 @@ import {
   getReportHelperNames as getExportHelperNames,
 } from '@/utils/reportsExport';
 import { useReportFilters } from '@/hooks/useReportFilters';
+import { RecordListFilterBar } from '@/components/record/RecordListFilterBar';
+import { RecordListTable, type RecordListRow } from '@/components/record/RecordListTable';
 
 type ReportValuesData = Record<string, FormValue>;
 
@@ -88,8 +85,6 @@ export default function ReportsClientPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const confirm = useConfirm();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
   const [reports, setReports] = useState<Report[]>([]);
   const [aiSentCount, setAiSentCount] = useState(0);
@@ -196,8 +191,8 @@ export default function ReportsClientPage() {
   const currentPage = Math.min(page, pageCount - 1);
   const visibleReports = reports.slice(currentPage * REPORT_PAGE_SIZE, (currentPage + 1) * REPORT_PAGE_SIZE);
 
-  const handleSelectAllClick = (event: React.ChangeEvent<HTMLInputElement>) => { if (event.target.checked) { setSelected(reports.map(n => n.id)); return; } setSelected([]); };
-  const handleClick = (event: React.MouseEvent<unknown>, id: string) => {
+  const handleSelectAllClick = (checked: boolean) => { if (checked) { setSelected(reports.map(n => n.id)); return; } setSelected([]); };
+  const handleClick = (id: string) => {
       const selectedIndex = selected.indexOf(id);
       let newSelected: readonly string[] = [];
       if (selectedIndex === -1) newSelected = newSelected.concat(selected, id);
@@ -542,6 +537,20 @@ export default function ReportsClientPage() {
   };
 
   const handleOpenDetail = (report: Report) => { router.push(buildRecordPath(report.clients.id, { reportId: report.id })); };
+  const listRows: RecordListRow[] = visibleReports.map((report) => {
+    const abnormal = isAbnormalReport(report);
+    return {
+      id: report.id,
+      status: getReportStatusLabel(report.status),
+      statusColor: getReportStatusChipColor(report.status),
+      start: formatReportDateTime(new Date(report.start_at)),
+      end: formatReportDateTime(new Date(report.end_at)),
+      client: report.clients.name,
+      helper: getHelperNames(report),
+      abnormal,
+      actions: <Button size="small" variant={abnormal ? 'contained' : 'outlined'} color={abnormal ? 'error' : 'primary'} onClick={() => handleOpenDetail(report)} sx={{ fontSize: '0.75rem', py: 0.5 }}>{abnormal ? '確認・修正' : '詳細'}</Button>,
+    };
+  });
   let headerTitle = "全件表示";
   if (onlyPending) headerTitle = "未承認・差戻し";
   if (isCurrentMonth) headerTitle = "今月の記録";
@@ -568,13 +577,7 @@ export default function ReportsClientPage() {
              </Alert>
            )}
 
-           <Box sx={{ p: 2, mb: 3, bgcolor: 'background.muted' }}>
-              <Stack spacing={2}>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} flexWrap="wrap" useFlexGap>
-                    <Box display="flex" alignItems="center" gap={1} color="text.secondary" sx={{ minWidth: 0 }}>
-                        <FilterListIcon fontSize="small" />
-                        <Typography variant="subtitle2" fontWeight="bold">絞り込み:</Typography>
-                    </Box>
+           <RecordListFilterBar source="reports" canViewReports>
                     <TextField select label="利用者" size="small" value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} sx={{ minWidth: { xs: 0, md: 150 }, bgcolor: 'background.paper', width: { xs: '100%', md: 'auto' } }}>
                         <MenuItem value="all">全員</MenuItem>
                         {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
@@ -589,9 +592,7 @@ export default function ReportsClientPage() {
                     </Box>
                     {!isExportView && <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />}
                     <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none', width: { xs: '100%', md: 'auto' } }}>検索</Button>
-                </Stack>
-              </Stack>
-           </Box>
+           </RecordListFilterBar>
            
            <Box sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? 'background.tint' : 'background.paper', display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, borderTop: '1px solid', borderBottom: '1px solid', borderColor: 'divider' }}>
                <Box>
@@ -631,110 +632,13 @@ export default function ReportsClientPage() {
 
            {loading ? <CircularProgress /> : (
              <>
-             {isMobile && (
-               <Stack divider={<Divider />} sx={{ borderTop: 1, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
-                 {visibleReports.map((row) => {
-                   const start = new Date(row.start_at);
-                   const end = new Date(row.end_at);
-                   const isAbnormal = isAbnormalReport(row);
-                   const checked = selected.includes(row.id);
-
-                   return (
-                     <Box key={row.id} sx={{ p: 1.5, bgcolor: isAbnormal ? 'background.danger' : 'background.paper' }}>
-                       <Stack spacing={1.25}>
-                         <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
-                           <Box display="flex" alignItems="center" gap={1} minWidth={0}>
-                             <Checkbox checked={checked} onClick={(e) => handleClick(e, row.id)} sx={{ p: 0.5 }} />
-                             <Box minWidth={0}>
-                               <Typography variant="subtitle2" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{row.clients.name}</Typography>
-                               <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{getHelperNames(row)}</Typography>
-                             </Box>
-                           </Box>
-                           <Chip label={getReportStatusLabel(row.status)} color={getReportStatusChipColor(row.status)} size="small" variant="outlined" />
-                         </Box>
-                         <Box display="flex" alignItems="flex-start" gap={1}>
-                           <Box flexGrow={1} minWidth={0}>
-                             <Typography variant="body2" color={isAbnormal ? 'error' : 'inherit'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
-                               {formatReportDateTime(start)} 〜
-                             </Typography>
-                             <Typography variant="body2" color={isAbnormal ? 'error' : 'text.secondary'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
-                               {formatReportDateTime(end)}
-                             </Typography>
-                           </Box>
-                           {isAbnormal && <ErrorOutlineIcon color="error" fontSize="small" />}
-                         </Box>
-                         <Box display="flex" justifyContent="flex-end">
-                           <Button size="small" variant={isAbnormal ? "contained" : "outlined"} color={isAbnormal ? "error" : "primary"} onClick={() => handleOpenDetail(row)} sx={{ fontSize: '0.75rem', py: 0.5 }}>
-                             {isAbnormal ? "確認・修正" : "詳細"}
-                           </Button>
-                         </Box>
-                       </Stack>
-                     </Box>
-                   );
-                 })}
-                 {reports.length === 0 && <Box sx={{ py: 5, px: 2, textAlign: 'center', color: 'text.disabled' }}>該当する記録がありません</Box>}
-               </Stack>
-             )}
-             <TableContainer sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto', boxShadow: 'none', border: '1px solid', borderColor: 'divider' }}>
-               <Table>
-                 <TableHead sx={{ bgcolor: 'background.muted' }}>
-                   <TableRow>
-                     <TableCell padding="checkbox"><Checkbox onChange={handleSelectAllClick} /></TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>ステータス</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>
-                         <TableSortLabel active={orderBy === 'start_at'} direction={order} onClick={() => { setOrder(order === 'asc' ? 'desc' : 'asc'); setOrderBy('start_at'); }}>
-                             開始 〜 終了日時
-                         </TableSortLabel>
-                     </TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>利用者</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>担当</TableCell>
-                     <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>操作</TableCell>
-                   </TableRow>
-                 </TableHead>
-                 <TableBody>
-                   {visibleReports.map((row) => {
-                     const start = new Date(row.start_at);
-                     const end = new Date(row.end_at);
-                     const isAbnormal = isAbnormalReport(row);
-
-                     return (
-                         <TableRow key={row.id} selected={selected.includes(row.id)} hover sx={{ '&:last-child td, &:last-child th': { border: 0 }, bgcolor: isAbnormal ? 'background.danger' : 'inherit' }}>
-                           <TableCell padding="checkbox"><Checkbox checked={selected.includes(row.id)} onClick={(e) => handleClick(e, row.id)} /></TableCell>
-                           <TableCell><Chip label={getReportStatusLabel(row.status)} color={getReportStatusChipColor(row.status)} size="small" variant="outlined" /></TableCell>
-                           
-                           {/* ★修正: 開始から終了までの日時を表示し、異常があればアイコンを出す */}
-                           <TableCell>
-                               <Box display="flex" alignItems="center" gap={1}>
-                                   <Box>
-                                       <Typography variant="body2" color={isAbnormal ? 'error' : 'inherit'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
-                                           {formatReportDateTime(start)} 〜
-                                       </Typography>
-                                       <Typography variant="body2" color={isAbnormal ? 'error' : 'text.secondary'} fontWeight={isAbnormal ? 'bold' : 'normal'}>
-                                           {formatReportDateTime(end)}
-                                       </Typography>
-                                   </Box>
-                                   {isAbnormal && (
-                                       <Tooltip title="期間が24時間を超えています（入力ミスの可能性があります）">
-                                           <ErrorOutlineIcon color="error" fontSize="small" />
-                                       </Tooltip>
-                                   )}
-                               </Box>
-                           </TableCell>
-
-                           <TableCell>{row.clients.name}</TableCell>
-                           <TableCell>{getHelperNames(row)}</TableCell>
-                           <TableCell>
-                               <Button size="small" variant={isAbnormal ? "contained" : "outlined"} color={isAbnormal ? "error" : "primary"} onClick={() => handleOpenDetail(row)} sx={{ fontSize: '0.75rem', py: 0.5 }}>
-                                   {isAbnormal ? "確認・修正" : "詳細"}
-                               </Button>
-                           </TableCell>
-                         </TableRow>
-                     );
-                   })}
-                   {reports.length === 0 && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: 'text.disabled' }}>該当する記録がありません</TableCell></TableRow>}
-                 </TableBody>
-               </Table>
-             </TableContainer>
+             <RecordListTable
+               rows={listRows}
+               selectedIds={selected}
+               onToggle={handleClick}
+               onSelectAll={handleSelectAllClick}
+               sort={{ order, active: orderBy === 'start_at', onChange: () => { setOrder(order === 'asc' ? 'desc' : 'asc'); setOrderBy('start_at'); } }}
+             />
              {pageCount > 1 && (
                <Stack direction="row" spacing={2} alignItems="center" justifyContent="center" sx={{ mt: 2 }}>
                  <Button variant="outlined" size="small" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>前へ</Button>

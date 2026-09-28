@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Box, CircularProgress, Stack, Typography } from '@/components/ui/mui';
+import { Alert, CircularProgress, Stack } from '@/components/ui/mui';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -12,6 +12,9 @@ import { AiImportReviewTable, type ReviewRow } from '@/components/ui/AiImportRev
 import { RawExtractionResponseSchema } from '@/lib/ai/mcpCandidateSchema';
 import { normalizeExtraction } from '@/lib/ai/normalizeExtraction';
 import { checkManagementPermission } from '@/utils/permissions';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import { InnerPageHeader, PageBody, PageLayout } from '@/components/ui';
+import { RecordListFilterBar } from '@/components/record/RecordListFilterBar';
 
 type Candidate = {
   id: string;
@@ -167,16 +170,16 @@ export default function AiCandidatesPage() {
   }, [canReview, currentOrg, rows, showToast]);
 
   return (
-    <Box sx={{ p: { xs: 2, md: 3 } }}>
-      <Stack spacing={2}>
-        <Typography variant="h5" fontWeight="bold">AI送信の確認</Typography>
+    <PageLayout>
+      <InnerPageHeader icon={<AutoFixHighIcon />} title="AI送信・要確認" />
+      <PageBody maxWidth={false}>
+        <RecordListFilterBar source="ai" canViewReports={canReview} />
+        <Stack spacing={2}>
         <Alert severity="warning">
           職員がAIから送信した記録です。原本とAIの読み取り結果を照合し、必要な修正と交通費の確認を行ってから承認してください。
         </Alert>
-        {!currentOrg ? <Alert severity="info">事業所を選択してください。</Alert> : loading ? <CircularProgress /> : loadError ? <Alert severity="error">{loadError}</Alert> : rows.length === 0 ? (
-          <Alert severity="info">この事業所には確認待ちのAI送信がありません。</Alert>
-        ) : !canReview ? (
-          <Alert severity="info">AIから送信済みの記録が {rows.length} 件あります。管理者の確認をお待ちください。</Alert>
+        {!currentOrg ? <Alert severity="info">事業所を選択してください。</Alert> : loading ? <CircularProgress /> : loadError ? <Alert severity="error">{loadError}</Alert> : !canReview ? (
+          <Alert severity="info">{rows.length > 0 ? `AIから送信済みの記録が ${rows.length} 件あります。管理者の確認をお待ちください。` : 'この事業所には確認待ちのAI送信がありません。'}</Alert>
         ) : (
           <AiImportReviewTable
             rows={rows}
@@ -191,7 +194,8 @@ export default function AiCandidatesPage() {
             saving={saving}
           />
         )}
-      </Stack>
-    </Box>
+        </Stack>
+      </PageBody>
+    </PageLayout>
   );
 }
