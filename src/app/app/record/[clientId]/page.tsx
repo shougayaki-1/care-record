@@ -12,7 +12,7 @@ import AssignmentReturnIcon from '@mui/icons-material/AssignmentReturn';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 
-import { AiImportButton, AppButton, AppDialog, InnerPageHeader, PageLayout } from '@/components/ui';
+import { AiImportButton, AppButton, AppDialog, InnerPageHeader, PageLayout, ScrollableActions } from '@/components/ui';
 import { MonthSplitTabs } from '@/components/record/MonthSplitTabs';
 import { RecordDynamicSections } from '@/components/record/RecordDynamicSections';
 import { RecordMetaForm } from '@/components/record/RecordMetaForm';
@@ -58,7 +58,7 @@ export default function RecordPage() {
             icon={<IconButton edge="start" onClick={handleClose} sx={{ color: 'action.active' }}><CloseIcon /></IconButton>}
             title={currentReportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済の記録' : '記録を修正')) : `${clientName} 様`}
             actions={(
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="nowrap" justifyContent="flex-end" sx={{ overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', maxWidth: '100%' }}>
+            <ScrollableActions aria-label="記録操作" role="group" tabIndex={0}>
                 {currentReportId && currentStatus !== 'approved' && canDeleteRecord && (
                     <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
                 )}
@@ -81,7 +81,7 @@ export default function RecordPage() {
                         <Button variant="contained" size="small" startIcon={<SendIcon />} onClick={handleSubmit} disabled={submitting || requiresSegmentSelection} sx={{ fontWeight: 'bold' }}>送信</Button>
                     </>
                 )}
-            </Stack>
+            </ScrollableActions>
             )}
        />
 
