@@ -90,7 +90,7 @@ const theme = createTheme({
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: { minHeight: 36, borderRadius: designTokens.radius.control, paddingInline: 16 },
+        root: { minHeight: 36, borderRadius: designTokens.radius.control, paddingInline: 16, whiteSpace: 'nowrap' },
       },
     },
     MuiTextField: { defaultProps: { size: 'small', variant: 'outlined' } },

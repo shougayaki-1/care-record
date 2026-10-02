@@ -4,7 +4,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import PersonIcon from '@mui/icons-material/Person';
 
-import { DateTimeField, MultiSelectField } from '@/components/ui';
+import { DateTimeField, MultiSelectField, UnitAdornment } from '@/components/ui';
 import { Box, MenuItem, Stack, TextField, Typography } from '@/components/ui/mui';
 import type { ActualStaffInput, HelperProfile, ServiceTypeOption, StaffRoleOption, TravelExpense } from '@/hooks/useRecordForm';
 
@@ -89,8 +89,8 @@ export function RecordMetaForm(props: RecordMetaFormProps) {
         <Box sx={{ bgcolor: aiFilledFields.has('serviceTime') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
           <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}><AccessTimeIcon fontSize="small" /> 提供時間 <Typography component="span" color="error">*</Typography></Typography>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-            <TextField label="サービス提供" type="number" fullWidth value={serviceTime} onChange={(event) => onServiceTimeChange(event.target.value)} onWheel={(event) => (event.target as HTMLElement).blur()} error={!!errors.serviceTime} disabled={disabled} slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
-            <TextField label="移動" type="number" fullWidth value={travelTime} onChange={(event) => onTravelTimeChange(event.target.value)} onWheel={(event) => (event.target as HTMLElement).blur()} disabled={disabled} slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
+            <TextField label="サービス提供" type="number" fullWidth value={serviceTime} onChange={(event) => onServiceTimeChange(event.target.value)} onWheel={(event) => (event.target as HTMLElement).blur()} error={!!errors.serviceTime} disabled={disabled} slotProps={{ input: { endAdornment: <UnitAdornment>時間</UnitAdornment> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
+            <TextField label="移動" type="number" fullWidth value={travelTime} onChange={(event) => onTravelTimeChange(event.target.value)} onWheel={(event) => (event.target as HTMLElement).blur()} disabled={disabled} slotProps={{ input: { endAdornment: <UnitAdornment>時間</UnitAdornment> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
           </Stack>
         </Box>
 
@@ -106,7 +106,7 @@ export function RecordMetaForm(props: RecordMetaFormProps) {
                 <TextField select size="small" label="移動手段" value={expense.method} onChange={(event) => { const method = event.target.value as TravelExpense['method']; onTravelExpenseChange(actualStaff.staff_id, { method, amountYen: method === 'none' ? '0' : method === 'car' ? (staff?.defaultTravelCostYen == null ? '' : String(staff.defaultTravelCostYen)) : '' }); }} disabled={disabled} sx={{ minWidth: 150 }}>
                   <MenuItem value="car">車</MenuItem><MenuItem value="public_transport">公共交通機関</MenuItem><MenuItem value="other">その他</MenuItem><MenuItem value="none">交通費なし</MenuItem>
                 </TextField>
-                <TextField size="small" type="number" label="精算額" value={expense.amountYen} onChange={(event) => onTravelExpenseChange(actualStaff.staff_id, { ...expense, amountYen: event.target.value })} disabled={disabled || expense.method === 'none'} error={Boolean(errors[`travel_${actualStaff.staff_id}`])} helperText={errors[`travel_${actualStaff.staff_id}`]} slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">円</Typography> }, htmlInput: { inputMode: 'numeric', step: 1, min: 0, max: 100000 } }} />
+                <TextField size="small" type="number" label="精算額" value={expense.amountYen} onChange={(event) => onTravelExpenseChange(actualStaff.staff_id, { ...expense, amountYen: event.target.value })} disabled={disabled || expense.method === 'none'} error={Boolean(errors[`travel_${actualStaff.staff_id}`])} helperText={errors[`travel_${actualStaff.staff_id}`]} slotProps={{ input: { endAdornment: <UnitAdornment>円</UnitAdornment> }, htmlInput: { inputMode: 'numeric', step: 1, min: 0, max: 100000 } }} />
               </Stack>;
             })}
           </Stack>

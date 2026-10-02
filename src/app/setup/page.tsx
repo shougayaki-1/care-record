@@ -14,6 +14,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import { useToast } from '@/components/ui/ToastProvider';
 import { createOrganization, updateOwnProfile } from '@/app/actions/user';
 import { AppButton } from '@/components/ui';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 
 type Step = 'profile' | 'choice' | 'create' | 'join';
 
@@ -160,6 +161,7 @@ export default function SetupPage() {
             <Box p={5} textAlign="center">
                 <CircularProgress />
                 <Typography mt={2}>セットアップ情報を取得中...</Typography>
+                <RecoveryLogoutButton label="別のアカウントでログインする" />
             </Box>
         );
     }
@@ -356,6 +358,9 @@ export default function SetupPage() {
                     </Stack>
                 )}
 
+                <Box mt={3} textAlign="center">
+                    <RecoveryLogoutButton label="別のアカウントでログインする" />
+                </Box>
             </Paper>
         </Box>
     );

@@ -4,19 +4,21 @@ CareRecord uses MUI v7 with semantic tokens from `src/theme.ts`. New product UI 
 
 ## Conventions
 
-- Use `AppButton` for actions. `primary` is the main action, `secondary` is supporting, and `danger` is destructive.
+- Use `AppButton` for actions. `primary` is the main action, `secondary` is supporting, and `danger` is destructive. Button labels stay on one line through the shared theme; let the parent wrap whole buttons or scroll instead of wrapping label text.
 - Use `AppTextField`, `NumberField`, `DateTimeField`, and `SelectField` for labelled inputs.
 - Use `MultiSelectField`, `CheckboxGroupField`, `RadioGroupField`, and `SwitchField` for choices. Each input must have a visible label and error text where validation can fail.
 - Use `ConfirmProvider` for two-action confirmations and `AppDialog` for workflows with custom actions.
 - Use `PageContainer`, `PageHeader` or `InnerPageHeader`, `SectionCard`, `DataTable`, `EmptyState`, and `StatusChip` for page structure.
 - Use theme keys such as `background.default`, `background.subtle`, `background.tint`, `background.danger`, and `divider`; do not add product colors as literals.
 - Use `background.aiHighlight` for fields populated by AI extraction.
+- Use `UnitAdornment` in `slotProps.input.endAdornment` for suffixes such as `時間` and `円`; preserve their single-line width.
 - Show transient operation results in a toast, field validation next to the field, and persistent system state in an alert.
 - Use MUI `slotProps` rather than deprecated `InputProps`, `InputLabelProps`, or component-specific `*Props` APIs in new code.
 
 ## Page and action patterns
 
 - Top-level authenticated app pages use `InnerPageHeader` unless the page is an unframed list page that already uses `PageHeader`.
+- Use `ScrollableActions` for action rows that must remain on one row (such as the record header). Its children keep their width, and overflowing actions remain reachable by scrolling; give the row an accessible name and keyboard focus.
 - Repeated settings sections should use `SectionCard` or the same outlined Paper styling from `SectionCard`; avoid one-off shadows and large corner radii in operational UI.
 - Save/create/export actions use the default `AppButton` intent. Cancel/close/filter actions use `variant="text"` or `variant="outlined"` with `intent="secondary"`. Destructive actions use `intent="danger"` and warning flows use `intent="warning"`.
 
