@@ -1,5 +1,7 @@
 'use client';
 
+import { useRecordQuery } from '@/hooks/useRecordQuery';
+import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useEffect, useState, useCallback } from 'react';
 import type { ReactElement } from 'react';
 import type { DocumentProps } from '@react-pdf/renderer';
@@ -80,17 +82,17 @@ async function loadReportValues(reports: Report[]): Promise<ExportReport[]> {
   });
 }
 
+const EMPTY_REPORTS: { reports: Report[]; aiSentCount: number } = { reports: [], aiSentCount: 0 };
+const logReportError = (error: unknown) => console.error(error);
+
 export default function ReportsClientPage() {
   const router = useRouter();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const confirm = useConfirm();
   
-  const [reports, setReports] = useState<Report[]>([]);
-  const [aiSentCount, setAiSentCount] = useState(0);
   const [page, setPage] = useState(0);
   const [clients, setClients] = useState<ClientData[]>([]);
-  const [loading, setLoading] = useState(true);
 
   const {
     filterClientId,
@@ -122,9 +124,9 @@ export default function ReportsClientPage() {
     setClients((data as ClientData[]) || []);
   }, [currentOrg]);
 
-  const fetchReports = useCallback(async () => {
-    if (!currentOrg) return;
-    setLoading(true); setSelected([]);
+  const loadReports = useCallback(async () => {
+    if (!currentOrg) return EMPTY_REPORTS;
+    setSelected([]);
     try {
       let reportIdsFromShift: string[] | null = null;
       if (filterShiftId) {
@@ -151,7 +153,7 @@ export default function ReportsClientPage() {
       if (onlyPending) query = query.in('status', ['pending', 'remanded']);
       else if (filterStatus !== 'all') query = query.eq('status', filterStatus);
 
-      query = query.limit(500);
+      query = query.order('start_at', { ascending: orderBy === 'start_at' && order === 'asc' }).order('id').limit(500);
       const { data, error } = await query;
       if (error) throw error;
       const sortedData = (data as unknown) as Report[] || [];
@@ -160,32 +162,23 @@ export default function ReportsClientPage() {
           const valB = orderBy === 'start_at' ? b.start_at : (orderBy === 'client_name' ? b.clients.name : '');
           if (valA < valB) return order === 'asc' ? -1 : 1;
           if (valA > valB) return order === 'asc' ? 1 : -1;
-          return 0;
+          return a.id.localeCompare(b.id);
       });
-      setReports(sortedData);
       setPage(0);
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+      const { count, error: countError } = await supabase.from('ai_import_candidates').select('id', { count: 'exact', head: true }).eq('organization_id', currentOrg.id);
+      if (countError) throw countError;
+      return { reports: sortedData, aiSentCount: count ?? 0 };
+    } catch (e) { throw e; }
   }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order, filterShiftId]);
+
+  const { data: { reports, aiSentCount }, loading, refresh: fetchReports } = useRecordQuery({ organizationId: wsLoading ? undefined : currentOrg?.id, queryKey: `${filterClientId}/${filterStatus}/${startDate}/${endDate}/${onlyPending}/${orderBy}/${order}/${filterShiftId}`, load: loadReports, empty: EMPTY_REPORTS, onError: logReportError });
 
   useEffect(() => {
     if (!wsLoading && currentOrg) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Workspace/filter changes are the external data source for this page.
       fetchClients();
-      fetchReports();
     }
-  }, [wsLoading, currentOrg, fetchClients, fetchReports]);
-
-  useEffect(() => {
-    if (!currentOrg) return;
-    let active = true;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- A workspace switch invalidates the previous workspace's count.
-    setAiSentCount(0);
-    void supabase.from('ai_import_candidates').select('id', { count: 'exact', head: true })
-      .eq('organization_id', currentOrg.id).then(({ count, error }) => {
-        if (active && !error) setAiSentCount(count ?? 0);
-      });
-    return () => { active = false; };
-  }, [currentOrg]);
+  }, [wsLoading, currentOrg, fetchClients]);
 
   const pageCount = Math.max(1, Math.ceil(reports.length / REPORT_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
@@ -207,9 +200,7 @@ export default function ReportsClientPage() {
       if (!(await confirm({ message: `${selected.length}件を一括承認しますか？`, confirmText: '承認する' }))) return;
       setProcessing(true);
       try {
-        const updateData = { status: 'approved' as ReportStatus, approved_at: new Date().toISOString() };
-        await transitionReports(currentOrg!.id, [...selected], 'approve');
-        setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, ...updateData, approved_by_user: { name: 'あなた' } } : r));
+        await commitRecordChange(currentOrg!.id, () => transitionReports(currentOrg!.id, [...selected], 'approve'));
         setSelected([]);
         showToast('一括承認しました');
       } catch (e) { console.error(e); showToast('エラーが発生しました', 'error'); } finally { setProcessing(false); }
@@ -220,8 +211,7 @@ export default function ReportsClientPage() {
     if (!(await confirm({ message: `${selected.length}件を一括で差戻ししますか？`, confirmText: '差し戻す' }))) return;
     setProcessing(true);
     try {
-        await transitionReports(currentOrg!.id, [...selected], 'remand');
-        setReports(prev => prev.map(r => selected.includes(r.id) ? { ...r, status: 'remanded' as ReportStatus } : r));
+        await commitRecordChange(currentOrg!.id, () => transitionReports(currentOrg!.id, [...selected], 'remand'));
         setSelected([]);
         showToast('差し戻しました');
     } catch (e) { 
@@ -243,8 +233,7 @@ export default function ReportsClientPage() {
 
     setProcessing(true);
     try {
-        await softDeleteReports(currentOrg!.id, [...selected], '帳票一覧から削除');
-        setReports(prev => prev.filter(r => !selected.includes(r.id)));
+        await commitRecordChange(currentOrg!.id, () => softDeleteReports(currentOrg!.id, [...selected], '帳票一覧から削除'));
         setSelected([]);
         showToast('削除しました');
     } catch (e) { 

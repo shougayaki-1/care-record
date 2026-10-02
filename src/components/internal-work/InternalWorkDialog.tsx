@@ -1,5 +1,6 @@
 'use client';
 
+import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useMemo, useState } from 'react';
 import { Stack, Typography } from '@/components/ui/mui';
 import SaveIcon from '@mui/icons-material/Save';
@@ -67,7 +68,7 @@ export default function InternalWorkDialog({
     if (Object.values(errors).some(Boolean)) return;
     setSaving(true);
     try {
-      await saveInternalWork({
+      await commitRecordChange(organizationId, () => saveInternalWork({
         organizationId,
         staffId: staffId || staffOptions[0]?.id || null,
         title,
@@ -76,7 +77,7 @@ export default function InternalWorkDialog({
         endAt: new Date(endAt).toISOString(),
         workHours: Number(workHours),
         note,
-      });
+      }));
       showToast('内勤実績を保存しました', 'success');
       setNote('');
       await onSaved?.();

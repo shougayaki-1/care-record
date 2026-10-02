@@ -1,5 +1,6 @@
 'use client';
 
+import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AiFilePicker, AppButton, PageLayout, RecordFormHeader, RecordFormBody, ScrollableActions } from '@/components/ui';
@@ -381,7 +382,7 @@ export default function AiImportPage() {
       prev.map((r) => (ids.includes(r.id) ? { ...r, saveStatus: 'saving' } : r)),
     );
 
-    const results = await Promise.allSettled(
+    const results = await commitRecordChange(currentOrg.id, () => Promise.allSettled(
       ids.map(async (id) => {
         const row = rows.find((r) => r.id === id);
         if (!row || !row.clientId) throw new Error('利用者が未選択です');
@@ -397,7 +398,7 @@ export default function AiImportPage() {
         const startAt = `${date}T${row.startAt}:00`;
         const endAt = `${date}T${row.endAt}:00`;
 
-        await saveReport({
+        const payload = {
           organizationId: currentOrg.id,
           clientId: row.clientId,
           startAt,
@@ -408,10 +409,11 @@ export default function AiImportPage() {
           idempotencyKey: crypto.randomUUID(),
           auditSource: 'ai_import',
           auditFileCount: row.fileCount,
-        });
+        } satisfies Parameters<typeof saveReport>[0];
+        await saveReport(payload);
         return id;
       }),
-    );
+    ), (batch) => batch.some((result) => result.status === 'fulfilled'));
 
     setRows((prev) =>
       prev.map((r) => {
