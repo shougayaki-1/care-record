@@ -2,13 +2,20 @@ import { test, expect } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { clickMenu, generateUser, registerClient, registerStaff, setupNewOrg } from './helpers';
 
+// Form inputs and received AI metadata refer to the same Japanese service date/time.
+// Keep the browser timezone explicit so UTC CI runners use the same fixture instants.
+test.use({ timezoneId: 'Asia/Tokyo' });
+
 test('通常・内勤・AI承認の保存結果が重複なく本人の履歴へ反映される', async ({ page }) => {
   test.slow();
   const user = generateUser();
   await setupNewOrg(page, user);
   await registerStaff(page, user.name, user.email);
   await registerClient(page, 'Feed利用者');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await page.evaluate(() => {
+    const date = new Date();
+    return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+  });
 
   await page.goto('/app/internal-work');
   await page.getByRole('button', { name: '内勤を記録', exact: true }).click();
@@ -48,7 +55,7 @@ test('通常・内勤・AI承認の保存結果が重複なく本人の履歴へ
   const candidateCard = page.locator(`[data-record-key="ai_submission:${candidate!.id}"]`);
   await expect(candidateCard).toBeVisible({ timeout: 45000 });
   await expect(page.locator('[data-record-key]')).toHaveCount(3);
-  expect(await page.locator('[data-record-key]').first().getAttribute('data-record-key')).toBe(`ai_submission:${candidate!.id}`);
+  await expect(page.locator('[data-record-key]').first()).toHaveAttribute('data-record-key', `ai_submission:${candidate!.id}`);
 
   await page.goto('/app/ai-candidates');
   await page.getByRole('button', { name: '内容を確認・修正', exact: true }).first().click();
@@ -64,9 +71,12 @@ test('通常・内勤・AI承認の保存結果が重複なく本人の履歴へ
   await expect(page.locator('[data-record-key^="internal:"]')).toHaveCount(1);
   await expect(page.locator('[data-record-key^="ai_submission:"]')).toHaveCount(0);
   const { data: provenance } = await admin.from('ai_import_provenance').select('report_id').eq('candidate_id', candidate!.id).single();
+  const { data: savedReport, error: reportError } = await admin.from('reports').select('start_at').eq('id', provenance!.report_id).single();
+  expect(reportError).toBeNull();
+  expect(Date.parse(savedReport!.start_at!)).toBe(Date.parse(`${today}T11:00:00+09:00`));
   const approved = page.locator(`[data-record-key="report:${provenance!.report_id}"]`);
   await expect(approved.getByText('承認済', { exact: true })).toBeVisible();
-  expect(await page.locator('[data-record-key]').first().getAttribute('data-record-key')).toBe(`report:${provenance!.report_id}`);
+  await expect(page.locator('[data-record-key]').first()).toHaveAttribute('data-record-key', `report:${provenance!.report_id}`);
   await page.getByLabel('日付絞り込み').fill('2000-01-01');
   await expect(page.locator('[data-record-key]')).toHaveCount(0);
   await page.getByLabel('日付絞り込み').fill('');
