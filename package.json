@@ -15,7 +15,7 @@
     "test:unit": "vitest run --project unit",
     "test:e2e": "node scripts/e2e/run-local.mjs all",
     "test:e2e:critical": "node scripts/e2e/run-local.mjs critical",
-    "test:ci-scope": "node --test scripts/ci/classify-changes.test.mjs",
+    "test:ci-scope": "node --test scripts/ci/*.test.mjs scripts/e2e/playwright-arguments.test.mjs",
     "security:audit": "npm audit --omit=dev --audit-level=high",
     "security:service-role": "node scripts/security/check-service-role-usage.mjs",
     "security:sbom": "npm sbom --package-lock-only --omit=dev --sbom-format=cyclonedx"
