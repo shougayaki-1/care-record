@@ -1,7 +1,10 @@
+import { sb } from 'storybook/test';
 import type { Preview } from '@storybook/nextjs-vite';
 import { CssBaseline, ThemeProvider } from '@mui/material';
 import theme from '../src/theme';
 import '../src/app/globals.css';
+
+sb.mock(import('../src/app/actions/authSecurity.ts'));
 
 const preview: Preview = {
   decorators: [

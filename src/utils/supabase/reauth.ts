@@ -6,16 +6,11 @@ import { getAuthedUser } from './auth';
 import { serviceRoleForServerSessions } from './serviceRole';
 import { REAUTH_GRANT_TTL_MINUTES } from '@/utils/authConstants';
 import type { Database } from '@/types/database.generated';
+import { REAUTH_PURPOSES, type ReauthPurpose } from '@/utils/reauthTypes';
+export { REAUTH_PURPOSES, type ReauthPurpose } from '@/utils/reauthTypes';
+import { isLoginRateLimited, recordLoginAttempt } from './loginAttempts';
 
 const supabaseAdmin = serviceRoleForServerSessions();
-
-export const REAUTH_PURPOSES = [
-  'owner_transfer',
-  'organization_delete',
-  'external_secret_change',
-] as const;
-
-export type ReauthPurpose = (typeof REAUTH_PURPOSES)[number];
 
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -48,9 +43,10 @@ export async function issueReauthGrant(
   purpose: ReauthPurpose,
   password: string,
 ): Promise<{ token: string; expiresAt: string }> {
-  if (!REAUTH_PURPOSES.includes(purpose) || !password) throw new Error('再認証情報が不正です');
+  if (!REAUTH_PURPOSES.includes(purpose) || purpose === 'account_password_reset' || !password) throw new Error('再認証情報が不正です');
   const user = await getAuthedUser();
   if (!user.email) throw new Error('メールアドレスを確認できません');
+  if (await isLoginRateLimited(user.email)) throw new Error('再認証の試行回数を超えました。約15分後にお試しください');
 
   // Cookieを書き換えない一時クライアントで現在のpasswordを検証する。
   const verifier = createClient<Database>(
@@ -59,8 +55,12 @@ export async function issueReauthGrant(
     { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } },
   );
   const { data, error } = await verifier.auth.signInWithPassword({ email: user.email, password });
-  if (error || data.user?.id !== user.id) throw new Error('再認証に失敗しました');
-  await verifier.auth.signOut().catch(() => undefined);
+  // This temporary session must not globally revoke the real browser session.
+  if (data.session) await verifier.auth.signOut({ scope: 'local' }).catch(() => undefined);
+  if (error || data.user?.id !== user.id) {
+    await recordLoginAttempt(user.email, 'failure');
+    throw new Error('再認証に失敗しました');
+  }
 
   return issueGrantToken(purpose, user.id, user.sessionId);
 }

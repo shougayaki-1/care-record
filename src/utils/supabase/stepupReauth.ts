@@ -5,40 +5,33 @@ import { createSessionClient } from './auth';
 import { serviceRoleForStepupReauth } from './serviceRole';
 import { issueGrantToken, REAUTH_PURPOSES, type ReauthPurpose } from './reauth';
 import { REAUTH_GRANT_TTL_MINUTES } from '@/utils/authConstants';
+import type { SsoProvider } from '@/utils/reauthTypes';
 
 const supabaseAdmin = serviceRoleForStepupReauth();
 
-// パスワードを持たない(SSOのみの)アカウント向けのstep-up再認証。
+// 連携されたSSO identityによるstep-up再認証。パスワード併用も許可する。
 // 対応するOAuthプロバイダへ再ログインさせ、戻ってきたセッションが
 // 開始時と同一ユーザーであることを確認した上で reauth_grants を発行する。
 // consumeReauthGrant 側の検証・利用フローは変更しない。
 
 const SSO_PROVIDERS = ['google', 'azure'] as const;
-type SsoProvider = (typeof SSO_PROVIDERS)[number];
 
 function hashNonce(nonce: string): string {
   return createHash('sha256').update(nonce).digest('hex');
 }
 
-export async function beginStepUpReauth(purpose: ReauthPurpose): Promise<{ nonce: string; provider: SsoProvider }> {
-  if (!REAUTH_PURPOSES.includes(purpose)) throw new Error('再認証情報が不正です');
+export async function beginStepUpReauth(purpose: ReauthPurpose, requestedProvider?: SsoProvider): Promise<{ nonce: string; provider: SsoProvider }> {
+  if (!REAUTH_PURPOSES.includes(purpose) || purpose === 'account_password_reset') throw new Error('再認証情報が不正です');
 
   const supabase = await createSessionClient();
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) throw new Error('認証が必要です');
 
-  // identities に 'email' が含まれるかではなく、実際にパスワードが
-  // 設定されているかで判定する(後からのパスワード設定/削除に identities
-  // が追従するとは限らないため)。
-  const { data: hasPassword, error: hasPasswordError } = await supabase.rpc('current_user_has_password');
-  if (hasPasswordError) throw new Error('認証情報を確認できません');
-  if (hasPassword) {
-    throw new Error('パスワードをお持ちのアカウントは、パスワードで再認証してください');
-  }
   const identities = user.identities || [];
   const ssoIdentity = identities.find(
     (identity): identity is typeof identity & { provider: SsoProvider } =>
-      (SSO_PROVIDERS as readonly string[]).includes(identity.provider),
+      (SSO_PROVIDERS as readonly string[]).includes(identity.provider)
+      && (!requestedProvider || identity.provider === requestedProvider),
   );
   if (!ssoIdentity) throw new Error('連携されたログイン方法が見つかりません');
 

@@ -1,7 +1,7 @@
 import { createServer } from 'node:net';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,6 +74,8 @@ async function writeIsolatedConfig(workdir) {
       copyFileSync(resolve(sourceSupabaseDir, 'migrations', entry.name), resolve(migrationsDir, entry.name));
     }
   }
+  const templatesDir = resolve(sourceSupabaseDir, 'templates');
+  if (existsSync(templatesDir)) cpSync(templatesDir, resolve(supabaseDir, 'templates'), { recursive: true });
   return projectId;
 }
 
@@ -122,6 +124,7 @@ try {
     NEXT_PUBLIC_SUPABASE_ANON_KEY: localConfig.ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY: localConfig.SERVICE_ROLE_KEY,
     SUPABASE_DB_URL: localConfig.DB_URL,
+    SUPABASE_MAILPIT_URL: localConfig.MAILPIT_URL || localConfig.INBUCKET_URL,
   };
   assertLocalSupabaseEnvironment(supabaseEnv);
   if (!supabaseEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY || !supabaseEnv.SUPABASE_SERVICE_ROLE_KEY || !supabaseEnv.SUPABASE_DB_URL) {

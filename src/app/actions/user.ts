@@ -1,6 +1,6 @@
 'use server';
 
-import { sanitizeDbError } from '@/utils/errors';
+import { sanitizeDbError, UserFacingError, withSafeError } from '@/utils/errors';
 
 import { randomUUID } from 'crypto';
 import { createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
@@ -78,17 +78,21 @@ export async function markNotificationRead(notificationId: string) {
     return { success: true };
 }
 
-export async function deleteUserAccount() {
-    // 退会できるのは本人のみ。対象 userId はセッションから取得する
-    const user = await getAuthedUser();
-    const userId = user.id;
-    await recordAuditEvent({ organizationId: null, actorId: userId, action: 'account.self_delete_request', resourceType: 'account', resourceId: userId, sessionId: user.sessionId });
-    const sessionClient = await createSessionClient();
-    const { error: requestError } = await sessionClient.rpc('request_own_account_deletion', {
-        p_retention_basis: '法令・契約上必要な記録と監査証跡を保全後、承認手順により消去',
+export async function deleteUserAccount(reauthToken: string) {
+    return withSafeError('deleteUserAccount', async () => {
+        // 本人・セッション・用途・期限・一回限りの証明はRPCでも原子的に検証する。
+        const user = await getAuthedUser();
+        const userId = user.id;
+        if (!reauthToken) throw new UserFacingError('この操作には再認証が必要です');
+        const sessionClient = await createSessionClient();
+        const { error: requestError } = await sessionClient.rpc('request_own_account_deletion', {
+            p_retention_basis: '法令・契約上必要な記録と監査証跡を保全後、承認手順により消去',
+            p_reauth_token: reauthToken,
+        });
+        if (requestError) throw sanitizeDbError(requestError, 'action.user');
+        await recordAuditEvent({ organizationId: null, actorId: userId, action: 'account.self_delete_request', resourceType: 'account', resourceId: userId, sessionId: user.sessionId });
+        const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: '876000h' });
+        if (error) throw sanitizeDbError(error, 'action.user');
+        return { success: true };
     });
-    if (requestError) throw sanitizeDbError(requestError, 'action.user');
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: '876000h' });
-    if (error) throw sanitizeDbError(error, 'action.user');
-    return { success: true };
 }
