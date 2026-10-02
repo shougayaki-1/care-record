@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Button, MenuItem, Stack, TextField, Typography } from '@/components/ui/mui';
 import SaveIcon from '@mui/icons-material/Save';
-import { AppDialog, DateTimeField } from '@/components/ui';
+import { AppDialog, DateTimeField, UnitAdornment } from '@/components/ui';
 import { useToast } from '@/components/ui/ToastProvider';
 import { saveInternalWork } from '@/app/actions/internalWork';
 import type { InternalWorkStaffOption } from '@/app/actions/internalWork';
@@ -114,7 +114,7 @@ export default function InternalWorkDialog({
           type="number"
           value={workHours}
           onChange={(e) => setWorkHours(e.target.value)}
-          slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">時間</Typography> }, htmlInput: { inputMode: 'decimal', step: '0.25' } }}
+          slotProps={{ input: { endAdornment: <UnitAdornment>時間</UnitAdornment> }, htmlInput: { inputMode: 'decimal', step: '0.25' } }}
         />
         <TextField label="メモ" value={note} onChange={(e) => setNote(e.target.value)} fullWidth multiline minRows={2} />
       </Stack>

@@ -100,8 +100,8 @@ test.describe('統合フロー', () => {
 
     // 8. 未承認の記録を開いて承認
     await clickMenu(page, '未承認・差戻し');
-    await expect(page.getByText('承認待ち').first()).toBeVisible({ timeout: 20000 });
-    await expect(page.getByText(staffName).first()).toBeVisible();
+    await expect(page.getByText('承認待ち', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText(staffName, { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
     await page.getByRole('button', { name: '詳細' }).first().click();
     await expect(page.getByText('記録の確認・承認')).toBeVisible({ timeout: 20000 });
@@ -111,6 +111,6 @@ test.describe('統合フロー', () => {
 
     // 9. 記録一覧で承認済になっている
     await page.waitForURL('**/app/reports**', { timeout: 20000 });
-    await expect(page.getByText('承認済').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText('承認済', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20000 });
   });
 });

@@ -3,7 +3,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 
 import type { AssignmentPermissionHint } from '@/app/actions/clients';
-import { CheckboxGroupField } from '@/components/ui';
+import { CheckboxGroupField, UnitAdornment } from '@/components/ui';
 import { Alert, Box, Card, CardContent, Chip, Stack, TextField, Typography } from '@/components/ui/mui';
 
 export type ClientStaffOption = { id: string; name: string; userId: string | null };
@@ -50,7 +50,7 @@ export function StaffAssignmentTab({
                 {allStaffs.filter((staff) => assignedStaffIds.includes(staff.id)).map((staff) => (
                   <Stack key={staff.id} direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
                     <Box sx={{ minWidth: { sm: 180 } }}><Typography sx={{ fontWeight: 'bold', overflowWrap: 'anywhere' }}>{staff.name}</Typography></Box>
-                    <TextField label="1訪問あたり" type="number" size="small" value={defaultTravelCosts[staff.id] ?? ''} onChange={(event) => setDefaultTravelCosts((previous) => ({ ...previous, [staff.id]: event.target.value }))} onWheel={(event) => (event.target as HTMLElement).blur()} helperText="空欄は記録時に入力。0円も設定できます" sx={{ maxWidth: { sm: 280 } }} slotProps={{ input: { endAdornment: <Typography variant="caption" color="text.secondary">円</Typography> }, htmlInput: { inputMode: 'numeric', step: '1', min: 0, max: 100000 } }} />
+                    <TextField label="1訪問あたり" type="number" size="small" value={defaultTravelCosts[staff.id] ?? ''} onChange={(event) => setDefaultTravelCosts((previous) => ({ ...previous, [staff.id]: event.target.value }))} onWheel={(event) => (event.target as HTMLElement).blur()} helperText="空欄は記録時に入力。0円も設定できます" sx={{ maxWidth: { sm: 280 } }} slotProps={{ input: { endAdornment: <UnitAdornment>円</UnitAdornment> }, htmlInput: { inputMode: 'numeric', step: '1', min: 0, max: 100000 } }} />
                   </Stack>
                 ))}
               </Stack>

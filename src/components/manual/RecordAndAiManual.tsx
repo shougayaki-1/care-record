@@ -19,7 +19,7 @@ import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import PersonIcon from '@mui/icons-material/Person';
-import { AiImportReviewTable, AppButton, AppTextField, DateTimeField, DynamicFormField, InnerPageHeader, PageLayout, type ReviewRow } from '@/components/ui';
+import { AiImportReviewTable, AppButton, AppTextField, DateTimeField, DynamicFormField, InnerPageHeader, PageLayout, type ReviewRow, UnitAdornment } from '@/components/ui';
 import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
 import { ManualCallout, ManualDefinitionList, ManualDemoFrame, ManualScreenHighlight, ManualSection, ManualStep } from '@/components/manual/ManualPrimitives';
 
@@ -197,7 +197,7 @@ function RecordDemo() {
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
                 <DateTimeField kind="datetime-local" label={`${selectedPart.label} 開始`} value={selectedPart.start} />
                 <DateTimeField kind="datetime-local" label={`${selectedPart.label} 終了`} value={selectedPart.end} />
-                <AppTextField label="提供時間" value={selectedPart.time} slotProps={{ input: { endAdornment: <Typography variant="caption">時間</Typography> } }} />
+                <AppTextField label="提供時間" value={selectedPart.time} slotProps={{ input: { endAdornment: <UnitAdornment>時間</UnitAdornment> } }} />
               </Stack>
             </ManualScreenHighlight>
 
