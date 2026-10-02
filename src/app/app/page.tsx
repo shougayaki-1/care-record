@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { Alert, Box, Button, CircularProgress, Stack } from '@/components/ui/mui';
 import { resolveAppDestination } from '@/utils/workspaceNavigation';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 
 export default function AppPage() {
   const router = useRouter();
@@ -29,6 +30,7 @@ export default function AppPage() {
           {errorMessage || '所属情報を確認できませんでした。'}
         </Alert>
         <Button variant="contained" onClick={() => void refreshWorkspace()}>再試行</Button>
+        <RecoveryLogoutButton />
       </Stack>
     </Box>
   );
