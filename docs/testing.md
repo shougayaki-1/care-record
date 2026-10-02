@@ -47,3 +47,19 @@ npm run test:e2e
 Docker Desktop、Chromium、Supabase CLI 2.108.0 が必要です。E2E runner は `PATH` 上の `supabase` コマンドを実行します。CI では `supabase/setup-cli` と Playwright の browser install を使って準備します。ローカルに browser が入っていない場合は、初回に `npx playwright install chromium` を実行します。`E2E_TEST_ENV=true` は一時環境を作る runner が Playwright に渡す値なので、手動で設定して Playwright を直接実行しないでください。本番や Staging の認証情報は E2E に渡しません。
 
 実行していない検査を「確認済み」と記録しないでください。CI の最終判定が失敗した場合は、選択された job のログを確認します。
+
+## CI実行時間の短縮（Issue #42）
+
+`scope` の変更分類を維持し、core の検査を `lint-security`、`typecheck`、`unit`、`build` の4ジョブで並列実行します。固定名の `CI` は、選択された4ジョブすべての成功を要求します。
+
+full E2E は Chromium と Mobile Chrome を matrix の別 runner で並列実行します。各 runner は独立した一時 Supabase とアプリを用意し、各 project の全シナリオを維持します。critical E2E は Chromium のみです。`workers: 1` は維持します。片方が失敗しても他方の検査を継続し、最終判定は失敗になります。レポートは project 別 artifact に保存します。
+
+ローカルの `npm run test:e2e` は引き続き両 project を実行します。単一 project には `E2E_PROJECT=chromium npm run test:e2e` または `E2E_PROJECT=mobile-chrome npm run test:e2e` を使います。
+
+変更前後は同じ変更分類・イベントの成功 run を複数比較します。GitHub Actions の run 画面で全体と各 job の所要時間を確認できます。CLI では次の結果を保存し、run 開始から最後の job 終了までの経過時間と各 job の開始・終了差分を比較します。
+
+```sh
+gh run view RUN_ID --json startedAt,jobs > /tmp/ci-RUN_ID.json
+```
+
+runner 利用時間・`npm ci` 回数は増えます。短縮の実測値は変更後の GitHub Actions run 完了後に記録します。
