@@ -6,6 +6,7 @@ import {
   type BoxProps,
   type ChipProps,
   type PaperProps,
+  type StackProps,
 } from '@mui/material';
 import type { ReactNode } from 'react';
 
@@ -95,7 +96,7 @@ export function InnerPageHeader({
         gap: { xs: 1, sm: 2 },
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, width: '100%', minWidth: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, width: { xs: '100%', sm: 'auto' }, flexGrow: 1, minWidth: 0 }}>
         {icon && <Box sx={{ color: 'action.active', display: 'flex', flexShrink: 0 }}>{icon}</Box>}
         <Typography
           variant="h6"
@@ -114,6 +115,8 @@ export function InnerPageHeader({
             justifyContent: { xs: 'flex-end', sm: 'flex-start' },
             gap: 1,
             flexWrap: 'wrap',
+            minWidth: 0,
+            maxWidth: '100%',
             width: { xs: '100%', sm: 'auto' },
           }}
         >
@@ -194,4 +197,31 @@ export function EmptyState({ title = 'データがありません', description,
 export type StatusTone = 'default' | 'success' | 'warning' | 'error' | 'info';
 export function StatusChip({ tone = 'default', ...props }: Omit<ChipProps, 'color'> & { tone?: StatusTone }) {
   return <Chip {...props} color={tone} variant={tone === 'default' ? 'outlined' : 'filled'} />;
+}
+
+/** Keep whole actions reachable when their combined width exceeds the header. */
+export function ScrollableActions({ children, sx, ...props }: StackProps) {
+  return (
+    <Stack
+      direction="row"
+      spacing={1}
+      useFlexGap
+      flexWrap="nowrap"
+      justifyContent="safe flex-end"
+      {...props}
+      sx={[
+        {
+          minWidth: 0,
+          maxWidth: '100%',
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          WebkitOverflowScrolling: 'touch',
+          '& > *': { flexShrink: 0 },
+        },
+        ...(Array.isArray(sx) ? sx : [sx]),
+      ]}
+    >
+      {children}
+    </Stack>
+  );
 }
