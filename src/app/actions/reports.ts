@@ -18,6 +18,7 @@ export type MyReportHistoryResult = {
     start_at: string;
     status: 'pending' | 'approved' | 'remanded';
     client_id: string;
+    authorId?: string;
     clients: { name: string } | null;
   }>;
 };
@@ -42,12 +43,12 @@ export async function getMyReportHistory(
 
   let query = supabase
     .from('reports')
-    .select('id, start_at, status, client_id, clients!inner(name, organization_id), report_actual_staffs!inner(staff_id)')
+    .select('id, start_at, status, client_id, helper_id, clients!inner(name, organization_id), report_actual_staffs!inner(staff_id)')
     .eq('clients.organization_id', organizationId)
     .eq('report_actual_staffs.staff_id', staff.id)
     .is('deleted_at', null)
     .neq('status', 'draft')
-    .order('start_at', { ascending: false })
+    .order('start_at', { ascending: false }).order('id')
     .limit(Math.min(Math.max(options.limit ?? 100, 1), 100));
   if (options.startAt) query = query.gte('start_at', options.startAt);
   if (options.endAt) query = query.lt('start_at', options.endAt);
@@ -60,6 +61,7 @@ export async function getMyReportHistory(
       start_at: report.start_at ?? '',
       status: report.status as 'pending' | 'approved' | 'remanded',
       client_id: report.client_id,
+      authorId: report.helper_id,
       clients: Array.isArray(report.clients) ? (report.clients[0] ?? null) : report.clients,
     })),
   };

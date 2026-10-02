@@ -1,5 +1,6 @@
 'use client';
 
+import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -903,7 +904,7 @@ export function useRecordForm() {
       if(!(await confirm({ title: '記録の削除', message: '本当に削除しますか？', confirmText: '削除する', confirmColor: 'error' }))) return;
       try {
         if (!currentReportId || !currentOrg) throw new Error('削除対象が不正です');
-        await softDeleteReports(currentOrg.id, [currentReportId], '記録編集画面から削除');
+        await commitRecordChange(currentOrg.id, () => softDeleteReports(currentOrg.id, [currentReportId], '記録編集画面から削除'));
         showToast('削除しました');
         router.back();
       } catch(e) {
@@ -965,7 +966,7 @@ export function useRecordForm() {
         travel_cost_yen: travelExpenseRows.reduce((sum, expense) => sum + (expense.amount_yen ?? 0), 0),
       };
       if (!currentOrg) throw new Error('事業所が選択されていません');
-      const result = await saveReportAction({
+      const result = await commitRecordChange(currentOrg.id, () => saveReportAction({
         organizationId: currentOrg.id,
         reportId: currentReportId,
         clientId: clientId as string,
@@ -982,7 +983,7 @@ export function useRecordForm() {
         ...(status === 'draft' && hasAiDraftSource
           ? { auditSource: 'ai_import' as const, auditFileCount: 1 }
           : {}),
-      });
+      }));
       const targetReportId = result.reportId;
       contentVersionRef.current = result.version;
       setTravelExpenses(Object.fromEntries(travelExpenseRows.map((expense) => [expense.staff_id, { method: expense.method, amountYen: expense.amount_yen == null ? '' : String(expense.amount_yen) }])));
@@ -1024,7 +1025,7 @@ export function useRecordForm() {
   const executeApprove = useCallback(async () => {
       if (!currentOrg || !currentReportId) return;
       try {
-        await transitionReports(currentOrg.id, [currentReportId], 'approve');
+        await commitRecordChange(currentOrg.id, () => transitionReports(currentOrg.id, [currentReportId], 'approve'));
           showToast('承認しました', 'success');
           router.push('/app/reports');
       } catch (error) {
@@ -1039,7 +1040,7 @@ export function useRecordForm() {
   const executeRemand = useCallback(async () => {
       if (!currentOrg || !currentReportId) return;
       try {
-        await transitionReports(currentOrg.id, [currentReportId], 'remand');
+        await commitRecordChange(currentOrg.id, () => transitionReports(currentOrg.id, [currentReportId], 'remand'));
           showToast('記録を差し戻しました', 'info');
           router.push('/app/reports');
       } catch (error) {

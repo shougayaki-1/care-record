@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { 
     Box, Typography, Card, CardActionArea, Stack, Avatar,
     Chip
@@ -18,23 +18,22 @@ import { InnerPageHeader, PageLayout, TablePageSkeleton } from '@/components/ui'
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
 import { checkRecordPermission, checkShiftPermission } from '@/utils/permissions';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
+import { useRecordQuery } from '@/hooks/useRecordQuery';
 import { buildRecordPath } from '@/utils/recordNavigation';
 
 type Client = { id: string; name: string; };
 type DraftReport = { id: string; created_at: string; };
 
+const EMPTY_SELECTION: { clients: Client[]; clientDrafts: Record<string, DraftReport[]>; todayShifts: MyShiftItem[] } = { clients: [], clientDrafts: {}, todayShifts: [] };
+const logSelectionError = (error: unknown) => console.error(error);
+
 export default function RecordSelectPage() {
     const router = useRouter();
     const { currentOrg, userId, loading: wsLoading } = useWorkspace();
-    const [clients, setClients] = useState<Client[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [clientDrafts, setClientDrafts] = useState<Record<string, DraftReport[]>>({});
-    const [todayShifts, setTodayShifts] = useState<MyShiftItem[]>([]);
-
     const fetchData = useCallback(async () => {
-        if (!currentOrg) return;
+        if (!currentOrg) return EMPTY_SELECTION;
         try {
-            if (!userId) return;
+            if (!userId) return EMPTY_SELECTION;
 
             const canCreateAll = currentOrg.effectivePermissions.records.create === 'all';
             const canCreateAssigned = currentOrg.effectivePermissions.records.create === 'assigned';
@@ -59,7 +58,8 @@ export default function RecordSelectPage() {
                 return [];
             })();
 
-            setClients(targetClients);
+            let todayShifts: MyShiftItem[] = [];
+            const draftsMap: Record<string, DraftReport[]> = {};
 
             // getMyShiftsWithStatus is a withSafeError Server Action that CAN throw
             // (e.g. the acting user has no `staffs` row yet — a normal state for a
@@ -68,7 +68,7 @@ export default function RecordSelectPage() {
             if (canViewShifts) {
                 try {
                     const shiftsResult = await getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString());
-                    setTodayShifts(shiftsResult.filter(s => s.status !== 'cancelled'));
+                    todayShifts = shiftsResult.filter(s => s.status !== 'cancelled');
                 } catch (e) {
                     console.error('today shifts load failed:', e);
                 }
@@ -83,21 +83,16 @@ export default function RecordSelectPage() {
                     .is('deleted_at', null)
                     .in('client_id', targetClients.map(c => c.id))
                     .order('created_at', { ascending: false });
-                const draftsMap: Record<string, DraftReport[]> = {};
                 if (drafts) drafts.forEach((d) => {
                     if (!draftsMap[d.client_id]) draftsMap[d.client_id] = [];
                     draftsMap[d.client_id].push({ id: d.id, created_at: d.created_at });
                 });
-                setClientDrafts(draftsMap);
             }
-        } catch (e) { console.error(e); } finally { setLoading(false); }
+            return { clients: targetClients, todayShifts, clientDrafts: draftsMap };
+        } catch (e) { throw e; }
     }, [currentOrg, userId]);
 
-    useEffect(() => {
-        if (!wsLoading && currentOrg) {
-            queueMicrotask(() => void fetchData());
-        }
-    }, [wsLoading, currentOrg, fetchData]);
+    const { data: { clients, clientDrafts, todayShifts }, loading } = useRecordQuery({ organizationId: wsLoading ? undefined : currentOrg?.id, queryKey: userId ?? '', load: fetchData, empty: EMPTY_SELECTION, onError: logSelectionError });
 
     const formatTime = (dateStr: string) => {
         if (!dateStr) return '';

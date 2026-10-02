@@ -1,5 +1,6 @@
 'use client';
 
+import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, CircularProgress, Stack } from '@/components/ui/mui';
 import { useWorkspace } from '@/context/WorkspaceContext';
@@ -112,7 +113,11 @@ export default function AiCandidatesPage() {
       void (async () => {
         const accepted = await confirm({ message: 'このAI送信を却下しますか？', confirmText: '却下する', confirmColor: 'error' });
         if (!accepted) return;
-        const { error } = await supabase.rpc('discard_ai_import_candidate', { p_organization_id: currentOrg.id, p_candidate_id: id });
+        const { error } = await commitRecordChange(currentOrg.id, async () => {
+          const result = await supabase.rpc('discard_ai_import_candidate', { p_organization_id: currentOrg.id, p_candidate_id: id });
+          if (result.error) throw result.error;
+          return result;
+        }).catch((error) => ({ error }));
         if (error) showToast('AI送信を却下できませんでした', 'error');
         else setRows((previous) => previous.filter((row) => row.id !== id));
       })();
@@ -144,7 +149,7 @@ export default function AiCandidatesPage() {
       if (travelTime && (!Number.isFinite(Number(travelTime)) || Number(travelTime) < 0)) {
         throw new Error('移動時間を確認してください');
       }
-      await approveAiCandidate({
+      const payload = {
         candidateId: id,
         organizationId: currentOrg.id,
         clientId: row.clientId,
@@ -157,7 +162,8 @@ export default function AiCandidatesPage() {
           ...row.result.values,
           ...(travelTime ? { travel_time: travelTime } : {}),
         },
-      });
+      } satisfies Parameters<typeof approveAiCandidate>[0];
+      await commitRecordChange(currentOrg.id, () => approveAiCandidate(payload));
       setRows((previous) => previous.filter((item) => item.id !== id));
       showToast('AI送信を確認し、提供記録を承認しました', 'success');
       return true;

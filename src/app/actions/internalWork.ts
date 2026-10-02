@@ -1,6 +1,6 @@
 'use server';
 
-import { sanitizeDbError } from '@/utils/errors';
+import { withSafeError, sanitizeDbError } from '@/utils/errors';
 import { assertOrgRole, assertOrgPermission, createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 import type { InternalWorkAction } from '@/utils/permissions';
 import { normalizePermissions } from '@/utils/permissions';
@@ -11,6 +11,7 @@ export type InternalWorkRecord = {
   id: string;
   organization_id: string;
   staff_id: string;
+  recorded_by?: string;
   title: string;
   work_type: string;
   start_at: string;
@@ -170,7 +171,7 @@ export async function listInternalWorkRecords(
 
   if (targetStaffId) query = query.eq('staff_id', targetStaffId);
 
-  const { data, error } = await query.order('start_at', { ascending: false });
+  const { data, error } = await query.order('start_at', { ascending: false }).order('id');
 
   if (error) throw sanitizeDbError(error, 'action.internalWork');
   return (data ?? []) as unknown as InternalWorkRecord[];
@@ -205,7 +206,7 @@ export async function getInternalWorkPageData(
 
       if (targetStaffId) query = query.eq('staff_id', targetStaffId);
 
-      const { data, error } = await query.order('start_at', { ascending: false });
+      const { data, error } = await query.order('start_at', { ascending: false }).order('id');
 
       if (error) throw sanitizeDbError(error, 'action.internalWork');
       return (data ?? []) as unknown as InternalWorkRecord[];
@@ -289,4 +290,24 @@ export async function listInternalWorkRecordsForStatistics(
 
   if (error) throw sanitizeDbError(error, 'action.internalWork');
   return (data ?? []) as unknown as InternalWorkRecord[];
+}
+
+/** Own history stays own even when the user can view all internal work. */
+export async function getMyInternalWorkHistory(organizationId: string, options: { startAt?: string; endAt?: string } = {}): Promise<InternalWorkRecord[]> {
+  return withSafeError('getMyInternalWorkHistory', async () => {
+    const user = await getAuthedUser();
+    await assertOrgRole(organizationId);
+    const permission = await getInternalWorkPermission(organizationId, user.id, 'view');
+    if (permission.scope === 'none' || !permission.ownStaffId) return [];
+    const session = await createSessionClient();
+    let query = session.from('internal_work_records')
+      .select('id, organization_id, staff_id, recorded_by, title, work_type, start_at, end_at, work_hours, status, note, staffs(name)')
+      .eq('organization_id', organizationId).eq('staff_id', permission.ownStaffId)
+      .is('deleted_at', null).order('start_at', { ascending: false }).order('id').limit(100);
+    if (options.startAt) query = query.gte('start_at', options.startAt);
+    if (options.endAt) query = query.lt('start_at', options.endAt);
+    const { data, error } = await query;
+    if (error) throw sanitizeDbError(error, 'action.internalWork');
+    return (data ?? []) as unknown as InternalWorkRecord[];
+  });
 }

@@ -1,33 +1,28 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
-    Box, Typography, Paper, Stack, Chip, TextField, Tabs, Tab, Card, CardActionArea, Divider,
+    Box, Typography, Paper, Stack, TextField, Tabs, Tab, Divider,
     Grid, IconButton, Tooltip
 } from '@/components/ui/mui';
-import EditIcon from '@mui/icons-material/Edit';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ListIcon from '@mui/icons-material/List';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import HistoryIcon from '@mui/icons-material/History';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { CalendarPageSkeleton, InnerPageHeader, PageLayout } from '@/components/ui';
-import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
-import { getMyReportHistory } from '@/app/actions/reports';
-import { getMyAiSubmissions } from '@/app/actions/aiCandidates';
-import { buildRecordPath } from '@/utils/recordNavigation';
+import { getMyRecordFeed } from '@/app/actions/recordFeed';
+import { useRecordQuery } from '@/hooks/useRecordQuery';
+import type { RecordFeedItem } from '@/utils/recordFeed';
+import { RecordFeedCard } from '@/components/record/RecordFeedCard';
 
-type Report = {
-    id: string; start_at: string; status: 'pending' | 'approved' | 'remanded';
-    client_id: string; clients: { name: string; } | null;
-};
-type AiSubmission = Awaited<ReturnType<typeof getMyAiSubmissions>>[number];
+const EMPTY_FEED: RecordFeedItem[] = [];
+const logFeedError = (error: unknown) => console.error('Failed to load own record history', error);
 
 // 簡易カレンダーコンポーネント
-const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month: number, events: Report[], onSelect: (report: Report) => void }) => {
+const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month: number, events: RecordFeedItem[], onSelect: (report: RecordFeedItem) => void }) => {
     const firstDay = new Date(year, month, 1).getDay(); // 0: Sun, 1: Mon...
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     
@@ -43,7 +38,7 @@ const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month
                 <Grid size={{ xs: 12/7 }} key={d} textAlign="center" fontWeight="bold" fontSize={12} color="text.secondary" sx={{ py: 1 }}>{d}</Grid>
             ))}
             {days.map((d, i) => {
-                const dayEvents = d ? events.filter(e => new Date(e.start_at).getDate() === d) : [];
+                const dayEvents = d ? events.filter(e => new Date(e.startAt).getDate() === d) : [];
                 return (
                     <Grid size={{ xs: 12/7 }} key={i}>
                         <Box 
@@ -60,7 +55,7 @@ const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month
                                     </Typography>
                                     <Box sx={{ flexGrow: 1, overflowY: 'auto', '::-webkit-scrollbar': {width:0} }}>
                                         {dayEvents.map(ev => (
-                                            <Tooltip key={ev.id} title={`${new Date(ev.start_at).getHours()}:${String(new Date(ev.start_at).getMinutes()).padStart(2,'0')} ${ev.clients?.name}`}>
+                                            <Tooltip key={`${ev.kind}:${ev.id}`} title={`${new Date(ev.startAt).getHours()}:${String(new Date(ev.startAt).getMinutes()).padStart(2,'0')} ${ev.title}`}>
                                                 <Box 
                                                     onClick={() => onSelect(ev)}
                                                     sx={{ 
@@ -70,7 +65,7 @@ const SimpleCalendar = ({ year, month, events, onSelect }: { year: number, month
                                                         '&:hover': { filter: 'brightness(0.95)' }
                                                     }}
                                                 >
-                                                    {ev.clients?.name}
+                                                    {ev.title}
                                                 </Box>
                                             </Tooltip>
                                         ))}
@@ -89,41 +84,14 @@ export default function HistoryPage() {
     const router = useRouter();
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const [viewMode, setViewMode] = useState(0); // 0: List, 1: Calendar
-    const [reports, setReports] = useState<Report[]>([]);
-    const [aiSubmissions, setAiSubmissions] = useState<AiSubmission[]>([]);
     const [filterDate, setFilterDate] = useState('');
-    const [currentMonth, setCurrentMonth] = useState(new Date()); // カレンダー表示用
-
-    useEffect(() => {
-        const fetchData = async () => {
-            if (!currentOrg) return;
-            let startAt: string | undefined;
-            let endAt: string | undefined;
-            if (viewMode === 0 && filterDate) {
-                startAt = `${filterDate}T00:00:00+09:00`;
-                endAt = `${filterDate}T23:59:59.999+09:00`;
-            } else if (viewMode === 1) {
-                startAt = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
-                endAt = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1).toISOString();
-            }
-            try {
-                const [result, submissions] = await Promise.all([
-                    getMyReportHistory(currentOrg.id, { startAt, endAt, limit: 100 }),
-                    getMyAiSubmissions(currentOrg.id),
-                ]);
-                setReports(result.status === 'ok' ? result.items : []);
-                setAiSubmissions(submissions);
-            } catch (error) {
-                console.error('Failed to load own report history', error);
-                setReports([]);
-                setAiSubmissions([]);
-            }
-        };
-
-        if (!wsLoading) fetchData();
-    }, [wsLoading, currentOrg, filterDate, viewMode, currentMonth]);
-
-    const handleEdit = (report: Report) => router.push(buildRecordPath(report.client_id, { reportId: report.id }));
+    const [currentMonth, setCurrentMonth] = useState(new Date());
+    const startAt = viewMode === 0 ? (filterDate ? `${filterDate}T00:00:00+09:00` : undefined) : new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
+    const endAt = viewMode === 0 ? (filterDate ? new Date(Date.parse(`${filterDate}T00:00:00+09:00`) + 86400000).toISOString() : undefined) : new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1).toISOString();
+    const organizationId = currentOrg?.id;
+    const load = useCallback(() => getMyRecordFeed(organizationId!, { startAt, endAt }), [organizationId, startAt, endAt]);
+    const { data: records } = useRecordQuery({ organizationId: wsLoading ? undefined : organizationId, queryKey: `${startAt ?? ''}/${endAt ?? ''}`, load, empty: EMPTY_FEED, onError: logFeedError, refreshInterval: 30000 });
+    const handleEdit = (record: RecordFeedItem) => { if (record.href) router.push(record.href); };
 
     const handleMonthChange = (diff: number) => {
         setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + diff, 1));
@@ -155,41 +123,8 @@ export default function HistoryPage() {
                             />
                         </Paper>
                         <Stack spacing={2}>
-                            {aiSubmissions.filter((item) => !filterDate || item.recordDate === filterDate).map((item) => (
-                                <Card key={item.id} variant="outlined" sx={{ borderRadius: 2, p: { xs: 1.5, sm: 2 } }}>
-                                    <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
-                                        <Box sx={{ minWidth: 0 }}>
-                                            <Typography variant="body2" color="text.secondary">{item.recordDate || new Date(item.createdAt).toLocaleDateString()} · AI送信</Typography>
-                                            <Typography variant="h6" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{item.clientName || item.sourceFileName || '利用者未特定'}</Typography>
-                                        </Box>
-                                        <Chip label="送信済み・管理者確認待ち" color="warning" size="small" />
-                                    </Stack>
-                                </Card>
-                            ))}
-                            {reports.map((report) => (
-                                <Card key={report.id} variant="outlined" sx={{ borderRadius: 2 }}>
-                                    <CardActionArea onClick={() => handleEdit(report)} sx={{ p: { xs: 1.5, sm: 2 } }}>
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1.5}>
-                                            <Box sx={{ minWidth: 0 }}>
-                                                <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-                                                    <AccessTimeIcon fontSize="small" color="action" />
-                                                    <Typography variant="body2" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>
-                                                        {new Date(report.start_at).toLocaleDateString()} {new Date(report.start_at).getHours()}:{String(new Date(report.start_at).getMinutes()).padStart(2,'0')}
-                                                    </Typography>
-                                                    <Chip 
-                                                        label={getReportStatusLabel(report.status)} 
-                                                        color={getReportStatusChipColor(report.status)} 
-                                                        size="small" sx={{ height: 20, fontSize: '0.7rem' }}
-                                                    />
-                                                </Box>
-                                                <Typography variant="h6" fontWeight="bold" sx={{ overflowWrap: 'anywhere' }}>{report.clients?.name} 様</Typography>
-                                            </Box>
-                                            <EditIcon color="action" />
-                                        </Stack>
-                                    </CardActionArea>
-                                </Card>
-                            ))}
-                            {reports.length === 0 && aiSubmissions.length === 0 && (
+                            {records.map((item) => <RecordFeedCard key={`${item.kind}:${item.id}`} item={item} onSelect={handleEdit} />)}
+                            {records.length === 0 && (
                                 <Box textAlign="center" py={5} color="text.secondary">
                                     <Typography>記録がありません</Typography>
                                 </Box>
@@ -211,7 +146,7 @@ export default function HistoryPage() {
                         <SimpleCalendar 
                             year={currentMonth.getFullYear()} 
                             month={currentMonth.getMonth()} 
-                            events={reports} 
+                            events={records}
                             onSelect={handleEdit} 
                         />
                     </Paper>

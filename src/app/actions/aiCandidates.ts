@@ -31,9 +31,11 @@ export async function getMyAiSubmissions(organizationId: string) {
       ? payload.meta : {};
     return {
       id: candidate.id,
+      authorId: userId,
       sourceFileName: candidate.source_file_name,
       createdAt: candidate.created_at,
       recordDate: typeof meta.date === 'string' ? meta.date : null,
+      startTime: typeof meta.start_at === 'string' && /^\d{2}:\d{2}$/.test(meta.start_at) ? meta.start_at : null,
       clientName: typeof meta.client_name === 'string' ? meta.client_name : null,
     };
   });
