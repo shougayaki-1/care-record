@@ -3,8 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
-import { Alert, Box, Button, CircularProgress, Container, IconButton, Stack, Typography } from '@/components/ui/mui';
-import CloseIcon from '@mui/icons-material/Close';
+import { Alert, Box, Button, CircularProgress, IconButton, Stack, Typography } from '@/components/ui/mui';
 import SendIcon from '@mui/icons-material/Send';
 import SaveIcon from '@mui/icons-material/Save';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -12,7 +11,7 @@ import AssignmentReturnIcon from '@mui/icons-material/AssignmentReturn';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 
-import { AiImportButton, AppButton, AppDialog, InnerPageHeader, PageLayout, ScrollableActions } from '@/components/ui';
+import { AiImportButton, AppButton, AppDialog, PageLayout, RecordFormHeader, RecordFormBody } from '@/components/ui';
 import { MonthSplitTabs } from '@/components/record/MonthSplitTabs';
 import { RecordDynamicSections } from '@/components/record/RecordDynamicSections';
 import { RecordMetaForm } from '@/components/record/RecordMetaForm';
@@ -54,11 +53,11 @@ export default function RecordPage() {
 
   return (
     <PageLayout>
-       <InnerPageHeader
-            icon={<IconButton edge="start" onClick={handleClose} sx={{ color: 'action.active' }}><CloseIcon /></IconButton>}
+       <RecordFormHeader
+            onClose={handleClose}
             title={currentReportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済の記録' : '記録を修正')) : `${clientName} 様`}
             actions={(
-            <ScrollableActions aria-label="記録操作" role="group" tabIndex={0}>
+            <>
                 {currentReportId && currentStatus !== 'approved' && canDeleteRecord && (
                     <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
                 )}
@@ -81,13 +80,11 @@ export default function RecordPage() {
                         <Button variant="contained" size="small" startIcon={<SendIcon />} onClick={handleSubmit} disabled={submitting || requiresSegmentSelection} sx={{ fontWeight: 'bold' }}>送信</Button>
                     </>
                 )}
-            </ScrollableActions>
+            </>
             )}
        />
 
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
-        <Container maxWidth="md" disableGutters sx={{ width: '100%' }}>
-            <Stack spacing={{ xs: 2.5, sm: 4 }}>
+      <RecordFormBody>
             {currentStatus !== 'approved' && autosaveState !== 'idle' && (
               <Alert severity={autosaveState === 'error' ? 'warning' : 'info'}>
                 {autosaveState === 'saving' ? '入力内容を保存中です…' : autosaveState === 'saved' ? '入力内容は自動保存されています' : '自動保存に失敗しました。通信を確認して入力を続けてください。'}
@@ -213,9 +210,7 @@ export default function RecordPage() {
                 {!currentReportId && <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>※一度下書き保存すると画像を添付できます</Typography>}
             </Box>
 
-            </Stack>
-        </Container>
-      </Box>
+      </RecordFormBody>
 
       <AppDialog
         open={openCloseDialog}

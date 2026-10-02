@@ -52,6 +52,7 @@ const FormFieldItem = memo(function FormFieldItem({
 
 type RecordDynamicSectionsProps = {
   sections: Array<{ title: string; items: FormItem[] }>;
+  headingComponent?: 'h3' | 'h6';
   answers: FormAnswers;
   errors: Record<string, string>;
   warnings?: Record<string, string>;
@@ -62,6 +63,7 @@ type RecordDynamicSectionsProps = {
 
 export function RecordDynamicSections({
   sections,
+  headingComponent = 'h6',
   answers,
   errors,
   warnings = {},
@@ -73,7 +75,7 @@ export function RecordDynamicSections({
     <Box key={`${section.title}-${index}`} sx={{ borderRadius: 1, overflow: 'hidden', bgcolor: 'background.paper' }}>
       <Box sx={{ bgcolor: 'background.muted', px: { xs: 2, sm: 3 }, py: { xs: 1.5, sm: 2 }, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center' }}>
         <Box sx={{ width: 6, height: 28, bgcolor: 'primary.main', borderRadius: 1, mr: 2, flexShrink: 0 }} />
-        <Typography variant="h6" color="text.primary" fontWeight="bold" sx={{ overflowWrap: 'anywhere', lineHeight: 1.3 }}>{section.title}</Typography>
+        <Typography component={headingComponent} variant="h6" color="text.primary" fontWeight="bold" sx={{ overflowWrap: 'anywhere', lineHeight: 1.3 }}>{section.title}</Typography>
       </Box>
       <Stack divider={<Divider />}>
         {section.items.map((item) => (

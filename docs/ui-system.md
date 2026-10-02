@@ -19,6 +19,8 @@ CareRecord uses MUI v7 with semantic tokens from `src/theme.ts`. New product UI 
 
 - Top-level authenticated app pages use `InnerPageHeader` unless the page is an unframed list page that already uses `PageHeader`.
 - Use `ScrollableActions` for action rows that must remain on one row (such as the record header). Its children keep their width, and overflowing actions remain reachable by scrolling; give the row an accessible name and keyboard focus.
+- Record input workflows share `RecordFormHeader` and `RecordFormBody` with the normal record page. Use `RecordFormDialog` for modal workflows; it composes `AppDialog`, the same header actions, mobile full-screen behavior, and an independently scrollable form body.
+- AI file selection uses `AiFilePicker` for both single-record reading and batch import, with a labelled keyboard-accessible chooser.
 - Repeated settings sections should use `SectionCard` or the same outlined Paper styling from `SectionCard`; avoid one-off shadows and large corner radii in operational UI.
 - Save/create/export actions use the default `AppButton` intent. Cancel/close/filter actions use `variant="text"` or `variant="outlined"` with `intent="secondary"`. Destructive actions use `intent="danger"` and warning flows use `intent="warning"`.
 

@@ -74,10 +74,12 @@ export function InnerPageHeader({
   icon,
   title,
   actions,
+  titleComponent = 'h6',
 }: {
   icon?: ReactNode;
   title: ReactNode;
   actions?: ReactNode;
+  titleComponent?: 'h1' | 'h2' | 'h6';
 }) {
   return (
     <Box
@@ -100,6 +102,7 @@ export function InnerPageHeader({
         {icon && <Box sx={{ color: 'action.active', display: 'flex', flexShrink: 0 }}>{icon}</Box>}
         <Typography
           variant="h6"
+          component={titleComponent}
           fontWeight="bold"
           color="text.primary"
           sx={{ flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.25 }}

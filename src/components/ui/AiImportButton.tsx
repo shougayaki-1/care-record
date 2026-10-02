@@ -1,22 +1,13 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import {
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
-  Divider,
-  Paper,
-  Typography,
-} from '@mui/material';
+import { Alert, Box, Stack, Typography } from '@mui/material';
+import { AppButton } from './AppButton';
+import { AppDialog } from './AppDialog';
+import { RecordFormDialog } from './RecordFormLayout';
+import { AiFilePicker } from './AiFilePicker';
+import { ScrollableActions } from './Layout';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import type { FormItem, PromptCandidate } from '@/lib/ai/extractPrompt';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
@@ -48,7 +39,6 @@ export function AiImportButton({
   const [loading, setLoading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
 
   const openWizard = () => {
     setSelectedFile(null);
@@ -77,7 +67,6 @@ export function AiImportButton({
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    setDragOver(false);
     const file = e.dataTransfer.files[0];
     if (file) handleFileSelect(file);
   };
@@ -142,123 +131,45 @@ export function AiImportButton({
 
   return (
     <>
-      <Button
-        variant="outlined"
-        size="small"
-        startIcon={<AutoFixHighIcon />}
-        onClick={openWizard}
-        disabled={disabled}
+      <ScrollableActions aria-label="AI読み取り" role="group" tabIndex={0}>
+        <AppButton intent="secondary" variant="outlined" size="small" startIcon={<AutoFixHighIcon />} onClick={openWizard} disabled={disabled}>
+          {hasExistingValues ? 'AIで読み取り（上書き）' : 'AIで読み取り'}
+        </AppButton>
+      </ScrollableActions>
+      <RecordFormDialog
+        open={wizardOpen}
+        onClose={closeWizard}
+        title="AIで記録を読み取る"
+        loading={loading}
+        actions={<>
+          <AppButton intent="secondary" variant="text" size="small" onClick={closeWizard} disabled={loading}>キャンセル</AppButton>
+          <AppButton size="small" startIcon={<AutoFixHighIcon />} onClick={handleProcess} disabled={!selectedFile} loading={loading}>
+            {loading ? '読み取り中...' : '処理開始'}
+          </AppButton>
+        </>}
       >
-        {hasExistingValues ? 'AIで読み取り（上書き）' : 'AIで読み取り'}
-      </Button>
-
-      {/* ウィザードダイアログ */}
-      <Dialog open={wizardOpen} onClose={closeWizard} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <AutoFixHighIcon color="primary" fontSize="small" />
-          AIで記録を読み取る
-        </DialogTitle>
-
-        <DialogContent dividers sx={{ p: 2 }}>
-          <AiInfoPanel variant="dialog" />
-
-          <Divider sx={{ my: 1.5 }} />
-
-          {/* ファイル選択エリア */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,application/pdf"
-            style={{ display: 'none' }}
-            onChange={handleFileInputChange}
-          />
-
+        <AiInfoPanel variant="dialog" />
+        <Box>
+          <Typography component="h3" variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>原本ファイル</Typography>
           {selectedFile ? (
-            <Paper
-              variant="outlined"
-              sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, bgcolor: 'action.hover' }}
-            >
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }} sx={{ p: 2, bgcolor: 'background.muted' }}>
               <InsertDriveFileIcon color="action" />
               <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography fontSize="0.875rem" noWrap>
-                  {selectedFile.name}
-                </Typography>
-                <Typography fontSize="0.75rem" color="text.secondary">
-                  {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                </Typography>
+                <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{selectedFile.name}</Typography>
+                <Typography variant="caption" color="text.secondary">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</Typography>
               </Box>
-              <Button
-                size="small"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={loading}
-              >
-                変更
-              </Button>
-            </Paper>
-          ) : (
-            <Paper
-              variant="outlined"
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              sx={{
-                p: 3,
-                textAlign: 'center',
-                border: '2px dashed',
-                borderColor: dragOver ? 'primary.main' : 'primary.light',
-                bgcolor: dragOver ? 'primary.50' : 'background.default',
-                cursor: 'pointer',
-                transition: 'border-color 0.15s, background-color 0.15s',
-              }}
-            >
-              <CloudUploadIcon color="primary" sx={{ fontSize: 36, mb: 0.5 }} />
-              <Typography fontSize="0.875rem" color="text.secondary">
-                クリックまたはドラッグ&ドロップでファイルを選択
-              </Typography>
-              <Typography fontSize="0.75rem" color="text.disabled" mt={0.5}>
-                PDF・JPEG・PNG・WebP（最大10MB）
-              </Typography>
-            </Paper>
-          )}
-
-          {errorMessage && (
-            <Alert severity="error" sx={{ mt: 1.5 }} onClose={() => setErrorMessage(null)}>
-              {errorMessage}
-            </Alert>
-          )}
-        </DialogContent>
-
-        <DialogActions sx={{ px: 2, py: 1.5 }}>
-          <Button onClick={closeWizard} disabled={loading}>
-            キャンセル
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <AutoFixHighIcon />}
-            onClick={handleProcess}
-            disabled={!selectedFile || loading}
-          >
-            {loading ? '読み取り中...' : '処理開始'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* 上書き確認ダイアログ */}
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <DialogTitle>確認</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            既存の入力内容が上書きされます。続けますか？
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmOpen(false)}>キャンセル</Button>
-          <Button onClick={handleConfirmContinue} variant="contained">
-            続ける
-          </Button>
-        </DialogActions>
-      </Dialog>
+            </Stack>
+          ) : null}
+          <AiFilePicker inputRef={fileInputRef} onChange={handleFileInputChange} onDrop={handleDrop} disabled={loading} buttonLabel={selectedFile ? 'ファイルを変更' : 'ファイルを選択'} />
+        </Box>
+        {errorMessage && <Alert severity="error" onClose={() => setErrorMessage(null)}>{errorMessage}</Alert>}
+      </RecordFormDialog>
+      <AppDialog open={confirmOpen} onClose={() => setConfirmOpen(false)} title="確認" actions={<ScrollableActions aria-label="上書き確認操作" role="group" tabIndex={0}>
+        <AppButton intent="secondary" variant="text" onClick={() => setConfirmOpen(false)}>キャンセル</AppButton>
+        <AppButton onClick={handleConfirmContinue}>続ける</AppButton>
+      </ScrollableActions>}>
+        <Typography>既存の入力内容が上書きされます。続けますか？</Typography>
+      </AppDialog>
     </>
   );
 }
