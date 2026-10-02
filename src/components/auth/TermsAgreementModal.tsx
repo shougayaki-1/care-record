@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import {
     Button, Typography, Box, FormControlLabel, Checkbox
 } from '@/components/ui/mui';
@@ -13,11 +14,13 @@ import { acceptCurrentTerms } from '@/app/actions/user';
 
 export const TermsAgreementModal = () => {
     const { showToast } = useToast();
+    const pathname = usePathname();
     const [open, setOpen] = useState(false);
     const [checked, setChecked] = useState(false);
     const [userId, setUserId] = useState<string | null>(null);
 
     useEffect(() => {
+        if (pathname.startsWith('/auth/')) return;
         const checkAgreement = async () => {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
@@ -32,7 +35,7 @@ export const TermsAgreementModal = () => {
             if (data && !data.is_agreed) setOpen(true);
         };
         void checkAgreement();
-    }, []);
+    }, [pathname]);
 
     const handleAgree = async () => {
         if (!userId) return;
@@ -51,7 +54,7 @@ export const TermsAgreementModal = () => {
 
     return (
         <AppDialog
-            open={open}
+            open={open && !pathname.startsWith('/auth/')}
             disableEscapeKeyDown
             maxWidth="sm"
             title="利用規約への同意"

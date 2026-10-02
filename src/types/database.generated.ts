@@ -1223,6 +1223,27 @@ export type Database = {
           },
         ]
       }
+      password_reset_requests: {
+        Row: {
+          created_at: string
+          email_hash: string
+          id: number
+          ip_hash: string | null
+        }
+        Insert: {
+          created_at?: string
+          email_hash: string
+          id?: never
+          ip_hash?: string | null
+        }
+        Update: {
+          created_at?: string
+          email_hash?: string
+          id?: never
+          ip_hash?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           agreed_at: string | null
@@ -2969,13 +2990,19 @@ export type Database = {
         Args: { p_shift_id: string; p_staff_ids: string[] }
         Returns: undefined
       }
-      request_own_account_deletion: {
-        Args: { p_retention_basis: string }
-        Returns: undefined
-      }
+      request_own_account_deletion:
+        | { Args: { p_retention_basis: string }; Returns: undefined }
+        | {
+            Args: { p_reauth_token: string; p_retention_basis: string }
+            Returns: undefined
+          }
       request_report_deletion: {
         Args: { p_org_id: string; p_reason: string; p_report_id: string }
         Returns: string
+      }
+      reserve_password_reset_request: {
+        Args: { p_email_hash: string; p_ip_hash: string }
+        Returns: boolean
       }
       reserve_report_image_upload: {
         Args: { p_report_id: string }

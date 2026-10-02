@@ -243,6 +243,9 @@ export const AuthForm = () => {
                             </AppButton>
                         </Stack>
                     </form>
+                    {!isRegisterMode && <AppButton href="/auth/forgot-password" variant="text" fullWidth sx={{ mt: 2 }} disabled={loading}>
+                        パスワードを忘れた方
+                    </AppButton>}
                 </Box>
             </Fade>
 

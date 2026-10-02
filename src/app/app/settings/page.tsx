@@ -36,10 +36,10 @@ import { getSettingsSectionsData } from '@/app/actions/settingsSections';
 import type { LaborPremiumType } from '@/utils/laborPremium';
 import type { ServiceType } from '@/app/actions/serviceTypes';
 import type { StaffRole } from '@/app/actions/staffRoles';
-import { issueReauthGrant, beginStepUpReauth, consumeStepUpGrantCookie } from '@/app/actions/auth';
+import { takeProviderReauthGrant } from '@/app/actions/authSecurity';
+import { useReauth } from '@/hooks/useReauth';
 
 // reauth_grants の purpose のうち、この画面で発行し得るもの
-type SettingsReauthPurpose = 'external_secret_change' | 'organization_delete';
 // OAuth step-up 再認証の往復から戻ってきた後に再開する操作
 type StepUpResumeAction = 'connect_calendar' | 'reauthorize_calendar' | 'disconnect_calendar' | 'delete_org';
 
@@ -93,10 +93,7 @@ function SettingsContent() {
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
     const [openLeaveDialog, setOpenLeaveDialog] = useState(false);
     const [confirmInput, setConfirmInput] = useState('');
-    const [reauthPassword, setReauthPassword] = useState('');
-    // false と判明した場合のみ「パスワードを持たないSSO専用アカウント」として扱う。
-    // 未確定(null)や取得失敗時は安全側(パスワード方式)にフォールバックする。
-    const [hasPasswordIdentity, setHasPasswordIdentity] = useState<boolean | null>(null);
+    const { requestReauth, reauthDialog } = useReauth();
 
     // 労働時間ルール・サービス種別・スタッフ役割の3セクションをまとめて1回で取得する
     const [settingsSectionsData, setSettingsSectionsData] = useState<{
@@ -175,30 +172,13 @@ function SettingsContent() {
         }
     }, [searchParams, showToast]);
 
-    // ログイン方式の判定: パスワードを持たない(SSOのみの)アカウントは、重要操作の
-    // 再認証をパスワードではなくOAuthのstep-upで行う。
-    // identities に 'email' が含まれるかではなく、実際にパスワードが設定されて
-    // いるかで判定する(後からのパスワード設定/削除に identities が追従すると
-    // は限らないため)。
-    useEffect(() => {
-        (async () => {
-            try {
-                const { data, error } = await supabase.rpc('current_user_has_password');
-                if (error) throw error;
-                setHasPasswordIdentity(Boolean(data));
-            } catch {
-                setHasPasswordIdentity(true);
-            }
-        })();
-    }, []);
-
     // OAuth step-up再認証(/auth/reauth-callback)から戻ってきた際、中断していた操作を再開する。
     const stepupHandledRef = useRef(false);
     useEffect(() => {
         const stepupError = searchParams.get('stepupError');
         if (stepupError) {
             window.history.replaceState(null, '', '/app/settings');
-            showToast('Googleでの再認証に失敗しました。もう一度お試しください。', 'error');
+            showToast('本人確認に失敗しました。もう一度お試しください。', 'error');
             return;
         }
         const stepup = searchParams.get('stepup');
@@ -209,7 +189,11 @@ function SettingsContent() {
 
         (async () => {
             try {
-                const grant = await consumeStepUpGrantCookie();
+                const grant = await takeProviderReauthGrant(action === 'delete_org' ? 'organization_delete' : 'external_secret_change');
+                if (searchParams.get('reauthOrg') !== currentOrg.id) {
+                    showToast('本人確認を開始した事業所と一致しません。もう一度お試しください。', 'error');
+                    return;
+                }
                 if (!grant) {
                     showToast('再認証の有効期限が切れました。もう一度お試しください。', 'error');
                     return;
@@ -238,28 +222,6 @@ function SettingsContent() {
             }
         })();
     }, [searchParams, currentOrg, showToast]);
-
-    /** パスワードを持つ人向けの再認証。 */
-    const promptPasswordReauth = async (purpose: SettingsReauthPurpose) => {
-        const password = window.prompt('外部連携を変更するため、現在のパスワードを入力してください');
-        if (!password) return null;
-        return issueReauthGrant(purpose, password);
-    };
-
-    /**
-     * SSOのみの人向けの再認証。Googleの認証画面へ全遷移するため、
-     * 呼び出し側は以後の処理を諦めて return する(戻り先で resume 用の action として続きを行う)。
-     */
-    const startOAuthStepUp = async (purpose: SettingsReauthPurpose, resume: StepUpResumeAction) => {
-        const { nonce, provider } = await beginStepUpReauth(purpose);
-        const next = `/app/settings?stepup=1&action=${resume}`;
-        const redirectTo = `${window.location.origin}/auth/reauth-callback?nonce=${encodeURIComponent(nonce)}&next=${encodeURIComponent(next)}`;
-        showToast('本人確認のためGoogleへ移動します', 'info');
-        await supabase.auth.signInWithOAuth({
-            provider: provider as 'google' | 'azure',
-            options: { redirectTo, queryParams: { prompt: 'select_account' } },
-        });
-    };
 
     const handleSave = async () => {
         if (!orgName.trim() || !currentOrg) return;
@@ -342,23 +304,11 @@ function SettingsContent() {
         if (!currentOrg) return;
         setConnectingCal(true);
         try {
-            if (hasPasswordIdentity === false) {
-                const { data: { user } } = await supabase.auth.getUser();
-                const hasGoogleIdentity = user?.identities?.some((identity) => identity.provider === 'google');
-                if (hasGoogleIdentity) {
-                    // Google SSO-only accounts use this Calendar authorization
-                    // as their step-up as well. It avoids a second,
-                    // back-to-back Google verification flow that can loop.
-                    const url = await getGoogleAuthUrlAction(currentOrg.id, mode);
-                    window.location.href = url;
-                    return;
-                }
-                // Azure-only SSO cannot be proven by a Google Calendar OAuth
-                // response, so it retains its provider-specific step-up.
-                await startOAuthStepUp('external_secret_change', mode === 'reauthorize' ? 'reauthorize_calendar' : 'connect_calendar');
-                return;
-            }
-            const grant = await promptPasswordReauth('external_secret_change');
+            const grant = await requestReauth('external_secret_change', {
+                preferredMethod: 'google',
+                next: `/app/settings?stepup=1&action=${mode === 'reauthorize' ? 'reauthorize_calendar' : 'connect_calendar'}&reauthOrg=${currentOrg.id}`,
+                calendarAuthorization: () => getGoogleAuthUrlAction(currentOrg.id, mode),
+            });
             if (!grant) {
                 setConnectingCal(false);
                 return;
@@ -377,11 +327,9 @@ function SettingsContent() {
         if (!(await confirm({ message: 'カレンダーの連携を解除しますか？\n（作成されたカレンダー自体はGoogleに残り、トークンのみ破棄されます）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
-            if (hasPasswordIdentity === false) {
-                await startOAuthStepUp('external_secret_change', 'disconnect_calendar');
-                return; // Googleへ全遷移するため、ここで処理を終える
-            }
-            const grant = await promptPasswordReauth('external_secret_change');
+            const grant = await requestReauth('external_secret_change', {
+                preferredMethod: 'google', next: `/app/settings?stepup=1&action=disconnect_calendar&reauthOrg=${currentOrg.id}`,
+            });
             if (!grant) return;
             await disconnectGoogleCalendar(currentOrg.id, grant.token);
             setGoogleCalendarId(null);
@@ -489,7 +437,11 @@ function SettingsContent() {
     const handleDeleteOrg = async () => {
         if (!currentOrg || confirmInput !== currentOrg.name) return;
         try {
-            const grant = await issueReauthGrant('organization_delete', reauthPassword);
+            setOpenDeleteDialog(false);
+            const grant = await requestReauth('organization_delete', {
+                next: `/app/settings?stepup=1&action=delete_org&reauthOrg=${currentOrg.id}`,
+            });
+            if (!grant) return;
             await deleteOrganization(currentOrg.id, grant.token);
             showToast('事業所を削除しました');
             window.location.href = '/setup';
@@ -497,18 +449,6 @@ function SettingsContent() {
             console.error(e);
             const msg = e instanceof Error ? e.message : String(e);
             showToast('削除失敗: ' + msg, 'error');
-        }
-    };
-
-    /** SSOのみのアカウント向け: Googleで再認証してから削除を実行する。 */
-    const handleDeleteOrgViaStepUp = async () => {
-        if (!currentOrg || confirmInput !== currentOrg.name) return;
-        try {
-            await startOAuthStepUp('organization_delete', 'delete_org');
-        } catch (e: unknown) {
-            console.error(e);
-            const msg = e instanceof Error ? e.message : String(e);
-            showToast('再認証の開始に失敗しました: ' + msg, 'error');
         }
     };
 
@@ -803,7 +743,7 @@ function SettingsContent() {
                                                         事業所を利用不能な削除保留状態にします。記録は保持方針に従い保全されます。
                                                     </Typography>
                                                 </Box>
-                                                <AppButton intent="danger" onClick={() => { setConfirmInput(''); setReauthPassword(''); setOpenDeleteDialog(true); }}>
+                                                <AppButton intent="danger" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
                                                     削除する
                                                 </AppButton>
                                             </Box>
@@ -816,6 +756,7 @@ function SettingsContent() {
 
             </PageBody>
 
+            {reauthDialog}
             <AppDialog
                 open={openDeleteDialog}
                 onClose={() => setOpenDeleteDialog(false)}
@@ -823,15 +764,9 @@ function SettingsContent() {
                 dividers={false}
                 actions={<>
                     <AppButton variant="text" intent="secondary" onClick={() => setOpenDeleteDialog(false)}>キャンセル</AppButton>
-                    {hasPasswordIdentity === false ? (
-                        <AppButton onClick={handleDeleteOrgViaStepUp} intent="danger" disabled={confirmInput !== currentOrg.name}>
-                            Googleで再認証して削除実行
-                        </AppButton>
-                    ) : (
-                        <AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name || !reauthPassword}>
-                            削除実行
-                        </AppButton>
-                    )}
+                    <AppButton onClick={handleDeleteOrg} intent="danger" disabled={confirmInput !== currentOrg.name}>
+                        本人確認して削除実行
+                    </AppButton>
                 </>}
             >
                     <Typography color="error" sx={{ mb: 2 }}>
@@ -845,22 +780,6 @@ function SettingsContent() {
                         onChange={e => setConfirmInput(e.target.value)}
                         placeholder={currentOrg.name}
                     />
-                    {hasPasswordIdentity === false ? (
-                        <Alert severity="info" sx={{ mt: 2 }}>
-                            SSOでログインしているため、削除実行を押すとGoogleの認証画面へ移動して本人確認します。
-                        </Alert>
-                    ) : (
-                        <AppTextField
-                            fullWidth
-                            size="small"
-                            type="password"
-                            autoComplete="current-password"
-                            value={reauthPassword}
-                            onChange={e => setReauthPassword(e.target.value)}
-                            label="現在のパスワード"
-                            sx={{ mt: 2 }}
-                        />
-                    )}
             </AppDialog>
 
             <AppDialog open={openLeaveDialog} onClose={() => setOpenLeaveDialog(false)} title="脱退の確認" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenLeaveDialog(false)}>キャンセル</AppButton><AppButton onClick={handleLeaveOrg} intent="warning">脱退する</AppButton></>}>

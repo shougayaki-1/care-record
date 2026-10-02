@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Box, Typography, TextField, Button, Alert, Stack, Divider,
     Chip, CircularProgress, Avatar, IconButton
@@ -22,6 +22,9 @@ import { deleteUserAccount, updateOwnProfile, uploadOwnAvatar } from '@/app/acti
 import { InnerPageHeader, PageBody, PageLayout } from '@/components/ui';
 import { logoutCurrentUser } from '@/utils/clientLogout';
 import Link from 'next/link';
+import { useReauth } from '@/hooks/useReauth';
+import { changeAccountEmail, changeAccountPassword, takeProviderReauthGrant } from '@/app/actions/authSecurity';
+import type { ReauthPurpose } from '@/utils/reauthTypes';
 
 const GoogleLogo = () => (
     <svg width="20" height="20" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" /><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" /><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" /><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" /></svg>
@@ -36,6 +39,9 @@ export default function ProfilePage() {
     const { currentOrg, loading: wsLoading } = useWorkspace();
     const { showToast } = useToast();
     const confirm = useConfirm();
+    const { requestReauth, reauthDialog } = useReauth();
+    const resumedGrant = useRef<{ purpose: ReauthPurpose; token: string } | null>(null);
+    const resumeHandled = useRef(false);
     
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -76,6 +82,34 @@ export default function ProfilePage() {
         queueMicrotask(() => void fetchProfile());
     }, [fetchProfile]);
 
+    useEffect(() => {
+        if (resumeHandled.current) return;
+        const params = new URLSearchParams(window.location.search);
+        if (!params.has('stepup') && !params.has('stepupError')) return;
+        resumeHandled.current = true;
+        window.history.replaceState(null, '', '/app/profile');
+        if (params.has('stepupError')) {
+            queueMicrotask(() => setMessage({ type: 'error', text: '本人確認に失敗しました。重要な操作は実行していません。' }));
+            return;
+        }
+        const purpose = params.get('reauthPurpose');
+        if (!['account_password_change', 'account_email_change', 'account_delete'].includes(purpose || '')) return;
+        void takeProviderReauthGrant(purpose as ReauthPurpose).then(grant => {
+            if (!grant) { setMessage({ type: 'error', text: '本人確認の有効期限が切れました。もう一度お試しください。' }); return; }
+            resumedGrant.current = { purpose: purpose as ReauthPurpose, token: grant.token };
+            setMessage({ type: 'success', text: '本人確認が完了しました。変更内容を再入力し、操作を確定してください。' });
+        }).catch(() => setMessage({ type: 'error', text: '本人確認を確認できません。もう一度お試しください。' }));
+    }, []);
+
+    const reauthFor = async (purpose: ReauthPurpose) => {
+        if (resumedGrant.current?.purpose === purpose) {
+            const grant = resumedGrant.current;
+            resumedGrant.current = null;
+            return grant;
+        }
+        return requestReauth(purpose, { next: `/app/profile?stepup=1&reauthPurpose=${purpose}` });
+    };
+
     // ★修正: error handlingの型をunknownにし、明示的にキャスト
     const handleUpdateProfile = async () => {
         setMessage(null);
@@ -89,31 +123,35 @@ export default function ProfilePage() {
         }
         setSaving(true);
         try {
-            await updateOwnProfile(name);
             if (newPassword) {
-                const { error: passError } = await supabase.auth.updateUser({ password: newPassword });
-                if (passError) throw passError;
+                const grant = await reauthFor('account_password_change');
+                if (!grant) return;
+                await changeAccountPassword(newPassword, confirmPassword, grant.token);
             }
+            await updateOwnProfile(name);
             setMessage({ type: 'success', text: '更新しました' });
             setNewPassword(''); setConfirmPassword('');
         } catch (e: unknown) { 
             if (e instanceof Error) setMessage({ type: 'error', text: e.message }); 
         } finally { 
-            setSaving(false); 
+            setSaving(false);
+            setNewPassword(''); setConfirmPassword('');
         }
     };
 
     const handleUpdateEmail = async () => {
-        if (!newEmail) return;
+        if (!newEmail || saving) return;
         setMessage(null);
+        setSaving(true);
         try {
-            const { error } = await supabase.auth.updateUser({ email: newEmail });
-            if (error) throw error;
+            const grant = await reauthFor('account_email_change');
+            if (!grant) return;
+            await changeAccountEmail(newEmail, grant.token);
             setMessage({ type: 'success', text: '確認メールを送信しました。新しいメールアドレスを確認してください。' });
             setNewEmail('');
         } catch(e: unknown) {
             if (e instanceof Error) setMessage({ type: 'error', text: e.message });
-        }
+        } finally { setSaving(false); }
     };
 
     const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -136,7 +174,9 @@ export default function ProfilePage() {
     const handleDeleteAccount = async () => {
         if (!(await confirm({ title: 'アカウントの退会', message: '本当に退会しますか？\nアカウントと関連データが完全に削除され、復元できません。', confirmText: '退会する', confirmColor: 'error' }))) return;
         try {
-            await deleteUserAccount();
+            const grant = await reauthFor('account_delete');
+            if (!grant) return;
+            await deleteUserAccount(grant.token);
             await logoutCurrentUser();
             window.location.href = '/';
         } catch(e: unknown) { 
@@ -153,6 +193,7 @@ export default function ProfilePage() {
 
     return (
         <PageLayout>
+            {reauthDialog}
             <InnerPageHeader icon={<AccountCircleIcon />} title="アカウント設定" />
 
             <PageBody maxWidth="sm">
@@ -206,7 +247,7 @@ export default function ProfilePage() {
                                     <Typography variant="body2" mb={1}>現在のメール: {email}</Typography>
                                     <Stack direction="row" spacing={1}>
                                         <TextField label="新しいメールアドレス" fullWidth size="small" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
-                                        <Button variant="outlined" onClick={handleUpdateEmail}>変更確認を送信</Button>
+                                        <Button variant="outlined" disabled={saving} onClick={handleUpdateEmail}>変更確認を送信</Button>
                                     </Stack>
                                 </Box>
 
@@ -215,8 +256,8 @@ export default function ProfilePage() {
                                 <Box>
                                     <Typography variant="caption" color="text.secondary" gutterBottom>パスワード変更</Typography>
                                     <Stack spacing={2}>
-                                        <TextField label="新しいパスワード" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} fullWidth size="small" helperText={newPassword ? PASSWORD_POLICY_HINT : ''} />
-                                        <TextField label="確認" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} fullWidth size="small" />
+                                        <TextField label="新しいパスワード" type="password" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} fullWidth size="small" helperText={newPassword ? PASSWORD_POLICY_HINT : ''} />
+                                        <TextField label="確認" type="password" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} fullWidth size="small" />
                                     </Stack>
                                 </Box>
                             </Stack>

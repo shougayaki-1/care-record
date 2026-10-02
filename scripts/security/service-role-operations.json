@@ -41,11 +41,11 @@
   },
   {
     "accessor": "serviceRoleForLoginSecurity",
-    "purpose": "Login attempt throttling",
-    "targets": ["login_attempts"],
+    "purpose": "Login attempt and password recovery request throttling",
+    "targets": ["login_attempts", "password_reset_requests"],
     "authorization": "Server-derived account hash and network hash",
     "audit": "Every success/failure is recorded without plaintext credentials",
-    "consumers": ["src/utils/supabase/loginAttempts.ts"]
+    "consumers": ["src/utils/supabase/loginAttempts.ts", "src/utils/supabase/passwordResetLimit.ts"]
   },
   {
     "accessor": "serviceRoleForOAuthNonce",
@@ -61,7 +61,7 @@
     "targets": ["user_session_activity", "reauth_grants"],
     "authorization": "Verified user ID, auth session ID, purpose, expiry and token hash",
     "audit": "Authentication and protected operations emit purpose-specific audit events",
-    "consumers": ["src/utils/supabase/reauth.ts"]
+    "consumers": ["src/utils/supabase/reauth.ts", "src/utils/supabase/accountSecurity.ts"]
   },
   {
     "accessor": "serviceRoleForRetentionDryRun",
@@ -73,7 +73,7 @@
   },
   {
     "accessor": "serviceRoleForStepupReauth",
-    "purpose": "Single-use OAuth step-up reauthentication challenge for password-less SSO accounts",
+    "purpose": "Single-use OAuth step-up reauthentication challenge for linked SSO identities",
     "targets": ["stepup_reauth_challenges"],
     "authorization": "Verified user ID with an SSO identity; nonce is hashed and consumed exactly once",
     "audit": "Successful completion issues a purpose-specific reauth grant via issueGrantToken",

@@ -58,17 +58,17 @@ export async function getGoogleAuthUrlAction(
         const reauth = await consumeReauthGrant('external_secret_change', reauthToken);
         if (reauth.userId !== userId) throw new Error('再認証した利用者が一致しません');
     } else {
-        // A Google SSO-only user can prove recent possession of the same
+        // A user with a linked Google identity can prove possession of the same
         // account while granting Calendar access. Running a separate Supabase
         // OAuth step-up first caused two consecutive Google prompts and could
         // trap users in a verification loop.
         const supabase = await createSessionClient();
-        const [{ data: { user }, error: userError }, { data: hasPassword, error: passwordError }] = await Promise.all([
+        const [{ data: { user }, error: userError }, { error: passwordError }] = await Promise.all([
             supabase.auth.getUser(),
             supabase.rpc('current_user_has_password'),
         ]);
         const hasGoogleIdentity = user?.identities?.some((identity) => identity.provider === 'google') ?? false;
-        if (userError || passwordError || !user || user.id !== userId || hasPassword || !hasGoogleIdentity) {
+        if (userError || passwordError || !user || user.id !== userId || !hasGoogleIdentity) {
             throw new Error('この操作には再認証が必要です');
         }
         requiresGoogleIdentityMatch = true;
@@ -98,7 +98,7 @@ export async function getGoogleAuthUrlAction(
 
     const url = oauth2Client.generateAuthUrl({
         access_type: 'offline', // リフレッシュトークンを取得するために必須
-        prompt: 'consent',      // 確実に同意画面を出してリフレッシュトークンをもらうため
+        prompt: requiresGoogleIdentityMatch ? 'select_account consent' : 'consent',
         scope: scopes,
         state: nonce,           // 推測不能な nonce のみを渡す（orgId は Cookie で保持）
     });
