@@ -40,7 +40,7 @@ import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { markNotificationRead } from '@/app/actions/user';
-import { logoutCurrentUser } from '@/utils/clientLogout';
+import { logoutAndRedirect } from '@/utils/clientLogout';
 import IdleTimeout from '@/components/auth/IdleTimeout';
 import { checkManagementPermission, type ManagementArea } from '@/utils/permissions';
 import { FeatureFlagsProvider } from '@/context/FeatureFlagsContext';
@@ -202,9 +202,8 @@ const TopAppBar = React.memo(function TopAppBar({
 
   const handleLogout = useCallback(async () => {
     setAccountAnchor(null);
-    await logoutCurrentUser();
-    router.push('/');
-  }, [router]);
+    await logoutAndRedirect();
+  }, []);
 
   const handleNotificationsClose = useCallback(() => setNotifAnchor(null), []);
 

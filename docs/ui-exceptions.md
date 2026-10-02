@@ -7,6 +7,7 @@
 - OAuthのGoogle・Microsoftロゴ: 各ブランド公式色。
 - `src/app/layout.tsx`のmetadata themeColor: HTMLメタデータへ渡す静的ブランド色。
 - 画像アップロード用の非表示native input。
+- Issue #29の復旧画面・ログアウトフォーム: Provider/MUIや通常の認証初期化が失敗しても操作できるnative HTML。色はブラウザのシステム色（Canvas / CanvasText / LinkText）を使い、通常画面のUI変更には適用しない。
 - `src/components/manual`: 操作説明用の赤い注釈、疑似スクリーンショット、手順強調のための装飾色。ただし、実アプリ画面に戻す共通UIは`docs/ui-system.md`のルールに従います。
 - ロール色プリセット: 利用者が選ぶ分類色として、テーマカラーではなくプリセット値を保持します。
 

@@ -137,7 +137,7 @@ export async function loginWithPassword(email: string, password: string): Promis
 export async function recordLogout(): Promise<void> {
   try {
     const user = await getAuthedUser();
-    await recordAuditEvent({
+    await recordAuthAuditSafely({
       organizationId: null,
       actorId: user.id,
       action: 'auth.logout',

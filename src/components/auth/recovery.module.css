@@ -1,0 +1,28 @@
+.form {
+  margin: 1rem 0;
+}
+
+.button {
+  padding: 0.65rem 1rem;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  color: LinkText;
+  background: Canvas;
+  font: inherit;
+  cursor: pointer;
+}
+
+.button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.surface {
+  max-width: 36rem;
+  margin: 4rem auto;
+  padding: 1.5rem;
+  color: CanvasText;
+  background: Canvas;
+  font-family: sans-serif;
+  line-height: 1.6;
+}
