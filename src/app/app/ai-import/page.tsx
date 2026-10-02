@@ -1,12 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { AiFilePicker, AppButton, PageLayout, RecordFormHeader, RecordFormBody, ScrollableActions } from '@/components/ui';
 import {
   Alert,
   Box,
-  Button,
   Checkbox,
-  CircularProgress,
   IconButton,
   LinearProgress,
   List,
@@ -17,7 +17,6 @@ import {
   Tooltip,
   Typography,
 } from '@/components/ui/mui';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import MergeTypeIcon from '@mui/icons-material/MergeType';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
@@ -137,6 +136,7 @@ export default function AiImportPage() {
   const { currentOrg } = useWorkspace();
   const { showToast } = useToast();
   const confirm = useConfirm();
+  const router = useRouter();
 
   const [clients, setClients] = useState<Candidate[]>([]);
   const [helpers, setHelpers] = useState<Candidate[]>([]);
@@ -156,7 +156,6 @@ export default function AiImportPage() {
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const dropRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 利用者・スタッフ取得
@@ -509,52 +508,42 @@ export default function AiImportPage() {
     }
   }
 
+  const handleClose = async () => {
+    if (processing || saving) return;
+    if ((fileEntries.length > 0 || rows.some((row) => row.saveStatus !== 'saved')) && !await confirm({ title: '保存されていない変更があります', message: '選択したファイルや未保存の確認内容があります。保存せず閉じますか？', confirmText: '保存せず閉じる', confirmColor: 'warning' })) return;
+    router.back();
+  };
+
   return (
-    <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
-      <Typography variant="h5" fontWeight="bold" mb={3}>
-        AI一括取込
-      </Typography>
-
-      <AiInfoPanel variant="page" />
-
-      {/* アップロードエリア */}
-      <Box
-        ref={dropRef}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={handleDrop}
-        sx={{
-          p: 3,
-          mb: 3,
-          textAlign: 'center',
-          border: '2px dashed',
-          borderColor: 'primary.light',
-          bgcolor: 'background.default',
-          cursor: 'pointer',
-        }}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept="application/pdf,image/jpeg,image/png,image/webp"
-          style={{ display: 'none' }}
-          onChange={handleFileInput}
-        />
-        <CloudUploadIcon color="primary" sx={{ fontSize: 48, mb: 1 }} />
-        <Typography color="text.secondary">
-          PDFや画像（JPEG・PNG・WebP）をドラッグ&ドロップ、またはクリックして選択
-        </Typography>
-      </Box>
+    <PageLayout>
+      <RecordFormHeader title="AI一括取込" onClose={() => void handleClose()} disabled={processing || saving} actions={<>
+        {fileEntries.length > 0 && !processing && <AppButton intent="secondary" variant="text" size="small" disabled={saving} onClick={() => {
+          fileEntries.forEach((entry) => { if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl); });
+          setFileEntries([]);
+          setGroups([]);
+          setSelectedFileIds(new Set());
+          setRows([]);
+          setProcessError(null);
+        }}>クリア</AppButton>}
+        <AppButton size="small" startIcon={<AutoFixHighIcon />} disabled={fileEntries.length === 0 || !currentOrg} loading={processing} onClick={() => void handleProcess()}>
+          {processing ? '処理中...' : '処理開始'}
+        </AppButton>
+      </>} />
+      <RecordFormBody>
+        <AiInfoPanel variant="page" />
+        <Box>
+          <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>原本ファイル</Typography>
+          <AiFilePicker inputRef={fileInputRef} onChange={handleFileInput} onDrop={handleDrop} multiple disabled={processing} />
+        </Box>
 
       {/* ファイルリスト */}
       {fileEntries.length > 0 && (
         <Box sx={{ mb: 2, p: 1, borderTop: 1, borderBottom: 1, borderColor: 'divider' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }} sx={{ mb: 1 }}>
             <Typography variant="subtitle2">{fileEntries.length} ファイル選択中</Typography>
             <Tooltip title="選択したファイルを1記録としてまとめる">
-              <span>
-                <Button
+              <ScrollableActions aria-label="ファイル操作" role="group" tabIndex={0}>
+                <AppButton intent="secondary"
                   size="small"
                   startIcon={<MergeTypeIcon />}
                   disabled={selectedFileIds.size < 2 || processing}
@@ -562,43 +551,13 @@ export default function AiImportPage() {
                   variant="outlined"
                 >
                   1記録としてまとめる
-                </Button>
-              </span>
+                </AppButton>
+              </ScrollableActions>
             </Tooltip>
-          </Box>
+          </Stack>
           <List dense>{fileListItems}</List>
         </Box>
       )}
-
-      {/* 処理ボタン */}
-      <Stack direction="row" spacing={2} mb={3}>
-        <Button
-          variant="contained"
-          startIcon={processing ? <CircularProgress size={18} color="inherit" /> : <AutoFixHighIcon />}
-          disabled={fileEntries.length === 0 || processing}
-          onClick={() => void handleProcess()}
-        >
-          {processing ? '処理中...' : '処理開始'}
-        </Button>
-        {fileEntries.length > 0 && !processing && (
-          <Button
-            variant="outlined"
-            color="inherit"
-            onClick={() => {
-              fileEntries.forEach((entry) => {
-                if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
-              });
-              setFileEntries([]);
-              setGroups([]);
-              setSelectedFileIds(new Set());
-              setRows([]);
-              setProcessError(null);
-            }}
-          >
-            クリア
-          </Button>
-        )}
-      </Stack>
 
       {/* 進捗 */}
       {processing && (
@@ -633,6 +592,7 @@ export default function AiImportPage() {
           />
         </Box>
       )}
-    </Box>
+      </RecordFormBody>
+    </PageLayout>
   );
 }

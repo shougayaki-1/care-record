@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AiImportReviewTable, type ReviewRow } from './AiImportReviewTable';
 
@@ -89,4 +89,35 @@ describe('AiImportReviewTable', () => {
     fireEvent.click(screen.getByRole('button', { name: '内容を確認して承認' }));
     await waitFor(() => expect(onApproveRow).toHaveBeenCalledWith('row-1'));
   });
+  it('keeps the review action in the shared header and displays required selectors with labels', () => {
+    render(<AiImportReviewTable
+      rows={[{ ...row, clientId: null, helperId: null }]}
+      clients={[{ id: 'client-1', name: '利用者' }]} helpers={[{ id: 'helper-1', name: 'スタッフ' }]}
+      formTemplate={[]} onRowChange={vi.fn()} onSaveSelected={vi.fn()} saving={false}
+    />);
+    fireEvent.click(screen.getAllByRole('button', { name: '内容を確認・修正' })[0]);
+    const dialog = screen.getByRole('dialog', { name: '提供記録の確認・修正' });
+    const actions = within(dialog).getByRole('group', { name: '記録操作' });
+    expect(within(actions).getByRole('button', { name: '原本と照合して確認済みにする' })).toHaveProperty('disabled', true);
+    expect(within(dialog).getByLabelText(/利用者/).getAttribute('aria-invalid')).toBe('true');
+    expect(within(dialog).getByLabelText(/担当スタッフ/)).toBeTruthy();
+    expect(within(dialog).getByText('利用者を選択してください')).toBeTruthy();
+    expect(within(dialog).getByText('スタッフを選択してください')).toBeTruthy();
+  });
+
+  it('disables the submitted record inputs and shared action while saving', () => {
+    render(<AiImportReviewTable
+      rows={[{ ...row, travelMethod: 'none', travelCostYen: '0' }]}
+      clients={[{ id: 'client-1', name: '利用者' }]} helpers={[{ id: 'helper-1', name: 'スタッフ' }]}
+      formTemplate={[]} onRowChange={vi.fn()} onSaveSelected={vi.fn()} workflow="review_submissions" saving={true}
+    />);
+    fireEvent.click(screen.getAllByRole('button', { name: '内容を確認・修正' })[0]);
+    const dialog = screen.getByRole('dialog', { name: '提供記録の確認・修正' });
+    expect(within(dialog).getByRole('button', { name: /内容を確認して承認/ })).toHaveProperty('disabled', true);
+    expect(within(dialog).getByLabelText('記録日')).toHaveProperty('disabled', true);
+    expect(within(dialog).getByRole('spinbutton', { name: '交通費' })).toHaveProperty('disabled', true);
+    expect(within(dialog).getByLabelText('移動時間').parentElement?.querySelector('.MuiInputAdornment-positionEnd')?.textContent).toBe('時間');
+    expect(within(dialog).getByRole('spinbutton', { name: '交通費' }).parentElement?.querySelector('.MuiInputAdornment-positionEnd')?.textContent).toBe('円');
+  });
+
 });

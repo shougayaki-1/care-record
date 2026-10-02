@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Box, Button, Chip, Divider, Stack, TextField, Typography,
+  Alert, Box, Chip, Divider, Stack, TextField, Typography,
   MenuItem,
 } from '@/components/ui/mui';
 import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import AddIcon from '@mui/icons-material/Add';
-import { FormPageSkeleton, InnerPageHeader, MonthField, PageBody, PageLayout, PageSection, PageToolbar } from '@/components/ui';
+import { AppButton, FormPageSkeleton, InnerPageHeader, MonthField, PageBody, PageLayout, PageSection, PageToolbar } from '@/components/ui';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import {
@@ -127,9 +127,9 @@ export default function InternalWorkPage() {
         <Stack spacing={3}>
           <PageToolbar>
               <Alert severity="info" sx={{ flex: 1 }}>会議・研修・事務作業など、利用者に紐づかない勤務実績を登録します。</Alert>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpenDialog(true)} disabled={!canCreateInternalWork || staffOptions.length === 0}>
+              <AppButton startIcon={<AddIcon />} onClick={() => setOpenDialog(true)} disabled={!canCreateInternalWork || staffOptions.length === 0}>
                 内勤を記録
-              </Button>
+              </AppButton>
           </PageToolbar>
 
           <PageSection sx={{ py: 0 }}>

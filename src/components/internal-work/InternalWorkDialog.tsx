@@ -1,9 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Button, MenuItem, Stack, TextField, Typography } from '@/components/ui/mui';
+import { Stack, Typography } from '@/components/ui/mui';
 import SaveIcon from '@mui/icons-material/Save';
-import { AppDialog, DateTimeField, UnitAdornment } from '@/components/ui';
+import { AppButton, AppTextField, DateTimeField, NumberField, RecordFormDialog, SectionCard, SelectField, UnitAdornment } from '@/components/ui';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useToast } from '@/components/ui/ToastProvider';
 import { saveInternalWork } from '@/app/actions/internalWork';
 import type { InternalWorkStaffOption } from '@/app/actions/internalWork';
@@ -35,6 +36,8 @@ export default function InternalWorkDialog({
   onSaved?: () => void | Promise<void>;
 }) {
   const { showToast } = useToast();
+  const confirm = useConfirm();
+  const [attempted, setAttempted] = useState(false);
   const now = useMemo(() => new Date(), []);
   const [title, setTitle] = useState('会議');
   const [workType, setWorkType] = useState('meeting');
@@ -45,7 +48,23 @@ export default function InternalWorkDialog({
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const validDates = Number.isFinite(new Date(startAt).getTime()) && Number.isFinite(new Date(endAt).getTime()) && new Date(endAt) > new Date(startAt);
+  const errors = {
+    title: !title.trim() || title.trim().length > 100 ? '件名を1〜100文字で入力してください' : '',
+    dates: validDates ? '' : '終了日時は開始日時より後にしてください',
+    hours: !workHours.trim() || !Number.isFinite(Number(workHours)) || Number(workHours) <= 0 || Number(workHours) > 24 ? '内勤時間を0より大きく24以下で入力してください' : '',
+    staff: staffOptions.length === 0 ? '対象スタッフを選択してください' : '',
+  };
+  const handleClose = async () => {
+    if (saving) return;
+    const changed = title !== '会議' || workType !== 'meeting' || staffId !== '' || note !== '' || workHours !== '1' || startAt !== formatDatetimeLocal(now) || endAt !== formatDatetimeLocal(new Date(now.getTime() + 60 * 60 * 1000));
+    if (changed && !await confirm({ title: '保存されていない変更があります', message: '入力内容が保存されていません。保存せず閉じますか？', confirmText: '保存せず閉じる', confirmColor: 'warning' })) return;
+    onClose();
+  };
+
   const handleSave = async () => {
+    setAttempted(true);
+    if (Object.values(errors).some(Boolean)) return;
     setSaving(true);
     try {
       await saveInternalWork({
@@ -71,53 +90,39 @@ export default function InternalWorkDialog({
   };
 
   return (
-    <AppDialog
+    <RecordFormDialog
       open={open}
-      onClose={onClose}
+      onClose={() => void handleClose()}
       title="内勤を記録"
-      maxWidth="sm"
-      actions={(
-        <>
-          <Button onClick={onClose}>キャンセル</Button>
-          <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving}>
-            保存
-          </Button>
-        </>
-      )}
+      loading={saving}
+      actions={<>
+        <AppButton intent="secondary" variant="text" size="small" onClick={() => void handleClose()} disabled={saving}>キャンセル</AppButton>
+        <AppButton size="small" startIcon={<SaveIcon />} onClick={handleSave} loading={saving} disabled={staffOptions.length === 0}>保存</AppButton>
+      </>}
     >
-      <Stack spacing={2} pt={1}>
-        <TextField
-          select
-          label="対象スタッフ"
-          value={staffId || staffOptions[0]?.id || ''}
-          onChange={(e) => setStaffId(e.target.value)}
-          fullWidth
-          disabled={staffOptions.length <= 1}
-        >
-          {staffOptions.map((staff) => (
-            <MenuItem key={staff.id} value={staff.id}>{staff.name}</MenuItem>
-          ))}
-        </TextField>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-          <TextField label="件名" value={title} onChange={(e) => setTitle(e.target.value)} fullWidth />
-          <TextField select label="種別" value={workType} onChange={(e) => setWorkType(e.target.value)} sx={{ minWidth: { sm: 180 } }}>
-            {WORK_TYPES.map((type) => <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>)}
-          </TextField>
+      <SectionCard>
+        <Typography component="h3" variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>基本情報</Typography>
+        <Stack spacing={3}>
+          <SelectField required label="担当スタッフ" options={staffOptions.map((staff) => ({ value: staff.id, label: staff.name }))} value={staffId || staffOptions[0]?.id || ''} onChange={setStaffId} disabled={saving || staffOptions.length <= 1} error={attempted && Boolean(errors.staff)} helperText={attempted ? errors.staff : undefined} />
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <AppTextField required label="件名" value={title} onChange={(event) => setTitle(event.target.value)} disabled={saving} error={attempted && Boolean(errors.title)} helperText={attempted ? errors.title : undefined} />
+            <SelectField label="種別" value={workType} onChange={setWorkType} options={WORK_TYPES} disabled={saving} />
+          </Stack>
         </Stack>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
-          <DateTimeField value={startAt} onChange={(e) => setStartAt(e.target.value)} />
-          <Typography color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>〜</Typography>
-          <DateTimeField value={endAt} onChange={(e) => setEndAt(e.target.value)} />
+      </SectionCard>
+      <SectionCard>
+        <Typography component="h3" variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>勤務日時・時間</Typography>
+        <Stack spacing={3}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <DateTimeField required label="開始日時" value={startAt} onChange={(event) => setStartAt(event.target.value)} disabled={saving} error={attempted && Boolean(errors.dates)} />
+            <DateTimeField required label="終了日時" value={endAt} onChange={(event) => setEndAt(event.target.value)} disabled={saving} error={attempted && Boolean(errors.dates)} helperText={attempted ? errors.dates : undefined} />
+          </Stack>
+          <NumberField required label="内勤時間" value={workHours} onChange={(event) => setWorkHours(event.target.value)} disabled={saving} error={attempted && Boolean(errors.hours)} helperText={attempted ? errors.hours : undefined} slotProps={{ input: { endAdornment: <UnitAdornment>時間</UnitAdornment> }, htmlInput: { min: 0, max: 24, step: '0.25' } }} />
         </Stack>
-        <TextField
-          label="内勤時間"
-          type="number"
-          value={workHours}
-          onChange={(e) => setWorkHours(e.target.value)}
-          slotProps={{ input: { endAdornment: <UnitAdornment>時間</UnitAdornment> }, htmlInput: { inputMode: 'decimal', step: '0.25' } }}
-        />
-        <TextField label="メモ" value={note} onChange={(e) => setNote(e.target.value)} fullWidth multiline minRows={2} />
-      </Stack>
-    </AppDialog>
+      </SectionCard>
+      <SectionCard>
+        <AppTextField label="メモ" value={note} onChange={(event) => setNote(event.target.value)} disabled={saving} multiline minRows={2} />
+      </SectionCard>
+    </RecordFormDialog>
   );
 }

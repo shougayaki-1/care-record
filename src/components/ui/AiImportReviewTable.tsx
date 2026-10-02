@@ -2,9 +2,13 @@
 
 import { useState } from 'react';
 import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, MenuItem, Select, Stack, TextField, Typography,
+  Alert, Box, Stack, Typography,
 } from '@/components/ui/mui';
+import { AppButton } from './AppButton';
+import { DateTimeField, NumberField, SelectField } from './Fields';
+import { RecordFormDialog } from './RecordFormLayout';
+import { ScrollableActions } from './Layout';
+import { UnitAdornment } from './UnitAdornment';
 import SaveIcon from '@mui/icons-material/Save';
 import { RecordListTable, type RecordListRow } from '@/components/record/RecordListTable';
 import { RecordDynamicSections } from '@/components/record/RecordDynamicSections';
@@ -127,17 +131,17 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
     onRowChange(reviewRow.id, { result: { ...reviewRow.result, values } });
   };
 
-  const renderActions = (row: ReviewRow) => <Stack direction="row" spacing={1} alignItems="center">
+  const renderActions = (row: ReviewRow) => <ScrollableActions aria-label="AI記録の操作" role="group" tabIndex={0}>
     {row.result && row.status !== 'skipped' && row.saveStatus !== 'saved' && (
-      <Button size="small" variant="outlined" onClick={() => setReviewId(row.id)}>内容を確認・修正</Button>
+      <AppButton intent="secondary" size="small" variant="outlined" onClick={() => setReviewId(row.id)}>内容を確認・修正</AppButton>
     )}
     {row.saveStatus !== 'saved' && row.status !== 'skipped' && (
-      <Button size="small" color="inherit" onClick={() => onRowChange(row.id, { status: 'skipped' })}>
+      <AppButton size="small" variant="text" intent={reviewingSubmissions ? 'danger' : 'secondary'} onClick={() => onRowChange(row.id, { status: 'skipped' })}>
         {reviewingSubmissions ? '却下' : row.sourceKind === 'ai_chat' ? '破棄' : 'スキップ'}
-      </Button>
+      </AppButton>
     )}
-    {row.status === 'skipped' && <Button size="small" onClick={() => onRowChange(row.id, { status: 'pending' })}>戻す</Button>}
-  </Stack>;
+    {row.status === 'skipped' && <AppButton size="small" variant="text" intent="secondary" onClick={() => onRowChange(row.id, { status: 'pending' })}>戻す</AppButton>}
+  </ScrollableActions>;
 
   const listRows: RecordListRow[] = rows.map((row) => ({
     id: row.id,
@@ -160,58 +164,16 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
   return <Box>
     <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} spacing={1} sx={{ mb: 2 }}>
       <Typography variant="body2" color="text.secondary">{reviewingSubmissions ? `${rows.length} 件のAI送信が確認待ちです` : `${rows.length} 件（確認済み: ${confirmedIds.length} 件）`}</Typography>
-      {!reviewingSubmissions && <Button variant="contained" size="small" startIcon={<SaveIcon />} disabled={confirmedIds.length === 0 || saving} onClick={() => void onSaveSelected(confirmedIds)}>
+      {!reviewingSubmissions && <ScrollableActions aria-label="下書き保存操作" role="group" tabIndex={0}><AppButton variant="contained" size="small" startIcon={<SaveIcon />} disabled={confirmedIds.length === 0 || saving} onClick={() => void onSaveSelected(confirmedIds)}>
         選択した記録を下書き保存
-      </Button>}
+      </AppButton></ScrollableActions>}
     </Stack>
 
     <RecordListTable rows={listRows} emptyMessage="確認待ちのAI送信がありません" />
 
-    <Dialog open={Boolean(reviewRow)} onClose={() => setReviewId(null)} maxWidth="lg" fullWidth>
-      <DialogTitle>提供記録の確認・修正</DialogTitle>
-      <DialogContent dividers>
-        {reviewRow?.result && <Stack spacing={3}>
-          {reviewRow.sourceKind === 'ai_chat' && <Alert severity="warning">AIチャットで読み取った候補です。原本PDFはこの画面に保存されていません。AIチャット側の原本と、日付・丸印・特記事項を照合してください。</Alert>}
-          {(reviewRow.sourceFiles ?? [{ fileName: reviewRow.fileName, fileType: reviewRow.fileType, previewUrl: reviewRow.previewUrl }]).map((source, index) => source.previewUrl &&
-            <Box key={`${source.fileName}-${index}`}>
-              <Typography variant="subtitle2" gutterBottom>{source.fileName}</Typography>
-              {source.fileType === 'application/pdf'
-                ? <Box component="iframe" src={source.previewUrl} title={source.fileName} sx={{ width: '100%', height: 400, border: 1, borderColor: 'divider' }} />
-                : <Box component="img" src={source.previewUrl} alt={source.fileName} sx={{ maxWidth: '100%', maxHeight: 400, objectFit: 'contain' }} />}
-            </Box>)}
-          <Box sx={{ p: { xs: 2, sm: 3 }, borderRadius: 1, bgcolor: 'background.paper' }}>
-            <Typography variant="h6" fontWeight="bold" gutterBottom>基本情報</Typography>
-            <Stack spacing={2}>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField fullWidth type="date" label="記録日" value={reviewRow.date} onChange={(event) => onRowChange(reviewRow.id, { date: event.target.value })} color={meta.date ? 'warning' : undefined} helperText={meta.date} slotProps={{ inputLabel: { shrink: true } }} />
-                <TextField fullWidth type="time" label="開始時刻" value={reviewRow.startAt} onChange={(event) => onRowChange(reviewRow.id, { startAt: event.target.value })} color={meta.start ? 'warning' : undefined} helperText={meta.start} slotProps={{ inputLabel: { shrink: true } }} />
-                <TextField fullWidth type="time" label="終了時刻" value={reviewRow.endAt} onChange={(event) => onRowChange(reviewRow.id, { endAt: event.target.value })} color={meta.end ? 'warning' : undefined} helperText={meta.end} slotProps={{ inputLabel: { shrink: true } }} />
-              </Stack>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <FormControl fullWidth><Typography variant="subtitle2" gutterBottom>利用者</Typography><Select value={reviewRow.clientId ?? ''} displayEmpty onChange={(event) => onRowChange(reviewRow.id, { clientId: event.target.value || null })}>
-                  <MenuItem value="">未選択</MenuItem>{clients.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
-                </Select>{meta.client && <Alert severity="warning" sx={{ mt: 1 }}>{meta.client}</Alert>}</FormControl>
-                <FormControl fullWidth><Typography variant="subtitle2" gutterBottom>担当スタッフ</Typography><Select value={reviewRow.helperId ?? ''} displayEmpty onChange={(event) => onRowChange(reviewRow.id, { helperId: event.target.value || null })}>
-                  <MenuItem value="">未選択</MenuItem>{helpers.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
-                </Select>{meta.helper && <Alert severity="warning" sx={{ mt: 1 }}>{meta.helper}</Alert>}</FormControl>
-                <TextField fullWidth type="number" label="移動時間（時間）" value={reviewRow.travelTime ?? ''} onChange={(event) => onRowChange(reviewRow.id, { travelTime: event.target.value })} color={meta.travel ? 'warning' : undefined} helperText={meta.travel} slotProps={{ htmlInput: { min: 0, step: 0.25 } }} />
-              </Stack>
-              {reviewingSubmissions && <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <FormControl fullWidth><Typography variant="subtitle2" gutterBottom>交通手段</Typography><Select value={reviewRow.travelMethod ?? ''} displayEmpty onChange={(event) => onRowChange(reviewRow.id, { travelMethod: event.target.value as ReviewRow['travelMethod'], ...(event.target.value === 'none' ? { travelCostYen: '0' } : {}) })}>
-                  <MenuItem value="">選択してください</MenuItem><MenuItem value="car">車</MenuItem><MenuItem value="public_transport">公共交通機関</MenuItem><MenuItem value="other">その他</MenuItem><MenuItem value="none">交通費なし</MenuItem>
-                </Select></FormControl>
-                <TextField fullWidth type="number" label="交通費（円）" value={reviewRow.travelCostYen ?? ''} onChange={(event) => onRowChange(reviewRow.id, { travelCostYen: event.target.value })} slotProps={{ htmlInput: { min: 0, max: 100000, step: 1 } }} />
-              </Stack>}
-            </Stack>
-          </Box>
-          {unmatched.map((warning, index) => <Alert key={`${warning}-${index}`} severity="warning">{warning}</Alert>)}
-          <RecordDynamicSections sections={sections} answers={reviewRow.result.values} errors={{}} warnings={fields} aiFilledFields={new Set()} disabled={false} onAnswerChange={changeAnswer} />
-        </Stack>}
-      </DialogContent>
-      <DialogActions>
-        {!canConfirm && <Typography variant="caption" color="error">利用者・スタッフ・日時・移動時間{reviewingSubmissions ? '・交通費' : ''}を確認してください</Typography>}
-        <Button onClick={() => setReviewId(null)}>閉じる</Button>
-        <Button variant="contained" disabled={!canConfirm || saving} onClick={() => {
+    <RecordFormDialog open={Boolean(reviewRow)} onClose={() => setReviewId(null)} title="提供記録の確認・修正" loading={saving} actions={<>
+      <AppButton intent="secondary" variant="text" size="small" onClick={() => setReviewId(null)} disabled={saving}>閉じる</AppButton>
+        <AppButton size="small" loading={saving} disabled={!canConfirm} onClick={() => {
           if (!reviewRow) return;
           if (reviewingSubmissions && onApproveRow) {
             void onApproveRow(reviewRow.id).then((approved) => { if (approved) setReviewId(null); });
@@ -219,8 +181,40 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
             onRowChange(reviewRow.id, { status: 'confirmed' });
             setReviewId(null);
           }
-        }}>{reviewingSubmissions ? '内容を確認して承認' : '原本と照合して確認済みにする'}</Button>
-      </DialogActions>
-    </Dialog>
+        }}>{reviewingSubmissions ? '内容を確認して承認' : '原本と照合して確認済みにする'}</AppButton>
+    </>}>
+        {reviewRow?.result && <>
+          {!canConfirm && <Alert severity="warning">利用者・スタッフ・日時・移動時間{reviewingSubmissions ? '・交通費' : ''}を確認してください</Alert>}
+          {reviewRow.sourceKind === 'ai_chat' && <Alert severity="warning">AIチャットで読み取った候補です。原本PDFはこの画面に保存されていません。AIチャット側の原本と、日付・丸印・特記事項を照合してください。</Alert>}
+          {(reviewRow.sourceFiles ?? [{ fileName: reviewRow.fileName, fileType: reviewRow.fileType, previewUrl: reviewRow.previewUrl }]).map((source, index) => source.previewUrl &&
+            <Box key={`${source.fileName}-${index}`}>
+              <Typography variant="subtitle2" gutterBottom sx={{ overflowWrap: 'anywhere' }}>{source.fileName}</Typography>
+              {source.fileType === 'application/pdf'
+                ? <Box component="iframe" src={source.previewUrl} title={source.fileName} sx={{ width: '100%', height: 400, border: 1, borderColor: 'divider' }} />
+                : <Box component="img" src={source.previewUrl} alt={source.fileName} sx={{ maxWidth: '100%', maxHeight: 400, objectFit: 'contain' }} />}
+            </Box>)}
+          <Box sx={{ p: { xs: 2, sm: 3 }, borderRadius: 1, bgcolor: 'background.paper' }}>
+            <Typography component="h3" variant="h6" fontWeight="bold" gutterBottom>基本情報</Typography>
+            <Stack spacing={2}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <DateTimeField kind="date" disabled={saving} label="記録日" value={reviewRow.date} onChange={(event) => onRowChange(reviewRow.id, { date: event.target.value })} color={meta.date ? 'warning' : undefined} helperText={meta.date} slotProps={{ inputLabel: { shrink: true } }} />
+                <DateTimeField kind="time" disabled={saving} label="開始時刻" value={reviewRow.startAt} onChange={(event) => onRowChange(reviewRow.id, { startAt: event.target.value })} color={meta.start ? 'warning' : undefined} helperText={meta.start} slotProps={{ inputLabel: { shrink: true } }} />
+                <DateTimeField kind="time" disabled={saving} label="終了時刻" value={reviewRow.endAt} onChange={(event) => onRowChange(reviewRow.id, { endAt: event.target.value })} color={meta.end ? 'warning' : undefined} helperText={meta.end} slotProps={{ inputLabel: { shrink: true } }} />
+              </Stack>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <SelectField required label="利用者" value={reviewRow.clientId ?? ''} options={[{ value: '', label: '未選択' }, ...clients.map((item) => ({ value: item.id, label: item.name }))]} onChange={(value) => onRowChange(reviewRow.id, { clientId: value || null })} disabled={saving} error={!reviewRow.clientId} helperText={meta.client || (!reviewRow.clientId ? '利用者を選択してください' : undefined)} />
+                <SelectField required label="担当スタッフ" value={reviewRow.helperId ?? ''} options={[{ value: '', label: '未選択' }, ...helpers.map((item) => ({ value: item.id, label: item.name }))]} onChange={(value) => onRowChange(reviewRow.id, { helperId: value || null })} disabled={saving} error={!reviewRow.helperId} helperText={meta.helper || (!reviewRow.helperId ? 'スタッフを選択してください' : undefined)} />
+                <NumberField disabled={saving} label="移動時間" value={reviewRow.travelTime ?? ''} onChange={(event) => onRowChange(reviewRow.id, { travelTime: event.target.value })} color={meta.travel ? 'warning' : undefined} helperText={meta.travel} slotProps={{ input: { endAdornment: <UnitAdornment>時間</UnitAdornment> }, htmlInput: { min: 0, step: 0.25 } }} />
+              </Stack>
+              {reviewingSubmissions && <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <SelectField required label="交通手段" value={reviewRow.travelMethod ?? ''} options={[{ value: '', label: '選択してください' }, { value: 'car', label: '車' }, { value: 'public_transport', label: '公共交通機関' }, { value: 'other', label: 'その他' }, { value: 'none', label: '交通費なし' }]} onChange={(value) => onRowChange(reviewRow.id, { travelMethod: value as ReviewRow['travelMethod'], ...(value === 'none' ? { travelCostYen: '0' } : {}) })} disabled={saving} error={!reviewRow.travelMethod} helperText={!reviewRow.travelMethod ? '交通手段を選択してください' : undefined} />
+                <NumberField required disabled={saving} error={!validExpense} helperText={!validExpense ? '交通費を0〜100000円で確認してください' : undefined} label="交通費" value={reviewRow.travelCostYen ?? ''} onChange={(event) => onRowChange(reviewRow.id, { travelCostYen: event.target.value })} slotProps={{ input: { endAdornment: <UnitAdornment>円</UnitAdornment> }, htmlInput: { inputMode: 'numeric', min: 0, max: 100000, step: 1 } }} />
+              </Stack>}
+            </Stack>
+          </Box>
+          {unmatched.map((warning, index) => <Alert key={`${warning}-${index}`} severity="warning">{warning}</Alert>)}
+          <RecordDynamicSections sections={sections} answers={reviewRow.result.values} errors={{}} warnings={fields} aiFilledFields={new Set()} headingComponent="h3" disabled={saving} onAnswerChange={changeAnswer} />
+        </>}
+    </RecordFormDialog>
   </Box>;
 }

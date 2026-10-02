@@ -15,6 +15,7 @@ import type { ReactNode } from 'react';
 
 export interface AppDialogProps extends Omit<DialogProps, 'title'> {
   title: ReactNode;
+  header?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
   dividers?: boolean;
@@ -28,6 +29,7 @@ export interface AppDialogProps extends Omit<DialogProps, 'title'> {
 
 export function AppDialog({
   title,
+  header,
   titleAction,
   actions,
   children,
@@ -78,12 +80,12 @@ export function AppDialog({
       ]}
       {...props}
     >
-      <DialogTitle>
+      {header ?? <DialogTitle>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, minWidth: 0 }}>
           <Box component="span" sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{title}</Box>
           {titleAction}
         </Box>
-      </DialogTitle>
+      </DialogTitle>}
       <DialogContent
         dividers={dividers}
         sx={[
@@ -94,7 +96,7 @@ export function AppDialog({
         {children}
       </DialogContent>
       {actions && <DialogActions sx={actionsSx}>{actions}</DialogActions>}
-      {loading && <CircularProgress size={24} aria-label="処理中" sx={{ position: 'absolute', top: 20, right: titleAction ? 64 : 24 }} />}
+      {loading && !header && <CircularProgress size={24} aria-label="処理中" sx={{ position: 'absolute', top: 20, right: titleAction ? 64 : 24 }} />}
     </Dialog>
   );
 }
