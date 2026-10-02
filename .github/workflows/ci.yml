@@ -47,8 +47,8 @@ jobs:
         id: changes
         run: node scripts/ci/classify-changes.mjs
 
-  quality:
-    name: App checks
+  lint-security:
+    name: Lint and security
     needs: scope
     if: needs.scope.outputs.core == 'true'
     runs-on: ubuntu-latest
@@ -60,12 +60,51 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint -- --max-warnings=0
+      - run: npm run security:service-role
+      - run: npm run test:ci-scope
+
+  typecheck:
+    name: Typecheck
+    needs: scope
+    if: needs.scope.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       - run: npm run typecheck
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-      - run: npm run security:service-role
-      - run: npm run test:ci-scope
+
+  unit:
+    name: Unit tests
+    needs: scope
+    if: needs.scope.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       - run: npm run test:unit
+
+  build:
+    name: Production build
+    needs: scope
+    if: needs.scope.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       - run: npm run build
         env:
           NODE_OPTIONS: --max-old-space-size=6144
@@ -180,11 +219,15 @@ jobs:
       - run: npm run test:ui
 
   e2e:
-    name: Local Supabase E2E
+    name: Local Supabase E2E (${{ matrix.project }})
     needs: scope
     if: needs.scope.outputs.e2eCritical == 'true' || needs.scope.outputs.e2eAll == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.scope.outputs.e2eAll == 'true' && '["chromium", "mobile-chrome"]' || '["chromium"]') }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -200,6 +243,7 @@ jobs:
       - name: Run the selected local E2E suite
         env:
           E2E_ALL: ${{ needs.scope.outputs.e2eAll }}
+          E2E_PROJECT: ${{ matrix.project }}
         run: |
           if [[ "$E2E_ALL" == 'true' ]]; then
             npm run test:e2e
@@ -209,7 +253,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.project }}
           path: playwright-report/
           if-no-files-found: ignore
           retention-days: 14
@@ -253,7 +297,7 @@ jobs:
 
   final:
     name: CI
-    needs: [scope, quality, database, database-upgrade, ui, e2e, dependencies, secret-scan]
+    needs: [scope, lint-security, typecheck, unit, build, database, database-upgrade, ui, e2e, dependencies, secret-scan]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -264,7 +308,12 @@ jobs:
           echo "$RESULTS" | jq -e '
             .scope.result == "success"
             and all(.[]; .result == "success" or .result == "skipped")
-            and (.scope.outputs.core != "true" or .quality.result == "success")
+            and (.scope.outputs.core != "true" or (
+              .["lint-security"].result == "success"
+              and .typecheck.result == "success"
+              and .unit.result == "success"
+              and .build.result == "success"
+            ))
             and (.scope.outputs.database != "true" or .database.result == "success")
             and (.scope.outputs.databaseUpgrade != "true" or .["database-upgrade"].result == "success")
             and (.scope.outputs.ui != "true" or .ui.result == "success")

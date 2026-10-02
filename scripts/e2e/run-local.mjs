@@ -6,18 +6,14 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertLocalSupabaseEnvironment } from './local-environment.mjs';
+import { playwrightArguments } from './playwright-arguments.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sourceSupabaseDir = resolve(repoRoot, 'supabase');
 const requestedSuite = process.argv[2] ?? 'critical';
 const requestedFiles = process.argv.slice(3);
 
-if (!['critical', 'all'].includes(requestedSuite)) {
-  throw new Error(`Unknown E2E suite "${requestedSuite}". Use "critical" or "all".`);
-}
-if (requestedFiles.some(file => !/^tests\/[A-Za-z0-9-]+\.spec\.ts$/.test(file))) {
-  throw new Error('Optional E2E test files must be paths such as tests/auth.spec.ts.');
-}
+const playwrightArgs = playwrightArguments(requestedSuite, requestedFiles, process.env.E2E_PROJECT);
 
 assertLocalSupabaseEnvironment(process.env, { requireApi: false });
 
@@ -129,19 +125,6 @@ try {
   assertLocalSupabaseEnvironment(supabaseEnv);
   if (!supabaseEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY || !supabaseEnv.SUPABASE_SERVICE_ROLE_KEY || !supabaseEnv.SUPABASE_DB_URL) {
     throw new Error('Supabase CLI did not return the local API keys and database URL required for E2E tests.');
-  }
-
-  const playwrightArgs = ['test'];
-  if (requestedFiles.length > 0) {
-    playwrightArgs.push(...requestedFiles);
-  } else if (requestedSuite === 'critical') {
-    playwrightArgs.push(
-      '--project=chromium',
-      'tests/auth.spec.ts',
-      'tests/workspace-routing.spec.ts',
-      'tests/staff-features.spec.ts',
-      'tests/tenant-isolation.spec.ts',
-    );
   }
 
   const result = spawnSync('npx', ['--no-install', 'playwright', ...playwrightArgs], {
