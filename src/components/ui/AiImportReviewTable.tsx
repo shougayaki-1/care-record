@@ -37,6 +37,7 @@ export type ReviewRow = {
   travelCostYen?: string;
   status: 'pending' | 'confirmed' | 'skipped' | 'error';
   saveStatus?: 'saving' | 'saved' | 'error';
+  saveError?: string;
 };
 
 export type AiImportReviewTableProps = {
@@ -114,7 +115,7 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
     Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && end > start &&
     (!travel || (Number.isFinite(Number(travel)) && Number(travel) >= 0)) &&
     (!reviewingSubmissions || validExpense));
-  const confirmedIds = rows.filter((row) => row.status === 'confirmed' && row.saveStatus !== 'saved').map((row) => row.id);
+  const confirmedIds = rows.filter((row) => row.status === 'confirmed' && row.saveStatus !== 'saved' && row.saveStatus !== 'saving').map((row) => row.id);
   const activeTemplate = reviewRow?.clientId ? templatesByClient?.[reviewRow.clientId] ?? formTemplate : formTemplate;
   const sections = groupSections(activeTemplate);
   const { fields, meta, unmatched } = locateWarnings(reviewRow?.result?.warnings ?? [], activeTemplate);
@@ -133,14 +134,14 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
 
   const renderActions = (row: ReviewRow) => <ScrollableActions aria-label="AI記録の操作" role="group" tabIndex={0}>
     {row.result && row.status !== 'skipped' && row.saveStatus !== 'saved' && (
-      <AppButton intent="secondary" size="small" variant="outlined" onClick={() => setReviewId(row.id)}>内容を確認・修正</AppButton>
+      <AppButton intent="secondary" size="small" variant="outlined" disabled={saving} onClick={() => setReviewId(row.id)}>内容を確認・修正</AppButton>
     )}
     {row.saveStatus !== 'saved' && row.status !== 'skipped' && (
-      <AppButton size="small" variant="text" intent={reviewingSubmissions ? 'danger' : 'secondary'} onClick={() => onRowChange(row.id, { status: 'skipped' })}>
+      <AppButton size="small" variant="text" intent={reviewingSubmissions ? 'danger' : 'secondary'} disabled={saving} onClick={() => onRowChange(row.id, { status: 'skipped' })}>
         {reviewingSubmissions ? '却下' : row.sourceKind === 'ai_chat' ? '破棄' : 'スキップ'}
       </AppButton>
     )}
-    {row.status === 'skipped' && <AppButton size="small" variant="text" intent="secondary" onClick={() => onRowChange(row.id, { status: 'pending' })}>戻す</AppButton>}
+    {row.status === 'skipped' && <AppButton size="small" variant="text" intent="secondary" disabled={saving} onClick={() => onRowChange(row.id, { status: 'pending' })}>戻す</AppButton>}
   </ScrollableActions>;
 
   const listRows: RecordListRow[] = rows.map((row) => ({
@@ -156,6 +157,7 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
       {row.sourceKind === 'ai_chat' && <Typography variant="caption" color="warning.main" display="block">AI取込・原本要確認</Typography>}
       {row.result?.confidence && <Typography variant="caption" color="text.secondary" display="block">AI自己評価: {{ high: '高', medium: '中', low: '低' }[row.result.confidence]}</Typography>}
       {row.fileCount > 1 && <Typography variant="caption" color="text.secondary" display="block">{row.fileCount}枚</Typography>}
+      {row.saveError && <Typography variant="caption" color="error" display="block">{row.saveError}</Typography>}
       {row.errorMessage && <Typography variant="caption" color="error" display="block">{row.errorMessage}</Typography>}
     </>,
     actions: renderActions(row),
@@ -164,14 +166,14 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
   return <Box>
     <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} spacing={1} sx={{ mb: 2 }}>
       <Typography variant="body2" color="text.secondary">{reviewingSubmissions ? `${rows.length} 件のAI送信が確認待ちです` : `${rows.length} 件（確認済み: ${confirmedIds.length} 件）`}</Typography>
-      {!reviewingSubmissions && <ScrollableActions aria-label="下書き保存操作" role="group" tabIndex={0}><AppButton variant="contained" size="small" startIcon={<SaveIcon />} disabled={confirmedIds.length === 0 || saving} onClick={() => void onSaveSelected(confirmedIds)}>
+      {!reviewingSubmissions && <ScrollableActions aria-label="下書き保存操作" role="group" tabIndex={0}><AppButton variant="contained" size="small" startIcon={<SaveIcon />} loading={saving} disabled={confirmedIds.length === 0} onClick={() => void onSaveSelected(confirmedIds)}>
         選択した記録を下書き保存
       </AppButton></ScrollableActions>}
     </Stack>
 
     <RecordListTable rows={listRows} emptyMessage="確認待ちのAI送信がありません" />
 
-    <RecordFormDialog open={Boolean(reviewRow)} onClose={() => setReviewId(null)} title="提供記録の確認・修正" loading={saving} actions={<>
+    <RecordFormDialog open={Boolean(reviewRow)} onClose={() => { if (!saving) setReviewId(null); }} title="提供記録の確認・修正" loading={saving} actions={<>
       <AppButton intent="secondary" variant="text" size="small" onClick={() => setReviewId(null)} disabled={saving}>閉じる</AppButton>
         <AppButton size="small" loading={saving} disabled={!canConfirm} onClick={() => {
           if (!reviewRow) return;
@@ -183,6 +185,7 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
           }
         }}>{reviewingSubmissions ? '内容を確認して承認' : '原本と照合して確認済みにする'}</AppButton>
     </>}>
+        {reviewRow?.saveError && <Alert severity="error">{reviewRow.saveError}</Alert>}
         {reviewRow?.result && <>
           {!canConfirm && <Alert severity="warning">利用者・スタッフ・日時・移動時間{reviewingSubmissions ? '・交通費' : ''}を確認してください</Alert>}
           {reviewRow.sourceKind === 'ai_chat' && <Alert severity="warning">AIチャットで読み取った候補です。原本PDFはこの画面に保存されていません。AIチャット側の原本と、日付・丸印・特記事項を照合してください。</Alert>}

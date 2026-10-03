@@ -3,6 +3,7 @@
 import { Box, Tab, Tabs, Typography } from '@/components/ui/mui';
 
 type MonthSplitTabsProps = {
+  disabled?: boolean;
   selectedPart: 'part1' | 'part2';
   originalShiftTimes: { start_at: string; end_at: string } | null;
   formatTimeForLabel: (date?: string) => string;
@@ -10,6 +11,7 @@ type MonthSplitTabsProps = {
 };
 
 export function MonthSplitTabs({
+  disabled = false,
   selectedPart,
   originalShiftTimes,
   formatTimeForLabel,
@@ -27,8 +29,8 @@ export function MonthSplitTabs({
         allowScrollButtonsMobile
         sx={{ bgcolor: 'background.paper', borderRadius: 2 }}
       >
-        <Tab value="part1" label={`前半（月末日の24:00まで: ${formatTimeForLabel(originalShiftTimes?.start_at)} 〜 24:00）`} />
-        <Tab value="part2" label={`後半（翌月1日の00:00から: 00:00 〜 ${formatTimeForLabel(originalShiftTimes?.end_at)}）`} />
+        <Tab disabled={disabled} value="part1" label={`前半（月末日の24:00まで: ${formatTimeForLabel(originalShiftTimes?.start_at)} 〜 24:00）`} />
+        <Tab disabled={disabled} value="part2" label={`後半（翌月1日の00:00から: 00:00 〜 ${formatTimeForLabel(originalShiftTimes?.end_at)}）`} />
       </Tabs>
     </Box>
   );

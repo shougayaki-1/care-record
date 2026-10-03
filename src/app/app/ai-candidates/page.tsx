@@ -4,7 +4,7 @@ import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, CircularProgress, Stack } from '@/components/ui/mui';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { useToast } from '@/components/ui/ToastProvider';
+import { useAsyncRecordAction } from '@/hooks/useAsyncRecordAction';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { supabase } from '@/lib/supabase';
 import { approveAiCandidate } from '@/app/actions/aiCandidates';
@@ -27,14 +27,13 @@ type NamedId = { id: string; name: string };
 export default function AiCandidatesPage() {
   const { currentOrg } = useWorkspace();
   const canReview = Boolean(currentOrg && checkManagementPermission(currentOrg.effectivePermissions, 'reports'));
-  const { showToast } = useToast();
+  const { pending: saving, run, isRunning } = useAsyncRecordAction(currentOrg?.id);
   const confirm = useConfirm();
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [clients, setClients] = useState<NamedId[]>([]);
   const [helpers, setHelpers] = useState<NamedId[]>([]);
   const [templatesByClient, setTemplatesByClient] = useState<Record<string, FormItem[]>>({});
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -109,36 +108,33 @@ export default function AiCandidatesPage() {
   }, [currentOrg]);
 
   const handleRowChange = useCallback((id: string, changes: Partial<ReviewRow>) => {
+    if (isRunning()) return;
     if (changes.status === 'skipped' && currentOrg && canReview) {
       void (async () => {
-        const accepted = await confirm({ message: 'このAI送信を却下しますか？', confirmText: '却下する', confirmColor: 'error' });
-        if (!accepted) return;
-        const { error } = await commitRecordChange(currentOrg.id, async () => {
+        const outcome = await run(() => commitRecordChange(currentOrg.id, async () => {
           const result = await supabase.rpc('discard_ai_import_candidate', { p_organization_id: currentOrg.id, p_candidate_id: id });
           if (result.error) throw result.error;
-          return result;
-        }).catch((error) => ({ error }));
-        if (error) showToast('AI送信を却下できませんでした', 'error');
-        else setRows((previous) => previous.filter((row) => row.id !== id));
+        }), {
+          confirm: () => confirm({ message: 'このAI送信を却下しますか？', confirmText: '却下する', confirmColor: 'error' }),
+          successMessage: 'AI送信を却下しました', errorMessage: 'AI送信を却下できませんでした。もう一度操作してください。',
+        });
+        if (outcome.ok) setRows((previous) => previous.filter((row) => row.id !== id));
       })();
       return;
     }
     setRows((previous) => previous.map((row) => {
       if (row.id !== id) return row;
       const contentChanged = Object.keys(changes).some((key) => key !== 'status');
-      return { ...row, ...changes, ...(contentChanged ? { status: 'pending' as const } : {}) };
+      return { ...row, ...changes, saveError: undefined, ...(contentChanged ? { status: 'pending' as const } : {}) };
     }));
-  }, [canReview, confirm, currentOrg, showToast]);
+  }, [canReview, confirm, currentOrg, isRunning, run]);
 
   const handleApproveRow = useCallback(async (id: string): Promise<boolean> => {
     if (!currentOrg || !canReview) return false;
     const row = rows.find((item) => item.id === id);
-    if (!row?.result || !row.clientId || !row.helperId || !row.travelMethod || row.travelCostYen === undefined) {
-      showToast('利用者・スタッフ・交通費を確認してください', 'error');
-      return false;
-    }
-    setSaving(true);
-    try {
+    const outcome = await run(async () => {
+      setRows((previous) => previous.map((item) => item.id === id ? { ...item, saveError: undefined } : item));
+      if (!row?.result || !row.clientId || !row.helperId || !row.travelMethod || row.travelCostYen === undefined) throw new Error('利用者・スタッフ・交通費を確認してください');
       const start = new Date(`${row.date}T${row.startAt}:00`);
       const end = new Date(`${row.date}T${row.endAt}:00`);
       if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && end < start) end.setDate(end.getDate() + 1);
@@ -164,16 +160,17 @@ export default function AiCandidatesPage() {
         },
       } satisfies Parameters<typeof approveAiCandidate>[0];
       await commitRecordChange(currentOrg.id, () => approveAiCandidate(payload));
-      setRows((previous) => previous.filter((item) => item.id !== id));
-      showToast('AI送信を確認し、提供記録を承認しました', 'success');
-      return true;
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '承認できませんでした', 'error');
+    }, {
+      successMessage: 'AI送信を確認し、提供記録を承認しました',
+      errorMessage: '承認に失敗しました。入力内容は保持しています。もう一度承認してください。',
+    });
+    if (!outcome.ok) {
+      if (outcome.reason === 'error') setRows((previous) => previous.map((item) => item.id === id ? { ...item, saveError: '承認に失敗しました。入力内容は保持しています。もう一度承認してください。' } : item));
       return false;
-    } finally {
-      setSaving(false);
     }
-  }, [canReview, currentOrg, rows, showToast]);
+    setRows((previous) => previous.filter((item) => item.id !== id));
+    return true;
+  }, [canReview, currentOrg, rows, run]);
 
   return (
     <PageLayout>

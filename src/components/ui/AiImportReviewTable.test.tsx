@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiImportReviewTable, type ReviewRow } from './AiImportReviewTable';
 
 const row: ReviewRow = {
@@ -17,6 +17,8 @@ const row: ReviewRow = {
   travelTime: '2',
   clientId: 'client-1', helperId: 'helper-1', status: 'pending',
 };
+
+afterEach(cleanup);
 
 describe('AiImportReviewTable', () => {
   it('requires opening the source review before confirming even a high confidence result', () => {
@@ -106,13 +108,18 @@ describe('AiImportReviewTable', () => {
   });
 
   it('disables the submitted record inputs and shared action while saving', () => {
-    render(<AiImportReviewTable
+    const view = (saving: boolean) => <AiImportReviewTable
       rows={[{ ...row, travelMethod: 'none', travelCostYen: '0' }]}
       clients={[{ id: 'client-1', name: '利用者' }]} helpers={[{ id: 'helper-1', name: 'スタッフ' }]}
-      formTemplate={[]} onRowChange={vi.fn()} onSaveSelected={vi.fn()} workflow="review_submissions" saving={true}
-    />);
+      formTemplate={[]} onRowChange={vi.fn()} onSaveSelected={vi.fn()} workflow="review_submissions" saving={saving}
+    />;
+    const { rerender } = render(view(false));
     fireEvent.click(screen.getAllByRole('button', { name: '内容を確認・修正' })[0]);
     const dialog = screen.getByRole('dialog', { name: '提供記録の確認・修正' });
+    rerender(view(true));
+    expect(screen.getAllByRole('button', { name: '内容を確認・修正', hidden: true })[0]).toHaveProperty('disabled', true);
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: '提供記録の確認・修正' })).toBeTruthy();
     expect(within(dialog).getByRole('button', { name: /内容を確認して承認/ })).toHaveProperty('disabled', true);
     expect(within(dialog).getByLabelText('記録日')).toHaveProperty('disabled', true);
     expect(within(dialog).getByRole('spinbutton', { name: '交通費' })).toHaveProperty('disabled', true);

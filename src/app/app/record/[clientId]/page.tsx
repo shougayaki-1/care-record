@@ -26,7 +26,7 @@ export default function RecordPage() {
     selectedHelpers, actualStaffs, actualServiceTypeId, startDateTime, endDateTime,
     serviceTime, travelTime, travelExpenses, images,
     aiFilledFields, isSpanningMonth, selectedPart, originalShiftTimes,
-    currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting,
+    currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting, actionError,
     shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId,
     dismissShiftSuggestion, setShiftSuggestions, setLinkedShifts,
     setActualServiceTypeId, setActualStaffs, setStartDateTime, setEndDateTime,
@@ -35,7 +35,7 @@ export default function RecordPage() {
     formatTimeForLabel, formatSegmentLabel, handlePartChange, handleChange, handleAnswerChange,
     handleImageUpload, handleDeleteReport, handleDraftSave, handleSubmit, handlePendingSave,
     handleApprove, handleRemand, handleClose, handleDialogDiscard, handleDialogSaveDraft,
-    handleAiExtracted, groupedSections, isAdmin, isReadOnly, canDeleteRecord,
+    handleAiExtracted, handleAiProcessingChange, groupedSections, isAdmin, isReadOnly, canDeleteRecord,
     requiresSegmentSelection, aiClients, aiHelpers, handleStaffChange,
   } = useRecordForm();
   const [mcpProvenance, setMcpProvenance] = useState<{ reportId: string; found: boolean } | null>(null);
@@ -54,6 +54,7 @@ export default function RecordPage() {
   return (
     <PageLayout>
        <RecordFormHeader
+            disabled={submitting}
             onClose={handleClose}
             title={currentReportId ? (isAdmin && currentStatus === 'pending' ? '記録の確認・承認' : (currentStatus === 'approved' ? '承認済の記録' : '記録を修正')) : `${clientName} 様`}
             actions={(
@@ -62,22 +63,22 @@ export default function RecordPage() {
                     <IconButton color="error" onClick={handleDeleteReport} disabled={submitting}><DeleteIcon /></IconButton>
                 )}
                 
-                {isAdmin && currentStatus === 'pending' && <Button variant="contained" color="success" size="small" startIcon={<CheckCircleIcon />} onClick={handleApprove} disabled={submitting || requiresSegmentSelection || isDirty}>承認</Button>}
-                {isAdmin && currentStatus === 'approved' && <Button variant="contained" color="warning" size="small" startIcon={<AssignmentReturnIcon />} onClick={handleRemand} disabled={submitting || requiresSegmentSelection}>承認取消</Button>}
+                {isAdmin && currentStatus === 'pending' && <AppButton loading={submitting} variant="contained" intent="success" size="small" startIcon={<CheckCircleIcon />} onClick={handleApprove} disabled={submitting || requiresSegmentSelection || isDirty}>承認</AppButton>}
+                {isAdmin && currentStatus === 'approved' && <AppButton loading={submitting} variant="contained" intent="warning" size="small" startIcon={<AssignmentReturnIcon />} onClick={handleRemand} disabled={submitting || requiresSegmentSelection}>承認取消</AppButton>}
                 {isAdmin && currentStatus === 'pending' && (
-                    <Button variant="outlined" size="small" startIcon={<SaveIcon />} onClick={handlePendingSave} disabled={submitting || requiresSegmentSelection}>
+                    <AppButton loading={submitting} variant="outlined" size="small" startIcon={<SaveIcon />} onClick={handlePendingSave} disabled={submitting || requiresSegmentSelection}>
                         変更を保存
-                    </Button>
+                    </AppButton>
                 )}
                 {!isAdmin && currentStatus === 'pending' && (
-                    <Button variant="contained" size="small" startIcon={<SaveIcon />} onClick={handlePendingSave} disabled={submitting || requiresSegmentSelection}>
+                    <AppButton loading={submitting} variant="contained" size="small" startIcon={<SaveIcon />} onClick={handlePendingSave} disabled={submitting || requiresSegmentSelection}>
                         変更を保存
-                    </Button>
+                    </AppButton>
                 )}
                 {currentStatus !== 'pending' && currentStatus !== 'approved' && (
                     <>
-                        <Button variant="outlined" size="small" startIcon={<SaveIcon />} onClick={handleDraftSave} disabled={submitting || requiresSegmentSelection}>下書き</Button>
-                        <Button variant="contained" size="small" startIcon={<SendIcon />} onClick={handleSubmit} disabled={submitting || requiresSegmentSelection} sx={{ fontWeight: 'bold' }}>送信</Button>
+                        <AppButton loading={submitting} variant="outlined" size="small" startIcon={<SaveIcon />} onClick={handleDraftSave} disabled={submitting || requiresSegmentSelection}>下書き</AppButton>
+                        <AppButton loading={submitting} variant="contained" size="small" startIcon={<SendIcon />} onClick={handleSubmit} disabled={submitting || requiresSegmentSelection} sx={{ fontWeight: 'bold' }}>送信</AppButton>
                     </>
                 )}
             </>
@@ -85,6 +86,7 @@ export default function RecordPage() {
        />
 
       <RecordFormBody>
+            {actionError && <Alert severity="error">{actionError}</Alert>}
             {currentStatus !== 'approved' && autosaveState !== 'idle' && (
               <Alert severity={autosaveState === 'error' ? 'warning' : 'info'}>
                 {autosaveState === 'saving' ? '入力内容を保存中です…' : autosaveState === 'saved' ? '入力内容は自動保存されています' : '自動保存に失敗しました。通信を確認して入力を続けてください。'}
@@ -99,6 +101,7 @@ export default function RecordPage() {
             
             {isSpanningMonth && (
               <MonthSplitTabs
+                disabled={submitting}
                 selectedPart={selectedPart}
                 originalShiftTimes={originalShiftTimes}
                 formatTimeForLabel={formatTimeForLabel}
@@ -121,6 +124,7 @@ export default function RecordPage() {
                         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                             {shiftSegments.map((segment, index) => (
                                 <Button
+                                    disabled={submitting}
                                     key={segment.id}
                                     size="small"
                                     variant={(selectedSegmentId || segmentId) === segment.id ? 'contained' : 'outlined'}
@@ -135,6 +139,7 @@ export default function RecordPage() {
             )}
 
             <ShiftSuggestions
+              disabled={submitting}
               organizationId={currentOrg?.id}
               reportId={currentReportId}
               suggestions={shiftSuggestions}
@@ -154,6 +159,7 @@ export default function RecordPage() {
                   clients={aiClients}
                   helpers={aiHelpers}
                   onExtracted={handleAiExtracted}
+                  onProcessingChange={handleAiProcessingChange}
                   hasExistingValues={Object.keys(answers).length > 0}
                   disabled={submitting || loading || !currentOrg || requiresSegmentSelection}
                 />
@@ -175,7 +181,7 @@ export default function RecordPage() {
               applyDefaultTravelCosts={!currentReportId}
               errors={errors}
               aiFilledFields={aiFilledFields}
-              disabled={isReadOnly}
+              disabled={isReadOnly || submitting}
               onServiceTypeChange={(value) => { setActualServiceTypeId(value); setIsDirty(true); }}
               onStaffChange={handleStaffChange}
               onActualStaffsChange={(value) => { setActualStaffs(value); setIsDirty(true); }}
@@ -191,7 +197,7 @@ export default function RecordPage() {
               answers={answers}
               errors={errors}
               aiFilledFields={aiFilledFields}
-              disabled={isReadOnly}
+              disabled={isReadOnly || submitting}
               onAnswerChange={handleAnswerChange}
             />
 
@@ -201,8 +207,8 @@ export default function RecordPage() {
                     {images.map(img => (
                         <Box key={img.id} component="img" src={img.url} sx={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 1 }} />
                     ))}
-                    <IconButton color="primary" component="label" disabled={!currentReportId || isReadOnly} sx={{ width: 100, height: 100, border: '1px dashed', borderColor: 'divider', borderRadius: 1, flexDirection: 'column' }}>
-                        <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!currentReportId || isReadOnly} />
+                    <IconButton color="primary" component="label" disabled={!currentReportId || isReadOnly || submitting} sx={{ width: 100, height: 100, border: '1px dashed', borderColor: 'divider', borderRadius: 1, flexDirection: 'column' }}>
+                        <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!currentReportId || isReadOnly || submitting} />
                         <PhotoCamera />
                         {!currentReportId && <Typography variant="caption" sx={{ fontSize: 9 }}>未保存</Typography>}
                     </IconButton>
@@ -214,11 +220,13 @@ export default function RecordPage() {
 
       <AppDialog
         open={openCloseDialog}
-        onClose={() => setOpenCloseDialog(false)}
+        loading={submitting}
+        onClose={() => { if (!submitting) setOpenCloseDialog(false); }}
         title="保存されていない変更があります"
         dividers={false}
-        actions={<><AppButton variant="text" intent="danger" onClick={handleDialogDiscard}>破棄して移動</AppButton><AppButton onClick={handleDialogSaveDraft} autoFocus>下書き保存</AppButton></>}
+        actions={<><AppButton variant="text" intent="danger" onClick={handleDialogDiscard} disabled={submitting}>破棄して移動</AppButton><AppButton onClick={handleDialogSaveDraft} loading={submitting} autoFocus>下書き保存</AppButton></>}
       >
+        {actionError && <Alert severity="error">{actionError}</Alert>}
         <Typography>入力内容が保存されていません。下書きとして保存しますか？</Typography>
       </AppDialog>
     </PageLayout>

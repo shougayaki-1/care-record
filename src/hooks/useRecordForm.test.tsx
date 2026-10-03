@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -97,6 +97,8 @@ vi.mock('@/lib/supabase', () => {
 });
 
 import { useRecordForm } from './useRecordForm';
+import { saveReport, discardReportAutosave } from '@/app/actions/reports';
+afterEach(cleanup);
 
 const report = (id: string, startAt: string) => ({
   data: {
@@ -114,6 +116,8 @@ const report = (id: string, startAt: string) => ({
 
 describe('useRecordForm', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(discardReportAutosave).mockResolvedValue({ success: true });
     testState.search = 'reportId=report-a&draftKey=test-draft';
     testState.reports = new Map([
       ['report-a', deferred()],
@@ -155,4 +159,49 @@ describe('useRecordForm', () => {
     expect(testState.router.replace).toHaveBeenCalled();
     expect(testState.router.replace.mock.calls[0][0]).toContain('draftKey=');
   });
+  it('retains normal record input and the close dialog on failure, then retries without duplicate writes', async () => {
+    const { result } = renderHook(() => useRecordForm());
+    await waitFor(() => expect(testState.requestedReports).toContain('report-a'));
+    await act(async () => { testState.reports.get('report-a')?.resolve(report('report-a', '2026-07-19T09:00:00.000Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => { result.current.handleAnswerChange('note', '保持する入力'); result.current.setServiceTime('1.5'); result.current.setIsDirty(true); });
+    act(() => result.current.handleClose()); expect(result.current.openCloseDialog).toBe(true);
+    vi.mocked(saveReport).mockRejectedValueOnce(new Error('network unavailable'));
+    await act(async () => { await result.current.handleDialogSaveDraft(); });
+    expect(result.current.openCloseDialog).toBe(true); expect(result.current.submitting).toBe(false);
+    expect(result.current.answers.note).toBe('保持する入力'); expect(result.current.serviceTime).toBe('1.5'); expect(result.current.isDirty).toBe(true);
+    expect(testState.router.back).not.toHaveBeenCalled(); expect(testState.showToast).toHaveBeenLastCalledWith(expect.stringContaining('入力内容は保持'), 'error');
+    const key = vi.mocked(saveReport).mock.calls[0][0].idempotencyKey;
+    const response = deferred<Awaited<ReturnType<typeof saveReport>>>(); vi.mocked(saveReport).mockReturnValueOnce(response.promise);
+    let retry!: Promise<void>;
+    await act(async () => { retry = result.current.handleDialogSaveDraft(); await result.current.handleDraftSave(); });
+    expect(saveReport).toHaveBeenCalledTimes(2); expect(result.current.submitting).toBe(true);
+    expect(vi.mocked(saveReport).mock.calls[1][0].idempotencyKey).toBe(key);
+    await act(async () => { response.resolve({ success: true, reportId: 'report-a', revisionId: 'revision-2', version: 2, replayed: false }); await retry; });
+    expect(result.current.openCloseDialog).toBe(false); expect(result.current.submitting).toBe(false); expect(result.current.isDirty).toBe(false);
+    expect(testState.router.back).toHaveBeenCalledOnce(); expect(testState.showToast).toHaveBeenLastCalledWith('下書きを保存しました', 'success');
+  });
+  it('locks a normal submission while its confirmation is still open', async () => {
+    const { result } = renderHook(() => useRecordForm());
+    await waitFor(() => expect(testState.requestedReports).toContain('report-a'));
+    await act(async () => { testState.reports.get('report-a')?.resolve(report('report-a', '2026-07-19T09:00:00.000Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const confirmation = deferred<boolean>(); testState.confirm.mockReturnValueOnce(confirmation.promise);
+    let first!: Promise<void>;
+    await act(async () => { first = result.current.handleSubmit(); await result.current.handleSubmit(); });
+    expect(testState.confirm).toHaveBeenCalledOnce(); expect(saveReport).not.toHaveBeenCalled(); expect(result.current.submitting).toBe(true);
+    await act(async () => { confirmation.resolve(false); await first; });
+    expect(result.current.submitting).toBe(false); expect(testState.router.push).not.toHaveBeenCalled();
+  });
+
+  it('blocks normal save and close immediately while its AI input is being processed', async () => {
+    const { result } = renderHook(() => useRecordForm());
+    await waitFor(() => expect(testState.requestedReports).toContain('report-a'));
+    await act(async () => { testState.reports.get('report-a')?.resolve(report('report-a', '2026-07-19T09:00:00.000Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { result.current.handleAiProcessingChange(true); await result.current.handleDraftSave(); result.current.handleClose(); });
+    expect(saveReport).not.toHaveBeenCalled(); expect(testState.router.back).not.toHaveBeenCalled(); expect(result.current.submitting).toBe(true);
+    act(() => result.current.handleAiProcessingChange(false)); expect(result.current.submitting).toBe(false);
+  });
+
 });

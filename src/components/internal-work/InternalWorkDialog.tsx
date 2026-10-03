@@ -1,12 +1,12 @@
 'use client';
 
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
-import { useMemo, useState } from 'react';
-import { Stack, Typography } from '@/components/ui/mui';
+import { useMemo, useRef, useState } from 'react';
+import { Alert, Stack, Typography } from '@/components/ui/mui';
 import SaveIcon from '@mui/icons-material/Save';
 import { AppButton, AppTextField, DateTimeField, NumberField, RecordFormDialog, SectionCard, SelectField, UnitAdornment } from '@/components/ui';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { useToast } from '@/components/ui/ToastProvider';
+import { useAsyncRecordAction } from '@/hooks/useAsyncRecordAction';
 import { saveInternalWork } from '@/app/actions/internalWork';
 import type { InternalWorkStaffOption } from '@/app/actions/internalWork';
 
@@ -36,10 +36,11 @@ export default function InternalWorkDialog({
   onClose: () => void;
   onSaved?: () => void | Promise<void>;
 }) {
-  const { showToast } = useToast();
+  const { pending: saving, error, run, isRunning } = useAsyncRecordAction(organizationId);
   const confirm = useConfirm();
   const [attempted, setAttempted] = useState(false);
   const now = useMemo(() => new Date(), []);
+  const initialDates = useRef({ start: formatDatetimeLocal(now), end: formatDatetimeLocal(new Date(now.getTime() + 60 * 60 * 1000)) });
   const [title, setTitle] = useState('会議');
   const [workType, setWorkType] = useState('meeting');
   const [staffId, setStaffId] = useState('');
@@ -47,7 +48,6 @@ export default function InternalWorkDialog({
   const [endAt, setEndAt] = useState(() => formatDatetimeLocal(new Date(now.getTime() + 60 * 60 * 1000)));
   const [workHours, setWorkHours] = useState('1');
   const [note, setNote] = useState('');
-  const [saving, setSaving] = useState(false);
 
   const validDates = Number.isFinite(new Date(startAt).getTime()) && Number.isFinite(new Date(endAt).getTime()) && new Date(endAt) > new Date(startAt);
   const errors = {
@@ -56,18 +56,31 @@ export default function InternalWorkDialog({
     hours: !workHours.trim() || !Number.isFinite(Number(workHours)) || Number(workHours) <= 0 || Number(workHours) > 24 ? '内勤時間を0より大きく24以下で入力してください' : '',
     staff: staffOptions.length === 0 ? '対象スタッフを選択してください' : '',
   };
+  const resetForm = () => {
+    const next = new Date();
+    initialDates.current = { start: formatDatetimeLocal(next), end: formatDatetimeLocal(new Date(next.getTime() + 60 * 60 * 1000)) };
+    setTitle('会議'); setWorkType('meeting'); setStaffId(''); setWorkHours('1'); setNote('');
+    setStartAt(initialDates.current.start); setEndAt(initialDates.current.end);
+    setAttempted(false);
+  };
   const handleClose = async () => {
-    if (saving) return;
-    const changed = title !== '会議' || workType !== 'meeting' || staffId !== '' || note !== '' || workHours !== '1' || startAt !== formatDatetimeLocal(now) || endAt !== formatDatetimeLocal(new Date(now.getTime() + 60 * 60 * 1000));
-    if (changed && !await confirm({ title: '保存されていない変更があります', message: '入力内容が保存されていません。保存せず閉じますか？', confirmText: '保存せず閉じる', confirmColor: 'warning' })) return;
+    if (isRunning()) return;
+    const changed = title !== '会議' || workType !== 'meeting' || staffId !== '' || note !== '' || workHours !== '1' || startAt !== initialDates.current.start || endAt !== initialDates.current.end;
+    if (changed) {
+      const outcome = await run(async () => {}, {
+        confirm: () => confirm({ title: '保存されていない変更があります', message: '入力内容が保存されていません。保存せず閉じますか？', confirmText: '保存せず閉じる', confirmColor: 'warning' }),
+        errorMessage: '画面を閉じられませんでした。入力内容は保持しています。',
+      });
+      if (!outcome.ok) return;
+    }
+    resetForm();
     onClose();
   };
 
   const handleSave = async () => {
     setAttempted(true);
     if (Object.values(errors).some(Boolean)) return;
-    setSaving(true);
-    try {
+    const result = await run(async (isCurrent) => {
       await commitRecordChange(organizationId, () => saveInternalWork({
         organizationId,
         staffId: staffId || staffOptions[0]?.id || null,
@@ -78,16 +91,14 @@ export default function InternalWorkDialog({
         workHours: Number(workHours),
         note,
       }));
-      showToast('内勤実績を保存しました', 'success');
-      setNote('');
-      await onSaved?.();
-      onClose();
-    } catch (e) {
-      console.error(e);
-      showToast(e instanceof Error ? e.message : '保存に失敗しました', 'error');
-    } finally {
-      setSaving(false);
-    }
+      if (isCurrent()) {
+        try { await onSaved?.(); } catch (error) { console.error('Saved internal work callback failed', error); }
+      }
+    }, { successMessage: '内勤実績を保存しました', errorMessage: '保存に失敗しました。入力内容は保持しています。もう一度保存してください。' });
+    if (!result.ok) return;
+    // A subsequent entry starts clean; failures keep every field for retry.
+    resetForm();
+    onClose();
   };
 
   return (
@@ -101,6 +112,7 @@ export default function InternalWorkDialog({
         <AppButton size="small" startIcon={<SaveIcon />} onClick={handleSave} loading={saving} disabled={staffOptions.length === 0}>保存</AppButton>
       </>}
     >
+      {error && <Alert severity="error">{error}</Alert>}
       <SectionCard>
         <Typography component="h3" variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>基本情報</Typography>
         <Stack spacing={3}>
