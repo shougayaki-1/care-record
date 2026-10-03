@@ -80,9 +80,9 @@ export function RecordMetaForm(props: RecordMetaFormProps) {
         <Box sx={{ bgcolor: aiFilledFields.has('startDateTime') || aiFilledFields.has('endDateTime') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
           <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}><CalendarTodayIcon fontSize="small" /> サービス日時</Typography>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
-            <DateTimeField value={startDateTime} onChange={(event) => onStartChange(event.target.value)} disabled={disabled} />
+            <DateTimeField label="開始日時" value={startDateTime} onChange={(event) => onStartChange(event.target.value)} disabled={disabled} />
             <Typography color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>～</Typography>
-            <DateTimeField value={endDateTime} onChange={(event) => onEndChange(event.target.value)} disabled={disabled} />
+            <DateTimeField label="終了日時" value={endDateTime} onChange={(event) => onEndChange(event.target.value)} disabled={disabled} />
           </Stack>
         </Box>
 

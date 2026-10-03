@@ -37,6 +37,13 @@ test('通常記録で共通ヘッダーと狭幅フォームを利用する', as
   for (const width of [240, 320, 375, 1280]) {
     await page.setViewportSize({ width, height: 800 });
     await checkActions(page.getByRole('group', { name: '記録操作' }));
+    for (const label of ['開始日時', '終了日時']) {
+      const input = page.getByLabel(label, { exact: true });
+      await expect(input).toBeVisible();
+      const bounds = await input.boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    }
   }
 
 });
