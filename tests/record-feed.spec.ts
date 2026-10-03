@@ -50,8 +50,8 @@ test('通常・内勤・AI承認の保存結果が重複なく本人の履歴へ
 
   await clickMenu(page, '記録を作成');
   await page.getByText('Feed利用者 様', { exact: true }).click();
-  await page.locator('input[type="datetime-local"]').nth(0).fill(`${today}T09:00`);
-  await page.locator('input[type="datetime-local"]').nth(1).fill(`${today}T10:00`);
+  await page.getByLabel('開始日時', { exact: true }).fill(`${today}T09:00`);
+  await page.getByLabel('終了日時', { exact: true }).fill(`${today}T10:00`);
   await page.getByLabel('サービス提供').fill('1');
   await page.getByLabel('移動', { exact: true }).fill('0.5');
   await page.getByLabel('精算額').fill('0');
@@ -65,6 +65,8 @@ test('通常・内勤・AI承認の保存結果が重複なく本人の履歴へ
   await page.getByRole('button', { name: '送信', exact: true }).click();
   await page.getByRole('button', { name: '送信する', exact: true }).click();
   await expect(page.getByRole('alert').filter({ hasText: '保存に失敗しました。入力内容は保持しています。もう一度操作してください。' }).first()).toBeVisible();
+  await expect(page.getByLabel('開始日時', { exact: true })).toHaveValue(`${today}T09:00`);
+  await expect(page.getByLabel('終了日時', { exact: true })).toHaveValue(`${today}T10:00`);
   await expect(page.getByLabel('サービス提供')).toHaveValue('1');
   await expect(page.getByLabel('移動', { exact: true })).toHaveValue('0.5');
   await page.getByRole('button', { name: '送信', exact: true }).click();
