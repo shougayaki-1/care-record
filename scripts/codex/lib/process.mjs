@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir, platform } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
 const purposes = new Set(['build', 'codex', 'github']);
@@ -32,8 +32,9 @@ export function safeEnvironment(env = process.env, { purpose = 'build', home } =
   };
 }
 
-export async function command(binary, args, { cwd, input, purpose = 'build', timeout = 120_000, signal, parentEnv = process.env } = {}) {
+export async function command(binary, args, { cwd, input, purpose = 'build', timeout = 120_000, signal, testMode = false, parentEnv = process.env } = {}) {
   if (!purposes.has(purpose)) throw new Error('Unknown subprocess purpose');
+  if (testMode && purpose !== 'build') throw new Error('Test environment is build-only');
   // Per-process directories never reuse a HOME/cache that a previous script could populate.
   let privateHome;
   try {
@@ -43,7 +44,7 @@ export async function command(binary, args, { cwd, input, purpose = 'build', tim
     }
     return await new Promise((resolve, reject) => {
       if (signal?.aborted) { reject(new Error('Worker stopped')); return; }
-      const child = spawn(binary, args, { cwd, env: safeEnvironment(parentEnv, { purpose, home: privateHome }), detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(binary, args, { cwd, env: { ...safeEnvironment(parentEnv, { purpose, home: privateHome }), ...(testMode ? localTestEnvironment(parentEnv) : {}) }, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
       let output = '';
       let size = 0;
       let stopping = false;
@@ -77,4 +78,17 @@ export async function command(binary, args, { cwd, input, purpose = 'build', tim
   } finally {
     if (privateHome) await rm(privateHome, { recursive: true, force: true });
   }
+}
+
+
+// Synthetic loopback values only. Never copy hosted-service credentials into tests.
+function localTestEnvironment(env) {
+  const owner = env.HOME || homedir();
+  const cache = platform() === 'darwin' ? join(owner, 'Library/Caches') : env.XDG_CACHE_HOME || join(owner, '.cache');
+  return {
+    APP_ENV: 'test', AI_IMPORT_ENABLED: 'false', STORYBOOK_DISABLE_TELEMETRY: '1',
+    NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:54321',
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: 'ci-test-anon-key', SUPABASE_SERVICE_ROLE_KEY: 'ci-test-service-role-key',
+    PLAYWRIGHT_BROWSERS_PATH: env.PLAYWRIGHT_BROWSERS_PATH || join(cache, 'ms-playwright'),
+  };
 }
