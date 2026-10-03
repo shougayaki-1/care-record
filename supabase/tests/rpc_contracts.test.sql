@@ -16,7 +16,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path TO public, extensions;
-SELECT plan(27);
+SELECT plan(38);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -255,6 +255,44 @@ SELECT ok(has_function_privilege('authenticated',
 SELECT ok(NOT has_function_privilege('anon',
   'public.account_replace_member_roles(uuid,uuid,uuid[])', 'EXECUTE'),
   'anon cannot execute account_replace_member_roles');
+
+-- Issue #40: exercise RPC authorization directly, bypassing Server Actions.
+INSERT INTO public.organization_roles (id, organization_id, name, is_preset, permissions) VALUES
+ ('a0000004-0000-0000-0000-000000000004','aaaaaaaa-0000-0000-0000-00000000000a','Preset',true,'{"management":{}}'),
+ ('a0000005-0000-0000-0000-000000000005','aaaaaaaa-0000-0000-0000-00000000000a','Safe deletion',false,'{"management":{}}');
+UPDATE public.organization_members SET role='owner'
+ WHERE organization_id='aaaaaaaa-0000-0000-0000-00000000000a' AND user_id='a4444444-0000-0000-0000-000000000004';
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claims', '{"sub":"a3333333-0000-0000-0000-000000000003","role":"authenticated","session_id":"a3-sess"}', true);
+SELECT throws_ok($$ SELECT public.mutate_organization_role_authorized('aaaaaaaa-0000-0000-0000-00000000000a','a0000004-0000-0000-0000-000000000004','delete',NULL,NULL,NULL,false) $$,
+ '42501','preset_role_delete_forbidden','non-owner cannot delete a preset directly');
+SELECT throws_ok($$ SELECT public.mutate_organization_role_authorized('aaaaaaaa-0000-0000-0000-00000000000a','a0000002-0000-0000-0000-000000000002','delete',NULL,NULL,NULL,false) $$,
+ '42501','owner_required','non-owner cannot delete a dangerous role directly');
+SELECT throws_ok($$ SELECT public.mutate_organization_role_authorized('bbbbbbbb-0000-0000-0000-00000000000b','a0000005-0000-0000-0000-000000000005','delete',NULL,NULL,NULL,false) $$,
+ '42501','permission_denied','role deletion cannot cross tenant boundaries');
+SELECT lives_ok($$ SELECT public.mutate_organization_role_authorized('aaaaaaaa-0000-0000-0000-00000000000a','a0000005-0000-0000-0000-000000000005','delete',NULL,NULL,NULL,false) $$,
+ 'role manager can delete a safe custom role with an implicit owner remaining');
+SELECT set_config('request.jwt.claims', '{"sub":"a2222222-0000-0000-0000-000000000002","role":"authenticated","session_id":"a2-sess"}', true);
+SELECT throws_ok($$ SELECT public.account_remove('aaaaaaaa-0000-0000-0000-00000000000a','a4444444-0000-0000-0000-000000000004','active') $$,
+ '42501','owner_required','accounts manager cannot remove an owner even when another owner remains');
+SELECT set_config('request.jwt.claims', '{"sub":"a1111111-0000-0000-0000-000000000001","role":"authenticated","session_id":"a1-sess"}', true);
+SELECT throws_ok($$ SELECT public.mutate_organization_role_authorized('aaaaaaaa-0000-0000-0000-00000000000a','a0000004-0000-0000-0000-000000000004','delete',NULL,NULL,NULL,false) $$,
+ '42501','preset_role_delete_forbidden','owner cannot delete a preset either');
+SELECT lives_ok($$ SELECT public.account_remove('aaaaaaaa-0000-0000-0000-00000000000a','a4444444-0000-0000-0000-000000000004','active') $$,
+ 'owner may remove another owner while one owner remains');
+SELECT throws_ok($$ SELECT public.account_remove('aaaaaaaa-0000-0000-0000-00000000000a','a1111111-0000-0000-0000-000000000001','active') $$,
+ 'P0001','last_owner','last owner removal remains forbidden');
+SELECT lives_ok($$ SELECT public.mutate_organization_role_authorized('aaaaaaaa-0000-0000-0000-00000000000a','a0000002-0000-0000-0000-000000000002','delete',NULL,NULL,NULL,false) $$,
+ 'owner may delete a dangerous custom role');
+RESET ROLE;
+SELECT is((SELECT count(*) FROM public.organization_roles WHERE id='a0000004-0000-0000-0000-000000000004'),1::bigint,'rejected preset deletion preserves the row');
+-- Legacy ownerless organization: dropping the final explicit roles grant still fails.
+DELETE FROM public.organization_members WHERE organization_id='aaaaaaaa-0000-0000-0000-00000000000a' AND role='owner';
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claims', '{"sub":"a3333333-0000-0000-0000-000000000003","role":"authenticated","session_id":"a3-sess"}', true);
+SELECT throws_ok($$ SELECT public.mutate_organization_role_authorized('aaaaaaaa-0000-0000-0000-00000000000a','a0000003-0000-0000-0000-000000000003','update','Roles role',NULL,'{"management":{}}',false) $$,
+ '22023','last_role_manager','last explicit role manager protection remains active');
+RESET ROLE;
 
 SELECT * FROM finish();
 ROLLBACK;

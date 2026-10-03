@@ -48,6 +48,8 @@ export default function SetupPage() {
 
     useEffect(() => {
         let mounted = true;
+        let initializedUserId: string | null = null;
+        let initializationTimer: ReturnType<typeof setTimeout> | undefined;
 
         const processUser = async (user: User) => {
             if (!mounted) return;
@@ -89,21 +91,29 @@ export default function SetupPage() {
             }
         };
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
             if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
                 if (session) {
-                    await processUser(session.user);
+                    // SIGNED_IN can repeat for the same session. Reinitializing would
+                    // overwrite the wizard step and discard the user's progress.
+                    if (initializedUserId === session.user.id) return;
+                    initializedUserId = session.user.id;
+                    clearTimeout(initializationTimer);
+                    // Keep Supabase queries outside the auth callback's execution.
+                    initializationTimer = setTimeout(() => { void processUser(session.user); }, 0);
                 } else if (event === 'INITIAL_SESSION') {
                     console.warn('[SetupPage] INITIAL_SESSION received but no session found. Redirecting to login.');
                     if (mounted) router.replace('/?error=session_missing');
                 }
             } else if (event === 'SIGNED_OUT') {
+                clearTimeout(initializationTimer);
                 if (mounted) router.replace('/');
             }
         });
 
         return () => {
             mounted = false;
+            clearTimeout(initializationTimer);
             subscription.unsubscribe();
         };
     }, [router, paramInviteCode]);
