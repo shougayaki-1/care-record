@@ -77,6 +77,7 @@ describe('InternalWorkDialog record UI', () => {
     const before = within(dialog).getByLabelText('開始日時', { exact: false }).getAttribute('value');
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
     await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining('入力内容は保持'), 'error'));
+    expect(within(dialog).getByRole('alert').textContent).toContain('入力内容は保持');
     expect(onClose).not.toHaveBeenCalled(); expect(within(dialog).getByDisplayValue('研修メモ')).toBeTruthy();
     expect(within(dialog).getByDisplayValue('2.5')).toBeTruthy(); expect(within(dialog).getByDisplayValue('再試行する入力')).toBeTruthy();
     expect(within(dialog).getByLabelText('開始日時', { exact: false }).getAttribute('value')).toBe(before);

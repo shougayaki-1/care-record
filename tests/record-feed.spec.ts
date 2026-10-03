@@ -35,7 +35,7 @@ test('通常・内勤・AI承認の保存結果が重複なく本人の履歴へ
     await route.continue();
   });
   await internal.getByRole('button', { name: '保存', exact: true }).click();
-  await expect(page.getByText('保存に失敗しました。入力内容は保持しています。もう一度保存してください。')).toBeVisible();
+  await expect(internal.getByRole('alert').filter({ hasText: '保存に失敗しました。入力内容は保持しています。もう一度保存してください。' })).toBeVisible();
   await expect(internal.getByLabel('件名')).toHaveValue('Feed内勤会議');
   await expect(internal.getByLabel('開始日時')).toHaveValue(`${today}T10:00`);
   await internal.getByRole('button', { name: '保存', exact: true }).click();
@@ -64,7 +64,7 @@ test('通常・内勤・AI承認の保存結果が重複なく本人の履歴へ
   });
   await page.getByRole('button', { name: '送信', exact: true }).click();
   await page.getByRole('button', { name: '送信する', exact: true }).click();
-  await expect(page.getByText('保存に失敗しました。入力内容は保持しています。もう一度操作してください。')).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: '保存に失敗しました。入力内容は保持しています。もう一度操作してください。' }).first()).toBeVisible();
   await expect(page.getByLabel('サービス提供')).toHaveValue('1');
   await expect(page.getByLabel('移動', { exact: true })).toHaveValue('0.5');
   await page.getByRole('button', { name: '送信', exact: true }).click();
@@ -104,7 +104,7 @@ test('通常・内勤・AI承認の保存結果が重複なく本人の履歴へ
     await route.continue();
   });
   await review.getByRole('button', { name: '内容を確認して承認', exact: true }).click();
-  await expect(page.getByText('承認に失敗しました。入力内容は保持しています。もう一度承認してください。')).toBeVisible();
+  await expect(review.getByRole('alert').filter({ hasText: '承認に失敗しました。入力内容は保持しています。もう一度承認してください。' })).toBeVisible();
   await expect(review).toBeVisible();
   await expect(review.getByRole('combobox', { name: '交通手段' })).toHaveText('交通費なし');
   await review.getByRole('button', { name: '内容を確認して承認', exact: true }).click();

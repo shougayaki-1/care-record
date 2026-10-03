@@ -29,6 +29,10 @@ test('通常記録で共通ヘッダーと狭幅フォームを利用する', as
 
   await clickMenu(page, '記録を作成');
   await page.getByText('UI確認 利用者 様').click();
+  // The client card already has this heading while navigation is in flight.
+  // Wait for the actual record route and its actions before resizing the page.
+  await expect(page).toHaveURL(/\/app\/record\/[^/?]+(?:\?.*)?$/, { timeout: 30000 });
+  await expect(page.getByRole('group', { name: '記録操作' })).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('heading', { name: 'UI確認 利用者 様' })).toBeVisible();
   for (const width of [240, 320, 375, 1280]) {
     await page.setViewportSize({ width, height: 800 });

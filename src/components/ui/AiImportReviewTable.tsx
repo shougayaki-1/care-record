@@ -185,6 +185,7 @@ export function AiImportReviewTable({ rows, clients, helpers, formTemplate, temp
           }
         }}>{reviewingSubmissions ? '内容を確認して承認' : '原本と照合して確認済みにする'}</AppButton>
     </>}>
+        {reviewRow?.saveError && <Alert severity="error">{reviewRow.saveError}</Alert>}
         {reviewRow?.result && <>
           {!canConfirm && <Alert severity="warning">利用者・スタッフ・日時・移動時間{reviewingSubmissions ? '・交通費' : ''}を確認してください</Alert>}
           {reviewRow.sourceKind === 'ai_chat' && <Alert severity="warning">AIチャットで読み取った候補です。原本PDFはこの画面に保存されていません。AIチャット側の原本と、日付・丸印・特記事項を照合してください。</Alert>}

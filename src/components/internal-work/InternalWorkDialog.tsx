@@ -2,7 +2,7 @@
 
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useMemo, useRef, useState } from 'react';
-import { Stack, Typography } from '@/components/ui/mui';
+import { Alert, Stack, Typography } from '@/components/ui/mui';
 import SaveIcon from '@mui/icons-material/Save';
 import { AppButton, AppTextField, DateTimeField, NumberField, RecordFormDialog, SectionCard, SelectField, UnitAdornment } from '@/components/ui';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -36,7 +36,7 @@ export default function InternalWorkDialog({
   onClose: () => void;
   onSaved?: () => void | Promise<void>;
 }) {
-  const { pending: saving, run, isRunning } = useAsyncRecordAction(organizationId);
+  const { pending: saving, error, run, isRunning } = useAsyncRecordAction(organizationId);
   const confirm = useConfirm();
   const [attempted, setAttempted] = useState(false);
   const now = useMemo(() => new Date(), []);
@@ -112,6 +112,7 @@ export default function InternalWorkDialog({
         <AppButton size="small" startIcon={<SaveIcon />} onClick={handleSave} loading={saving} disabled={staffOptions.length === 0}>保存</AppButton>
       </>}
     >
+      {error && <Alert severity="error">{error}</Alert>}
       <SectionCard>
         <Typography component="h3" variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>基本情報</Typography>
         <Stack spacing={3}>

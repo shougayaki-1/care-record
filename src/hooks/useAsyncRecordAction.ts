@@ -18,16 +18,19 @@ export function useAsyncRecordAction(scope = '') {
   const locked = useRef(false);
   const mounted = useRef(true);
   const activeScope = useRef(scope);
+  const scopeGeneration = useRef(0);
   const attempts = useRef(new Map<string, { fingerprint: string; key: string }>());
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ scope: string; message: string } | null>(null);
+  const error = failure?.scope === scope ? failure.message : null;
   useEffect(() => {
     mounted.current = true;
     activeScope.current = scope;
+    scopeGeneration.current += 1;
     return () => { mounted.current = false; };
   }, [scope]);
   const isRunning = useCallback(() => locked.current, []);
-  const clearError = useCallback(() => setError(null), []);
+  const clearError = useCallback(() => setFailure(null), []);
   const attemptKey = useCallback((id: string, payload: unknown) => {
     const fingerprint = JSON.stringify(payload);
     const previous = attempts.current.get(id);
@@ -42,10 +45,11 @@ export function useAsyncRecordAction(scope = '') {
     if (locked.current) return { ok: false, reason: 'busy' };
     if (!mounted.current) return { ok: false, reason: 'cancelled' };
     const requestScope = scope;
-    const isCurrent = () => mounted.current && activeScope.current === requestScope;
+    const requestGeneration = scopeGeneration.current;
+    const isCurrent = () => mounted.current && activeScope.current === requestScope && scopeGeneration.current === requestGeneration;
     locked.current = true;
     setPending(true);
-    setError(null);
+    setFailure(null);
     dismissToast?.();
     try {
       if (options.confirm && !await options.confirm()) return { ok: false, reason: 'cancelled' };
@@ -59,7 +63,7 @@ export function useAsyncRecordAction(scope = '') {
     } catch (cause) {
       const message = typeof options.errorMessage === 'function' ? options.errorMessage(cause) : options.errorMessage;
       if (isCurrent()) {
-        setError(message);
+        setFailure({ scope: requestScope, message });
         showToast(message, 'error');
       }
       return { ok: false, reason: 'error' };

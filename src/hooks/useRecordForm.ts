@@ -246,7 +246,7 @@ export function useRecordForm() {
     [incomingDraftKey, recordIdentityKey],
   );
   const draftKey = draftScope.key;
-  const { pending: actionPending, run, isRunning, attemptKey, finishAttempt } = useAsyncRecordAction(`${recordIdentityKey}:${draftKey}`);
+  const { pending: actionPending, error: actionError, run, isRunning, attemptKey, finishAttempt } = useAsyncRecordAction(`${recordIdentityKey}:${draftKey}`);
   const recordScopeKey = `${recordIdentityKey}:${draftKey}`;
   const autosaveRestoredRef = useRef(false);
   const autosaveRevisionRef = useRef(0);
@@ -1139,7 +1139,7 @@ export function useRecordForm() {
     selectedHelpers, actualStaffs, actualServiceTypeId, startDateTime, endDateTime,
     serviceTime, travelTime, travelExpenses, images,
     aiFilledFields, isSpanningMonth, selectedPart, originalShiftTimes,
-    currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting,
+    currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting, actionError,
     shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId,
     setShiftSuggestions, setLinkedShifts, setSelectedSegmentId, dismissShiftSuggestion,
     setActualServiceTypeId, setActualStaffs, setStartDateTime, setEndDateTime,

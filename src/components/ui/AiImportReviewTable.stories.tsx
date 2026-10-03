@@ -24,4 +24,8 @@ export const Processing: Story = { args: { workflow: 'review_submissions', savin
   await expect(canvas.getAllByRole('button', { name: '内容を確認・修正' })[0]).toBeDisabled();
   await expect(canvas.getByRole('button', { name: '却下' })).toBeDisabled();
 } };
-export const SaveFailure: Story = { args: { rows: [{ ...sampleRow, status: 'confirmed', saveStatus: 'error', saveError: '保存に失敗しました。入力内容を確認して再試行してください。' }] }, play: openReview };
+export const SaveFailure: Story = { args: { rows: [{ ...sampleRow, status: 'confirmed', saveStatus: 'error', saveError: '保存に失敗しました。入力内容を確認して再試行してください。' }] }, play: async (context) => {
+  await openReview!(context);
+  const dialog = within(context.canvasElement.ownerDocument.body).getByRole('dialog', { name: '提供記録の確認・修正' });
+  await expect(within(dialog).getAllByRole('alert').map((alert) => alert.textContent).join(' ')).toContain('再試行してください');
+} };

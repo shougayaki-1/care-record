@@ -125,7 +125,7 @@ export default function AiCandidatesPage() {
     setRows((previous) => previous.map((row) => {
       if (row.id !== id) return row;
       const contentChanged = Object.keys(changes).some((key) => key !== 'status');
-      return { ...row, ...changes, ...(contentChanged ? { status: 'pending' as const } : {}) };
+      return { ...row, ...changes, saveError: undefined, ...(contentChanged ? { status: 'pending' as const } : {}) };
     }));
   }, [canReview, confirm, currentOrg, isRunning, run]);
 
@@ -133,6 +133,7 @@ export default function AiCandidatesPage() {
     if (!currentOrg || !canReview) return false;
     const row = rows.find((item) => item.id === id);
     const outcome = await run(async () => {
+      setRows((previous) => previous.map((item) => item.id === id ? { ...item, saveError: undefined } : item));
       if (!row?.result || !row.clientId || !row.helperId || !row.travelMethod || row.travelCostYen === undefined) throw new Error('利用者・スタッフ・交通費を確認してください');
       const start = new Date(`${row.date}T${row.startAt}:00`);
       const end = new Date(`${row.date}T${row.endAt}:00`);
@@ -163,7 +164,10 @@ export default function AiCandidatesPage() {
       successMessage: 'AI送信を確認し、提供記録を承認しました',
       errorMessage: '承認に失敗しました。入力内容は保持しています。もう一度承認してください。',
     });
-    if (!outcome.ok) return false;
+    if (!outcome.ok) {
+      if (outcome.reason === 'error') setRows((previous) => previous.map((item) => item.id === id ? { ...item, saveError: '承認に失敗しました。入力内容は保持しています。もう一度承認してください。' } : item));
+      return false;
+    }
     setRows((previous) => previous.filter((item) => item.id !== id));
     return true;
   }, [canReview, currentOrg, rows, run]);

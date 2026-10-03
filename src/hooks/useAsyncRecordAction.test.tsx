@@ -43,6 +43,7 @@ describe('record action lifecycle', () => {
     let run!: ReturnType<typeof result.current.run>; let isCurrent!: () => boolean;
     act(() => { run = result.current.run((current) => { isCurrent = current; return first.promise; }, options); });
     rerender({ scope: 'org-b' }); expect(isCurrent()).toBe(false);
+    rerender({ scope: 'org-a' }); expect(isCurrent()).toBe(false);
     await act(async () => { first.resolve(); expect(await run).toEqual({ ok: false, reason: 'cancelled' }); });
     expect(showToast).not.toHaveBeenCalled(); expect(result.current.pending).toBe(false);
     const second = deferred<void>(); act(() => { run = result.current.run(() => second.promise, options); });
@@ -56,4 +57,11 @@ describe('record action lifecycle', () => {
     const changed = result.current.attemptKey('row', { value: 'two' });
     result.current.finishAttempt('row'); expect(result.current.attemptKey('row', { value: 'two' })).not.toBe(changed);
   });
+  it('does not show an old error in a different record scope', async () => {
+    const { result, rerender } = renderHook(({ scope }) => useAsyncRecordAction(scope), { initialProps: { scope: 'record-a' } });
+    await act(async () => { await result.current.run(async () => { throw new Error('failed'); }, options); });
+    expect(result.current.error).toBe(options.errorMessage);
+    rerender({ scope: 'record-b' }); expect(result.current.error).toBeNull();
+  });
+
 });
