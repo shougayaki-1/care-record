@@ -41,11 +41,12 @@ Supabase Auth（パスワード + Google OAuth）。`src/proxy.ts`（Next.js 16 
 
 ## AI 記録インポート
 
-- `src/app/api/ai/extract/`: Vertex AI Gemini を使い SSE でストリーミング応答。
+- `src/app/api/ai/extract/`: 環境変数で選択した Vertex AI Gemini または OpenAI GPT-6 Luna を使い、SSE で結果を送信。
   `validation.ts` で入力検証。
 - `src/lib/ai/`: プロンプト（`extractPrompt.ts`）、抽出結果スキーマ（`extractSchema.ts`、zod）、
-  モデル選択（`model.ts`）、SSEクライアント（`sseClient.ts`）。
+  モデル選択（`model.ts`）、OpenAI用厳密スキーマ（`openaiSchema.ts`）、SSEクライアント（`sseClient.ts`）。
 - 抽出結果は必ず zod スキーマで検証してから記録に反映する。
+- OpenAI設定手順は[`ai-import-openai.md`](ai-import-openai.md)を参照。
 
 ## バックアップ・データ保持
 

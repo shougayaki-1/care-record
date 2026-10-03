@@ -259,7 +259,7 @@ function AiImportDemo() {
           >
             <CloudUploadIcon color="primary" sx={{ fontSize: 40, mb: 0.5 }} />
             <Typography fontWeight={800}>クリックまたはドラッグ&ドロップでファイルを選択</Typography>
-            <Typography variant="body2" color="text.secondary" mt={0.5}>PDF・JPEG・PNG・WebP（最大10MB）</Typography>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>PDF・JPEG・PNG・WebP（最大20MB）</Typography>
           </Paper>
           <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} useFlexGap flexWrap="wrap">
             <Chip label="訪問記録_山田太郎_0704.pdf" icon={<AutoFixHighIcon />} />

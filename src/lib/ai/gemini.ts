@@ -1,5 +1,4 @@
-import { VertexAI } from '@google-cloud/vertexai';
-import { MODEL_NAME } from './model';
+import { GoogleGenAI } from '@google/genai';
 import { isAiImportEnabled } from '@/lib/env/server';
 
 type ServiceAccountCredentials = {
@@ -29,29 +28,28 @@ function parseServiceAccountCredentials(): ServiceAccountCredentials | undefined
   }
 }
 
-let vertexAI: VertexAI | null = null;
+let genAI: GoogleGenAI | null = null;
 
 export function getGenerativeModel() {
   if (!isAiImportEnabled()) {
     throw new Error('AI import is disabled');
   }
-  if (!vertexAI) {
+  if (!genAI) {
     const project = process.env.GCP_PROJECT_ID;
     if (!project) throw new Error('GCP_PROJECT_ID is required');
     const location = process.env.VERTEX_AI_LOCATION ?? 'asia-northeast1';
     const credentials = parseServiceAccountCredentials();
 
-    vertexAI = new VertexAI({
+    genAI = new GoogleGenAI({
+      vertexai: true,
       project,
       location,
       ...(credentials
         ? {
-            googleAuthOptions: {
-              credentials,
-            },
+            googleAuthOptions: { credentials },
           }
         : {}),
     });
   }
-  return vertexAI.getGenerativeModel({ model: MODEL_NAME });
+  return genAI.models;
 }

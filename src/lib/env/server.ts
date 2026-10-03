@@ -17,6 +17,10 @@ export function isAiImportEnabled(): boolean {
   return getDeploymentEnv().AI_IMPORT_ENABLED;
 }
 
+export function getAiExtractProvider(): 'gemini' | 'openai' {
+  return getDeploymentEnv().AI_EXTRACT_PROVIDER;
+}
+
 export function areExternalIntegrationsEnabled(): boolean {
   return getDeploymentEnv().EXTERNAL_INTEGRATIONS_ENABLED;
 }

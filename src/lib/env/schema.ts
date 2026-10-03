@@ -8,7 +8,10 @@ const deploymentEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).optional(),
   APP_ENV: appEnvSchema.default('local'),
   AI_IMPORT_ENABLED: enabledSchema,
+  AI_EXTRACT_PROVIDER: z.enum(['gemini', 'openai']).default('gemini'),
   EXTERNAL_INTEGRATIONS_ENABLED: enabledSchema.default(true),
+  OPENAI_API_KEY: optionalString,
+  OPENAI_MODEL: optionalString,
   NEXT_PUBLIC_SUPABASE_URL: optionalString,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: optionalString,
   SUPABASE_SERVICE_ROLE_KEY: optionalString,
@@ -33,6 +36,9 @@ const deploymentEnvSchema = z.object({
   GCP_SERVICE_ACCOUNT_KEY_JSON: optionalString,
   GOOGLE_APPLICATION_CREDENTIALS: optionalString,
 }).superRefine((env, context) => {
+  if (env.AI_IMPORT_ENABLED && env.AI_EXTRACT_PROVIDER === 'openai' && !env.OPENAI_API_KEY) {
+    context.addIssue({ code: 'custom', path: ['OPENAI_API_KEY'], message: 'OpenAI import requires OPENAI_API_KEY' });
+  }
   if (env.NODE_ENV === 'production' && env.APP_ENV === 'local') {
     context.addIssue({ code: 'custom', path: ['APP_ENV'], message: 'APP_ENV must be explicitly set for a production server' });
   }
@@ -114,7 +120,7 @@ const deploymentEnvSchema = z.object({
     }
   }
 
-  if (env.AI_IMPORT_ENABLED && !env.GCP_SERVICE_ACCOUNT_KEY_JSON && !env.GOOGLE_APPLICATION_CREDENTIALS) {
+  if (env.AI_IMPORT_ENABLED && env.AI_EXTRACT_PROVIDER === 'gemini' && !env.GCP_SERVICE_ACCOUNT_KEY_JSON && !env.GOOGLE_APPLICATION_CREDENTIALS) {
     context.addIssue({ code: 'custom', path: ['AI_IMPORT_ENABLED'], message: 'AI import requires Google Cloud credentials' });
   }
 });

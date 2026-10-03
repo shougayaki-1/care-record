@@ -34,6 +34,7 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useAsyncRecordAction } from '@/hooks/useAsyncRecordAction';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { readAiExtractSse } from '@/lib/ai/sseClient';
+import { matchCandidateName } from '@/lib/ai/matchCandidate';
 
 type FileEntry = {
   id: string;
@@ -49,13 +50,9 @@ type FileGroup = {
 
 type Candidate = { id: string; name: string };
 
-/** AIの名前照合: 候補リストからファジー一致でIDを返す */
+/** Fall back to a unique name match when no candidate ID was returned. */
 function matchName(aiName: string, candidates: Candidate[]): string | null {
-  if (!aiName) return null;
-  const found = candidates.find(
-    (c) => c.name.includes(aiName) || aiName.includes(c.name),
-  );
-  return found?.id ?? null;
+  return matchCandidateName(aiName, candidates)?.id ?? null;
 }
 
 function pickCandidateId(candidateId: string | null | undefined, candidates: Candidate[]): string | null {
@@ -197,7 +194,7 @@ export default function AiImportPage() {
       id: crypto.randomUUID(),
       file: f,
       groupId: null,
-      previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
+      previewUrl: URL.createObjectURL(f),
     }));
     setFileEntries((prev) => [...prev, ...entries]);
   }, []);
@@ -303,6 +300,13 @@ export default function AiImportPage() {
         const processingGroups = buildProcessingGroups(orderedEntries, groups);
         formData.set('grouping', JSON.stringify(processingGroups));
 
+        const sourceFilesFor = (fileIndex: number) =>
+          (processingGroups.find((group) => group[0] === fileIndex) ?? [fileIndex]).map((index) => ({
+            fileName: orderedEntries[index]?.file.name ?? '',
+            fileType: orderedEntries[index]?.file.type ?? '',
+            previewUrl: orderedEntries[index]?.previewUrl ?? null,
+          }));
+
         setTotalCount(processingGroups.length);
 
         await streamExtract(
@@ -311,7 +315,7 @@ export default function AiImportPage() {
             const aiMeta = result.meta;
             const clientId =
               pickCandidateId(aiMeta.client_id_candidate, clients) ??
-              matchName(aiMeta.client_name, clients);
+              matchName(aiMeta.client_name ?? '', clients);
             const helperId =
               pickFirstCandidateId(aiMeta.helper_id_candidates, helpers) ??
               (aiMeta.helper_names.length > 0
@@ -324,11 +328,13 @@ export default function AiImportPage() {
               fileName: orderedEntries[fileIndex]?.file.name ?? '',
               fileType: orderedEntries[fileIndex]?.file.type ?? '',
               previewUrl: orderedEntries[fileIndex]?.previewUrl ?? null,
-              fileCount: processingGroups.find((group) => group[0] === fileIndex)?.length ?? 1,
+              sourceFiles: sourceFilesFor(fileIndex),
+              fileCount: sourceFilesFor(fileIndex).length,
               result,
-              date: aiMeta.date,
-              startAt: aiMeta.start_at,
-              endAt: aiMeta.end_at,
+              date: aiMeta.date ?? '',
+              startAt: aiMeta.start_at ?? '',
+              endAt: aiMeta.end_at ?? '',
+              travelTime: aiMeta.travel_time_hours == null ? '' : String(aiMeta.travel_time_hours),
               clientId,
               helperId,
               status: 'pending',
@@ -342,7 +348,8 @@ export default function AiImportPage() {
               fileName: orderedEntries[fileIndex]?.file.name ?? '',
               fileType: orderedEntries[fileIndex]?.file.type ?? '',
               previewUrl: orderedEntries[fileIndex]?.previewUrl ?? null,
-              fileCount: processingGroups.find((group) => group[0] === fileIndex)?.length ?? 1,
+              sourceFiles: sourceFilesFor(fileIndex),
+              fileCount: sourceFilesFor(fileIndex).length,
               result: null,
               errorMessage: message,
               date: '',
@@ -380,7 +387,11 @@ export default function AiImportPage() {
 
   const handleRowChange = (id: string, changes: Partial<ReviewRow>) => {
     if (isRunning()) return;
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...changes, saveStatus: r.saveStatus === 'error' ? undefined : r.saveStatus, saveError: undefined } : r)));
+    setRows((prev) => prev.map((r) => {
+      if (r.id !== id) return r;
+      const contentChanged = Object.keys(changes).some((key) => key !== 'status');
+      return { ...r, ...changes, ...(contentChanged ? { status: 'pending' as const } : {}), saveStatus: r.saveStatus === 'error' ? undefined : r.saveStatus, saveError: undefined };
+    }));
   };
 
   const handleSaveSelected = useCallback(async (ids: string[]) => {
@@ -404,6 +415,10 @@ export default function AiImportPage() {
             if (!isValidDraftTime(row.date, row.startAt, row.endAt)) {
               throw new Error('開始・終了日時が不正です');
             }
+            const travelTime = row.travelTime?.trim() ?? '';
+            if (travelTime && (!Number.isFinite(Number(travelTime)) || Number(travelTime) < 0)) {
+              throw new Error('移動時間が不正です');
+            }
             const helper = helpers.find((h) => h.id === row.helperId);
             if (!helper) throw new Error('スタッフが未選択です');
 
@@ -417,7 +432,7 @@ export default function AiImportPage() {
               startAt,
               endAt,
               status: 'draft',
-              values: { ...row.result.values, _helpers: [helper.name] },
+              values: { ...row.result.values, _helpers: [helper.name], ...(travelTime ? { travel_time: travelTime } : {}) },
               expectedVersion: 0,
               auditSource: 'ai_import',
               auditFileCount: row.fileCount,

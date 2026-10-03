@@ -58,7 +58,7 @@ export function validateFile(file: File): FileValidationResult {
 }
 
 /**
- * Gemini呼び出し単位のファイルグループを作る。
+ * AI呼び出し単位のファイルグループを作る。
  * grouping指定時も未指定のファイルは単独グループとして残す。
  */
 export function buildProcessingGroups(fileCount: number, grouping: number[][] | null): number[][] {

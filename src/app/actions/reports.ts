@@ -227,12 +227,13 @@ export async function saveReport(input: SaveReportInput) {
     await recordAuditEvent({
       organizationId: input.organizationId,
       actorId: user.id,
-      action: 'ai_draft.created',
+      action: 'ai_draft.client_reported',
       resourceType: 'report',
       resourceId: savedReportId,
       sessionId: user.sessionId,
       details: {
         source: 'ai_import',
+        verified: false,
         model: input.auditModel || MODEL_NAME,
         file_count: input.auditFileCount ?? 1,
       },

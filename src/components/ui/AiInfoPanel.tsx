@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Accordion,
   AccordionDetails,
@@ -27,6 +27,24 @@ type SectionKey = 'about' | 'security' | 'steps' | 'cautions';
 
 export function AiInfoPanel({ variant = 'page' }: Props) {
   const [expanded, setExpanded] = useState<SectionKey | false>(false);
+  const [aiDestination, setAiDestination] = useState<string>('送信先のAIサービスを確認中です。');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/ai/provider', { signal: controller.signal, cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) throw new Error('AI provider unavailable');
+        return response.json() as Promise<{ provider: 'gemini' | 'openai'; model: string }>;
+      })
+      .then(({ provider, model }) => {
+        setAiDestination(`読み取りには ${provider === 'openai' ? 'OpenAI' : 'Google Vertex AI'}（${model}）へファイルを送信します。`);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof Error && error.name === 'AbortError') return;
+        setAiDestination('送信先のAIサービスを表示できません。処理前に管理者へ確認してください。');
+      });
+    return () => controller.abort();
+  }, []);
 
   const toggle = (key: SectionKey) =>
     setExpanded((prev) => (prev === key ? false : key));
@@ -35,6 +53,9 @@ export function AiInfoPanel({ variant = 'page' }: Props) {
 
   return (
     <Box sx={{ mb: variant === 'page' ? 3 : 1.5 }}>
+      <Typography fontSize={bodyTypo} color="text.secondary" sx={{ mb: 1 }}>
+        {aiDestination}
+      </Typography>
       {/* 機能説明 */}
       <Accordion
         expanded={expanded === 'about'}
@@ -55,7 +76,7 @@ export function AiInfoPanel({ variant = 'page' }: Props) {
           </Typography>
           <List dense disablePadding sx={{ mt: 1 }}>
             {[
-              '対応形式: PDF・JPEG・PNG・WebP（1ファイル最大10MB）',
+              '対応形式: PDF・JPEG・PNG・WebP（1ファイル最大20MB）',
               'PDFは複数記録を自動検出して個別に取り込めます',
               '複数枚にまたがる記録は画像をグループ化して処理できます',
             ].map((text) => (
@@ -87,9 +108,8 @@ export function AiInfoPanel({ variant = 'page' }: Props) {
         <AccordionDetails sx={{ pt: 0 }}>
           <List dense disablePadding>
             {[
-              'Google Vertex AI（Gemini）を使用。データ処理追加契約（DPA）の適用により、送信した記録情報がAIのトレーニングに使用されることはありません。',
-              'アップロードされたファイルはAI処理後に保持されません。サーバーやクラウドストレージには保存されません。',
-              'AI取込操作はすべて監査ログに記録されます（誰が・いつ・何件処理したか）。',
+              'アプリはアップロード元ファイルを記録データとして保存しません。',
+              'AI取込の開始日時・操作したユーザー・ファイル数を監査ログに記録します。',
             ].map((text) => (
               <ListItem key={text} sx={{ py: 0.25, px: 0 }}>
                 <ListItemIcon sx={{ minWidth: 24 }}>
@@ -128,7 +148,7 @@ export function AiInfoPanel({ variant = 'page' }: Props) {
                   '① ファイルを選択またはドラッグ&ドロップ（PDF・JPEG・PNG・WebP）',
                   '② 複数画像が1件の記録の場合は「1記録としてまとめる」で結合',
                   '③ 「処理開始」をクリック — 結果がリアルタイムで追加されます',
-                  '④ 各行の日付・スタッフ・利用者を確認・修正',
+                  '④ 各行で原本と全項目を照合し、誤りを修正して確認済みにする',
                   '⑤ 「下書き保存」で記録として保存',
                 ]
             ).map((text) => (
@@ -157,8 +177,8 @@ export function AiInfoPanel({ variant = 'page' }: Props) {
         <AccordionDetails sx={{ pt: 0 }}>
           <List dense disablePadding>
             {[
-              'AIの読み取り結果は必ず目視で確認してください。特に氏名・日付・時刻はミスが起きやすい箇所です。',
-              '信頼度が「低」（赤）のフィールドは特に注意が必要です。',
+              'AIの読み取り結果は必ず原本と照合してください。氏名・日付・時刻に加え、丸印やチェック欄も誤読することがあります。',
+              'AI自己評価が「高」でも誤りは起こります。自己評価は保存可否の判断に使わないでください。',
               '手書きが薄い・汚れがある・傾きが大きいと読み取り精度が下がります。できるだけ明るく正面から撮影してください。',
               '記録の最終的な正確性を確認する責任はスタッフにあります。AIによる下書きはあくまで補助です。',
             ].map((text) => (

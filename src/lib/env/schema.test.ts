@@ -29,7 +29,16 @@ const productionEnv = {
 
 describe('parseDeploymentEnv', () => {
   it('keeps local development permissive and disables AI by default', () => {
-    expect(parseDeploymentEnv({})).toMatchObject({ APP_ENV: 'local', AI_IMPORT_ENABLED: false });
+    expect(parseDeploymentEnv({})).toMatchObject({ APP_ENV: 'local', AI_IMPORT_ENABLED: false, AI_EXTRACT_PROVIDER: 'gemini' });
+  });
+
+  it('requires an OpenAI API key only when OpenAI import is enabled', () => {
+    expect(() => parseDeploymentEnv({ AI_IMPORT_ENABLED: 'true', AI_EXTRACT_PROVIDER: 'openai' }))
+      .toThrow(/OPENAI_API_KEY/);
+    expect(parseDeploymentEnv({ AI_IMPORT_ENABLED: 'true', AI_EXTRACT_PROVIDER: 'openai', OPENAI_API_KEY: 'test-only-key' }))
+      .toMatchObject({ AI_EXTRACT_PROVIDER: 'openai', AI_IMPORT_ENABLED: true });
+    expect(parseDeploymentEnv({ ...productionEnv, AI_IMPORT_ENABLED: 'true', AI_EXTRACT_PROVIDER: 'openai', OPENAI_API_KEY: 'test-only-key' }))
+      .toMatchObject({ AI_EXTRACT_PROVIDER: 'openai', AI_IMPORT_ENABLED: true });
   });
 
   it('rejects an implicit local APP_ENV on a production server', () => {

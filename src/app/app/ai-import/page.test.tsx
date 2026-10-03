@@ -26,7 +26,7 @@ import Page from './page';
 const record = (index: number): AiExtractSseEvent => ({ type: 'record', index, fileIndex: index, result: { meta: { date: '2026-10-02', start_at: '09:00', end_at: '10:00', client_name: '利用者', helper_names: ['担当'], client_id_candidate: 'client-1', helper_id_candidates: ['helper-1'] }, values: { note: `入力${index}` }, confidence: 'high', warnings: [] } });
 let unsubscribe: (() => void) | undefined;
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); unsubscribe?.(); });
-beforeEach(() => { vi.clearAllMocks(); state.review = null; state.confirm.mockResolvedValue(true); vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: {} })); });
+beforeEach(() => { vi.clearAllMocks(); state.review = null; state.confirm.mockResolvedValue(true); vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: {}, json: async () => ({ provider: 'gemini', model: 'test-model' }) })); });
 async function extract() {
   state.reader.mockImplementationOnce(async (_: unknown, emit: (event: AiExtractSseEvent) => void) => { emit(record(0)); emit(record(1)); });
   render(<ThemeProvider theme={theme}><Page /></ThemeProvider>);
@@ -40,6 +40,19 @@ async function extract() {
   return rows.map((row) => row.id);
 }
 describe('AI batch lifecycle', () => {
+  it('requires review again after editing a confirmed row', async () => {
+    const ids = await extract();
+    const row = state.review!.rows[0];
+    act(() => state.review!.onRowChange(row.id, { travelTime: '0.5' }));
+    expect(state.review!.rows[0].status).toBe('pending');
+    state.save.mockResolvedValue({ reportId: 'report', version: 1 });
+    await act(async () => { await state.review!.onSaveSelected([ids[0]]); });
+    expect(state.save).not.toHaveBeenCalled();
+    act(() => state.review!.onRowChange(row.id, { status: 'confirmed' }));
+    await act(async () => { await state.review!.onSaveSelected([ids[0]]); });
+    expect(state.save.mock.calls[0][0].values.travel_time).toBe('0.5');
+    expect(state.review!.rows[0].sourceFiles).toHaveLength(1);
+  });
   it('retains failed rows, retries only those rows with the same key, and keeps the existing feed boundary', async () => {
     const ids = await extract(); const refresh = vi.fn().mockResolvedValue(undefined); unsubscribe = subscribeRecordFeed('org-1', refresh);
     let finish!: (value: unknown) => void;

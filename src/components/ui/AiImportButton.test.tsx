@@ -10,7 +10,8 @@ vi.mock('@/lib/ai/sseClient', () => ({ readAiExtractSse: reader }));
 vi.mock('./ToastProvider', () => ({ useToast: () => ({ showToast: toast, dismissToast: dismiss }) }));
 const record: AiExtractSseEvent = { type: 'record', index: 0, fileIndex: 0, result: { meta: { date: '2026-10-02', start_at: '09:00', end_at: '10:00', client_name: '利用者', helper_names: [], client_id_candidate: null, helper_id_candidates: [] }, values: { note: '確認対象' }, confidence: 'high', warnings: [] } };
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
-beforeEach(() => { vi.clearAllMocks(); vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: {} })); });
+beforeEach(() => { vi.clearAllMocks(); vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: {}, json: async () => ({ provider: 'gemini', model: 'test-model' }) })); });
+const extractionRequests = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).startsWith('/api/ai/extract'));
 function open() {
   const onExtracted = vi.fn(); const onProcessingChange = vi.fn(); render(<ThemeProvider theme={theme}><AiImportButton organizationId="org-1" formTemplate={[]} clients={[]} helpers={[]} onExtracted={onExtracted} onProcessingChange={onProcessingChange} /></ThemeProvider>);
   fireEvent.click(screen.getByRole('button', { name: 'AIで読み取り' }));
@@ -25,7 +26,7 @@ describe('single AI extraction lifecycle', () => {
     const { dialog, onExtracted, onProcessingChange } = open(); const start = within(dialog).getByRole('button', { name: '処理開始' });
     fireEvent.click(start); fireEvent.click(start);
     await waitFor(() => expect(reader).toHaveBeenCalledOnce());
-    expect(onProcessingChange).toHaveBeenLastCalledWith(true); expect(fetch).toHaveBeenCalledOnce(); expect(onExtracted).not.toHaveBeenCalled();
+    expect(onProcessingChange).toHaveBeenLastCalledWith(true); expect(extractionRequests()).toHaveLength(1); expect(onExtracted).not.toHaveBeenCalled();
     expect(within(dialog).getByRole('button', { name: /読み取り中/ }).getAttribute('aria-busy')).toBe('true');
     expect(within(dialog).getByRole('button', { name: 'キャンセル' })).toHaveProperty('disabled', true);
     fireEvent.keyDown(dialog, { key: 'Escape' }); expect(screen.getByRole('dialog', { name: 'AIで記録を読み取る' })).toBeTruthy();
@@ -42,7 +43,7 @@ describe('single AI extraction lifecycle', () => {
     expect(within(dialog).getByRole('button', { name: '処理開始' })).toHaveProperty('disabled', false);
     reader.mockImplementationOnce(async (_: unknown, onEvent: (event: AiExtractSseEvent) => void) => { onEvent(record); });
     fireEvent.click(within(dialog).getByRole('button', { name: '処理開始' }));
-    await waitFor(() => expect(onExtracted).toHaveBeenCalledOnce()); expect(fetch).toHaveBeenCalledTimes(2); expect(dismiss).toHaveBeenCalledTimes(2);
-    const body = vi.mocked(fetch).mock.calls[1][1]?.body as FormData; expect((body.get('files[]') as File).name).toBe('retry.pdf');
+    await waitFor(() => expect(onExtracted).toHaveBeenCalledOnce()); expect(extractionRequests()).toHaveLength(2); expect(dismiss).toHaveBeenCalledTimes(2);
+    const body = extractionRequests()[1][1]?.body as FormData; expect((body.get('files[]') as File).name).toBe('retry.pdf');
   });
 });

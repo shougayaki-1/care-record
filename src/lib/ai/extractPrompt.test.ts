@@ -119,6 +119,15 @@ describe('buildExtractionPrompt', () => {
     expect(systemPrompt).toContain('"warnings"');
   });
 
+  it('判読不能な値を 0 や空文字で補完しないよう指示する', () => {
+    const { systemPrompt } = buildExtractionPrompt({ formTemplate: SAMPLE_TEMPLATE, clients: [], helpers: [] });
+    expect(systemPrompt).toContain('読めない数値を 0 に置き換えず null');
+    expect(systemPrompt).toContain('判読不能');
+    expect(systemPrompt).toContain('移動(加算)');
+    expect(systemPrompt).toContain('見出し前の印刷された ●');
+    expect(systemPrompt).toContain('左端の □ と、括弧内・行内の選択肢は別々に判定');
+  });
+
   it('userPromptTemplate がファイルの添付について言及する', () => {
     const { userPromptTemplate } = buildExtractionPrompt({
       formTemplate: SAMPLE_TEMPLATE,

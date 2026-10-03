@@ -1,23 +1,25 @@
 import { NextRequest } from 'next/server';
-import type { Part } from '@google-cloud/vertexai';
+import type { Part } from '@google/genai';
 import { getAuthedUser, assertOrgRole } from '@/utils/supabase/auth';
 import { logError, serializeError } from '@/utils/log';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { getGenerativeModel } from '@/lib/ai/gemini';
-import { MODEL_NAME } from '@/lib/ai/model';
+import { MODEL_NAME, OPENAI_MODEL_NAME } from '@/lib/ai/model';
+import { generateOpenAIExtractionText, type ExtractionFile } from '@/lib/ai/openai';
 import { buildExtractionPrompt } from '@/lib/ai/extractPrompt';
-import { ExtractionResponseSchema, ExtractionResponseVertexSchema } from '@/lib/ai/extractSchema';
+import { RawExtractionResponseSchema, buildExtractionResponseVertexSchema } from '@/lib/ai/extractSchema';
+import { normalizeExtraction } from '@/lib/ai/normalizeExtraction';
 import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
 import type { FormItem, PromptCandidate } from '@/lib/ai/extractPrompt';
 import { formatSseEvent } from './sseUtils';
 import { buildProcessingGroups, validateFileCount, validateFile } from './validation';
-import { isAiImportEnabled } from '@/lib/env/server';
+import { getAiExtractProvider, isAiImportEnabled } from '@/lib/env/server';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
-  // Feature flag is checked before authentication, body parsing, or Vertex client creation.
+  // Feature flag is checked before authentication, body parsing, or AI client creation.
   if (!isAiImportEnabled()) {
     return new Response('Not Found', { status: 404 });
   }
@@ -50,6 +52,8 @@ export async function POST(request: NextRequest) {
 
   // 3. ファイル取得とファイル数の検証
   const files = formData.getAll('files[]') as File[];
+  const provider = getAiExtractProvider();
+  const modelName = provider === 'openai' ? OPENAI_MODEL_NAME : MODEL_NAME;
   const countResult = validateFileCount(files.length);
   if (!countResult.ok) {
     return new Response(`Bad Request: ${countResult.reason}`, { status: 400 });
@@ -86,7 +90,7 @@ export async function POST(request: NextRequest) {
       resourceType: 'ai_import',
       sessionId: authedSessionId,
       outcome: 'success',
-      details: { source: 'ai_import', model: MODEL_NAME, file_count: files.length },
+      details: { source: 'ai_import', provider, model: modelName, file_count: files.length },
     });
   } catch (auditErr) {
     // 監査ログの失敗はリクエストをブロックしない（ログだけ出す）
@@ -102,7 +106,7 @@ export async function POST(request: NextRequest) {
     helpers,
   });
 
-  const model = getGenerativeModel();
+  const model = provider === 'gemini' ? getGenerativeModel() : null;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -121,7 +125,7 @@ export async function POST(request: NextRequest) {
 
         try {
           // a. 各ファイルのバリデーション + ArrayBuffer 読み込み
-          const parts: Part[] = [{ text: userPromptTemplate }];
+          const inputFiles: ExtractionFile[] = [];
 
           for (const idx of group) {
             const file = files[idx];
@@ -144,43 +148,51 @@ export async function POST(request: NextRequest) {
                   data: Buffer.from(await file.arrayBuffer()),
                 };
 
-            parts.push({
-              inlineData: {
-                mimeType: fileBytes.mimeType,
-                data: fileBytes.data.toString('base64'),
-              },
-            });
+            inputFiles.push({ name: file.name, mimeType: fileBytes.mimeType, data: fileBytes.data });
           }
 
-          // b. Gemini に送信
-          const result = await model.generateContent({
-            contents: [
-              {
-                role: 'user',
-                parts,
+          // b. 設定済みプロバイダーへ送信。どちらも同じ検証・レビュー経路を使う。
+          let responseText: string;
+          if (provider === 'openai') {
+            responseText = await generateOpenAIExtractionText({
+              systemPrompt,
+              userPrompt: userPromptTemplate,
+              files: inputFiles,
+              formTemplate,
+            });
+          } else {
+            const parts: Part[] = [
+              { text: userPromptTemplate },
+              ...inputFiles.map((file) => ({
+                inlineData: { mimeType: file.mimeType, data: file.data.toString('base64') },
+              })),
+            ];
+            const result = await model!.generateContent({
+              model: MODEL_NAME,
+              contents: [{ role: 'user', parts }],
+              config: {
+                systemInstruction: systemPrompt,
+                responseMimeType: 'application/json',
+                responseSchema: buildExtractionResponseVertexSchema(formTemplate),
               },
-            ],
-            systemInstruction: { role: 'system', parts: [{ text: systemPrompt }] },
-            generationConfig: {
-              responseMimeType: 'application/json',
-              responseSchema: ExtractionResponseVertexSchema,
-            },
-          });
+            });
+            responseText = result.text ?? '';
+          }
 
           // c. レスポンスを取得してパース
-          const text = result.response.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
           let parsed: { records: unknown[] };
           try {
-            parsed = JSON.parse(text) as { records: unknown[] };
+            parsed = JSON.parse(responseText) as { records: unknown[] };
           } catch {
-            logError('[ai/extract] Gemini response was not valid JSON', { organizationId, sample: text.slice(0, 200) });
+            logError('[ai/extract] AI response was not valid JSON', { organizationId, provider });
             throw new Error('AI の応答形式が不正でした');
           }
 
-          const validated = ExtractionResponseSchema.parse(parsed);
+          const validated = RawExtractionResponseSchema.parse(parsed);
 
           // d. 各記録を record イベントとして送信
-          for (const record of validated.records) {
+          for (const rawRecord of validated.records) {
+            const record = normalizeExtraction(rawRecord, formTemplate, clients, helpers);
             sendEvent('record', {
               type: 'record',
               index: recordIndex,

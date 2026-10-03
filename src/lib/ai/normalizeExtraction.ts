@@ -1,6 +1,5 @@
 import type { FormItem, PromptCandidate } from './extractPrompt';
-import type { ExtractionResult } from './extractSchema';
-import type { RawExtractionResult } from './mcpCandidateSchema';
+import type { ExtractionResult, RawExtractionResult } from './extractSchema';
 import { matchCandidateName } from './matchCandidate';
 
 const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
@@ -90,10 +89,6 @@ export function normalizeExtraction(
     ...raw,
     meta: {
       ...raw.meta,
-      date: raw.meta.date ?? '',
-      start_at: raw.meta.start_at ?? '',
-      end_at: raw.meta.end_at ?? '',
-      client_name: raw.meta.client_name ?? '',
       client_id_candidate: clientId && clientId === matchedClientId ? clientId : null,
       helper_id_candidates: helperIds.filter((id) => matchedHelperIds.has(id)),
     },

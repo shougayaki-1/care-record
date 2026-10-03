@@ -5,6 +5,7 @@ import {
   ExtractionResultSchema,
   ExtractionResponseSchema,
   ExtractionResponseVertexSchema,
+  buildExtractionResponseVertexSchema,
 } from './extractSchema';
 
 describe('MetaSchema', () => {
@@ -39,6 +40,25 @@ describe('MetaSchema', () => {
       helper_id_candidates: [],
     };
     expect(() => MetaSchema.parse(input)).not.toThrow();
+  });
+
+  it('判読できない日付・時刻・利用者名は null のまま保持する', () => {
+    const result = MetaSchema.parse({
+      date: null, start_at: null, end_at: null, client_name: null,
+      helper_names: [], client_id_candidate: null, helper_id_candidates: [],
+    });
+    expect(result.date).toBeNull();
+    expect(result.client_name).toBeNull();
+  });
+
+  it('移動(加算)時間を数値で保持し、不明なら null を許す', () => {
+    const input = {
+      date: '2026-09-25', start_at: '09:00', end_at: '18:00', client_name: '利用者',
+      helper_names: [], client_id_candidate: null, helper_id_candidates: [], travel_time_hours: 2,
+    };
+    expect(MetaSchema.parse(input).travel_time_hours).toBe(2);
+    expect(MetaSchema.parse({ ...input, travel_time_hours: null }).travel_time_hours).toBeNull();
+    expect(MetaSchema.safeParse({ ...input, travel_time_hours: -1 }).success).toBe(false);
   });
 
   it('必須フィールドが欠けていると失敗する', () => {
@@ -165,11 +185,27 @@ describe('ExtractionResponseVertexSchema', () => {
     expect(ExtractionResponseVertexSchema.properties?.records.type).toBe('ARRAY');
   });
 
+  it('フォームの項目ごとに nullable な値の型と選択肢を指定する', () => {
+    const schema = buildExtractionResponseVertexSchema([
+      { id: 'sec', label: '見出し', type: 'section', required: false },
+      { id: 'meal', label: '食事', type: 'multicheckbox', options: '朝,昼', required: false, hasDetail: true },
+      { id: 'amount', label: '尿量', type: 'number', required: false },
+    ]);
+    const values = schema.properties?.records.items?.properties?.values;
+    expect(values?.properties?.sec).toBeUndefined();
+    expect(values?.properties?.meal.type).toBe('ARRAY');
+    expect(values?.properties?.meal.items?.enum).toEqual(['朝', '昼']);
+    expect(values?.properties?.amount.type).toBe('NUMBER');
+    expect(values?.properties?.amount.nullable).toBe(true);
+    expect(values?.required).toContain('meal_detail');
+  });
+
   it('候補IDフィールドを required meta として定義している', () => {
     const recordItem = ExtractionResponseVertexSchema.properties?.records.items;
     const meta = recordItem?.properties?.meta;
     expect(meta?.required).toContain('client_id_candidate');
     expect(meta?.required).toContain('helper_id_candidates');
     expect(meta?.properties?.client_id_candidate.nullable).toBe(true);
+    expect(meta?.properties?.travel_time_hours.nullable).toBe(true);
   });
 });

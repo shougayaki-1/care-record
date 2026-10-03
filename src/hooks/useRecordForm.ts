@@ -25,6 +25,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRequestGeneration } from '@/hooks/useRequestGeneration';
 import { supabase } from '@/lib/supabase';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
+import { matchCandidateName } from '@/lib/ai/matchCandidate';
 import { checkRecordPermission } from '@/utils/permissions';
 
 export type FormItem = {
@@ -1059,7 +1060,7 @@ export function useRecordForm() {
     const filled = new Set(Object.keys(result.values));
     setAnswers(prev => ({ ...prev, ...result.values }));
 
-    const { date, start_at: startAt, end_at: endAt, helper_names: helperNames } = result.meta;
+    const { date, start_at: startAt, end_at: endAt, helper_names: helperNames, travel_time_hours: travelTimeHours } = result.meta;
     const startDate = date && startAt ? new Date(`${date}T${startAt}:00`) : null;
     const endDate = date && endAt ? new Date(`${date}T${endAt}:00`) : null;
     if (startDate && Number.isFinite(startDate.getTime())) {
@@ -1081,9 +1082,15 @@ export function useRecordForm() {
       setServiceTime(String(diffHours));
       filled.add('serviceTime');
     }
+    if (travelTimeHours !== null && travelTimeHours !== undefined) {
+      setTravelTime(String(travelTimeHours));
+      filled.add('travelTime');
+    } else {
+      setTravelTime('');
+    }
 
     const matchedHelpers = helperNames
-      .map((name) => selectableStaffs.find((staff) => staff.name.includes(name) || name.includes(staff.name))?.name)
+      .map((name) => matchCandidateName(name, selectableStaffs)?.name)
       .filter((name): name is string => Boolean(name));
     if (matchedHelpers.length > 0) {
       setSelectedHelpers(Array.from(new Set(matchedHelpers)));
@@ -1093,7 +1100,7 @@ export function useRecordForm() {
     setAiFilledFields(filled);
     setHasAiDraftSource(true);
     setIsDirty(true);
-  }, [formatDatetimeLocal, selectableStaffs, setAiFilledFields, setAnswers, setEndDateTime, setHasAiDraftSource, setIsDirty, setSelectedHelpers, setServiceTime, setStartDateTime]);
+  }, [formatDatetimeLocal, selectableStaffs, setAiFilledFields, setAnswers, setEndDateTime, setHasAiDraftSource, setIsDirty, setSelectedHelpers, setServiceTime, setStartDateTime, setTravelTime]);
 
   const groupedSections = useMemo(() => {
     const sections: { title: string; items: FormItem[] }[] = [];
