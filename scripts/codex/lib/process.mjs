@@ -22,11 +22,11 @@ export function safeEnvironment(env = process.env, { purpose = 'build', home } =
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(home, 'config/gitconfig'),
   };
   if (purpose === 'build') return isolated;
-  // gh uses its explicit config path; authenticated Git may use the owner's credential helpers.
-  // HOME remains isolated, and CODEX_HOME is never inherited by GitHub operations.
+  // OS keyrings (macOS security and Linux Secret Service) need the login HOME/session.
+  // Only GitHub operations receive these capabilities; never inherit CODEX_HOME.
   return {
-    ...isolated,
-    ...Object.fromEntries(['GH_TOKEN', 'GITHUB_TOKEN', 'GH_HOST', 'SSH_AUTH_SOCK'].filter(n => env[n]).map(n => [n, env[n]])),
+    ...isolated, HOME: env.HOME || homedir(),
+    ...Object.fromEntries(['DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_HOST', 'SSH_AUTH_SOCK'].filter(n => env[n]).map(n => [n, env[n]])),
     GH_CONFIG_DIR: env.GH_CONFIG_DIR || join(env.XDG_CONFIG_HOME || join(env.HOME || homedir(), '.config'), 'gh'),
     GIT_CONFIG_GLOBAL: env.GIT_CONFIG_GLOBAL || join(env.HOME || homedir(), '.gitconfig'),
   };

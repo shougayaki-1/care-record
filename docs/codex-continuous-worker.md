@@ -87,7 +87,7 @@ subprocess の環境は用途別の allowlist で分離します。
 |---|---|---|
 | npm ci / typecheck / lint / test / local Git | 実行ごとに新しい mode 0700 の一時 HOME。npm user/global config、XDG config/cache/data、Git global config も空の専用パスへ向け、終了後に削除 | なし。CODEX_HOME、GH token/config、SSH_AUTH_SOCK、API key、NPM_TOKEN を渡さない |
 | Codex exec / resume / help | ChatGPT auth/session を発見する元の HOME / CODEX_HOME | Codex の HOME / CODEX_HOME のみ。GH token/config・SSH agent・API key は渡さない |
-| gh / git fetch / git push | 一時 HOME を使用し、gh の config と Git credential helper の global config を明示的に指定 | GH_CONFIG_DIR、GH_TOKEN / GITHUB_TOKEN、GH_HOST、SSH_AUTH_SOCK。CODEX_HOME は渡さない |
+| gh / git fetch / git push | OS keyring の探索用に元の HOME を使用。cache/tmp は専用一時領域、gh config と Git global config は明示指定 | GH_CONFIG_DIR、GH_TOKEN / GITHUB_TOKEN、GH_HOST、SSH_AUTH_SOCK。Linux Secret Service 用 DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR。CODEX_HOME は渡さない |
 
 `GH_CONFIG_DIR` が未指定なら、元の XDG_CONFIG_HOME または HOME から gh の config directory だけを解決します。GitHub 用の Git global config は `GIT_CONFIG_GLOBAL` または元の HOME の `.gitconfig` を使います。build の npm config/cache は毎回新しく作るため、以前の subprocess が書いた認証設定を再利用しません。repository の `.npmrc` に credential を置かないでください。この環境分離は同じ OS ユーザーのファイルアクセスまで隔離する sandbox ではありません。専用ユーザー・clone と Codex sandbox の運用前提は維持します。
 
@@ -186,3 +186,5 @@ worker の自動テストは CLI/GitHub を mock し、キュー、依存、quot
 2026-10-03 に Context7 `/openai/codex` と [公式の非対話実行](https://developers.openai.com/codex/noninteractive)、[configuration reference](https://developers.openai.com/codex/config-reference)、インストール済み `codex-cli 0.159.0-alpha.12.1` の help を確認しました。確認対象は JSONL / output schema / thread.started / exec resume / workspace-write / approval_policy / forced_login_method と quota error の resets_at 表記です。GitHub CLI は 2.96.0 の help を確認しています。CLI 更新後は exec/resume の help と worker tests を再確認してください。
 
 PR #65 の credential 境界修正では、2026-10-03 に Context7 `/openai/codex` の HOME/CODEX_HOME による認証・session 発見と、`/npm/cli` の userconfig/globalconfig/cache override を再確認しました。npm 11.6.2 の実 lifecycle script と build subprocess を使う自動テストで、認証 capability の除外・一時 HOME の削除を確認します。
+
+macOS の gh 2.96.0 は OS keyring の読み取りに `security` を使います。一時 HOME では keyring が見つからず、公開 repository の API が成功しても `gh auth status` と認証必須 `gh api user` は失敗しました。GitHub 操作だけログイン HOME を維持し、手動 token export／token のファイル化は不要です。Linux の Secret Service session capability も GitHub 操作だけに継承します。build と Codex の allowlist は変更しません。元の HOME を渡す GitHub 操作は信頼できる gh/git に限定してください。同一ユーザーでのファイルアクセス自体は sandbox 境界ではありません。確認: 2026-10-03、Context7 `/cli/cli` の keyring token 解決と gh 2.96.0 の公式実装。
