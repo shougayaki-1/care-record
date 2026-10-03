@@ -122,6 +122,7 @@ function mockExecute(items, calls) {
       if (args[0] === 'worktree' && args[1] === 'add') {
         await mkdir(args[4], { recursive: true });
         await writeFile(join(args[4], 'package.json'), JSON.stringify({ scripts: localScripts }));
+        await writeFile(join(args[4], 'vercel.json'), JSON.stringify({ git: { deploymentEnabled: { [args[3]]: false } } }));
       }
       if (args[0] === 'rev-list') return args.at(-1) === 'base-sha..HEAD' && args.includes('--count') ? '1' : '0';
       if (args[0] === 'diff') return 'A\tscripts/example.mjs';
@@ -333,7 +334,8 @@ test('parent worker verifies and commits actual isolated worktree changes before
   await git(['config', 'user.email', 'worker-test@example.invalid']);
   await writeFile(join(root, 'example.txt'), 'baseline\n');
   await writeFile(join(root, 'package.json'), JSON.stringify({ scripts: localScripts }));
-  await git(['add', 'example.txt', 'package.json']);
+  await writeFile(join(root, 'vercel.json'), JSON.stringify({ git: { deploymentEnabled: { 'codex/issue-40-task-40': false } } }));
+  await git(['add', 'example.txt', 'package.json', 'vercel.json']);
   await git(['commit', '-m', 'baseline']);
   await git(['remote', 'add', 'origin', 'https://github.com/test/repo.git']);
   await git(['update-ref', 'refs/remotes/origin/main', await git(['rev-parse', 'HEAD'])]);
@@ -744,4 +746,22 @@ test('dry-run reports required E2E preflight without preparing state/worktree/Co
 
 for (const failure of ['migration required', 'authentication required', 'credentials required', 'requires external service']) test(`real unsafe command diagnostic prevents local-verification classification: ${failure}`, async () => {
   await assert.rejects(command(process.execPath, ['-e', `console.error(${JSON.stringify(failure)});process.exit(1)`]), error => error.category === 'unsafe' && !JSON.stringify(error).includes(failure));
+});
+
+for (const allowed of [true, false]) test(`parent publication ${allowed ? 'accepts only current branch suppression' : 'rejects unrelated Vercel configuration edits'}`, async t => {
+  const f = await repairFixture(t);
+  const baseline = { headers: [], git: { deploymentEnabled: { 'codex/other': false } } };
+  const state = await worker({ ...f.options, execute: async (b, a, o) => {
+    if (b === 'git' && a[0] === 'diff' && a[1] === '--name-status') return 'M\tvercel.json\nM\tscripts/example.mjs';
+    if (b === 'git' && a[0] === 'show') return JSON.stringify(baseline);
+    return f.execute(b, a, o);
+  }, run: async ({ current }) => {
+    const after = structuredClone(baseline);
+    after.git.deploymentEnabled[current.branch] = false;
+    if (!allowed) after.headers.push({ source: '/private', headers: [] });
+    await writeFile(join(current.worktree, 'vercel.json'), JSON.stringify(after));
+    return { code: 0, result };
+  } });
+  assert.equal(state.lastReason, allowed ? 'completed' : 'parent_verification_safety_failed');
+  assert.equal(f.calls.some(([b,a]) => b === 'git' && a[0] === 'push'), allowed);
 });

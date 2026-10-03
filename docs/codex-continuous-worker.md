@@ -219,3 +219,6 @@ Issue 本文の Acceptance Criteria / Required Tests / 完了条件、MUST / 必
 回帰テストは一時 directory の state/worktree/session、合成の CLI/検証失敗、mock GitHub publication を使用します。既存 #50 の state/worktree/session を読まず、変更・resume しません。実 UI 風 assertion failure → 同じ session への診断差し戻し → 最小修正 → 独立検証 → mock publication、quota/retry上限、安全な handoff override、E2E preflight と code-only の非停止、unsafe reason、publication failure を検証します。
 
 確認日: 2026-10-03。実行環境 Node.js 24.12.0。Context7 `/nodejs/node` の公式 child_process.spawn（stdout/stderr pipe、close/error event）と node:test（mock/子runnerの環境隔離）を確認しました。既存 CLI/sandbox/credential isolation 方針は維持しています。
+
+
+#50復旧の追加検証では、record等のshared UI外のcomponent変更も親unit/UIの対象にします。自動公開前はVercelのdeploymentEnabledが現在branchについてfalse（または全体false）であることを確認します。vercel.jsonの差分は現在branchのfalse設定だけの変更を許可し、それ以外のdeployment/security設定変更は引き続き人へ返します。確認日: 2026-10-03、Context7 `/nodejs/node` のJSON file read/writeとchild process error/closeを再確認。

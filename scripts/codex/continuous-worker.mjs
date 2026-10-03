@@ -7,6 +7,7 @@ import { ensureWorktree, WorktreeSafetyError } from './lib/worktree.mjs';
 import { verificationTests, assertLocalCheck } from './lib/verification.mjs';
 import { VerificationFailure } from './lib/failure.mjs';
 import { preflightReason } from './lib/preflight.mjs';
+import { deploymentDisabled, branchSuppressionOnly, PublicationSafetyError } from './lib/publication.mjs';
 import { GitHub } from './lib/github.mjs';
 import { branchName, disposition, labels, metadata, selectIssue } from './lib/queue.mjs';
 import { loadState, lockState, saveJson } from './lib/state.mjs';
@@ -61,7 +62,13 @@ export async function verify(current, execute) {
   if (changed.some(line => /^(?!A\s)\S+\s+supabase\/migrations\//.test(line) || /\s+supabase\/migrations\/old\//.test(line) || /\s+(?:.*\/)?(?:\.env(?!\.example$)|auth\.json|WORKER-PROGRESS\.md|.*\.pem$)/.test(line))) throw new Error('Protected file changed');
   // DB/RLS changes never reach test commands or publication automatically.
   if (changed.some(line => /\s+(?:supabase\/migrations\/|src\/utils\/permissions\.ts)/.test(line))) throw new Error('DB/RLS change requires human verification before publishing');
-  if (changed.some(line => /\s+(?:src\/(?:app\/auth\/|components\/auth\/|utils\/supabase\/|utils\/.*(?:[Aa]uth|[Pp]ermission|[Tt]enant|[Rr]etention)|proxy\.ts)|scripts\/(?:db|e2e)\/|supabase\/|vercel\.json)/.test(line))) throw new Error('Security-sensitive change requires human verification');
+  if (changed.some(line => /\s+(?:src\/(?:app\/auth\/|components\/auth\/|utils\/supabase\/|utils\/.*(?:[Aa]uth|[Pp]ermission|[Tt]enant|[Rr]etention)|proxy\.ts)|scripts\/(?:db|e2e)\/|supabase\/)/.test(line))) throw new Error('Security-sensitive change requires human verification');
+  const deploymentConfig = JSON.parse(await readFile(join(current.worktree, 'vercel.json'), 'utf8'));
+  if (!deploymentDisabled(deploymentConfig, current.branch)) throw new PublicationSafetyError();
+  if (changed.some(line => /\s+vercel\.json$/.test(line))) {
+    const baseConfig = JSON.parse(await run(['show', `${current.base}:vercel.json`]));
+    if (!branchSuppressionOnly(baseConfig, deploymentConfig, current.branch)) throw new Error('Deployment configuration change requires human verification');
+  }
   let scripts = null;
   try { scripts = JSON.parse(await readFile(join(current.worktree, 'package.json'), 'utf8')).scripts ?? {}; }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -260,7 +267,7 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
           continue;
         }
         state.paused = true; state.status = 'needs-human';
-        state.lastReason = error instanceof WorktreeSafetyError ? error.reason : error instanceof VerificationFailure
+        state.lastReason = error instanceof WorktreeSafetyError || error instanceof PublicationSafetyError ? error.reason : error instanceof VerificationFailure
           ? error.retryable ? 'verification_retry_exhausted' : 'unsafe_or_unavailable_verification' : 'parent_verification_safety_failed';
         if (error instanceof VerificationFailure && error.retryable) current.repair = error.diagnostic;
         if (error instanceof WorktreeSafetyError) current.worktreeCheck = error.check;

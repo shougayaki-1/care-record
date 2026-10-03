@@ -23,6 +23,7 @@ async function fixture(t, { advance = true, packageData } = {}) {
   await git(['config', 'user.email', 'worker@example.invalid']);
   await git(['remote', 'add', 'origin', 'https://github.com/test/repo.git']);
   await writeFile(join(root, 'example.txt'), 'original\n');
+  await writeFile(join(root, 'vercel.json'), JSON.stringify({ git: { deploymentEnabled: { 'codex/issue-51-test': false } } }));
   if (packageData) await writeFile(join(root, 'package.json'), JSON.stringify(packageData));
   await git(['add', '.']); await git(['commit', '-m', 'base']);
   const old = await git(['rev-parse', 'HEAD']);
@@ -128,7 +129,7 @@ test('resume mismatch pauses with diagnostic state, preserving base/session/fail
 test('standard test is selected only for inspected local unit/UI scripts and rejects unsafe hooks/commands', () => {
   assert.deepEqual(verificationTests(['M\tpackage.json'], scripts), ['test']);
   assert.deepEqual(verificationTests(['M\tpackage-lock.json'], scripts), ['test']);
-  assert.deepEqual(verificationTests(['M\tsrc/components/ui/Button.tsx'], scripts), ['test:ui']);
+  assert.deepEqual(verificationTests(['M\tsrc/components/ui/Button.tsx'], scripts), ['test:unit', 'test:ui']);
   for (const bad of [{ test: 'npm run test:e2e' }, { test: 'npm run test:unit' }, { pretest: 'deploy' }, { 'posttest:ui': 'curl external' }, { 'test:ui': 'supabase db reset' }]) {
     assert.throws(() => verificationTests(['M\tpackage.json'], { ...scripts, ...bad }), /human verification/);
   }

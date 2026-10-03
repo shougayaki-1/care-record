@@ -34,10 +34,10 @@ export function verificationTests(changed, scripts, reasons = []) {
     assertLocalTests(scripts, ['test', 'test:unit', 'test:ui']);
     checks.push('test');
   } else {
-    if (changed.some(line => /\s+src\/(?:app\/actions|utils)\//.test(line))) {
+    if (changed.some(line => /\s+src\/(?:app\/actions|utils|components)\//.test(line))) {
       assertLocalTests(scripts, ['test:unit']); checks.push('test:unit');
     }
-    if (changed.some(line => /\s+src\/components\/ui\//.test(line))) {
+    if (changed.some(line => /\s+src\/components\//.test(line))) {
       assertLocalTests(scripts, ['test:ui']); checks.push('test:ui');
     }
   }
