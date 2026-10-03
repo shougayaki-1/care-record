@@ -16,6 +16,7 @@
     "db:types:local": "node scripts/db/generate-types-local.mjs > src/types/database.generated.ts",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
+    "test": "npm run test:unit && npm run test:ui",
     "test:ui": "vitest run --project storybook",
     "test:unit": "vitest run --project unit",
     "test:e2e": "node scripts/e2e/run-local.mjs all",

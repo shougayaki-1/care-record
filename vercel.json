@@ -22,7 +22,8 @@
     "deploymentEnabled": {
       "codex/issue-56-continuous-worker": false,
       "codex/issue-56-keyring-follow-up": false,
-      "codex/worker-worktree-verification": false
+      "codex/worker-worktree-verification": false,
+      "codex/issue-51-dx-npm-run-test": false
     }
   }
 }
