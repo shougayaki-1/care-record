@@ -1,6 +1,6 @@
 'use server';
 
-import { sanitizeDbError, withSafeError } from '@/utils/errors';
+import { sanitizeDbError, withSafeError, UserFacingError } from '@/utils/errors';
 import { PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS, type RolePermissions } from '@/utils/permissions';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
@@ -88,12 +88,14 @@ export async function updateOrgRole(orgId: string, roleId: string, patch: RolePa
 
 export async function deleteOrgRole(orgId: string, roleId: string): Promise<void> {
   return withSafeError('deleteOrgRole', async () => {
-    const { userId } = await assertOrgPermission(orgId, 'roles');
+    const { userId, isOwner } = await assertOrgPermission(orgId, 'roles');
     const supabase = await createSessionClient();
     const { data: existing, error: readError } = await supabase
-      .from('organization_roles').select('name, color, permissions').eq('id', roleId).eq('organization_id', orgId).maybeSingle();
+      .from('organization_roles').select('name, color, permissions, is_preset').eq('id', roleId).eq('organization_id', orgId).maybeSingle();
     if (readError) throw sanitizeDbError(readError, 'action.roles.delete.read');
     if (!existing) throw new Error('対象のロールが見つかりません');
+    if (existing.is_preset) throw new UserFacingError('プリセットロールは削除できません');
+    assertOwnerForDangerousPermissions(existing.permissions as RolePermissions, isOwner);
     await assertRoleManagerRemains(orgId, { deletedRoleId: roleId });
     const { error } = await supabase.rpc('mutate_organization_role_authorized', {
       p_organization_id: orgId, p_role_id: roleId, p_action: 'delete',

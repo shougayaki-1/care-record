@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useCallback, useTransition } from 'react';
+import { useId, useState, useCallback, useTransition } from 'react';
 import type { SyntheticEvent } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, Button, TextField, Stack,
-  IconButton, Select, MenuItem, FormControl, InputLabel, Menu, Alert, ListItemIcon,
+  Chip, Stack,
+  IconButton, MenuItem, Menu, ListItemIcon,
   CircularProgress, Divider, LinearProgress, Tabs, Tab,
 } from '@/components/ui/mui';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
@@ -21,8 +21,8 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
-import { createInvitation, getAccountOverview, getInviteStaffCandidates, getOrgRoles, updateAccountRole, updateMemberRoles, removeAccount, type InviteStaffCandidate } from '@/app/actions/accounts';
-import { AppButton, AppDialog, InnerPageHeader, PageBody, PageLayout, PageToolbar } from '@/components/ui';
+import { createInvitation, getAccountOverview, getInviteStaffCandidates, getOrgRoles, updateMemberRoles, removeAccount, type InviteStaffCandidate } from '@/app/actions/accounts';
+import { AppButton, AppDialog, AppTextField, SelectField, StatusChip, EmptyState, InnerPageHeader, PageBody, PageLayout, PageToolbar } from '@/components/ui';
 import { checkManagementPermission } from '@/utils/permissions';
 import RoleManagementPanel from '@/components/roles/RoleManagementPanel';
 import { useFetchData } from '@/hooks/useFetchData';
@@ -55,6 +55,7 @@ const initialAccountsData: AccountsData = {
 };
 
 export default function AccountsPage() {
+  const roleRestrictionId = useId();
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const theme = useTheme();
@@ -77,7 +78,6 @@ export default function AccountsPage() {
 
   // ダイアログ用
   const [openRoleDialog, setOpenRoleDialog] = useState(false);
-  const [editRole, setEditRole] = useState('staff');
   const [editOrgRoleIds, setEditOrgRoleIds] = useState<string[]>([]);
   
   // ★追加：削除（取り消し）確認ダイアログ用
@@ -170,7 +170,6 @@ export default function AccountsPage() {
 
   const openRoleEditDialog = () => {
     if (!selectedAccount) return;
-    setEditRole(selectedAccount.role === 'owner' ? 'owner' : 'member');
     setEditOrgRoleIds(selectedAccount.roles?.map(r => r.id) ?? []);
     setOpenRoleDialog(true);
     handleMenuClose();
@@ -179,21 +178,6 @@ export default function AccountsPage() {
   const executeRoleChange = async () => {
     if (!currentOrg || !selectedAccount) return;
     try {
-      if (selectedAccount.id === currentUserId && selectedAccount.role === 'owner' && editRole !== 'owner') {
-        const ownerCount = accountList.filter(a => a.role === 'owner' && a.status === 'active').length;
-        if (ownerCount <= 1) {
-          showToast('あなたは最後のオーナーです。他の人にオーナー権限を付与してから変更してください。', 'error');
-          setOpenRoleDialog(false);
-          return;
-        }
-      }
-
-      await updateAccountRole(currentOrg.id, {
-        targetId: selectedAccount.id,
-        status: selectedAccount.status === 'active' ? 'active' : 'invited',
-        newRole: editRole,
-      });
-
       if (selectedAccount.status === 'active') {
         await updateMemberRoles(currentOrg.id, selectedAccount.id, editOrgRoleIds);
       }
@@ -287,7 +271,7 @@ export default function AccountsPage() {
                     {isFetching ? (
                         <Box sx={{ py: 4, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box>
                     ) : accountList.length === 0 ? (
-                        <Box sx={{ py: 4, px: 2, textAlign: 'center', color: 'text.secondary' }}>アカウントがありません</Box>
+                        <EmptyState title="アカウントがありません" />
                     ) : accountList.map((account) => (
                         <Box key={account.id} sx={{ py: 1.5 }}>
                             <Stack spacing={1.25}>
@@ -321,7 +305,7 @@ export default function AccountsPage() {
                                     ) : (
                                         <Chip label="一般" size="small" color="default" variant="outlined" />
                                     )}
-                                    <Chip label={account.status === 'active' ? '有効' : '招待中'} color={account.status === 'active' ? 'success' : 'warning'} size="small" variant="filled" />
+                                    <StatusChip label={account.status === 'active' ? '有効' : '招待中'} tone={account.status === 'active' ? 'success' : 'warning'} size="small" variant="filled" />
                                 </Box>
                             </Stack>
                         </Box>
@@ -343,7 +327,7 @@ export default function AccountsPage() {
                         {isFetching ? (
                             <TableRow><TableCell colSpan={4} align="center" sx={{ py: 4 }}><CircularProgress size={24} /></TableCell></TableRow>
                         ) : accountList.length === 0 ? (
-                            <TableRow><TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}>アカウントがありません</TableCell></TableRow>
+                            <TableRow><TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}><EmptyState title="アカウントがありません" /></TableCell></TableRow>
                         ) : (
                             accountList.map((account) => (
                             <TableRow key={account.id} hover sx={{ height: 60 }}>
@@ -393,9 +377,9 @@ export default function AccountsPage() {
                                     )}
                                 </TableCell>
                                 <TableCell>
-                                    <Chip 
+                                    <StatusChip
                                         label={account.status === 'active' ? '有効' : '招待中'} 
-                                        color={account.status === 'active' ? 'success' : 'warning'} 
+                                        tone={account.status === 'active' ? 'success' : 'warning'}
                                         size="small" 
                                         variant="filled" 
                                     />
@@ -438,7 +422,7 @@ export default function AccountsPage() {
           )}
 
           {/* ★修正: onClick を openDeleteConfirmDialog に変更 */}
-          <MenuItem onClick={openDeleteConfirmDialog} sx={{ color: 'error.main', py: 1.5 }}>
+          <MenuItem disabled={selectedAccount?.role === 'owner' && !isOwner} onClick={openDeleteConfirmDialog} sx={{ color: 'error.main', py: 1.5 }}>
               <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon> 
               {selectedAccount?.status === 'active' ? 'アカウントを削除' : '招待を取り消す'}
           </MenuItem>
@@ -456,23 +440,13 @@ export default function AccountsPage() {
       {/* --- 権限・ロール変更ダイアログ --- */}
       <AppDialog open={openRoleDialog} onClose={() => setOpenRoleDialog(false)} maxWidth="xs" title="権限・ロールの変更" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenRoleDialog(false)}>キャンセル</AppButton><AppButton onClick={executeRoleChange}>変更を保存</AppButton></>}>
         <Box pt={1}>
+          {!isOwner && <Typography id={roleRestrictionId} variant="caption" color="text.secondary">危険な権限を含むロールはオーナーのみ付与できます。</Typography>}
           <Typography variant="body2" mb={2}>
             <b>{selectedAccount?.name}</b> さんの権限を変更します。
           </Typography>
-          <FormControl fullWidth size="small">
-            <InputLabel id="edit-system-role-label">システム権限</InputLabel>
-            <Select labelId="edit-system-role-label" value={editRole} onChange={(e) => setEditRole(e.target.value)} label="システム権限">
-              <MenuItem value="member">メンバー - 権限はロールで管理</MenuItem>
-              {selectedAccount?.status === 'active' && (
-                <MenuItem value="owner">オーナー - 所有者</MenuItem>
-              )}
-            </Select>
-          </FormControl>
-          {selectedAccount?.id === currentUserId && editRole !== 'owner' && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              自分の所有者区分を変更すると、再度オーナーに戻るには別のオーナーによる移譲が必要です。
-            </Alert>
-          )}
+          <Typography variant="body2" color="text.secondary">
+            システム権限: {selectedAccount?.role === 'owner' ? 'オーナー' : 'メンバー'}。オーナーの変更には再認証付きの専用移譲フローが必要です。
+          </Typography>
           {availableRoles.length > 0 && selectedAccount?.status === 'active' && (
             <>
               <Divider sx={{ my: 2 }} />
@@ -485,6 +459,8 @@ export default function AccountsPage() {
                     <Chip
                       key={role.id}
                       label={role.name}
+                      disabled={locked}
+                      aria-describedby={locked ? roleRestrictionId : undefined}
                       onClick={() => {
                         if (locked) return;
                         if (selected) setEditOrgRoleIds(prev => prev.filter(id => id !== role.id));
@@ -492,10 +468,8 @@ export default function AccountsPage() {
                       }}
                       variant={selected ? 'filled' : 'outlined'}
                       sx={{
-                        cursor: locked ? 'not-allowed' : 'pointer',
-                        opacity: locked ? 0.4 : 1,
                         borderColor: role.color ?? undefined,
-                        color: selected ? '#fff' : (role.color ?? undefined),
+                        color: selected ? theme.palette.getContrastText(role.color ?? theme.palette.primary.main) : (role.color ?? undefined),
                         bgcolor: selected ? (role.color ?? undefined) : undefined,
                       }}
                     />
@@ -510,6 +484,7 @@ export default function AccountsPage() {
       {/* --- 新規招待ダイアログ --- */}
       <AppDialog open={openInvite} onClose={() => setOpenInvite(false)} maxWidth="xs" title="新しいアカウントの招待" actions={<AppButton variant="text" intent="secondary" onClick={() => setOpenInvite(false)}>閉じる</AppButton>}>
           <Stack spacing={3} alignItems="center" py={1}>
+             {!isOwner && <Typography id={roleRestrictionId} variant="caption" color="text.secondary">危険な権限を含むロールはオーナーのみ付与できます。</Typography>}
              {!generatedLink ? (
                  <>
                     {availableRoles.length > 0 && (
@@ -523,6 +498,8 @@ export default function AccountsPage() {
                                 <Chip
                                   key={role.id}
                                   label={role.name}
+                                  disabled={locked}
+                                  aria-describedby={locked ? roleRestrictionId : undefined}
                                   onClick={() => {
                                     if (locked) return;
                                     if (selected) setSelectedRoleIds(prev => prev.filter(id => id !== role.id));
@@ -530,10 +507,8 @@ export default function AccountsPage() {
                                   }}
                                   variant={selected ? 'filled' : 'outlined'}
                                   sx={{
-                                    cursor: locked ? 'not-allowed' : 'pointer',
-                                    opacity: locked ? 0.4 : 1,
                                     borderColor: role.color ?? undefined,
-                                    color: selected ? '#fff' : (role.color ?? undefined),
+                                    color: selected ? theme.palette.getContrastText(role.color ?? theme.palette.primary.main) : (role.color ?? undefined),
                                     bgcolor: selected ? (role.color ?? undefined) : undefined,
                                   }}
                                 />
@@ -542,26 +517,17 @@ export default function AccountsPage() {
                           </Box>
                         </Box>
                     )}
-                    <TextField label="招待する人の名前" placeholder="例: 山田 太郎" size="small" fullWidth required value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} helperText="招待された人の表示名として使われます" />
-                    <TextField label="招待先メールアドレス" type="email" size="small" fullWidth required value={newInviteEmail} onChange={(e) => setNewInviteEmail(e.target.value)} helperText="このメールアドレスでログインした人だけが72時間以内に利用できます" />
-                    <FormControl fullWidth size="small">
-                      <InputLabel id="invite-staff-link-label">スタッフ名簿との紐付け</InputLabel>
-                      <Select labelId="invite-staff-link-label" value={selectedInviteStaffId} onChange={(e) => setSelectedInviteStaffId(e.target.value)} label="スタッフ名簿との紐付け">
-                        <MenuItem value="none">紐付けない</MenuItem>
-                        {inviteStaffCandidates.map((staff) => (
-                          <MenuItem key={staff.id} value={staff.id}>
-                            {staff.name}{staff.positions && staff.positions.length > 0 ? `（${staff.positions.join('・')}）` : ''}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <Button variant="contained" onClick={handleGenerateLink} disabled={!newInviteName.trim() || !newInviteEmail.trim()} fullWidth sx={{ py: 1, boxShadow: 'none' }}>招待リンクを発行</Button>
+                    <AppTextField label="招待する人の名前" placeholder="例: 山田 太郎" size="small" fullWidth required value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} helperText="招待された人の表示名として使われます" />
+                    <AppTextField label="招待先メールアドレス" type="email" size="small" fullWidth required value={newInviteEmail} onChange={(e) => setNewInviteEmail(e.target.value)} helperText="このメールアドレスでログインした人だけが72時間以内に利用できます" />
+                    <SelectField label="スタッフ名簿との紐付け" size="small" value={selectedInviteStaffId} onChange={setSelectedInviteStaffId}
+                      options={[{ value: 'none', label: '紐付けない' }, ...inviteStaffCandidates.map(staff => ({ value: staff.id, label: `${staff.name}${staff.positions?.length ? `（${staff.positions.join('・')}）` : ''}` }))]} />
+                    <AppButton variant="contained" onClick={handleGenerateLink} disabled={!newInviteName.trim() || !newInviteEmail.trim()} fullWidth sx={{ py: 1, boxShadow: 'none' }}>招待リンクを発行</AppButton>
                  </>
              ) : (
                  <>
                     <Typography variant="body2" textAlign="center">以下のリンクを相手に共有してください。</Typography>
-                    <TextField value={generatedLink} fullWidth size="small" slotProps={{ input: { readOnly: true, endAdornment: (<IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}><ContentCopyIcon /></IconButton>) } }} />
-                    <Button variant="outlined" startIcon={<ShareIcon />} fullWidth onClick={handleShare}>共有メニューを開く</Button>
+                    <AppTextField label="招待リンク" value={generatedLink} fullWidth size="small" slotProps={{ input: { readOnly: true, endAdornment: (<IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}><ContentCopyIcon /></IconButton>) } }} />
+                    <AppButton intent="secondary" variant="outlined" startIcon={<ShareIcon />} fullWidth onClick={handleShare}>共有メニューを開く</AppButton>
                  </>
              )}
           </Stack>

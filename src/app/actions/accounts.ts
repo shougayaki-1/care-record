@@ -1,6 +1,6 @@
 'use server';
 
-import { sanitizeDbError } from '@/utils/errors';
+import { sanitizeDbError, withSafeError, UserFacingError } from '@/utils/errors';
 
 import { randomUUID } from 'crypto';
 import { getAuthedUser, assertOrgRole, assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
@@ -239,31 +239,40 @@ export async function updateAccountRole(
 
 /**
  * メンバーの除名 / 招待の取り消し。
- * 他人の除名は owner のみ。自分自身の脱退はメンバーであれば可。
+ * 他メンバー/招待は accounts 権限、owner の除名は owner のみ。自己脱退はメンバーであれば可。
  * 最後の owner はサーバ側でも削除を拒否する。
  */
 export async function removeAccount(
     orgId: string,
     params: { targetId: string; status: 'active' | 'invited' }
 ) {
-    const { id: callerId } = await getAuthedUser();
-    const { targetId, status } = params;
+    return withSafeError('removeAccount', async () => {
+        const { id: callerId } = await getAuthedUser();
+        const { targetId, status } = params;
 
-    if (status === 'active' && targetId === callerId) {
-        // 自己脱退: メンバーであればよい
-        await assertOrgRole(orgId);
-    } else {
-        // 他メンバーの除名 / 招待取消はアカウント管理権限が必要
-        await assertOrgPermission(orgId, 'accounts');
-    }
+        if (status === 'active' && targetId === callerId) {
+            // 自己脱退: メンバーであればよい
+            await assertOrgRole(orgId);
+        } else {
+            // 他メンバーの除名 / 招待取消はアカウント管理権限が必要
+            await assertOrgPermission(orgId, 'accounts');
+        }
 
-    const sessionClient = await createSessionClient();
-    const { error } = await sessionClient.rpc('account_remove', {
-        p_organization_id: orgId, p_target_id: targetId, p_status: status,
+        const sessionClient = await createSessionClient();
+        if (status === 'active') {
+            const { data: target, error: readError } = await sessionClient.from('organization_members')
+                .select('role').eq('organization_id', orgId).eq('user_id', targetId).maybeSingle();
+            if (readError) throw sanitizeDbError(readError, 'action.accounts.remove.read');
+            if (!target) throw new UserFacingError('対象のメンバーが見つかりません');
+            if (target.role === 'owner') await assertOrgRole(orgId, ['owner']);
+        }
+        const { error } = await sessionClient.rpc('account_remove', {
+            p_organization_id: orgId, p_target_id: targetId, p_status: status,
+        });
+        if (error) throw sanitizeDbError(error, 'action.accounts');
+        await recordAuditEvent({ organizationId: orgId, actorId: callerId, action: status === 'active' ? 'account.remove' : 'account.invitation_revoke', resourceType: 'account', resourceId: targetId });
+        return { success: true };
     });
-    if (error) throw sanitizeDbError(error, 'action.accounts');
-    await recordAuditEvent({ organizationId: orgId, actorId: callerId, action: status === 'active' ? 'account.remove' : 'account.invitation_revoke', resourceType: 'account', resourceId: targetId });
-    return { success: true };
 }
 
 export type InvitationPreview = {

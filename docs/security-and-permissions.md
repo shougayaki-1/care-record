@@ -11,6 +11,9 @@
 - DB側の実体: RLSポリシー（`supabase/migrations/`）。アプリ側の定義とは**二重管理**なので、
   一方を変更したら他方の整合を確認する（`.claude/rules/supabase.md`）。
 - 安全補助: `src/utils/supabase/roleSafety.ts`
+- ロール削除: `deleteOrgRole` と `mutate_organization_role_authorized` でプリセット削除を拒否し、危険権限（accounts / roles / organizationDelete / ownerTransfer）を含むロールの削除はownerに限定する。最後のロール管理者保護にはownerの暗黙権限も含める。
+- 除名: `removeAccount` と `account_remove` で一般メンバー・招待はaccounts権限、ownerを対象とする除名はownerのみ許可する。自己脱退は所属メンバーに許可し、最後のownerは脱退・除名できない。
+- owner変更: 通常の業務ロール編集では所有者区分を変更しない。`transferOwner` の専用再認証フローを使う。
 
 ## 認証・セッション
 

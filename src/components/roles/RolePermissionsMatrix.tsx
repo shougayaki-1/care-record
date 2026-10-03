@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useId } from 'react';
 import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Checkbox, ToggleButton, ToggleButtonGroup, Typography, Box, Stack, Tooltip,
@@ -12,6 +12,7 @@ type Props = {
   value: RolePermissions;
   onChange: (next: RolePermissions) => void;
   disabled?: boolean;
+  isOwner?: boolean;
 };
 
 const SCOPE_LABELS: Record<RecordScope, string> = {
@@ -21,15 +22,17 @@ const SCOPE_LABELS: Record<RecordScope, string> = {
 };
 
 function ScopeToggle({
-  scope, onChange, allowAssigned = true,
+  scope, onChange, allowAssigned = true, disabled,
 }: {
   scope: RecordScope;
   onChange: (s: RecordScope) => void;
   allowAssigned?: boolean;
+  disabled?: boolean;
 }) {
   const options: RecordScope[] = allowAssigned ? ['all', 'assigned', 'none'] : ['all', 'none'];
   return (
     <ToggleButtonGroup
+      disabled={disabled}
       value={scope}
       exclusive
       onChange={(_, v) => v && onChange(v as RecordScope)}
@@ -83,7 +86,9 @@ const MGMT_ITEMS: Array<{ label: string; key: keyof RolePermissions['management'
   { label: 'オーナー移譲', key: 'ownerTransfer', description: '事業所オーナーを別メンバーへ移譲できます。' },
 ];
 
-export default function RolePermissionsMatrix({ value, onChange, disabled }: Props) {
+export default function RolePermissionsMatrix({ value, onChange, disabled, isOwner = false }: Props) {
+  const ownerOnlyDescriptionId = useId();
+  const dangerousKeys = ['accounts', 'roles', 'organizationDelete', 'ownerTransfer'];
   const setRecords = (action: RecordAction, scope: RecordScope) =>
     onChange({ ...value, records: { ...value.records, [action]: scope } });
   const setShifts = (action: ShiftAction, scope: RecordScope) =>
@@ -94,7 +99,7 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
     onChange({ ...value, management: { ...value.management, [area]: checked } });
 
   return (
-    <Box sx={{ minWidth: 0, opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
+    <Box sx={{ minWidth: 0 }}>
       <Box sx={{ mb: 1.5, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2, bgcolor: 'background.subtle' }}>
         <Typography variant="caption" color="text.secondary" display="block">
           「全体」は担当に関係なく操作できます。「担当」はその利用者またはシフトの担当者に紐付いている場合だけ操作できます。「×」は許可しません。
@@ -118,6 +123,7 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
                     scope={value.records[r.action]}
                     onChange={s => setRecords(r.action, s)}
                     allowAssigned={r.allowAssigned}
+                  disabled={disabled}
                   />
                 </TableCell>
               ))}
@@ -130,6 +136,7 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
                     scope={value.shifts[r.action]}
                     onChange={s => setShifts(r.action, s)}
                     allowAssigned={r.allowAssigned}
+                  disabled={disabled}
                   />
                 </TableCell>
               ))}
@@ -144,6 +151,7 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
                     scope={value.internalWork[r.action]}
                     onChange={s => setInternalWork(r.action, s)}
                     allowAssigned={r.allowAssigned}
+                  disabled={disabled}
                   />
                 </TableCell>
               ))}
@@ -168,6 +176,7 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
                   scope={value.records[r.action]}
                   onChange={s => setRecords(r.action, s)}
                   allowAssigned={r.allowAssigned}
+                  disabled={disabled}
                 />
               </Stack>
             ))}
@@ -185,6 +194,7 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
                   scope={value.shifts[r.action]}
                   onChange={s => setShifts(r.action, s)}
                   allowAssigned={r.allowAssigned}
+                  disabled={disabled}
                 />
               </Stack>
             ))}
@@ -202,6 +212,7 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
                   scope={value.internalWork[r.action]}
                   onChange={s => setInternalWork(r.action, s)}
                   allowAssigned={r.allowAssigned}
+                  disabled={disabled}
                 />
               </Stack>
             ))}
@@ -209,12 +220,15 @@ export default function RolePermissionsMatrix({ value, onChange, disabled }: Pro
         </Box>
       </Stack>
 
+      {!isOwner && <Typography id={ownerOnlyDescriptionId} variant="caption" color="text.secondary" display="block" mt={2}>アカウント管理・ロール管理・事業所削除・オーナー移譲はオーナーのみ変更できます。</Typography>}
       <Typography variant="subtitle2" mt={2} mb={1}>管理機能アクセス</Typography>
       <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))' }} gap={0.5}>
         {MGMT_ITEMS.map(item => (
           <Box key={item.key} display="flex" alignItems="center" minWidth={0}>
             <Checkbox
               size="small"
+              disabled={disabled || (!isOwner && dangerousKeys.includes(item.key))}
+              slotProps={{ input: { 'aria-label': item.label, 'aria-describedby': !isOwner && dangerousKeys.includes(item.key) ? ownerOnlyDescriptionId : undefined } }}
               checked={value.management[item.key]}
               onChange={e => setMgmt(item.key, e.target.checked)}
             />
