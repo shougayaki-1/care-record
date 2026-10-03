@@ -29,3 +29,7 @@ CareRecord uses MUI v7 with semantic tokens from `src/theme.ts`. New product UI 
 Direct MUI composition remains appropriate for layout primitives (`Box`, `Stack`, `Typography`), tables with highly specialized cells, navigation, tabs, icon buttons, and third-party integrations. Hidden native file inputs, FullCalendar styling, React PDF components, and brand-mandated OAuth logos are explicit exceptions.
 
 Every reusable component state is documented in Storybook. Run `npm run storybook` for development or `npm run build-storybook` as a validation gate.
+
+## 記録の非同期操作
+
+通常記録・内勤・AIの処理中表示、二重送信防止、通知、再試行、成功後の状態遷移は [記録の非同期操作](record-async.md) に従う。フォーム構造・アクション配置とフィード更新経路は維持する。

@@ -19,4 +19,9 @@ const openReview: Story['play'] = async ({ canvasElement }) => {
 };
 export const DraftReview: Story = { play: openReview };
 export const SubmittedReview: Story = { args: { workflow: 'review_submissions' }, play: openReview };
-export const Processing: Story = { args: { workflow: 'review_submissions', saving: true }, play: openReview };
+export const Processing: Story = { args: { workflow: 'review_submissions', saving: true }, play: async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await expect(canvas.getAllByRole('button', { name: '内容を確認・修正' })[0]).toBeDisabled();
+  await expect(canvas.getByRole('button', { name: '却下' })).toBeDisabled();
+} };
+export const SaveFailure: Story = { args: { rows: [{ ...sampleRow, status: 'confirmed', saveStatus: 'error', saveError: '保存に失敗しました。入力内容を確認して再試行してください。' }] }, play: openReview };

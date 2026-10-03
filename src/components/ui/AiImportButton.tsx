@@ -11,6 +11,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import type { FormItem, PromptCandidate } from '@/lib/ai/extractPrompt';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
+import { useAsyncRecordAction } from '@/hooks/useAsyncRecordAction';
 import { readAiExtractSse } from '@/lib/ai/sseClient';
 import { AiInfoPanel } from '@/components/ui/AiInfoPanel';
 
@@ -20,6 +21,7 @@ export type AiImportButtonProps = {
   clients: PromptCandidate[];
   helpers: PromptCandidate[];
   onExtracted: (result: ExtractionResult) => void;
+  onProcessingChange?: (processing: boolean) => void;
   hasExistingValues?: boolean;
   disabled?: boolean;
 };
@@ -30,33 +32,33 @@ export function AiImportButton({
   clients,
   helpers,
   onExtracted,
+  onProcessingChange,
   hasExistingValues = false,
   disabled = false,
 }: AiImportButtonProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
+  const { pending: loading, error: errorMessage, run, isRunning, clearError } = useAsyncRecordAction(organizationId);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const openWizard = () => {
     setSelectedFile(null);
-    setErrorMessage(null);
+    clearError();
     setWizardOpen(true);
   };
 
   const closeWizard = () => {
-    if (loading) return;
+    if (isRunning()) return;
     setWizardOpen(false);
     setSelectedFile(null);
-    setErrorMessage(null);
+    clearError();
     setConfirmOpen(false);
   };
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
-    setErrorMessage(null);
+    clearError();
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,7 +74,7 @@ export function AiImportButton({
   };
 
   const handleProcess = () => {
-    if (!selectedFile) return;
+    if (!selectedFile || isRunning()) return;
     if (hasExistingValues) {
       setConfirmOpen(true);
     } else {
@@ -86,53 +88,53 @@ export function AiImportButton({
   };
 
   const processFile = async (file: File) => {
-    setLoading(true);
-    setErrorMessage(null);
+    if (isRunning()) return;
+    onProcessingChange?.(true);
     try {
-      const formData = new FormData();
-      formData.append('files[]', file);
-      formData.set('formTemplate', JSON.stringify(formTemplate));
-      formData.set('clients', JSON.stringify(clients));
-      formData.set('helpers', JSON.stringify(helpers));
+      const outcome = await run(async () => {
+        const formData = new FormData();
+        formData.append('files[]', file);
+        formData.set('formTemplate', JSON.stringify(formTemplate));
+        formData.set('clients', JSON.stringify(clients));
+        formData.set('helpers', JSON.stringify(helpers));
 
-      const extractUrl = `/api/ai/extract?organizationId=${encodeURIComponent(organizationId)}`;
-      const response = await fetch(extractUrl, {
-        method: 'POST',
-        body: formData,
-      });
+        const extractUrl = `/api/ai/extract?organizationId=${encodeURIComponent(organizationId)}`;
+        const response = await fetch(extractUrl, {
+          method: 'POST',
+          body: formData,
+        });
 
-      if (!response.ok || !response.body) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `サーバーエラー (${response.status})`);
-      }
-
-      let extracted = false;
-      await readAiExtractSse(response.body, (event) => {
-        if (event.type === 'record' && !extracted) {
-          extracted = true;
-          onExtracted(event.result);
-        } else if (event.type === 'error') {
-          throw new Error(event.message || 'AIの読み取りに失敗しました');
+        if (!response.ok || !response.body) {
+          const text = await response.text().catch(() => '');
+          throw new Error(text || `サーバーエラー (${response.status})`);
         }
-      });
 
-      if (!extracted) {
-        throw new Error('AIから結果を受信できませんでした');
-      }
+        let extracted: ExtractionResult | null = null;
+        await readAiExtractSse(response.body, (event) => {
+          if (event.type === 'record' && !extracted) {
+            extracted = event.result;
+          } else if (event.type === 'error') {
+            throw new Error(event.message || 'AIの読み取りに失敗しました');
+          }
+        });
 
+        if (!extracted) {
+          throw new Error('AIから結果を受信できませんでした');
+        }
+
+        return extracted;
+      }, { successMessage: 'AIの読み取り結果を入力しました。原本と照合してください。', errorMessage: 'AIの読み取りに失敗しました。ファイルと入力内容は保持しています。もう一度処理開始してください。' });
+      if (!outcome.ok) return;
+      onExtracted(outcome.value);
       setWizardOpen(false);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'AIの読み取りに失敗しました';
-      setErrorMessage(message);
-    } finally {
-      setLoading(false);
-    }
+      setSelectedFile(null);
+    } finally { onProcessingChange?.(false); }
   };
 
   return (
     <>
       <ScrollableActions aria-label="AI読み取り" role="group" tabIndex={0}>
-        <AppButton intent="secondary" variant="outlined" size="small" startIcon={<AutoFixHighIcon />} onClick={openWizard} disabled={disabled}>
+        <AppButton intent="secondary" variant="outlined" size="small" startIcon={<AutoFixHighIcon />} onClick={openWizard} disabled={disabled || loading}>
           {hasExistingValues ? 'AIで読み取り（上書き）' : 'AIで読み取り'}
         </AppButton>
       </ScrollableActions>
@@ -162,7 +164,7 @@ export function AiImportButton({
           ) : null}
           <AiFilePicker inputRef={fileInputRef} onChange={handleFileInputChange} onDrop={handleDrop} disabled={loading} buttonLabel={selectedFile ? 'ファイルを変更' : 'ファイルを選択'} />
         </Box>
-        {errorMessage && <Alert severity="error" onClose={() => setErrorMessage(null)}>{errorMessage}</Alert>}
+        {errorMessage && <Alert severity="error" onClose={() => clearError()}>{errorMessage}</Alert>}
       </RecordFormDialog>
       <AppDialog open={confirmOpen} onClose={() => setConfirmOpen(false)} title="確認" actions={<ScrollableActions aria-label="上書き確認操作" role="group" tabIndex={0}>
         <AppButton intent="secondary" variant="text" onClick={() => setConfirmOpen(false)}>キャンセル</AppButton>

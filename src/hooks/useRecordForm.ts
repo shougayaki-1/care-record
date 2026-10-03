@@ -1,5 +1,6 @@
 'use client';
 
+import { useAsyncRecordAction } from '@/hooks/useAsyncRecordAction';
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
@@ -245,6 +246,7 @@ export function useRecordForm() {
     [incomingDraftKey, recordIdentityKey],
   );
   const draftKey = draftScope.key;
+  const { pending: actionPending, run, isRunning, attemptKey, finishAttempt } = useAsyncRecordAction(`${recordIdentityKey}:${draftKey}`);
   const recordScopeKey = `${recordIdentityKey}:${draftKey}`;
   const autosaveRestoredRef = useRef(false);
   const autosaveRevisionRef = useRef(0);
@@ -278,7 +280,8 @@ export function useRecordForm() {
     selectedPart,
     originalShiftTimes,
   } = formState;
-  const { currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting } = uiState;
+  const { currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting: imageSubmitting } = uiState;
+  const submitting = imageSubmitting || actionPending;
   const { shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId } = shiftState;
 
   const setFormField = useCallback(<K extends keyof FormState>(field: K, value: SetStateValue<FormState[K]>) => {
@@ -320,7 +323,8 @@ export function useRecordForm() {
   const setErrors = useCallback((value: SetStateValue<Record<string, string>>) => {
     uiDispatch({ type: 'SET_ERROR_MAP', errors: resolveStateValue(value, errors) });
   }, [errors]);
-  const setSubmitting = useCallback((value: SetStateValue<boolean>) => setUiField('submitting', value), [setUiField]);
+  const externalPending = useRef(false);
+  const setSubmitting = useCallback((value: boolean) => { externalPending.current = value; setUiField('submitting', value); }, [setUiField]);
 
   const setShiftSuggestions = useCallback((value: SetStateValue<ShiftSuggestion[]>) => setShiftField('shiftSuggestions', value), [setShiftField]);
   const setLinkedShifts = useCallback((value: SetStateValue<LinkedShift[]>) => setShiftField('linkedShifts', value), [setShiftField]);
@@ -398,6 +402,7 @@ export function useRecordForm() {
   }, [formatDatetimeLocal, setEndDateTime, setServiceTime, setStartDateTime]);
 
   const handlePartChange = async (part: 'part1' | 'part2') => {
+      if (isRunning() || externalPending.current) return;
       if (isDirty) {
           if (!(await confirm({ message: '変更内容が保存されていません。切り替えてよろしいですか？' }))) return;
       }
@@ -812,7 +817,7 @@ export function useRecordForm() {
   }, [currentOrg, currentStatus, draftKey, loading, recordScopeKey, setActualServiceTypeId, setActualStaffs, setAnswers, setEndDateTime, setIsDirty, setSelectedHelpers, setServiceTime, setStartDateTime, setTravelExpenses, setTravelTime, showToast]);
 
   useEffect(() => {
-    if (!isDirty || loading || !currentOrg || currentStatus === 'approved') return;
+    if (!isDirty || loading || submitting || !currentOrg || currentStatus === 'approved') return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       const revision = autosaveRevisionRef.current + 1;
@@ -848,7 +853,7 @@ export function useRecordForm() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, currentStatus, draftKey, endDateTime, isDirty, loading, recordScopeKey, selectedHelpers, serviceTime, startDateTime, travelExpenses, travelTime]);
+  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, currentStatus, draftKey, endDateTime, isDirty, loading, recordScopeKey, selectedHelpers, serviceTime, submitting, startDateTime, travelExpenses, travelTime]);
 
   useEffect(() => {
     if (!currentReportId || !currentOrg) return;
@@ -900,18 +905,17 @@ export function useRecordForm() {
   }, [currentOrg, currentReportId, loadExistingData, setSubmitting, showToast]);
 
   const handleDeleteReport = useCallback(async () => {
-      if (currentStatus === 'approved') { showToast('承認済みの記録は削除できません', 'error'); return; }
-      if(!(await confirm({ title: '記録の削除', message: '本当に削除しますか？', confirmText: '削除する', confirmColor: 'error' }))) return;
-      try {
-        if (!currentReportId || !currentOrg) throw new Error('削除対象が不正です');
-        await commitRecordChange(currentOrg.id, () => softDeleteReports(currentOrg.id, [currentReportId], '記録編集画面から削除'));
-        showToast('削除しました');
-        router.back();
-      } catch(e) {
-          console.error(e);
-          showToast('削除に失敗しました', 'error');
-      }
-  }, [confirm, currentOrg, currentReportId, currentStatus, router, showToast]);
+    if (externalPending.current) return;
+    if (currentStatus === 'approved') { showToast('承認済みの記録は削除できません', 'error'); return; }
+    const outcome = await run(async () => {
+      if (!currentReportId || !currentOrg) throw new Error('削除対象が不正です');
+      await commitRecordChange(currentOrg.id, () => softDeleteReports(currentOrg.id, [currentReportId], '記録編集画面から削除'));
+    }, {
+      confirm: () => confirm({ title: '記録の削除', message: '本当に削除しますか？', confirmText: '削除する', confirmColor: 'error' }),
+      successMessage: '削除しました', errorMessage: '削除に失敗しました。もう一度操作してください。',
+    });
+    if (outcome.ok) router.back();
+  }, [confirm, currentOrg, currentReportId, currentStatus, router, run, showToast]);
 
   const getTravelExpense = useCallback((staffId: string): TravelExpense => {
     const configured = travelExpenses[staffId];
@@ -949,14 +953,15 @@ export function useRecordForm() {
     return Object.keys(ne).length === 0;
   }, [actualStaffs.length, answers, selectedHelpers.length, serviceTime, setErrors, template, travelExpenseRows]);
 
-  const saveReport = useCallback(async (status: ReportStatus, skipValidation = false) => {
-    if (shiftId && shiftSegments.length > 0 && !selectedSegmentId) {
-      showToast('記録を作成する前にサービス区間を選択してください', 'warning');
-      return false;
-    }
-    if (!skipValidation && !validate()) { showToast('入力不備があります', 'error'); window.scrollTo({ top: 0, behavior: 'smooth' }); return false; }
-    setSubmitting(true);
-    try {
+  const saveReport = useCallback(async (status: ReportStatus, skipValidation: boolean, feedback: { message: string; confirm?: () => Promise<boolean> }) => {
+    if (externalPending.current) return false;
+    let savedUrl: string | null = null;
+    const outcome = await run(async (isCurrent) => {
+      if (shiftId && shiftSegments.length > 0 && !selectedSegmentId) {
+        showToast('記録を作成する前にサービス区間を選択してください', 'warning');
+        return false;
+      }
+      if (!skipValidation && !validate()) { showToast('入力不備があります', 'error'); window.scrollTo({ top: 0, behavior: 'smooth' }); return false; }
       const finalData = {
         ...answers,
         _helpers: selectedHelpers,
@@ -966,7 +971,7 @@ export function useRecordForm() {
         travel_cost_yen: travelExpenseRows.reduce((sum, expense) => sum + (expense.amount_yen ?? 0), 0),
       };
       if (!currentOrg) throw new Error('事業所が選択されていません');
-      const result = await commitRecordChange(currentOrg.id, () => saveReportAction({
+      const payload = {
         organizationId: currentOrg.id,
         reportId: currentReportId,
         clientId: clientId as string,
@@ -979,11 +984,13 @@ export function useRecordForm() {
         actualStaffs,
         values: finalData,
         expectedVersion: contentVersionRef.current,
-        idempotencyKey: crypto.randomUUID(),
         ...(status === 'draft' && hasAiDraftSource
           ? { auditSource: 'ai_import' as const, auditFileCount: 1 }
           : {}),
-      }));
+      } satisfies Omit<Parameters<typeof saveReportAction>[0], 'idempotencyKey'>;
+      const result = await commitRecordChange(currentOrg.id, () => saveReportAction({ ...payload, idempotencyKey: attemptKey('report', payload) }));
+      finishAttempt('report');
+      if (!isCurrent()) return false;
       const targetReportId = result.reportId;
       contentVersionRef.current = result.version;
       setTravelExpenses(Object.fromEntries(travelExpenseRows.map((expense) => [expense.staff_id, { method: expense.method, amountYen: expense.amount_yen == null ? '' : String(expense.amount_yen) }])));
@@ -997,65 +1004,56 @@ export function useRecordForm() {
       
       if (!currentReportId && targetReportId) {
           const newUrl = `/app/record/${clientId}?reportId=${targetReportId}&draftKey=${encodeURIComponent(draftKey)}`;
-          router.replace(newUrl);
+          savedUrl = newUrl;
       }
 
       return true;
-    } catch (e) {
-      console.error(e);
-      const message = e instanceof Error && e.message.startsWith('REPORT_VERSION_CONFLICT:')
+    }, {
+      confirm: feedback.confirm,
+      successMessage: (saved) => saved ? feedback.message : null,
+      errorMessage: (error) => error instanceof Error && error.message.startsWith('REPORT_VERSION_CONFLICT:')
         ? '他の利用者がこの記録を更新しました。入力内容は保持しています。再読み込みして差分を確認してください。'
-        : 'エラーが発生しました';
-      showToast(message, 'error');
-      return false;
-    }
-    finally { setSubmitting(false); }
-  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, draftKey, endDateTime, hasAiDraftSource, router, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setSubmitting, setTravelExpenses, shiftId, shiftSegments.length, showToast, startDateTime, travelExpenseRows, travelTime, validate]);
+        : '保存に失敗しました。入力内容は保持しています。もう一度操作してください。',
+    });
+    if (outcome.ok && outcome.value && savedUrl) router.replace(savedUrl);
+    return outcome.ok && outcome.value;
+  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, draftKey, endDateTime, hasAiDraftSource, attemptKey, finishAttempt, router, run, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setTravelExpenses, shiftId, shiftSegments.length, showToast, startDateTime, travelExpenseRows, travelTime, validate]);
 
-  const handleDraftSave = useCallback(async () => { if (await saveReport('draft', true)) { showToast('下書きを保存しました', 'success'); } }, [saveReport, showToast]);
+  const handleDraftSave = useCallback(() => saveReport('draft', true, { message: '下書きを保存しました' }), [saveReport]);
   const handleSubmit = useCallback(async () => {
-      if (!(await confirm({ title: '送信の確認', message: '記録を送信しますか？', confirmText: '送信する' }))) return;
-      if (await saveReport('pending')) { showToast('記録を送信しました', 'success'); router.push('/app/record'); }
-  }, [confirm, router, saveReport, showToast]);
-  const handlePendingSave = useCallback(async () => {
-      if (await saveReport('pending')) {
-        showToast('承認待ちのまま変更を保存しました', 'success');
-      }
-  }, [saveReport, showToast]);
-  const executeApprove = useCallback(async () => {
-      if (!currentOrg || !currentReportId) return;
-      try {
-        await commitRecordChange(currentOrg.id, () => transitionReports(currentOrg.id, [currentReportId], 'approve'));
-          showToast('承認しました', 'success');
-          router.push('/app/reports');
-      } catch (error) {
-          console.error(error);
-          showToast('承認に失敗しました', 'error');
-      }
-  }, [currentOrg, currentReportId, router, showToast]);
+    if (await saveReport('pending', false, {
+      message: '記録を送信しました',
+      confirm: () => confirm({ title: '送信の確認', message: '記録を送信しますか？', confirmText: '送信する' }),
+    })) router.push('/app/record');
+  }, [confirm, router, saveReport]);
+  const handlePendingSave = useCallback(() => saveReport('pending', false, { message: '承認待ちのまま変更を保存しました' }), [saveReport]);
   const handleApprove = useCallback(async () => {
-      if (!(await confirm({ title: '承認の確認', message: 'この記録を承認しますか？', confirmText: '承認する', confirmColor: 'primary' }))) return;
-      await executeApprove();
-  }, [confirm, executeApprove]);
-  const executeRemand = useCallback(async () => {
-      if (!currentOrg || !currentReportId) return;
-      try {
-        await commitRecordChange(currentOrg.id, () => transitionReports(currentOrg.id, [currentReportId], 'remand'));
-          showToast('記録を差し戻しました', 'info');
-          router.push('/app/reports');
-      } catch (error) {
-          console.error(error);
-          showToast('差し戻しに失敗しました', 'error');
-      }
-  }, [currentOrg, currentReportId, router, showToast]);
+    if (externalPending.current) return;
+    if (!currentOrg || !currentReportId) return;
+    const outcome = await run(() => commitRecordChange(currentOrg.id, () => transitionReports(currentOrg.id, [currentReportId], 'approve')), {
+      confirm: () => confirm({ title: '承認の確認', message: 'この記録を承認しますか？', confirmText: '承認する', confirmColor: 'primary' }),
+      successMessage: '承認しました', errorMessage: '承認に失敗しました。もう一度操作してください。',
+    });
+    if (outcome.ok) router.push('/app/reports');
+  }, [confirm, currentOrg, currentReportId, router, run]);
   const handleRemand = useCallback(async () => {
-      if (!(await confirm({ title: '承認取消の確認', message: '承認を取り消し、差し戻しますか？', confirmText: '差し戻す', confirmColor: 'warning' }))) return;
-      await executeRemand();
-  }, [confirm, executeRemand]);
+    if (externalPending.current) return;
+    if (!currentOrg || !currentReportId) return;
+    const outcome = await run(() => commitRecordChange(currentOrg.id, () => transitionReports(currentOrg.id, [currentReportId], 'remand')), {
+      confirm: () => confirm({ title: '承認取消の確認', message: '承認を取り消し、差し戻しますか？', confirmText: '差し戻す', confirmColor: 'warning' }),
+      successMessage: '記録を差し戻しました', successSeverity: 'info', errorMessage: '差し戻しに失敗しました。もう一度操作してください。',
+    });
+    if (outcome.ok) router.push('/app/reports');
+  }, [confirm, currentOrg, currentReportId, router, run]);
 
-  const handleClose = useCallback(() => { if (isDirty) setOpenCloseDialog(true); else router.back(); }, [isDirty, router, setOpenCloseDialog]);
-  const handleDialogDiscard = useCallback(() => { setOpenCloseDialog(false); router.back(); }, [router, setOpenCloseDialog]);
-  const handleDialogSaveDraft = useCallback(async () => { if (await saveReport('draft', true)) { showToast('下書き保存しました'); router.back(); } setOpenCloseDialog(false); }, [router, saveReport, setOpenCloseDialog, showToast]);
+  const handleClose = useCallback(() => { if (isRunning() || externalPending.current || imageSubmitting) return; if (isDirty) setOpenCloseDialog(true); else router.back(); }, [imageSubmitting, isDirty, isRunning, router, setOpenCloseDialog]);
+  const handleDialogDiscard = useCallback(() => { if (isRunning()) return; setOpenCloseDialog(false); router.back(); }, [isRunning, router, setOpenCloseDialog]);
+  const handleDialogSaveDraft = useCallback(async () => {
+    if (await saveReport('draft', true, { message: '下書きを保存しました' })) {
+      setOpenCloseDialog(false);
+      router.back();
+    }
+  }, [router, saveReport, setOpenCloseDialog]);
 
   const handleAiExtracted = useCallback((result: ExtractionResult) => {
     const filled = new Set(Object.keys(result.values));
@@ -1150,7 +1148,7 @@ export function useRecordForm() {
     formatTimeForLabel, formatSegmentLabel, handlePartChange, handleChange, handleAnswerChange,
     handleImageUpload, handleDeleteReport, handleDraftSave, handleSubmit, handlePendingSave,
     handleApprove, handleRemand, handleClose, handleDialogDiscard, handleDialogSaveDraft,
-    handleAiExtracted, groupedSections, isAdmin, isReadOnly, canDeleteRecord,
+    handleAiExtracted, handleAiProcessingChange: setSubmitting, groupedSections, isAdmin, isReadOnly, canDeleteRecord,
     requiresSegmentSelection, aiClients, aiHelpers, handleStaffChange,
   };
 }

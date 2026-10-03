@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect, fn, userEvent, within, waitFor } from 'storybook/test';
+import { ToastProvider } from './ToastProvider';
 import { AiImportButton } from './AiImportButton';
-const meta = { title: 'UI/AiImportButton', component: AiImportButton, args: { organizationId: 'org-1', formTemplate: [], clients: [], helpers: [], onExtracted: fn() } } satisfies Meta<typeof AiImportButton>;
+const meta = { title: 'UI/AiImportButton', component: AiImportButton, decorators: [(Story) => <ToastProvider><Story /></ToastProvider>], args: { organizationId: 'org-1', formTemplate: [], clients: [], helpers: [], onExtracted: fn() } } satisfies Meta<typeof AiImportButton>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const ChooseFile: Story = { play: async ({ canvasElement }) => {

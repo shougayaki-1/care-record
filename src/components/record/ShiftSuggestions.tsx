@@ -5,6 +5,7 @@ import { Alert, Box, Button, Chip, Typography } from '@/components/ui/mui';
 import type { LinkedShift, ShiftSuggestion } from '@/hooks/useRecordForm';
 
 type ShiftSuggestionsProps = {
+  disabled?: boolean;
   organizationId?: string;
   reportId: string | null;
   suggestions: ShiftSuggestion[];
@@ -22,6 +23,7 @@ const formatTime = (value: string) => new Date(value).toLocaleTimeString('ja-JP'
 });
 
 export function ShiftSuggestions({
+  disabled = false,
   organizationId,
   reportId,
   suggestions,
@@ -33,7 +35,7 @@ export function ShiftSuggestions({
   onError,
 }: ShiftSuggestionsProps) {
   const handleLink = async (shiftId: string) => {
-    if (!organizationId || !reportId) return;
+    if (disabled || !organizationId || !reportId) return;
     try {
       await addShiftLink(organizationId, reportId, shiftId);
       const [linked, nextSuggestions] = await Promise.all([
@@ -49,7 +51,7 @@ export function ShiftSuggestions({
   };
 
   const handleUnlink = async (shiftId: string) => {
-    if (!organizationId || !reportId) return;
+    if (disabled || !organizationId || !reportId) return;
     try {
       await removeShiftLink(organizationId, reportId, shiftId);
       onLinkedShiftsChange((await getLinkedShifts(reportId)) as LinkedShift[]);
@@ -68,8 +70,8 @@ export function ShiftSuggestions({
           sx={{ mb: 1 }}
           action={(
             <Box display="flex" gap={1}>
-              <Button size="small" onClick={() => void handleLink(suggestion.id)}>紐付ける</Button>
-              <Button size="small" onClick={() => onDismiss(suggestion.id)}>無視する</Button>
+              <Button disabled={disabled} size="small" onClick={() => void handleLink(suggestion.id)}>紐付ける</Button>
+              <Button disabled={disabled} size="small" onClick={() => onDismiss(suggestion.id)}>無視する</Button>
             </Box>
           )}
         >
@@ -89,7 +91,7 @@ export function ShiftSuggestions({
                 <Chip
                   key={link.shift_id}
                   label={`${staffName} ${formatTime(shift.start_at)}〜${formatTime(shift.end_at)}${link.is_primary ? ' [主]' : ''}`}
-                  onDelete={link.is_primary ? undefined : () => void handleUnlink(link.shift_id)}
+                  onDelete={disabled || link.is_primary ? undefined : () => void handleUnlink(link.shift_id)}
                 />
               );
             })}

@@ -31,6 +31,7 @@ import { AiImportReviewTable, type ReviewRow } from '@/components/ui/AiImportRev
 import { AiInfoPanel } from '@/components/ui/AiInfoPanel';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useAsyncRecordAction } from '@/hooks/useAsyncRecordAction';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { readAiExtractSse } from '@/lib/ai/sseClient';
 
@@ -136,6 +137,10 @@ async function streamExtract(
 export default function AiImportPage() {
   const { currentOrg } = useWorkspace();
   const { showToast } = useToast();
+  const { pending, error: actionError, run, isRunning, clearError, attemptKey, finishAttempt } = useAsyncRecordAction(currentOrg?.id);
+  const [operationKind, setOperationKind] = useState<'extract' | 'save'>('extract');
+  const processing = pending && operationKind === 'extract';
+  const saving = pending && operationKind === 'save';
   const confirm = useConfirm();
   const router = useRouter();
 
@@ -148,14 +153,11 @@ export default function AiImportPage() {
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
 
   // 処理状態
-  const [processing, setProcessing] = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
-  const [processError, setProcessError] = useState<string | null>(null);
 
   // 結果行
   const [rows, setRows] = useState<ReviewRow[]>([]);
-  const [saving, setSaving] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -277,163 +279,175 @@ export default function AiImportPage() {
 
   // 処理開始
   const handleProcess = async () => {
-    if (!currentOrg || fileEntries.length === 0) return;
-    if (rows.length > 0) {
-      const ok = await confirm({ message: '現在の確認結果がクリアされます。続けますか？' });
-      if (!ok) return;
-    }
-    setProcessing(true);
-    setProcessedCount(0);
-    setTotalCount(0);
-    setProcessError(null);
-    setRows([]);
+    if (!currentOrg || fileEntries.length === 0 || isRunning()) return;
+    setOperationKind('extract');
+    await run(async (isCurrent) => {
+      setProcessedCount(0);
+      setTotalCount(0);
+      const extractedRows: ReviewRow[] = [];
+      let extractionError: string | null = null;
+      try {
+        const formData = new FormData();
+        formData.set('organizationId', currentOrg.id);
+        formData.set('formTemplate', JSON.stringify(DEFAULT_TEMPLATE));
+        formData.set('clients', JSON.stringify(clients));
+        formData.set('helpers', JSON.stringify(helpers));
 
-    try {
-      const formData = new FormData();
-      formData.set('organizationId', currentOrg.id);
-      formData.set('formTemplate', JSON.stringify(DEFAULT_TEMPLATE));
-      formData.set('clients', JSON.stringify(clients));
-      formData.set('helpers', JSON.stringify(helpers));
+        // グループ情報を構築
+        // fileIndex はファイルエントリの順序
+        const orderedEntries = [...fileEntries];
+        for (const entry of orderedEntries) {
+          formData.append('files[]', entry.file);
+        }
 
-      // グループ情報を構築
-      // fileIndex はファイルエントリの順序
-      const orderedEntries = [...fileEntries];
-      for (const entry of orderedEntries) {
-        formData.append('files[]', entry.file);
+        const processingGroups = buildProcessingGroups(orderedEntries, groups);
+        formData.set('grouping', JSON.stringify(processingGroups));
+
+        setTotalCount(processingGroups.length);
+
+        await streamExtract(
+          formData,
+          (result, fileIndex) => {
+            const aiMeta = result.meta;
+            const clientId =
+              pickCandidateId(aiMeta.client_id_candidate, clients) ??
+              matchName(aiMeta.client_name, clients);
+            const helperId =
+              pickFirstCandidateId(aiMeta.helper_id_candidates, helpers) ??
+              (aiMeta.helper_names.length > 0
+                ? matchName(aiMeta.helper_names[0], helpers)
+                : null);
+
+            const row: ReviewRow = {
+              id: crypto.randomUUID(),
+              fileIndex,
+              fileName: orderedEntries[fileIndex]?.file.name ?? '',
+              fileType: orderedEntries[fileIndex]?.file.type ?? '',
+              previewUrl: orderedEntries[fileIndex]?.previewUrl ?? null,
+              fileCount: processingGroups.find((group) => group[0] === fileIndex)?.length ?? 1,
+              result,
+              date: aiMeta.date,
+              startAt: aiMeta.start_at,
+              endAt: aiMeta.end_at,
+              clientId,
+              helperId,
+              status: 'pending',
+            };
+            extractedRows.push(row);
+          },
+          (message, fileIndex) => {
+            const row: ReviewRow = {
+              id: crypto.randomUUID(),
+              fileIndex,
+              fileName: orderedEntries[fileIndex]?.file.name ?? '',
+              fileType: orderedEntries[fileIndex]?.file.type ?? '',
+              previewUrl: orderedEntries[fileIndex]?.previewUrl ?? null,
+              fileCount: processingGroups.find((group) => group[0] === fileIndex)?.length ?? 1,
+              result: null,
+              errorMessage: message,
+              date: '',
+              startAt: '',
+              endAt: '',
+              clientId: null,
+              helperId: null,
+              status: 'error',
+            };
+            extractedRows.push(row);
+            extractionError = message;
+          },
+          () => {
+            if (isCurrent()) setProcessedCount((n) => n + 1);
+          },
+        );
+      } catch (error) {
+        // Retain previously reviewed input after a transport failure. If this was
+        // the first attempt, keep any complete records received before the error.
+        if (isCurrent() && rows.length === 0 && extractedRows.length > 0) setRows(extractedRows);
+        throw error;
       }
-
-      const processingGroups = buildProcessingGroups(orderedEntries, groups);
-      formData.set('grouping', JSON.stringify(processingGroups));
-
-      setTotalCount(processingGroups.length);
-
-      await streamExtract(
-        formData,
-        (result, fileIndex) => {
-          const aiMeta = result.meta;
-          const clientId =
-            pickCandidateId(aiMeta.client_id_candidate, clients) ??
-            matchName(aiMeta.client_name, clients);
-          const helperId =
-            pickFirstCandidateId(aiMeta.helper_id_candidates, helpers) ??
-            (aiMeta.helper_names.length > 0
-              ? matchName(aiMeta.helper_names[0], helpers)
-              : null);
-
-          const row: ReviewRow = {
-            id: crypto.randomUUID(),
-            fileIndex,
-            fileName: orderedEntries[fileIndex]?.file.name ?? '',
-            fileType: orderedEntries[fileIndex]?.file.type ?? '',
-            previewUrl: orderedEntries[fileIndex]?.previewUrl ?? null,
-            fileCount: processingGroups.find((group) => group[0] === fileIndex)?.length ?? 1,
-            result,
-            date: aiMeta.date,
-            startAt: aiMeta.start_at,
-            endAt: aiMeta.end_at,
-            clientId,
-            helperId,
-            status: 'pending',
-          };
-          setRows((prev) => [...prev, row]);
-        },
-        (message, fileIndex) => {
-          const row: ReviewRow = {
-            id: crypto.randomUUID(),
-            fileIndex,
-            fileName: orderedEntries[fileIndex]?.file.name ?? '',
-            fileType: orderedEntries[fileIndex]?.file.type ?? '',
-            previewUrl: orderedEntries[fileIndex]?.previewUrl ?? null,
-            fileCount: processingGroups.find((group) => group[0] === fileIndex)?.length ?? 1,
-            result: null,
-            errorMessage: message,
-            date: '',
-            startAt: '',
-            endAt: '',
-            clientId: null,
-            helperId: null,
-            status: 'error',
-          };
-          setRows((prev) => [...prev, row]);
-          setProcessError(message);
-        },
-        () => {
-          setProcessedCount((n) => n + 1);
-        },
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'AI処理中にエラーが発生しました';
-      setProcessError(msg);
-    } finally {
-      setProcessing(false);
-    }
+      if (!isCurrent()) return;
+      if (extractionError || extractedRows.length === 0) {
+        if (rows.length === 0) setRows(extractedRows);
+        throw new Error(extractionError || 'AIから結果を受信できませんでした');
+      }
+      setRows(extractedRows);
+    }, {
+      confirm: rows.length > 0 ? () => confirm({ message: '現在の確認結果がクリアされます。続けますか？' }) : undefined,
+      successMessage: 'AIの読み取りが完了しました。原本と照合してください。',
+      errorMessage: 'AI処理に失敗しました。ファイルと入力内容は保持しています。もう一度処理開始してください。',
+    });
   };
 
   const handleRowChange = (id: string, changes: Partial<ReviewRow>) => {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...changes } : r)));
+    if (isRunning()) return;
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...changes, saveStatus: r.saveStatus === 'error' ? undefined : r.saveStatus, saveError: undefined } : r)));
   };
 
   const handleSaveSelected = useCallback(async (ids: string[]) => {
-    if (!currentOrg) return;
-    setSaving(true);
+    if (!currentOrg || isRunning()) return;
+    const selectedIds = [...new Set(ids)].filter((id) => rows.some((row) => row.id === id && row.status === 'confirmed' && row.saveStatus !== 'saved'));
+    if (selectedIds.length === 0) return;
+    setOperationKind('save');
+    await run(async (isCurrent) => {
+      // Mark all as saving
+      setRows((prev) =>
+        prev.map((r) => (selectedIds.includes(r.id) ? { ...r, saveStatus: 'saving', saveError: undefined } : r)),
+      );
 
-    // Mark all as saving
-    setRows((prev) =>
-      prev.map((r) => (ids.includes(r.id) ? { ...r, saveStatus: 'saving' } : r)),
-    );
+      try {
+        const results = await commitRecordChange(currentOrg.id, () => Promise.allSettled(
+          selectedIds.map(async (id) => {
+            const row = rows.find((r) => r.id === id);
+            if (!row || !row.clientId) throw new Error('利用者が未選択です');
+            if (!row.helperId) throw new Error('スタッフが未選択です');
+            if (!row.result) throw new Error('読み取り結果がありません');
+            if (!isValidDraftTime(row.date, row.startAt, row.endAt)) {
+              throw new Error('開始・終了日時が不正です');
+            }
+            const helper = helpers.find((h) => h.id === row.helperId);
+            if (!helper) throw new Error('スタッフが未選択です');
 
-    const results = await commitRecordChange(currentOrg.id, () => Promise.allSettled(
-      ids.map(async (id) => {
-        const row = rows.find((r) => r.id === id);
-        if (!row || !row.clientId) throw new Error('利用者が未選択です');
-        if (!row.helperId) throw new Error('スタッフが未選択です');
-        if (!row.result) throw new Error('読み取り結果がありません');
-        if (!isValidDraftTime(row.date, row.startAt, row.endAt)) {
-          throw new Error('開始・終了日時が不正です');
-        }
-        const helper = helpers.find((h) => h.id === row.helperId);
-        if (!helper) throw new Error('スタッフが未選択です');
+            const date = row.date;
+            const startAt = `${date}T${row.startAt}:00`;
+            const endAt = `${date}T${row.endAt}:00`;
 
-        const date = row.date;
-        const startAt = `${date}T${row.startAt}:00`;
-        const endAt = `${date}T${row.endAt}:00`;
+            const payload = {
+              organizationId: currentOrg.id,
+              clientId: row.clientId,
+              startAt,
+              endAt,
+              status: 'draft',
+              values: { ...row.result.values, _helpers: [helper.name] },
+              expectedVersion: 0,
+              auditSource: 'ai_import',
+              auditFileCount: row.fileCount,
+            } satisfies Omit<Parameters<typeof saveReport>[0], 'idempotencyKey'>;
+            await saveReport({ ...payload, idempotencyKey: attemptKey(id, payload) });
+            finishAttempt(id);
+            return id;
+          }),
+        ), (batch) => batch.some((result) => result.status === 'fulfilled'));
 
-        const payload = {
-          organizationId: currentOrg.id,
-          clientId: row.clientId,
-          startAt,
-          endAt,
-          status: 'draft',
-          values: { ...row.result.values, _helpers: [helper.name] },
-          expectedVersion: 0,
-          idempotencyKey: crypto.randomUUID(),
-          auditSource: 'ai_import',
-          auditFileCount: row.fileCount,
-        } satisfies Parameters<typeof saveReport>[0];
-        await saveReport(payload);
-        return id;
-      }),
-    ), (batch) => batch.some((result) => result.status === 'fulfilled'));
+        if (isCurrent()) setRows((prev) =>
+          prev.map((r) => {
+            if (!selectedIds.includes(r.id)) return r;
+            const result = results[selectedIds.indexOf(r.id)];
+            if (result.status === 'fulfilled') return { ...r, saveStatus: 'saved', saveError: undefined };
+            return { ...r, saveStatus: 'error', saveError: '保存に失敗しました。入力内容を確認して再試行してください。' };
+          }),
+        );
 
-    setRows((prev) =>
-      prev.map((r) => {
-        if (!ids.includes(r.id)) return r;
-        const result = results[ids.indexOf(r.id)];
-        if (result.status === 'fulfilled') return { ...r, saveStatus: 'saved' };
-        return { ...r, saveStatus: 'error' };
-      }),
-    );
-
-    const errorCount = results.filter((r) => r.status === 'rejected').length;
-    const savedCount = results.filter((r) => r.status === 'fulfilled').length;
-    if (savedCount > 0) {
-      showToast(`${savedCount} 件を下書き保存しました`, 'success');
-    }
-    if (errorCount > 0) {
-      showToast(`${errorCount} 件の保存に失敗しました`, 'error');
-    }
-    setSaving(false);
-  }, [rows, currentOrg, helpers, showToast]);
+        return { saved: results.filter((result) => result.status === 'fulfilled').length, failed: results.filter((result) => result.status === 'rejected').length };
+      } catch (error) {
+        if (isCurrent()) setRows((previous) => previous.map((row) => selectedIds.includes(row.id) && row.saveStatus === 'saving' ? { ...row, saveStatus: 'error', saveError: '保存に失敗しました。入力内容を確認して再試行してください。' } : row));
+        throw error;
+      }
+    }, {
+      successMessage: ({ saved, failed }) => failed ? `${saved} 件を保存、${failed} 件の保存に失敗しました。失敗した記録は再試行できます。` : `${saved} 件を下書き保存しました`,
+      successSeverity: ({ saved, failed }) => failed ? (saved ? 'warning' : 'error') : 'success',
+      errorMessage: '保存に失敗しました。入力内容は保持しています。もう一度下書き保存してください。',
+    });
+  }, [rows, currentOrg, helpers, isRunning, run, attemptKey, finishAttempt]);
 
   const fileIcon = (file: File) => {
     if (file.type === 'application/pdf') return <PictureAsPdfIcon fontSize="small" color="error" />;
@@ -466,7 +480,7 @@ export default function AiImportPage() {
                   size="small"
                   checked={selectedFileIds.has(ge.id)}
                   onChange={() => toggleSelectFile(ge.id)}
-                  disabled={processing}
+                  disabled={pending}
                 />
               </ListItemIcon>
               <ListItemIcon sx={{ minWidth: 28 }}>{fileIcon(ge.file)}</ListItemIcon>
@@ -475,11 +489,11 @@ export default function AiImportPage() {
                 primaryTypographyProps={{ fontSize: '0.85rem', noWrap: true }}
               />
               <Tooltip title="グループから外す">
-                <IconButton size="small" onClick={() => ungroupFile(ge.id)} disabled={processing}>
+                <IconButton size="small" onClick={() => ungroupFile(ge.id)} disabled={pending}>
                   <MergeTypeIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
-              <IconButton size="small" onClick={() => removeFile(ge.id)} disabled={processing}>
+              <IconButton size="small" onClick={() => removeFile(ge.id)} disabled={pending}>
                 <DeleteIcon fontSize="small" />
               </IconButton>
             </ListItem>
@@ -494,7 +508,7 @@ export default function AiImportPage() {
               size="small"
               checked={selectedFileIds.has(entry.id)}
               onChange={() => toggleSelectFile(entry.id)}
-              disabled={processing}
+              disabled={pending}
             />
           </ListItemIcon>
           <ListItemIcon sx={{ minWidth: 28 }}>{fileIcon(entry.file)}</ListItemIcon>
@@ -502,7 +516,7 @@ export default function AiImportPage() {
             primary={entry.file.name}
             primaryTypographyProps={{ fontSize: '0.85rem', noWrap: true }}
           />
-          <IconButton size="small" onClick={() => removeFile(entry.id)} disabled={processing}>
+          <IconButton size="small" onClick={() => removeFile(entry.id)} disabled={pending}>
             <DeleteIcon fontSize="small" />
           </IconButton>
         </ListItem>,
@@ -511,7 +525,7 @@ export default function AiImportPage() {
   }
 
   const handleClose = async () => {
-    if (processing || saving) return;
+    if (isRunning()) return;
     if ((fileEntries.length > 0 || rows.some((row) => row.saveStatus !== 'saved')) && !await confirm({ title: '保存されていない変更があります', message: '選択したファイルや未保存の確認内容があります。保存せず閉じますか？', confirmText: '保存せず閉じる', confirmColor: 'warning' })) return;
     router.back();
   };
@@ -519,15 +533,14 @@ export default function AiImportPage() {
   return (
     <PageLayout>
       <RecordFormHeader title="AI一括取込" onClose={() => void handleClose()} disabled={processing || saving} actions={<>
-        {fileEntries.length > 0 && !processing && <AppButton intent="secondary" variant="text" size="small" disabled={saving} onClick={() => {
+        {fileEntries.length > 0 && !processing && <AppButton intent="secondary" variant="text" size="small" disabled={pending} onClick={() => {
           fileEntries.forEach((entry) => { if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl); });
           setFileEntries([]);
           setGroups([]);
           setSelectedFileIds(new Set());
           setRows([]);
-          setProcessError(null);
-        }}>クリア</AppButton>}
-        <AppButton size="small" startIcon={<AutoFixHighIcon />} disabled={fileEntries.length === 0 || !currentOrg} loading={processing} onClick={() => void handleProcess()}>
+            }}>クリア</AppButton>}
+        <AppButton size="small" startIcon={<AutoFixHighIcon />} disabled={fileEntries.length === 0 || !currentOrg || saving} loading={processing} onClick={() => void handleProcess()}>
           {processing ? '処理中...' : '処理開始'}
         </AppButton>
       </>} />
@@ -535,7 +548,7 @@ export default function AiImportPage() {
         <AiInfoPanel variant="page" />
         <Box>
           <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>原本ファイル</Typography>
-          <AiFilePicker inputRef={fileInputRef} onChange={handleFileInput} onDrop={handleDrop} multiple disabled={processing} />
+          <AiFilePicker inputRef={fileInputRef} onChange={handleFileInput} onDrop={handleDrop} multiple disabled={pending} />
         </Box>
 
       {/* ファイルリスト */}
@@ -548,7 +561,7 @@ export default function AiImportPage() {
                 <AppButton intent="secondary"
                   size="small"
                   startIcon={<MergeTypeIcon />}
-                  disabled={selectedFileIds.size < 2 || processing}
+                  disabled={selectedFileIds.size < 2 || pending}
                   onClick={mergeSelected}
                   variant="outlined"
                 >
@@ -574,9 +587,9 @@ export default function AiImportPage() {
         </Box>
       )}
 
-      {processError && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setProcessError(null)}>
-          {processError}
+      {actionError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => { clearError(); }}>
+          {actionError}
         </Alert>
       )}
 
@@ -590,7 +603,7 @@ export default function AiImportPage() {
             formTemplate={DEFAULT_TEMPLATE}
             onRowChange={handleRowChange}
             onSaveSelected={handleSaveSelected}
-            saving={saving}
+            saving={pending}
           />
         </Box>
       )}

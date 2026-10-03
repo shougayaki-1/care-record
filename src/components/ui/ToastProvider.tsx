@@ -6,28 +6,36 @@ import { Snackbar, Alert, AlertColor } from '@mui/material';
 
 type ToastContextType = {
     showToast: (message: string, severity?: AlertColor) => void;
+    dismissToast: () => void;
 };
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
 export const ToastProvider = ({ children }: { children: ReactNode }) => {
     const [open, setOpen] = useState(false);
+    const [sequence, setSequence] = useState(0);
     const [msg, setMsg] = useState('');
     const [severity, setSeverity] = useState<AlertColor>('success');
 
     const showToast = useCallback((message: string, type: AlertColor = 'success') => {
+        setSequence((previous) => previous + 1);
         setMsg(message);
         setSeverity(type);
         setOpen(true);
     }, []);
 
-    const handleClose = () => setOpen(false);
-    const contextValue = useMemo(() => ({ showToast }), [showToast]);
+    const dismissToast = useCallback(() => setOpen(false), []);
+    const handleClose = (_event?: unknown, reason?: string) => {
+        if (reason === 'clickaway') return;
+        dismissToast();
+    };
+    const contextValue = useMemo(() => ({ showToast, dismissToast }), [showToast, dismissToast]);
 
     return (
         <ToastContext.Provider value={contextValue}>
             {children}
             <Snackbar
+                key={sequence}
                 open={open}
                 autoHideDuration={3000}
                 onClose={handleClose}
