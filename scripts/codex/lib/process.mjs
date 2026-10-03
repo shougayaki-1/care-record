@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { homedir, tmpdir, platform } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { CommandFailure, failureSignals } from './failure.mjs';
 
 const purposes = new Set(['build', 'codex', 'github']);
 
@@ -48,6 +49,13 @@ export async function command(binary, args, { cwd, input, purpose = 'build', tim
       let output = '';
       let size = 0;
       let stopping = false;
+      const signals = {};
+      let tail = '';
+      const inspect = chunk => {
+        const text = tail + chunk;
+        for (const [name, value] of Object.entries(failureSignals(text))) if (value) signals[name] = true;
+        tail = text.slice(-256); // Transient only; never attached to errors/logs.
+      };
       let escalation;
       const kill = sig => {
         try { if (process.platform !== 'win32') process.kill(-child.pid, sig); else child.kill(sig); } catch { /* Already exited. */ }
@@ -62,15 +70,16 @@ export async function command(binary, args, { cwd, input, purpose = 'build', tim
       const cleanup = () => { clearTimeout(timer); clearTimeout(escalation); signal?.removeEventListener('abort', stop); };
       signal?.addEventListener('abort', stop, { once: true });
       child.stdout.setEncoding('utf8');
-      child.stdout.on('data', chunk => { size += chunk.length; if (size > 20_000_000) stop(); else output += chunk; });
+      child.stdout.on('data', chunk => { inspect(chunk); size += chunk.length; if (size > 20_000_000) stop(); else output += chunk; });
       // Do not forward potentially sensitive stderr or command arguments.
-      child.stderr.resume();
-      child.once('error', () => { cleanup(); reject(new Error(`${binary} could not start`)); });
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', inspect);
+      child.once('error', () => { cleanup(); reject(new CommandFailure({ operational: true })); });
       child.once('close', code => {
         cleanup();
         if (signal?.aborted) reject(new Error('Worker stopped'));
         else if (code === 0 && !stopping) resolve(output.trim());
-        else reject(new Error(`${binary} command failed; inspect locally without publishing credentials`));
+        else reject(new CommandFailure({ ...signals, operational: stopping }));
       });
       child.stdin.on('error', () => {});
       child.stdin.end(input);

@@ -1,3 +1,5 @@
+import { sandboxHandoff, localChecks } from './failure.mjs';
+
 const excluded = new Set(['codex:blocked', 'codex:running', 'codex:failed', 'codex:needs-human']);
 
 export function metadata(body = '') {
@@ -41,7 +43,11 @@ export function branchName(issue) {
 export function disposition(run, failures, config) {
   if (run.quota || run.result?.status === 'quota_wait') return 'quota_wait';
   if (run.interrupted || run.result?.status === 'paused') return 'paused';
+  if (run.result?.reasons?.some(r => !['sandbox_capability', 'local_verification'].includes(r.category))) return 'needs_human';
+  if (sandboxHandoff(run)) return 'completed';
+  if (run.result?.reasons?.some(r => r.category === 'sandbox_capability')) return 'needs_human';
+  if (!run.needsHuman && run.result?.reasons?.length && run.result.reasons.every(r => r.category === 'local_verification' && localChecks.includes(r.check))) return failures < config.maxRetries ? 'retry' : 'needs_human';
   if (run.needsHuman || run.result?.status === 'needs_human') return 'needs_human';
   if (run.code === 0 && run.result?.status === 'completed' && run.result.safe_to_open_pr) return 'completed';
-  return failures < config.maxRetries ? 'retry' : 'failed';
+  return failures < config.maxRetries ? 'retry' : 'needs_human';
 }

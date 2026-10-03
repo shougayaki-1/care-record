@@ -13,6 +13,7 @@ import { GitHub } from './lib/github.mjs';
 const issue = (number, names = ['codex:ready'], body = '') => ({ number, title: `Task ${number}`, state: 'open', labels: names.map(name => ({ name })), body, html_url: `https://github.com/test/repo/issues/${number}` });
 const result = { status: 'completed', summary: 'Implemented', tests: ['typecheck', 'lint'], unrun_tests: 'E2E: human confirmation required', security_impact: 'None', remaining_work: 'None', safe_to_open_pr: true };
 const config = configuration({});
+const localScripts = { typecheck: 'tsc --noEmit', lint: 'eslint', test: 'npm run test:unit && npm run test:ui', 'test:unit': 'vitest run --project unit', 'test:ui': 'vitest run --project storybook', build: 'next build --webpack', 'test:codex-worker': 'node --test scripts/codex/*.test.mjs', 'test:ci-scope': 'node --test scripts/ci/*.test.mjs scripts/e2e/playwright-arguments.test.mjs' };
 
 test('priority labels, metadata, issue order and default priority', () => {
   const issues = [issue(1), issue(8, ['codex:ready', 'priority:p1']), issue(9, ['codex:ready', 'priority:p0']), issue(7, ['codex:ready', 'priority:p1'])];
@@ -67,10 +68,10 @@ test('quota, weekly quota, interruptions, failures and bounded retry are distinc
   assert.equal(disposition({ result: { status: 'quota_wait' } }, 0, config), 'quota_wait');
   assert.equal(disposition({ interrupted: true }, 0, config), 'paused');
   assert.equal(disposition({ code: 1 }, 0, config), 'retry');
-  assert.equal(disposition({ code: 1 }, 1, config), 'failed');
+  assert.equal(disposition({ code: 1 }, 1, config), 'needs_human');
   assert.equal(disposition({ result: { status: 'needs_human' } }, 0, config), 'needs_human');
   assert.equal(disposition({ needsHuman: true, code: 1 }, 0, config), 'needs_human');
-  assert.equal(disposition({ code: 1, result }, 1, config), 'failed');
+  assert.equal(disposition({ code: 1, result }, 1, config), 'needs_human');
 });
 
 test('quota detection handles codes, variants and weekly limits', () => {
@@ -118,7 +119,10 @@ function mockExecute(items, calls) {
       if (args[0] === 'rev-parse') return args.includes('--git-common-dir') ? '/git-meta' : 'base-sha';
       if (args[0] === 'branch') { const n = options?.cwd?.match(/issue-(\d+)$/)?.[1] ?? '40'; return `codex/issue-${n}-task-${n}`; }
       if (args[0] === 'merge-base') return 'base-sha';
-      if (args[0] === 'worktree' && args[1] === 'add') await mkdir(args[4], { recursive: true });
+      if (args[0] === 'worktree' && args[1] === 'add') {
+        await mkdir(args[4], { recursive: true });
+        await writeFile(join(args[4], 'package.json'), JSON.stringify({ scripts: localScripts }));
+      }
       if (args[0] === 'rev-list') return args.at(-1) === 'base-sha..HEAD' && args.includes('--count') ? '1' : '0';
       if (args[0] === 'diff') return 'A\tscripts/example.mjs';
       return '';
@@ -229,16 +233,16 @@ test('continuous worker remains active after 180 minutes and waits only on quota
   assert.equal(state.current.number, 41);
 });
 
-test('finite implementation retries end in failed and never publish', async t => {
+test('finite implementation retries end in needs-human and never publish', async t => {
   const path = await directory(t);
   const root = join(path, 'root'); await mkdir(root);
   const calls = [];
   let turns = 0;
   const state = await worker({ config: { ...config, stateDir: join(path, 'state') }, root, mode: 'once', execute: mockExecute([issue(40)], calls), report: () => {}, wait: async () => {}, run: async () => { turns++; return { code: 1 }; } });
   assert.equal(turns, 2);
-  assert.equal(state.status, 'failed');
-  assert.equal(state.current, null);
-  assert.ok(calls.some(([binary, args]) => binary === 'gh' && args.includes('codex:failed')));
+  assert.equal(state.status, 'needs-human');
+  assert.equal(state.current.failures, 1);
+  assert.ok(calls.some(([binary, args]) => binary === 'gh' && args.includes('codex:needs-human')));
   assert.ok(!calls.some(([binary, args]) => binary === 'git' && args[0] === 'push'));
 });
 
@@ -254,7 +258,7 @@ test('needs-human pauses immediately without publishing or consuming retries', a
   assert.ok(!calls.some(([binary, args]) => binary === 'git' && args[0] === 'push'));
 });
 
-test('verification failures preserve publish stage for recovery and do not push', async t => {
+test('unclassified operational verification failures preserve publish stage and do not repair', async t => {
   const path = await directory(t);
   const root = join(path, 'root'); await mkdir(root);
   const stateDir = join(path, 'state');
@@ -328,7 +332,8 @@ test('parent worker verifies and commits actual isolated worktree changes before
   await git(['config', 'user.name', 'Worker Test']);
   await git(['config', 'user.email', 'worker-test@example.invalid']);
   await writeFile(join(root, 'example.txt'), 'baseline\n');
-  await git(['add', 'example.txt']);
+  await writeFile(join(root, 'package.json'), JSON.stringify({ scripts: localScripts }));
+  await git(['add', 'example.txt', 'package.json']);
   await git(['commit', '-m', 'baseline']);
   await git(['remote', 'add', 'origin', 'https://github.com/test/repo.git']);
   await git(['update-ref', 'refs/remotes/origin/main', await git(['rev-parse', 'HEAD'])]);
@@ -493,4 +498,250 @@ test('keyring-only GitHub auth retains login HOME/session without exporting toke
   }
   assert.notEqual(build.HOME, owner);
   assert.equal(build.CODEX_HOME, undefined);
+});
+
+// All worker regression cases use a fresh temporary state and mocked publication.
+// No existing worker state, worktree or session is discovered or accessed.
+async function repairFixture(t, { body = '', maxRetries = 1 } = {}) {
+  const path = await directory(t);
+  const root = join(path, 'root'); await mkdir(root);
+  const calls = [];
+  const stateDir = join(path, 'state');
+  const execute = mockExecute([issue(40, ['codex:ready'], body)], calls);
+  return { path, root, calls, stateDir, execute,
+    options: { root, config: { ...config, stateDir, maxRetries }, mode: 'once', wait: async () => {}, report: () => {} } };
+}
+
+for (const body of [
+  '## Acceptance Criteria\n- E2Eを実行して成功すること',
+  '## Required Tests\n- npm run test:e2e:critical',
+  'You MUST run E2E tests successfully.',
+]) test(`E2E execution preflight stops before any worktree or Codex command: ${body}`, async t => {
+  const f = await repairFixture(t, { body });
+  const state = await worker({ ...f.options, execute: f.execute, run: () => assert.fail('Codex ran') });
+  assert.equal(state.lastReason, 'manual_e2e_required');
+  assert.equal(state.status, 'needs-human');
+  assert.equal(state.current.stage, 'prepare');
+  assert.ok(f.calls.some(([b, a]) => b === 'gh' && a.includes('codex:needs-human')));
+  assert.ok(!f.calls.some(([b, a]) => b === 'codex' || b === 'npm' || (b === 'git' && ['fetch', 'worktree', 'push'].includes(a[0]))));
+  await assert.rejects(readFile(join(f.stateDir, 'worktrees/issue-40/package.json')), { code: 'ENOENT' });
+});
+
+for (const body of [
+  '## Acceptance Criteria\n- E2E test file tests/foo.spec.ts のselectorを更新すること。実行自体は必須ではない。',
+  '## Required Tests\n- Update the E2E fixture/test code without running E2E.\n- Run typecheck.',
+  'Background: E2E tests run in CI.\n## Acceptance Criteria\n- Update selectors in tests/foo.spec.ts',
+  'E2E実行は禁止。\n## Acceptance Criteria\n- unitを実行すること',
+]) test(`E2E code/optional mentions do not block implementation: ${body}`, async t => {
+  const f = await repairFixture(t, { body });
+  let ran = false;
+  const state = await worker({ ...f.options, execute: f.execute, run: async () => { ran = true; return { code: 0, result }; } });
+  assert.ok(ran); assert.equal(state.lastReason, 'completed');
+  assert.ok(!f.calls.some(([b, a]) => b === 'npm' && a.some(s => /test:e2e/.test(s))));
+});
+
+for (const check of ['typecheck', 'lint', 'test:unit', 'test:ui', 'build', 'test:ci-scope', 'diff-check']) {
+  test(`parent ${check} assertion returns safe feedback to same session and only publishes after repair`, async t => {
+    const f = await repairFixture(t);
+    let turns = 0; let checks = 0;
+    const handoff = { ...result, status: 'needs_human', safe_to_open_pr: false,
+      unrun_tests: 'listen EPERM: delegated local check', reasons: [{ category: 'sandbox_capability', check }] };
+    const { CommandFailure } = await import('./lib/failure.mjs');
+    const state = await worker({ ...f.options, now: () => turns, execute: async (b, a, o) => {
+      if ((b === 'npm' && a[1] === check) || (check === 'diff-check' && b === 'git' && a[0] === 'diff' && a[1] === '--check')) {
+        checks++;
+        if (checks === 1) throw new CommandFailure({ assertion: true });
+      }
+      if (b === 'git' && a[0] === 'push') assert.ok(checks >= 2, 'premature publication');
+      return f.execute(b, a, o);
+    }, run: async ({ current, onSession }) => {
+      turns++;
+      if (turns === 1) await onSession('same-session');
+      else {
+        assert.equal(current.session, 'same-session');
+        assert.equal(current.worktree, join(f.stateDir, 'worktrees/issue-40'));
+        assert.equal(current.branch, 'codex/issue-40-task-40');
+        assert.equal(current.base, 'base-sha');
+        assert.equal(current.failures, 1);
+        assert.deepEqual(current.repair, { category: 'local_verification', check, diagnostic: 'assertion_failed' });
+      }
+      return { code: 0, result: turns === 1 ? handoff : { ...result, reasons: [] } };
+    } });
+    assert.equal(turns, 2); assert.equal(state.lastReason, 'completed');
+    assert.ok(!f.calls.some(([, a]) => ['reset', 'rebase', 'clean', 'stash'].includes(a[0]) || a.includes('codex:needs-human')));
+  });
+}
+
+test('quota during parent self-repair persists feedback/count/session and resumes without consuming another retry', async t => {
+  const f = await repairFixture(t);
+  const { CommandFailure } = await import('./lib/failure.mjs');
+  let turns = 0; let time = 10; let checks = 0;
+  const options = { ...f.options, now: () => time, execute: async (b, a, o) => {
+    if (b === 'npm' && a[1] === 'typecheck' && ++checks === 1) throw new CommandFailure({ type: true });
+    return f.execute(b, a, o);
+  } };
+  const first = await worker({ ...options, run: async ({ onSession }) => {
+    await onSession('repair-quota-session'); turns++;
+    return turns === 1 ? { code: 0, result } : { code: 1, quota: 'window', resetAt: 100 };
+  } });
+  assert.equal(first.status, 'quota-wait'); assert.equal(first.current.failures, 1);
+  assert.equal(first.current.repair.diagnostic, 'type_error');
+  assert.equal(first.current.session, 'repair-quota-session');
+  time = 100;
+  const final = await worker({ ...options, run: async ({ current }) => {
+    assert.equal(current.failures, 1); assert.equal(current.session, 'repair-quota-session');
+    assert.equal(current.repair.check, 'typecheck'); return { code: 0, result };
+  } });
+  assert.equal(final.lastReason, 'completed');
+});
+
+test('parent verification retry is bounded and exhausted failures require human review', async t => {
+  const f = await repairFixture(t, { maxRetries: 2 });
+  const { CommandFailure } = await import('./lib/failure.mjs');
+  let turns = 0;
+  const state = await worker({ ...f.options, execute: async (b, a, o) => {
+    if (b === 'npm' && a[1] === 'typecheck') throw new CommandFailure({ assertion: true });
+    return f.execute(b, a, o);
+  }, run: async () => { turns++; return { code: 0, result }; } });
+  assert.equal(turns, 3); assert.equal(state.current.failures, 2);
+  assert.equal(state.lastReason, 'verification_retry_exhausted');
+  assert.equal(state.paused, true);
+  assert.ok(!f.calls.some(([b, a]) => b === 'git' && ['push', 'commit'].includes(a[0])));
+});
+
+for (const category of ['db', 'auth', 'permission', 'tenant', 'production', 'deploy', 'credential', 'external_service', 'destructive', 'security', 'retention', 'specification', 'manual_e2e', 'worktree_safety']) {
+  test(`unsafe ${category} reason is never overridden even alongside sandbox reasons`, async t => {
+    const f = await repairFixture(t);
+    const state = await worker({ ...f.options, execute: f.execute, run: async () => ({ code: 0, result: { ...result,
+      reasons: [{ category: 'sandbox_capability', check: 'test:ui' }, { category, check: 'none' }] } }) });
+    assert.equal(state.status, 'needs-human'); assert.equal(state.current.failures, 0);
+    assert.ok(!f.calls.some(([b, a]) => b === 'git' && a[0] === 'push'));
+  });
+}
+
+test('unsafe parent command failure never triggers repair', async t => {
+  const f = await repairFixture(t);
+  const { CommandFailure } = await import('./lib/failure.mjs');
+  let turns = 0;
+  const state = await worker({ ...f.options, execute: async (b, a, o) => {
+    if (b === 'npm' && a[1] === 'typecheck') throw new CommandFailure({ unsafe: true });
+    return f.execute(b, a, o);
+  }, run: async () => { turns++; return { code: 0, result }; } });
+  assert.equal(turns, 1); assert.equal(state.current.failures, 0);
+  assert.equal(state.lastReason, 'unsafe_or_unavailable_verification');
+});
+
+for (const failure of ['push', 'pr']) test(`${failure} publication failure never reruns Codex`, async t => {
+  const f = await repairFixture(t);
+  let turns = 0;
+  const state = await worker({ ...f.options, execute: async (b, a, o) => {
+    if ((failure === 'push' && b === 'git' && a[0] === 'push') || (failure === 'pr' && b === 'gh' && a[0] === 'pr' && a[1] === 'create')) throw new Error('private credential error');
+    return f.execute(b, a, o);
+  }, run: async () => { turns++; return { code: 0, result }; } });
+  assert.equal(turns, 1); assert.equal(state.lastReason, 'publication_failed');
+  assert.equal(state.current.stage, 'publish'); assert.equal(state.current.failures, 0);
+  assert.ok(!(await readFile(join(f.stateDir, 'state.json'), 'utf8')).includes('private credential error'));
+});
+
+test('failed process output is projected to fixed diagnostics without stderr/secret/PHI', async () => {
+  let error;
+  try {
+    await command(process.execPath, ['-e', "console.log('TS2322 patient example@example.invalid'); console.error('AssertionError ghp_private token=secret-value'); process.exit(1)"]);
+  } catch (caught) { error = caught; }
+  assert.equal(error.diagnostic, 'type_error');
+  for (const text of ['patient', 'example@', 'ghp_private', 'secret-value', 'TS2322']) assert.ok(!JSON.stringify(error).includes(text));
+});
+
+for (const status of ['completed', 'needs_human']) test(`structured sandbox ${status}/false is eligible; free text alone is never an override`, () => {
+  const handoff = { ...result, status, safe_to_open_pr: false,
+    reasons: [{ category: 'sandbox_capability', check: 'test:ui' }] };
+  assert.equal(disposition({ code: 0, result: handoff }, 0, config), 'completed');
+  assert.notEqual(disposition({ code: 0, result: { ...handoff, reasons: undefined } }, 0, config), 'completed');
+  assert.equal(disposition({ code: 0, needsHuman: true, result: handoff }, 0, config), 'needs_human');
+  assert.equal(disposition({ code: 0, result: { ...handoff, unrun_tests: 'migration required' } }, 0, config), 'needs_human');
+  assert.equal(validateResult({ ...handoff, reasons: [{ category: 'sandbox_capability', check: 'test:e2e' }] }), null);
+  assert.equal(validateResult({ ...handoff, reasons: [{ category: 'sandbox_capability', check: 'test:ui', detail: 'secret' }] }), null);
+});
+
+test('preflight leaves only a fixed safe Issue reason and does not duplicate it on resume', async t => {
+  const f = await repairFixture(t, { body: '## Acceptance Criteria\n### Required browser checks\n- E2Eを実行して成功すること PRIVATE-ISSUE-TEXT' });
+  await worker({ ...f.options, execute: f.execute, run: () => assert.fail('Codex ran') });
+  await worker({ ...f.options, resume: true, execute: f.execute, run: () => assert.fail('Codex ran') });
+  const comments = f.calls.filter(([b, a]) => b === 'gh' && a[0] === 'issue' && a[1] === 'comment');
+  assert.equal(comments.length, 1);
+  assert.ok(comments[0][2].input.includes('manual_e2e_required'));
+  assert.ok(!comments[0][2].input.includes('PRIVATE-ISSUE-TEXT'));
+  assert.ok(!(await readFile(join(f.stateDir, 'state.json'), 'utf8')).includes('PRIVATE-ISSUE-TEXT'));
+});
+
+test('unsafe/hooked check scripts stop the entire verification plan before executing any npm check', async t => {
+  for (const scripts of [
+    { ...localScripts, 'pretest:ui': 'npm run test:e2e' },
+    { ...localScripts, build: 'deploy production' },
+    { ...localScripts, typecheck: 'npm run test:e2e' },
+    { ...localScripts, postlint: 'curl external-service' },
+  ]) {
+    const f = await repairFixture(t);
+    const state = await worker({ ...f.options, execute: f.execute, run: async ({ current }) => {
+      await writeFile(join(current.worktree, 'package.json'), JSON.stringify({ scripts }));
+      return { code: 0, result: { ...result, reasons: [{ category: 'sandbox_capability', check: 'test:ui' }, { category: 'sandbox_capability', check: 'build' }] } };
+    } });
+    assert.equal(state.lastReason, 'parent_verification_safety_failed');
+    assert.ok(!f.calls.some(([b, a]) => b === 'npm' && a[0] === 'run'));
+    assert.ok(!f.calls.some(([b, a]) => b === 'git' && a[0] === 'push'));
+  }
+});
+
+test('parent test changing HEAD/status on failure is a safety anomaly, never a self-repair', async t => {
+  const f = await repairFixture(t);
+  const { CommandFailure } = await import('./lib/failure.mjs');
+  let changed = false; let turns = 0;
+  const state = await worker({ ...f.options, execute: async (b, a, o) => {
+    if (b === 'npm' && a[1] === 'typecheck') { changed = true; throw new CommandFailure({ assertion: true }); }
+    if (changed && b === 'git' && a[0] === 'status') return '?? unexpected-file';
+    return f.execute(b, a, o);
+  }, run: async () => { turns++; return { code: 0, result }; } });
+  assert.equal(turns, 1); assert.equal(state.lastReason, 'verification_changed_worktree');
+  assert.equal(state.current.failures, 0);
+});
+
+for (const resumeAvailable of [true, false]) test(`repair keeps saved session and stops if ${resumeAvailable ? 'a different session is reported' : 'CLI resume is unavailable'}`, async t => {
+  const f = await repairFixture(t);
+  const { CommandFailure } = await import('./lib/failure.mjs');
+  let turns = 0;
+  await assert.rejects(worker({ ...f.options, execute: async (b, a, o) => {
+    if (!resumeAvailable && b === 'codex' && a.includes('resume')) return '--json';
+    if (b === 'npm' && a[1] === 'typecheck') throw new CommandFailure({ assertion: true });
+    return f.execute(b, a, o);
+  }, run: async ({ onSession }) => {
+    turns++;
+    await onSession(turns === 1 ? 'saved-session' : 'different-session');
+    return { code: 0, result };
+  } }), /repair_session/);
+  const state = await loadState(f.stateDir);
+  assert.equal(state.current.session, 'saved-session');
+  assert.equal(state.lastReason, resumeAvailable ? 'repair_session_mismatch' : 'repair_session_resume_unavailable');
+  assert.equal(state.paused, true); assert.equal(state.current.failures, 1);
+  assert.equal(turns, resumeAvailable ? 2 : 1);
+});
+
+test('real JSONL resume refuses a replacement thread during self-repair', async t => {
+  const path = await directory(t);
+  const binary = join(path, 'session-mismatch.mjs');
+  await writeFile(binary, `#!/usr/bin/env node\nprocess.stdin.resume();\nconsole.log(JSON.stringify({type:'thread.started',thread_id:'different-thread'}));\n`, { mode: 0o700 });
+  const outcome = await runCodex({ current: { worktree: path, session: 'saved-thread', repair: { category: 'local_verification', check: 'typecheck', diagnostic: 'type_error' } },
+    issue: issue(40), schemaPath: '/schema', tracePath: join(path, 'trace'), stderrPath: join(path, 'stderr'), binary, onSession: () => assert.fail('Session was replaced') });
+  assert.equal(outcome.safetyReason, 'repair_session_mismatch');
+});
+
+test('dry-run reports required E2E preflight without preparing state/worktree/Codex commands', async t => {
+  const f = await repairFixture(t, { body: 'Required Tests:\n- E2E execution must pass.' });
+  let preview;
+  await worker({ ...f.options, mode: 'dry-run', execute: f.execute, report: value => { preview = JSON.parse(value); }, run: () => assert.fail('Codex ran') });
+  assert.equal(preview.preflight, 'manual_e2e_required'); assert.deepEqual(preview.commands, []);
+  await assert.rejects(readFile(join(f.stateDir, 'state.json')), { code: 'ENOENT' });
+});
+
+for (const failure of ['migration required', 'authentication required', 'credentials required', 'requires external service']) test(`real unsafe command diagnostic prevents local-verification classification: ${failure}`, async () => {
+  await assert.rejects(command(process.execPath, ['-e', `console.error(${JSON.stringify(failure)});process.exit(1)`]), error => error.category === 'unsafe' && !JSON.stringify(error).includes(failure));
 });
