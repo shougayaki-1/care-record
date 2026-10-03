@@ -20,7 +20,8 @@
   ],
   "git": {
     "deploymentEnabled": {
-      "codex/issue-56-continuous-worker": false
+      "codex/issue-56-continuous-worker": false,
+      "codex/issue-56-keyring-follow-up": false
     }
   }
 }
