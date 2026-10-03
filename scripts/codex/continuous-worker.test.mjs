@@ -117,7 +117,9 @@ function mockExecute(items, calls) {
       if (args[0] === 'remote') return 'https://github.com/test/repo.git';
       if (args[0] === 'rev-parse') return args.includes('--git-common-dir') ? '/git-meta' : 'base-sha';
       if (args[0] === 'branch') { const n = options?.cwd?.match(/issue-(\d+)$/)?.[1] ?? '40'; return `codex/issue-${n}-task-${n}`; }
-      if (args[0] === 'rev-list') return '1';
+      if (args[0] === 'merge-base') return 'base-sha';
+      if (args[0] === 'worktree' && args[1] === 'add') await mkdir(args[4], { recursive: true });
+      if (args[0] === 'rev-list') return args.at(-1) === 'base-sha..HEAD' && args.includes('--count') ? '1' : '0';
       if (args[0] === 'diff') return 'A\tscripts/example.mjs';
       return '';
     }
@@ -179,7 +181,7 @@ test('quota wait survives restart and resumes same Issue before queue selection'
   assert.ok(calls.some(([binary, args]) => binary === 'git' && args[0] === 'push'));
   assert.ok(calls.some(([binary, args]) => binary === 'gh' && args[1] === 'create' && args.includes('--draft')));
   assert.ok(!calls.some(([, args]) => args.includes('merge')));
-  assert.ok(!calls.some(([binary, args]) => binary === 'git' && args[0] === 'fetch'));
+  assert.ok(calls.some(([binary, args, options]) => binary === 'git' && args[0] === 'fetch' && options.purpose === 'github'));
 });
 
 test('status is read-only and requires neither GitHub nor Codex', async t => {

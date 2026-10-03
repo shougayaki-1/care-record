@@ -1,8 +1,10 @@
 import { homedir } from 'node:os';
 import { resolve, join, relative, isAbsolute, dirname, basename, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { mkdir, access, realpath } from 'node:fs/promises';
+import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { command } from './lib/process.mjs';
+import { ensureWorktree, WorktreeSafetyError } from './lib/worktree.mjs';
+import { verificationTests } from './lib/verification.mjs';
 import { GitHub } from './lib/github.mjs';
 import { branchName, disposition, labels, metadata, selectIssue } from './lib/queue.mjs';
 import { loadState, lockState, saveJson } from './lib/state.mjs';
@@ -44,8 +46,10 @@ async function canonicalPath(path) {
   }
 }
 
-async function verify(current, execute) {
+export async function verify(current, execute) {
+  await ensureWorktree(current, current.worktree, execute);
   const run = args => execute('git', args, { cwd: current.worktree });
+  const beforeHead = await run(['rev-parse', 'HEAD']);
   if (await run(['branch', '--show-current']) !== current.branch) throw new Error('Worktree branch mismatch');
   const beforeChecks = await run(['status', '--porcelain']);
   const changed = (await run(['diff', '--name-status', '--no-renames', current.base])).split('\n').filter(Boolean);
@@ -53,20 +57,23 @@ async function verify(current, execute) {
   changed.push(...untracked.map(path => `A\t${path}`));
   if (!changed.length) throw new Error('No implementation changes');
   if (changed.some(line => /^(?!A\s)\S+\s+supabase\/migrations\//.test(line) || /\s+supabase\/migrations\/old\//.test(line) || /\s+(?:.*\/)?(?:\.env(?!\.example$)|auth\.json|WORKER-PROGRESS\.md|.*\.pem$)/.test(line))) throw new Error('Protected file changed');
-  for (const args of [['run', 'typecheck'], ['run', 'lint', '--', '--max-warnings=0']]) await execute('npm', args, { cwd: current.worktree, timeout: 600_000 });
-  if (changed.some(line => /\s+src\/(?:app\/actions|utils)\//.test(line))) await execute('npm', ['run', 'test:unit'], { cwd: current.worktree, timeout: 600_000 });
-  if (changed.some(line => /\s+src\/components\/ui\//.test(line))) await execute('npm', ['run', 'test:ui'], { cwd: current.worktree, timeout: 600_000 });
-  if (changed.some(line => /\s+scripts\/codex\//.test(line))) await execute('npm', ['run', 'test:codex-worker'], { cwd: current.worktree, timeout: 600_000 });
-  // DB checks require human environment confirmation, not automatic migration application.
+  // DB/RLS changes never reach test commands or publication automatically.
   if (changed.some(line => /\s+(?:supabase\/migrations\/|src\/utils\/permissions\.ts)/.test(line))) throw new Error('DB/RLS change requires human verification before publishing');
+  let scripts = {};
+  try { scripts = JSON.parse(await readFile(join(current.worktree, 'package.json'), 'utf8')).scripts ?? {}; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const tests = verificationTests(changed, scripts);
+  for (const args of [['run', 'typecheck'], ['run', 'lint', '--', '--max-warnings=0']]) await execute('npm', args, { cwd: current.worktree, timeout: 600_000 });
+  for (const name of tests) await execute('npm', ['run', name], { cwd: current.worktree, timeout: 600_000, testMode: true });
   const afterChecks = await run(['status', '--porcelain']);
-  if (beforeChecks !== afterChecks) throw new Error('Verification changed worktree files');
+  if (beforeHead !== await run(['rev-parse', 'HEAD']) || beforeChecks !== afterChecks) throw new Error('Verification changed worktree files');
   if (afterChecks) {
     await run(['add', '--all', '--', '.']);
     await run(['commit', '-m', `Implement issue #${current.number}`]);
   }
   if (Number(await run(['rev-list', '--count', `${current.base}..HEAD`])) < 1) throw new Error('No implementation commit');
   if (await run(['status', '--porcelain'])) throw new Error('Verification changed tracked files');
+  return ['npm run typecheck', 'npm run lint -- --max-warnings=0', ...tests.map(name => `npm run ${name}`)];
 }
 
 export async function worker({ config, mode = 'normal', resume = false, root = process.cwd(), execute = command, run = runCodex, now = Date.now, wait = sleep, signal, report = console.log }) {
@@ -98,6 +105,7 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
       commands: current ? [['git', 'fetch', 'origin', 'main'], ['git', 'worktree', 'add', '-b', current.branch, current.worktree, 'origin/main'], ['npm', 'ci'], ['codex', ...codexArgs(current, join(config.stateDir, 'result.schema.json'))], ['git', 'push', 'origin', current.branch], ['gh', 'pr', 'create', '--draft']] : [] }, null, 2));
     return state;
   }
+  let resumePending = resume;
   const unlock = await lockState(config.stateDir);
   try {
     // Reload after obtaining the lock; another process may have just completed.
@@ -105,7 +113,8 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
     if (state.repo && state.repo !== repo) throw new Error('Saved state belongs to another repository');
     state.repo = repo;
     if (state.paused && !resume) { report('Worker paused. Review state and use --resume.'); return state; }
-    if (resume) { state.paused = false; if (state.current) state.current.failures = 0; await persist(); }
+    // Resume only clears the pause after worktree safety is proven.
+    if (resume && !state.current) { state.paused = false; await persist(); }
     const execHelp = await execute('codex', ['exec', '--help'], { purpose: 'codex' });
     let resumeHelp = '';
     try { resumeHelp = await execute('codex', ['exec', 'resume', '--help'], { purpose: 'codex' }); } catch { /* Fall back to same worktree. */ }
@@ -132,21 +141,15 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
       const current = state.current;
       if (resolve(current.worktree) !== join(config.stateDir, 'worktrees', `issue-${current.number}`)) throw new Error('Unexpected worktree path in state');
       const issue = await github.issue(current.number);
-      if (issue.state !== 'open' || labels(issue).some(n => ['codex:blocked', 'codex:failed', 'codex:needs-human'].includes(n))) {
-        if (!resume) { state.paused = true; state.status = 'needs-human'; state.lastReason = 'needs_human'; await persist(); return state; }
-        if (issue.state !== 'open' || labels(issue).includes('codex:blocked')) throw new Error('Current issue is closed or blocked');
-        await github.gh(['issue', 'edit', String(current.number), '--repo', repo, '--remove-label', 'codex:failed', '--remove-label', 'codex:needs-human']);
-      }
+      const intervention = issue.state !== 'open' || labels(issue).some(n => ['codex:blocked', 'codex:failed', 'codex:needs-human'].includes(n));
+      if (intervention && !resume) { state.paused = true; state.status = 'needs-human'; state.lastReason = 'needs_human'; await persist(); return state; }
+      if (issue.state !== 'open' || labels(issue).includes('codex:blocked')) throw new Error('Current issue is closed or blocked');
+      current.worktreeCheck = await ensureWorktree(current, root, execute);
+      if (resumePending) { state.paused = false; current.failures = 0; resumePending = false; }
+      await persist();
+      if (intervention) await github.gh(['issue', 'edit', String(current.number), '--repo', repo, '--remove-label', 'codex:failed', '--remove-label', 'codex:needs-human']);
       await github.mark(current.number, 'running');
       if (current.stage === 'prepare') {
-        await execute('git', ['fetch', 'origin', 'main'], { cwd: root, purpose: 'github' });
-        current.base ??= await execute('git', ['rev-parse', 'origin/main'], { cwd: root });
-        await persist();
-        await mkdir(join(config.stateDir, 'worktrees'), { recursive: true, mode: 0o700 });
-        let exists = true;
-        try { await access(current.worktree); } catch { exists = false; }
-        if (!exists) await execute('git', ['worktree', 'add', '-b', current.branch, current.worktree, current.base], { cwd: root });
-        if (await execute('git', ['branch', '--show-current'], { cwd: current.worktree }) !== current.branch) throw new Error('Existing worktree branch mismatch');
         await execute('npm', ['ci'], { cwd: current.worktree, timeout: 600_000 });
         current.stage = 'implement';
         await persist();
@@ -199,7 +202,9 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
         await persist();
       }
       try {
-        await verify(current, execute);
+        const verified = await verify(current, execute);
+        current.result.tests = [...new Set([...current.result.tests, ...verified.map(name => `Parent verified: ${name}`)])];
+        current.result.unrun_tests += `\nParent verification passed: ${verified.join(', ')}. Any earlier sandbox restriction for these commands is resolved.`;
         await execute('git', ['push', 'origin', `${current.branch}:${current.branch}`], { cwd: current.worktree, purpose: 'github' });
         current.pr = await github.draft(current, current.result);
         await persist();
@@ -212,11 +217,12 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
         state.lastReason = 'completed';
         await persist();
         report(`Issue #${current.number}: Draft PR ${current.pr}`);
-      } catch {
+      } catch (error) {
         // Preserve publish stage for idempotent recovery, never rerun Codex blindly.
         state.paused = true;
         state.status = 'needs-human';
-        state.lastReason = 'needs_human';
+        state.lastReason = error instanceof WorktreeSafetyError ? error.reason : 'parent_verification_or_publication_failed';
+        if (error instanceof WorktreeSafetyError) { current.worktreeCheck = error.check; report(`Issue #${current.number}: ${error.message}`); }
         await persist();
         await github.mark(current.number, 'needs_human');
         report(`Issue #${current.number}: verification or publication needs human review.`);
@@ -234,7 +240,8 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
       return state;
     }
     if (state.current) {
-      state.status = 'needs-human'; state.paused = true; state.lastReason = 'operational_error';
+      state.status = 'needs-human'; state.paused = true; state.lastReason = error instanceof WorktreeSafetyError ? error.reason : 'operational_error';
+      if (error instanceof WorktreeSafetyError) { state.current.worktreeCheck = error.check; report(`Issue #${state.current.number}: ${error.message}`); }
       await persist();
       try { await github.mark(state.current.number, 'needs_human'); } catch { /* Preserve local recovery even if GitHub is unavailable. */ }
     }
