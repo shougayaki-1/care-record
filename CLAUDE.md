@@ -16,6 +16,7 @@
 
 - `npm run dev` / `npm run build`
 - `npm run lint` / `npm run typecheck`
+- `npm run test`（unit → Storybook UI。準備と対象範囲は docs/testing.md）
 - `npm run test:unit`（Vitest, src/**/*.test.ts）
 - `npm run test:ui`（Storybook ブラウザテスト）
 - `npm run test:e2e:critical` / `npm run test:e2e`（Playwright。使い捨てのローカルSupabaseで実行し、ホスト済み環境の認証情報を使用しない）

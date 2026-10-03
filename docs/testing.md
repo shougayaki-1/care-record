@@ -24,6 +24,43 @@ npm run test:unit
 npm run build
 ```
 
+## 標準テスト
+
+`npm run test` は既存の `npm run test:unit`（`src/**/*.test.{ts,tsx}`）と
+`npm run test:ui`（Storybook の Chromium browser test）をこの順に実行します。
+unit が失敗すると UI は開始せず、unit または UI の失敗は標準 test の非0終了コードに伝わります。
+個別に実行する場合は引き続き `test:unit` / `test:ui` を使用できます。
+
+事前に Node.js 24 と npm、依存関係、Playwright の Chromium を用意してください。
+初回の依存関係・ブラウザのインストールにはネットワーク接続が必要です。
+
+```sh
+npm ci
+npx playwright install chromium
+export APP_ENV=test
+export AI_IMPORT_ENABLED=false
+export STORYBOOK_DISABLE_TELEMETRY=1
+export NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
+export NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-test-anon-key
+export SUPABASE_SERVICE_ROLE_KEY=ci-test-service-role-key
+npm run test
+```
+
+上記の値は CI と同じテスト専用のダミー値です。既存の retention unit は
+DB 呼び出し前の拒否を検査しますが、import 時の client 初期化には URL と key が必要です。
+実サービスの資格情報で置き換えないでください。
+
+標準 test は unit とローカルの Storybook UI を対象とし、
+Supabase の起動、DB migration、E2E、実際の外部サービス連携試験は実行しません。
+Docker、Supabase CLI、実サービスの認証情報や環境ファイルは不要です。
+`test:ci-scope`、lint、型検査、build も標準 test には含めず、上記の個別コマンドで実行します。
+CI は引き続き変更分類に応じた個別の unit / UI job と並列 job を使用します。
+
+DB 試験は Docker とローカル Supabase を準備し、対象と影響を確認して別途実行します。
+実際の Google Calendar / Vertex AI / GCS 等への接続試験は標準 test の対象外です。
+必要な場合だけ、承認された非本番の専用環境と合成データ・環境専用の認証情報を準備し、
+実行範囲と外部接続を確認して実施します。本番サービス・本番データは使用しません。
+
 `CI` workflow 内の固定名 check は `CI` です。`scope` が選んだ job だけが実行対象となり、
 最終判定 job は条件付き job が `skipped` の場合も成功として扱います。
 `main` のブランチ保護では、この `CI` を必須チェックに設定済みです。
@@ -31,6 +68,9 @@ npm run build
 UI 変更時は `npx playwright install chromium` の後、`npm run test:ui` を実行します。DB 変更時は [CI workflow](../.github/workflows/ci.yml) と同じ Supabase CLI 2.108.0 で、ローカルの migration、pgTAP、DB lint を確認します。共有環境に適用済みの migration は書き換えません。CI の変更分類に関するテストには `npm run test:ci-scope` を使います。
 
 ## E2E
+
+E2E は標準 `npm run test` に含めません。ローカル DB の作成・migration 適用を伴うため、
+専用環境と実行条件を確認し、ユーザーの確認を得てから実行してください。
 
 `npm run test:e2e:critical` は、認証、組織のセットアップと再ログイン後の workspace 解決、記録保存、組織分離を中心に検査する Chromium テストです。`npm run test:e2e` はすべての E2E テストを実行します。どちらのコマンドも一時ディレクトリに専用の Supabase project ID と空きポートを用意し、現行 migration を適用して、合成アカウントでテストした後に環境を破棄します。開発用の `supabase/.temp` や DB はリセットしません。Supabase の API URL または DB URL にループバック以外を指定すると、開始前に失敗します。既存の localhost アプリも再利用しません。
 
