@@ -101,7 +101,7 @@ npm run codex:worker -- --resume
 
 `--resume` は needs-human 等の手動停止を解除しますが、保存された quota の retry 時刻は飛ばしません。仕様・認証・専用環境の問題を解決してから使ってください。blocked / closed の Issue は再開しません。通常は保存された session を公式の `exec resume <session-id>` で再開します。resume command が JSON/schema に対応していない CLI では、同じ worktree の差分、commit、WORKER-PROGRESS.md、保存された残作業を使って新しい exec から再開します。session が手動削除されている場合は、その ID を state から除いたうえで `--resume` します。
 
-失敗の retry 上限後は `codex:failed` とし worktree と state の Issue 別アーカイブを残します。再試行したい場合は原因を解決し、既存 worktree と branch を確認したうえで current state をそのアーカイブから復元するか、作業を人へ引き継ぎます。単に ready に戻すと既存 branch と衝突するため、自動で branch を削除・上書きしません。
+実装・親検証の retry 上限後は `codex:needs-human` とし、同じ worktree/session/base と state の Issue 別アーカイブを残して停止します。再試行したい場合は原因を解決し、既存 worktree と branch を確認したうえで current state をそのアーカイブから復元するか、作業を人へ引き継ぎます。単に ready に戻すと既存 branch と衝突するため、自動で branch を削除・上書きしません。
 
 ## state とログ
 
@@ -113,7 +113,7 @@ kill -9 / 電源断では lock が残る場合があります。worker とその
 
 ## Draft PR
 
-completed かつ safe_to_open_pr の結果に限り、worker が変更領域を確認し、typecheck/lint と関連 unit/UI tests を再実行します。残っている実装差分は親 worker が commit し、commit と clean worktree を確認して push します。既存 migration の変更・秘密ファイル・未完了 progress note の追加は拒否します。PR は `Closes #<issue>`、概要、実行検証、未実行と理由、security/RLS/migration 影響を記載した Draft です。Issue は ready/running を外し、PR merge まで open のままにします。
+completed かつ safe_to_open_pr の結果、または構造化された sandbox capability 理由だけの限定 handoff に限り、worker が変更領域を確認し、typecheck/lint・関連 unit/UI tests・対象 build/static checks と git diff --check を再実行します。残っている実装差分は親 worker が commit し、commit と clean worktree を確認して push します。既存 migration の変更・秘密ファイル・未完了 progress note の追加は拒否します。PR は `Closes #<issue>`、概要、実行検証、未実行と理由、security/RLS/migration 影響を記載した Draft です。Issue は ready/running を外し、PR merge まで open のままにします。
 
 公開途中の失敗は publish stage のまま needs-human に保存します。resume は同じ branch の Draft PR を確認して再利用するため、PR 作成成功後にラベル更新が失敗しても新しい PR を作りません。既存の non-draft / closed / merged PR は人へ戻します。自動 merge はありません。
 
@@ -177,8 +177,10 @@ macOS は `~/Library/LaunchAgents/local.care-record.codex-worker.plist` に次�
 
 ```sh
 npm run test:codex-worker
+npm run test:ci-scope
 npm run typecheck
 npm run lint -- --max-warnings=0
+git diff --check
 ```
 
 worker の自動テストは CLI/GitHub を mock し、キュー、依存、quota reset/backoff、再起動復元、同一 Issue の再開、dry-run/status の read-only、ログの秘匿、Draft PR を検証します。CI の lint-security job に組み込んでいます。実運用の ChatGPT 消費、push、PR 作成、daemon 登録はこのテストでは行いません。
@@ -193,10 +195,30 @@ macOS の gh 2.96.0 は OS keyring の読み取りに `security` を使います
 
 Codex 起動前と親の公開検証前に origin/main を fetch し、branch、HEAD、保存 base の祖先関係、origin/main、local commits、tracked/untracked changes を検査します。保存 base は remote の SHA だけでは更新しません。`prepare`、clean、session/progress/result/lastRun なし、local commits なし、HEAD が最新 main の祖先である場合だけ `merge --ff-only` で更新し、成功後に base を保存します。作業済みの stale worktree は `stale_existing_worktree`、保存 base が HEAD の祖先でない場合は `worktree_base_mismatch` として needs-human で停止します。state に SHA と dirty/local commit の診断情報を残し、reset/rebase/clean/stash は実行しません。resume でも session/base/failures は整合性検査が失敗した場合に保持します。
 
-Codex が sandbox の listen EPERM／browser launch restriction で実行できなかったチェックは、親が必ず再実行する場合だけ `unrun_tests` にコマンドと制約を記載して completed に委譲できます。対象は shared UI 変更の Storybook UI と、package.json/package-lock.json 変更で定義された標準 test の unit/UI です。typecheck/lint、任意の検査、assertion failure、DB/RLS/migration、production、認証要求、外部サービス、破壊的操作、security/retention 判断は委譲できません。sandbox bypass は禁止です。
+Codex が sandbox の listen EPERM／browser launch restriction で実行できなかった安全な local check は、`unrun_tests` に制約を記載し、`reasons: [{category: "sandbox_capability", check: "test:ui"}]` のように構造化して親へ委譲します。対象 check は typecheck、lint、test、test:unit、test:ui、build、test:codex-worker、test:ci-scope、diff-check だけです。親が scripts と lifecycle hooks を検査して各 check を独立実行します。構造化 reason がすべて sandbox_capability の場合だけ、code=0 の completed / safe_to_open_pr=false または needs_human も handoff として扱えます。古い自由文のみの false/needs_human、CLI の認証エラー、混在する human reason は override しません。sandbox bypass は禁止です。
 
 親は実際の scripts を読み、標準 `test` が `npm run test:unit && npm run test:ui`、leaf が `vitest run --project unit` / `vitest run --project storybook` で pre/post hook がないことを検査します。異なる定義は人へ戻し、E2E/DB/外部処理を起動しません。親のテストは credential-free HOME/cache と固定の test/loopback dummy Supabase 値で実行します。Chromium のインストール済み cache は明示的な PLAYWRIGHT_BROWSERS_PATH（未指定なら OS 標準 cache path）で探索し、ブラウザを自動インストールしません。不足時も公開せず人へ戻します。実サービスの認証値は渡しません。全チェック成功後だけ commit/push/Draft PR に進み、親が実行したコマンドを PR の検証記録に追加します。
 
 既存の作業済み stale worktree は人間が安全な4段階で復旧します。まず worker/子プロセス停止と branch/status/history を確認し、レビューした非機密ファイルだけ repo 外へバックアップします。次にそのファイルを明示指定したローカル checkpoint commit に保存します（push せず、E2E禁止時は `[skip ci]` を付ける）。最新 main を fetch し、reset/rebase ではなく通常の merge で取り込み、競合をレビューして解決します。最後に HEAD に最新 main が含まれることを merge-base で確認してから、排他停止中に保存 base をその main SHA と一致させます。session・stage・worktree は保持し、結果/差分の再レビュー後に once/resume します。状態更新は Git の実状態の確認後にのみ行い、単に base の値だけを書き換えないでください。
 
 確認: 2026-10-03、Context7 `/websites/git-scm_doc` の merge-base／fast-forward merge 仕様。実 Git 回帰テストと標準 npm test の実 subprocess で履歴・差分保全と親の成功/失敗の公開ゲートを検証します。
+
+
+## 親検証失敗の自己修正と E2E preflight（Issue #70）
+
+親の local verification と publication は別の失敗経路です。通常の typecheck/lint/unit/UI/build/static check/diff-check の非ゼロ終了では、`CODEX_WORKER_MAX_RETRIES`（既定1）の範囲で同じ Issue/branch/worktree/base/session を保持し、stage を implement に戻します。実装 retry と親検証 retry は同じ有限 budget を使います。quota 待機はその budget を消費せず、保存した feedback/session と待機時刻から再開します。session resume を使えない CLI は、既存 session を持つ self-repair を別 session で続行せず人へ返します。
+
+親の stdout/stderr を診断用に transient に分類し、state/prompt/report に渡す feedback は check 名、固定 category と `type_error` / `assertion_failed` / `check_failed` だけです。自由文、ファイル名、assertion の actual/expected、raw stderr、秘密情報、PHI は診断に含めません。Codex は Issue 内の最小修正を行い、親が全チェックを再実行します。先の result で委譲された check plan を state に保持し、修正後の result から reason が消えても必須検証を省略しません。上限到達は `verification_retry_exhausted`、安全上の問題や親の capability/起動失敗は `unsafe_or_unavailable_verification` 等で needs-human にします。push/gh/PR create 失敗は `publication_failed` と publish stage を保持し、Codex へ実装修正を要求しません。
+
+human reason category は db、auth、permission、tenant、production、deploy、credential、external_service、destructive、security、retention、specification、manual_e2e、worktree_safety です。これらが1つでもあれば sandbox override は禁止です。親側でも DB/RLS/migration・認証/テナント/保持などの機密領域、秘密ファイル、異なる scripts / pre/post hooks、worktree/base/state anomaly を公開前に停止します。local_verification は通常の修正対象であり sandbox_capability と混同しません。
+
+Issue 本文の Acceptance Criteria / Required Tests / 完了条件、MUST / 必須等の文脈で E2E実行そのものが明示必須なら、worktree準備・Codex起動より前に `manual_e2e_required` / codex:needs-human で停止します。安全な固定理由を state と Issue comment に残し、codex:needs-human label でも停止を示します。同じ preflight 理由の comment は resume 時に再投稿しません。本文中の E2E 言及、selector/fixture/test file の編集、任意/禁止の実行記載だけでは停止しません。E2E の無人実行・DB適用・production・deploy・auto merge は引き続き禁止です。
+
+240/320/375px/desktop の幅は Storybook/Vitest/browser assertion で覆える場合、目視だけを理由に human としません。明示された visual/manual specification 判断は specification reason で人へ返します。#50型の余分な Processing story の failure は、Issue 外の共通theme/helper text色変更・axe rule無効化で解消せず、余分な story を最小化し Service Dates / Screen Widths の必要な coverage を保持します。
+
+回帰テストは一時 directory の state/worktree/session、合成の CLI/検証失敗、mock GitHub publication を使用します。既存 #50 の state/worktree/session を読まず、変更・resume しません。実 UI 風 assertion failure → 同じ session への診断差し戻し → 最小修正 → 独立検証 → mock publication、quota/retry上限、安全な handoff override、E2E preflight と code-only の非停止、unsafe reason、publication failure を検証します。
+
+確認日: 2026-10-03。実行環境 Node.js 24.12.0。Context7 `/nodejs/node` の公式 child_process.spawn（stdout/stderr pipe、close/error event）と node:test（mock/子runnerの環境隔離）を確認しました。既存 CLI/sandbox/credential isolation 方針は維持しています。
+
+
+#50復旧の追加検証では、record等のshared UI外のcomponent変更も親unit/UIの対象にします。自動公開前はVercelのdeploymentEnabledが現在branchについてfalse（または全体false）であることを確認します。vercel.jsonの差分は現在branchのfalse設定だけの変更を許可し、それ以外のdeployment/security設定変更は引き続き人へ返します。確認日: 2026-10-03、Context7 `/nodejs/node` のJSON file read/writeとchild process error/closeを再確認。

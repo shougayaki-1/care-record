@@ -4,7 +4,10 @@ import { pathToFileURL } from 'node:url';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { command } from './lib/process.mjs';
 import { ensureWorktree, WorktreeSafetyError } from './lib/worktree.mjs';
-import { verificationTests } from './lib/verification.mjs';
+import { verificationTests, assertLocalCheck } from './lib/verification.mjs';
+import { VerificationFailure } from './lib/failure.mjs';
+import { preflightReason } from './lib/preflight.mjs';
+import { deploymentDisabled, branchSuppressionOnly, PublicationSafetyError } from './lib/publication.mjs';
 import { GitHub } from './lib/github.mjs';
 import { branchName, disposition, labels, metadata, selectIssue } from './lib/queue.mjs';
 import { loadState, lockState, saveJson } from './lib/state.mjs';
@@ -50,7 +53,7 @@ export async function verify(current, execute) {
   await ensureWorktree(current, current.worktree, execute);
   const run = args => execute('git', args, { cwd: current.worktree });
   const beforeHead = await run(['rev-parse', 'HEAD']);
-  if (await run(['branch', '--show-current']) !== current.branch) throw new Error('Worktree branch mismatch');
+  if (await run(['branch', '--show-current']) !== current.branch) throw new WorktreeSafetyError('worktree_branch_mismatch');
   const beforeChecks = await run(['status', '--porcelain']);
   const changed = (await run(['diff', '--name-status', '--no-renames', current.base])).split('\n').filter(Boolean);
   const untracked = (await run(['ls-files', '--others', '--exclude-standard'])).split('\n').filter(Boolean);
@@ -59,12 +62,35 @@ export async function verify(current, execute) {
   if (changed.some(line => /^(?!A\s)\S+\s+supabase\/migrations\//.test(line) || /\s+supabase\/migrations\/old\//.test(line) || /\s+(?:.*\/)?(?:\.env(?!\.example$)|auth\.json|WORKER-PROGRESS\.md|.*\.pem$)/.test(line))) throw new Error('Protected file changed');
   // DB/RLS changes never reach test commands or publication automatically.
   if (changed.some(line => /\s+(?:supabase\/migrations\/|src\/utils\/permissions\.ts)/.test(line))) throw new Error('DB/RLS change requires human verification before publishing');
-  let scripts = {};
+  if (changed.some(line => /\s+(?:src\/(?:app\/auth\/|components\/auth\/|utils\/supabase\/|utils\/.*(?:[Aa]uth|[Pp]ermission|[Tt]enant|[Rr]etention)|proxy\.ts)|scripts\/(?:db|e2e)\/|supabase\/)/.test(line))) throw new Error('Security-sensitive change requires human verification');
+  const deploymentConfig = JSON.parse(await readFile(join(current.worktree, 'vercel.json'), 'utf8'));
+  if (!deploymentDisabled(deploymentConfig, current.branch)) throw new PublicationSafetyError();
+  if (changed.some(line => /\s+vercel\.json$/.test(line))) {
+    const baseConfig = JSON.parse(await run(['show', `${current.base}:vercel.json`]));
+    if (!branchSuppressionOnly(baseConfig, deploymentConfig, current.branch)) throw new Error('Deployment configuration change requires human verification');
+  }
+  let scripts = null;
   try { scripts = JSON.parse(await readFile(join(current.worktree, 'package.json'), 'utf8')).scripts ?? {}; }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const tests = verificationTests(changed, scripts);
-  for (const args of [['run', 'typecheck'], ['run', 'lint', '--', '--max-warnings=0']]) await execute('npm', args, { cwd: current.worktree, timeout: 600_000 });
-  for (const name of tests) await execute('npm', ['run', name], { cwd: current.worktree, timeout: 600_000, testMode: true });
+  const tests = [...new Set([
+    ...verificationTests(changed, scripts ?? {}, current.result?.reasons ?? []),
+    ...(current.verificationChecks ?? []).filter(name => !['typecheck', 'lint', 'diff-check'].includes(name)),
+  ])];
+  const names = ['typecheck', 'lint', ...tests];
+  // Validate the entire plan before executing any script, including hooks.
+  for (const name of names) assertLocalCheck(scripts, name);
+  // A repaired Codex result must not drop checks delegated by an earlier result.
+  current.verificationChecks = [...names, 'diff-check'];
+  for (const name of names) {
+    try {
+      await execute('npm', ['run', name, ...(name === 'lint' ? ['--', '--max-warnings=0'] : [])], { cwd: current.worktree, timeout: 600_000, testMode: true });
+    } catch (error) {
+      if (beforeHead !== await run(['rev-parse', 'HEAD']) || beforeChecks !== await run(['status', '--porcelain'])) throw new WorktreeSafetyError('verification_changed_worktree');
+      throw new VerificationFailure(name, error);
+    }
+  }
+  try { await run(['diff', '--check', current.base]); }
+  catch (error) { throw new VerificationFailure('diff-check', error); }
   const afterChecks = await run(['status', '--porcelain']);
   if (beforeHead !== await run(['rev-parse', 'HEAD']) || beforeChecks !== afterChecks) throw new Error('Verification changed worktree files');
   if (afterChecks) {
@@ -73,7 +99,7 @@ export async function verify(current, execute) {
   }
   if (Number(await run(['rev-list', '--count', `${current.base}..HEAD`])) < 1) throw new Error('No implementation commit');
   if (await run(['status', '--porcelain'])) throw new Error('Verification changed tracked files');
-  return ['npm run typecheck', 'npm run lint -- --max-warnings=0', ...tests.map(name => `npm run ${name}`)];
+  return ['npm run typecheck', 'npm run lint -- --max-warnings=0', ...tests.map(name => `npm run ${name}`), 'git diff --check'];
 }
 
 export async function worker({ config, mode = 'normal', resume = false, root = process.cwd(), execute = command, run = runCodex, now = Date.now, wait = sleep, signal, report = console.log }) {
@@ -101,8 +127,9 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
     const snapshot = await github.snapshot();
     const issue = state.current ? await github.issue(state.current.number) : selectIssue(snapshot.issues, snapshot.dependencies, snapshot.linked);
     const current = state.current ?? (issue ? { number: issue.number, branch: branchName(issue), worktree: join(config.stateDir, 'worktrees', `issue-${issue.number}`) } : null);
-    report(JSON.stringify({ mode, issue: issue?.number ?? null, dependencies: issue ? metadataForReport(issue) : [], branch: current?.branch ?? null, status: state.status, nextRetryAt: state.nextRetryAt, paused: state.paused,
-      commands: current ? [['git', 'fetch', 'origin', 'main'], ['git', 'worktree', 'add', '-b', current.branch, current.worktree, 'origin/main'], ['npm', 'ci'], ['codex', ...codexArgs(current, join(config.stateDir, 'result.schema.json'))], ['git', 'push', 'origin', current.branch], ['gh', 'pr', 'create', '--draft']] : [] }, null, 2));
+    const preflight = issue ? preflightReason(issue.body) : null;
+    report(JSON.stringify({ mode, issue: issue?.number ?? null, dependencies: issue ? metadataForReport(issue) : [], branch: current?.branch ?? null, status: state.status, nextRetryAt: state.nextRetryAt, paused: state.paused, preflight,
+      commands: current && !preflight ? [['git', 'fetch', 'origin', 'main'], ['git', 'worktree', 'add', '-b', current.branch, current.worktree, 'origin/main'], ['npm', 'ci'], ['codex', ...codexArgs(current, join(config.stateDir, 'result.schema.json'))], ['git', 'push', 'origin', current.branch], ['gh', 'pr', 'create', '--draft']] : [] }, null, 2));
     return state;
   }
   let resumePending = resume;
@@ -115,11 +142,7 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
     if (state.paused && !resume) { report('Worker paused. Review state and use --resume.'); return state; }
     // Resume only clears the pause after worktree safety is proven.
     if (resume && !state.current) { state.paused = false; await persist(); }
-    const execHelp = await execute('codex', ['exec', '--help'], { purpose: 'codex' });
-    let resumeHelp = '';
-    try { resumeHelp = await execute('codex', ['exec', 'resume', '--help'], { purpose: 'codex' }); } catch { /* Fall back to same worktree. */ }
-    for (const flag of ['--json', '--output-schema']) if (!execHelp.includes(flag)) throw new Error('Codex CLI needs JSON and schema support for exec');
-    const canResumeSession = ['--json', '--output-schema'].every(flag => resumeHelp.includes(flag));
+    let canResumeSession;
     await execute('gh', ['auth', 'status'], { purpose: 'github' });
     await saveJson(join(config.stateDir, 'result.schema.json'), resultSchema);
     while (!signal?.aborted) {
@@ -144,6 +167,30 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
       const intervention = issue.state !== 'open' || labels(issue).some(n => ['codex:blocked', 'codex:failed', 'codex:needs-human'].includes(n));
       if (intervention && !resume) { state.paused = true; state.status = 'needs-human'; state.lastReason = 'needs_human'; await persist(); return state; }
       if (issue.state !== 'open' || labels(issue).includes('codex:blocked')) throw new Error('Current issue is closed or blocked');
+      const preflight = preflightReason(issue.body);
+      if (preflight) {
+        state.paused = true; state.status = 'needs-human'; state.lastReason = preflight;
+        const reported = current.preflight?.reason === preflight && current.preflight?.reported === true;
+        current.preflight = { category: 'manual_e2e', reason: preflight, reported };
+        await persist();
+        await github.mark(current.number, 'needs_human');
+        if (!reported) {
+          await github.gh(['issue', 'comment', String(current.number), '--repo', repo, '--body-file', '-'], {
+            input: 'Codex Worker preflight: manual_e2e_required. Issue completion explicitly requires E2E execution. Stopped before worktree preparation and Codex execution; E2E was not run. Human review is required.\n',
+          });
+          current.preflight.reported = true;
+          await persist();
+        }
+        report(`Issue #${current.number}: E2E execution is required; stopped before worktree/Codex preparation.`);
+        return state;
+      }
+      if (canResumeSession === undefined) {
+        const execHelp = await execute('codex', ['exec', '--help'], { purpose: 'codex' });
+        let resumeHelp = '';
+        try { resumeHelp = await execute('codex', ['exec', 'resume', '--help'], { purpose: 'codex' }); } catch { /* Initial runs may fall back to the same worktree. */ }
+        for (const flag of ['--json', '--output-schema']) if (!execHelp.includes(flag)) throw new Error('Codex CLI needs JSON and schema support for exec');
+        canResumeSession = ['--json', '--output-schema'].every(flag => resumeHelp.includes(flag));
+      }
       current.worktreeCheck = await ensureWorktree(current, root, execute);
       if (resumePending) { state.paused = false; current.failures = 0; resumePending = false; }
       await persist();
@@ -163,10 +210,15 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
         const runDir = join(config.stateDir, 'runs', `${current.number}-${now()}`);
         await mkdir(runDir, { recursive: true, mode: 0o700 });
         current.lastRun = runDir;
+        if (!canResumeSession && current.repair && current.session) throw new WorktreeSafetyError('repair_session_resume_unavailable');
         if (!canResumeSession) current.session = null;
         await persist();
         const outcome = await run({ current, issue, schemaPath: join(config.stateDir, 'result.schema.json'), tracePath: join(runDir, 'trace.jsonl'), stderrPath: join(runDir, 'stderr.log'), signal, maxRunMs: config.maxRunMs,
-          onSession: async session => { current.session = session; await persist(); } });
+          onSession: async session => {
+            if (current.repair && current.session && current.session !== session) throw new WorktreeSafetyError('repair_session_mismatch');
+            current.session = session; await persist();
+          } });
+        if (outcome.safetyReason === 'repair_session_mismatch') throw new WorktreeSafetyError(outcome.safetyReason);
         outcome.result = validateResult(outcome.result);
         if (outcome.result) {
           await saveJson(join(runDir, 'result.json'), outcome.result);
@@ -201,8 +253,33 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
         }
         await persist();
       }
+      let verified;
+      try { verified = await verify(current, execute); }
+      catch (error) {
+        if (signal?.aborted) throw error;
+        if (error instanceof VerificationFailure && error.retryable && current.failures < config.maxRetries) {
+          current.failures++;
+          current.repair = error.diagnostic;
+          current.stage = 'implement';
+          state.lastReason = 'parent_verification_retry';
+          await persist();
+          report(`Issue #${current.number}: ${error.diagnostic.check} failed; returning to Codex for repair ${current.failures}/${config.maxRetries}.`);
+          continue;
+        }
+        state.paused = true; state.status = 'needs-human';
+        state.lastReason = error instanceof WorktreeSafetyError || error instanceof PublicationSafetyError ? error.reason : error instanceof VerificationFailure
+          ? error.retryable ? 'verification_retry_exhausted' : 'unsafe_or_unavailable_verification' : 'parent_verification_safety_failed';
+        if (error instanceof VerificationFailure && error.retryable) current.repair = error.diagnostic;
+        if (error instanceof WorktreeSafetyError) current.worktreeCheck = error.check;
+        await persist(); await github.mark(current.number, 'needs_human');
+        report(`Issue #${current.number}: parent verification needs human review.`);
+        return state;
+      }
       try {
-        const verified = await verify(current, execute);
+        delete current.repair;
+        current.result.status = 'completed';
+        current.result.safe_to_open_pr = true;
+        current.result.reasons = [];
         current.result.tests = [...new Set([...current.result.tests, ...verified.map(name => `Parent verified: ${name}`)])];
         current.result.unrun_tests += `\nParent verification passed: ${verified.join(', ')}. Any earlier sandbox restriction for these commands is resolved.`;
         await execute('git', ['push', 'origin', `${current.branch}:${current.branch}`], { cwd: current.worktree, purpose: 'github' });
@@ -221,11 +298,11 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
         // Preserve publish stage for idempotent recovery, never rerun Codex blindly.
         state.paused = true;
         state.status = 'needs-human';
-        state.lastReason = error instanceof WorktreeSafetyError ? error.reason : 'parent_verification_or_publication_failed';
+        state.lastReason = error instanceof WorktreeSafetyError ? error.reason : 'publication_failed';
         if (error instanceof WorktreeSafetyError) { current.worktreeCheck = error.check; report(`Issue #${current.number}: ${error.message}`); }
         await persist();
         await github.mark(current.number, 'needs_human');
-        report(`Issue #${current.number}: verification or publication needs human review.`);
+        report(`Issue #${current.number}: publication needs human review.`);
         return state;
       }
       if (mode === 'once') return state;

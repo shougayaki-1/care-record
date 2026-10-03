@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile, rename, open, unlink, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
+import { repairDiagnostic, localChecks } from './failure.mjs';
 
 export const emptyState = () => ({ version: 1, repo: null, status: 'idle', current: null, lastReason: null, paused: false, quotaWaitStarted: null, nextRetryAt: null });
 
@@ -14,7 +15,10 @@ export async function loadState(directory) {
     || (state.current && (!Number.isSafeInteger(state.current.number) || state.current.number <= 0
       || !/^codex\/issue-\d+-[a-z0-9-]+$/.test(state.current.branch ?? '') || !state.current.branch.startsWith(`codex/issue-${state.current.number}-`)
       || typeof state.current.worktree !== 'string' || !Number.isInteger(state.current.failures) || state.current.failures < 0
-      || !Number.isInteger(state.current.quotaWaits) || state.current.quotaWaits < 0 || !['prepare', 'implement', 'publish'].includes(state.current.stage)))) {
+      || !Number.isInteger(state.current.quotaWaits) || state.current.quotaWaits < 0 || !['prepare', 'implement', 'publish'].includes(state.current.stage)
+      || (state.current.repair !== undefined && !repairDiagnostic(state.current.repair))
+      || (state.current.verificationChecks !== undefined && (!Array.isArray(state.current.verificationChecks)
+        || state.current.verificationChecks.some(name => !localChecks.includes(name))))))) {
     throw new Error('Invalid worker state; manual recovery required');
   }
   return state;
