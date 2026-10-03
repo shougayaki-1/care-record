@@ -5,13 +5,13 @@ import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import type { ButtonHTMLAttributes } from 'react';
 
 const mocks = vi.hoisted(() => ({
-  callback: null as ((event: AuthChangeEvent, session: Session | null) => Promise<void>) | null,
+  callback: null as ((event: AuthChangeEvent, session: Session | null) => void | Promise<void>) | null,
   name: '', inviteCode: null as string | null,
   preview: vi.fn(), replace: vi.fn(), push: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: mocks.replace, push: mocks.push }),
+  useRouter: () => router,
   useSearchParams: () => ({ get: () => mocks.inviteCode }),
 }));
 vi.mock('@/lib/supabase', () => ({ supabase: {
@@ -32,6 +32,8 @@ vi.mock('@/components/ui', () => ({
     <button onClick={onClick} disabled={disabled}>{children}</button>,
 }));
 
+const router = { replace: mocks.replace, push: mocks.push };
+
 import SetupPage from './page';
 
 beforeEach(() => {
@@ -44,7 +46,8 @@ afterEach(cleanup);
 async function loadUser(name = '') {
   mocks.name = name;
   await act(async () => {
-    await mocks.callback!('INITIAL_SESSION', { user: { id: 'user-without-membership' } } as Session);
+    mocks.callback!('INITIAL_SESSION', { user: { id: 'user-without-membership' } } as Session);
+    await new Promise(resolve => setTimeout(resolve, 0));
   });
 }
 
@@ -82,5 +85,21 @@ describe('setup recovery is always accessible', () => {
     await loadUser('利用者');
     expect(screen.getByText(/招待コードが無効または期限切れ/)).toBeTruthy();
     expectRecoveryForm();
+  });
+});
+
+
+describe('setup auth notifications preserve wizard progress', () => {
+  it.each(['SIGNED_IN', 'TOKEN_REFRESHED'] as const)('does not reset the create step on %s', async event => {
+    render(<SetupPage />);
+    await loadUser('利用者');
+    fireEvent.click(screen.getByText('新しい事業所を作成する'));
+    fireEvent.change(screen.getByLabelText('事業所名'), { target: { value: '入力中の事業所' } });
+    await act(async () => {
+      mocks.callback!(event, { user: { id: 'user-without-membership' } } as Session);
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(screen.getByRole('button', { name: '作成して開始' })).toBeTruthy();
+    expect((screen.getByLabelText('事業所名') as HTMLInputElement).value).toBe('入力中の事業所');
   });
 });

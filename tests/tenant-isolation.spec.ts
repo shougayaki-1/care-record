@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 import { clickMenu, generateUser, logout, registerClient, setupNewOrg } from './helpers';
 
 test('a different organization cannot read a client by its direct URL', async ({ page }) => {
+  // Two signups and organization setups run through the UI in one scenario.
+  test.slow();
   const firstOrgUser = generateUser();
   const privateClientName = `組織境界 ${generateUser().name}`;
   await setupNewOrg(page, firstOrgUser);
