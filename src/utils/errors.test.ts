@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { serializeError } from './log';
-import { getSafeExternalErrorDetails, logExternalError, sanitizeDbError, UserFacingError, withSafeError } from './errors';
+import { getSafeExternalErrorDetails, logExternalError, sanitizeDbError, UserFacingError, withSafeError, withActionResult } from './errors';
 
 vi.mock('./log', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./log')>();
@@ -11,7 +11,26 @@ vi.mock('./log', async (importOriginal) => {
 const GENERIC_MESSAGE = '処理に失敗しました。時間をおいて再度お試しください。';
 
 afterEach(() => {
+  vi.clearAllMocks();
   vi.restoreAllMocks();
+});
+
+describe('withActionResult', () => {
+  it('正常値と expected error をプレーンな結果として返す', async () => {
+    await expect(withActionResult('success', async () => [])).resolves.toEqual({ ok: true, data: [] });
+    const result = await withActionResult('expected', async () => {
+      throw new UserFacingError('アクセスできません', 'FORBIDDEN');
+    });
+    expect(JSON.parse(JSON.stringify(result))).toEqual({ ok: false, error: { code: 'FORBIDDEN', message: 'アクセスできません' } });
+  });
+
+  it.each([new Error('権限 denied: private_table'), { message: '内部情報' }, '秘密'])('安全そうな部分文字列や任意の throw 値も公開しない: %j', async error => {
+    const { logError } = await import('./log');
+    await expect(withActionResult('unexpected', async () => { throw error; })).resolves.toEqual({
+      ok: false, error: { code: 'UNEXPECTED_ERROR', message: GENERIC_MESSAGE },
+    });
+    expect(logError).toHaveBeenCalledWith('[action:unexpected]', { organizationId: undefined, error: serializeError(error) });
+  });
 });
 
 describe('sanitizeDbError', () => {

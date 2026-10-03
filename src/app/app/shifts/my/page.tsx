@@ -4,9 +4,9 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import {
   Box, Typography, CircularProgress, Stack, Chip, Paper,
-  IconButton, ToggleButton, ToggleButtonGroup, Tooltip
+  IconButton, ToggleButton, ToggleButtonGroup, Tooltip, Alert
 } from '@/components/ui/mui';
-import { CalendarPageSkeleton } from '@/components/ui';
+import { AppButton, CalendarPageSkeleton } from '@/components/ui';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ListIcon from '@mui/icons-material/List';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
@@ -21,6 +21,8 @@ import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
 import { buildRecordPath } from '@/utils/recordNavigation';
 import { convertToCalendarEvents } from '@/utils/shiftHelper';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
+import { GENERIC_ACTION_ERROR_MESSAGE, type ActionError } from '@/utils/actionResult';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 
 type ViewMode = 'list' | 'calendar';
 
@@ -110,10 +112,12 @@ export default function MyShiftsPage() {
   const { currentOrg, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const calendarRef = useRef<FullCalendar>(null);
+  const requestId = useRef(0);
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [shifts, setShifts] = useState<MyShiftItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<ActionError | null>(null);
 
   const [currentMonth, setCurrentMonth] = useState<string>(() => {
     const now = new Date();
@@ -122,25 +126,34 @@ export default function MyShiftsPage() {
 
   const fetchShifts = useCallback(async (month: string) => {
     if (!currentOrg) return;
+    const id = ++requestId.current;
     setLoading(true);
+    setLoadError(null);
+    setShifts([]);
     try {
       const [year, mon] = month.split('-').map(Number);
       const startDate = new Date(year, mon - 1, 1).toISOString();
       const endDate = new Date(year, mon, 1).toISOString();
-      const data = await getMyShiftsWithStatus(currentOrg.id, startDate, endDate);
-      setShifts(data);
+      const result = await getMyShiftsWithStatus(currentOrg.id, startDate, endDate);
+      if (id !== requestId.current) return;
+      if (result.ok) setShifts(result.data);
+      else setLoadError(result.error);
     } catch (e) {
       console.error(e);
-      showToast(e instanceof Error ? e.message : 'シフトの取得に失敗しました', 'error');
+      if (id === requestId.current) {
+        setLoadError({ code: 'UNEXPECTED_ERROR', message: GENERIC_ACTION_ERROR_MESSAGE });
+      }
     } finally {
-      setLoading(false);
+      if (id === requestId.current) setLoading(false);
     }
-  }, [currentOrg, showToast]);
+  }, [currentOrg]);
 
   useEffect(() => {
+    let active = true;
     if (!wsLoading && currentOrg) {
-      queueMicrotask(() => void fetchShifts(currentMonth));
+      queueMicrotask(() => { if (active) void fetchShifts(currentMonth); });
     }
+    return () => { active = false; requestId.current += 1; };
   }, [wsLoading, currentOrg, currentMonth, fetchShifts]);
 
   const handlePrevMonth = () => {
@@ -208,6 +221,14 @@ export default function MyShiftsPage() {
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
         {loading ? (
           <Box display="flex" justifyContent="center" pt={8}><CircularProgress /></Box>
+        ) : loadError ? (
+          <Stack spacing={2} maxWidth={600} mx="auto">
+            <Alert severity={loadError.code === 'STAFF_NOT_LINKED' ? 'warning' : 'error'}>
+              {loadError.message}
+            </Alert>
+            <AppButton intent="secondary" variant="outlined" onClick={() => void fetchShifts(currentMonth)}>再試行</AppButton>
+            {loadError.code === 'STAFF_NOT_LINKED' && <RecoveryLogoutButton />}
+          </Stack>
         ) : viewMode === 'list' ? (
           <Stack spacing={1.5} maxWidth={600} mx="auto">
             {shifts.length === 0 ? (

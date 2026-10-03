@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 import { 
     Box, Typography, Card, CardActionArea, Stack, Avatar,
-    Chip
+    Chip, Alert
 } from '@/components/ui/mui';
 import PersonIcon from '@mui/icons-material/Person';
 import EditNoteIcon from '@mui/icons-material/EditNote';
@@ -14,17 +14,18 @@ import TodayIcon from '@mui/icons-material/Today';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { InnerPageHeader, PageLayout, TablePageSkeleton } from '@/components/ui';
+import { AppButton, InnerPageHeader, PageLayout, TablePageSkeleton } from '@/components/ui';
 import { getMyShiftsWithStatus, type MyShiftItem } from '@/app/actions/shift';
 import { checkRecordPermission, checkShiftPermission } from '@/utils/permissions';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 import { useRecordQuery } from '@/hooks/useRecordQuery';
 import { buildRecordPath } from '@/utils/recordNavigation';
+import { GENERIC_ACTION_ERROR_MESSAGE, type ActionError } from '@/utils/actionResult';
 
 type Client = { id: string; name: string; };
 type DraftReport = { id: string; created_at: string; };
 
-const EMPTY_SELECTION: { clients: Client[]; clientDrafts: Record<string, DraftReport[]>; todayShifts: MyShiftItem[] } = { clients: [], clientDrafts: {}, todayShifts: [] };
+const EMPTY_SELECTION: { clients: Client[]; clientDrafts: Record<string, DraftReport[]>; todayShifts: MyShiftItem[]; shiftError: ActionError | null } = { clients: [], clientDrafts: {}, todayShifts: [], shiftError: null };
 const logSelectionError = (error: unknown) => console.error(error);
 
 export default function RecordSelectPage() {
@@ -59,18 +60,18 @@ export default function RecordSelectPage() {
             })();
 
             let todayShifts: MyShiftItem[] = [];
+            let shiftError: ActionError | null = null;
             const draftsMap: Record<string, DraftReport[]> = {};
 
-            // getMyShiftsWithStatus is a withSafeError Server Action that CAN throw
-            // (e.g. the acting user has no `staffs` row yet — a normal state for a
-            // fresh organization). Fetch it separately so that failure never
-            // discards the clients list above. Mirrors d7aff24 / ccd1837.
+            // A shift error must not discard the independent client list.
             if (canViewShifts) {
                 try {
                     const shiftsResult = await getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString());
-                    todayShifts = shiftsResult.filter(s => s.status !== 'cancelled');
+                    if (shiftsResult.ok) todayShifts = shiftsResult.data.filter(s => s.status !== 'cancelled');
+                    else shiftError = shiftsResult.error;
                 } catch (e) {
                     console.error('today shifts load failed:', e);
+                    shiftError = { code: 'UNEXPECTED_ERROR', message: GENERIC_ACTION_ERROR_MESSAGE };
                 }
             }
 
@@ -88,11 +89,11 @@ export default function RecordSelectPage() {
                     draftsMap[d.client_id].push({ id: d.id, created_at: d.created_at });
                 });
             }
-            return { clients: targetClients, todayShifts, clientDrafts: draftsMap };
+            return { clients: targetClients, todayShifts, clientDrafts: draftsMap, shiftError };
         } catch (e) { throw e; }
     }, [currentOrg, userId]);
 
-    const { data: { clients, clientDrafts, todayShifts }, loading } = useRecordQuery({ organizationId: wsLoading ? undefined : currentOrg?.id, queryKey: userId ?? '', load: fetchData, empty: EMPTY_SELECTION, onError: logSelectionError });
+    const { data: { clients, clientDrafts, todayShifts, shiftError }, loading } = useRecordQuery({ organizationId: wsLoading ? undefined : currentOrg?.id, queryKey: userId ?? '', load: fetchData, empty: EMPTY_SELECTION, onError: logSelectionError });
 
     const formatTime = (dateStr: string) => {
         if (!dateStr) return '';
@@ -116,6 +117,9 @@ export default function RecordSelectPage() {
             <InnerPageHeader icon={<EditNoteIcon />} title="記録を作成" />
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
+                {shiftError && <Alert severity="warning" sx={{ mb: 2 }} action={
+                    <AppButton size="small" variant="text" onClick={() => router.push('/app/shifts/my')}>自分のシフトで確認</AppButton>
+                }>{shiftError.message}</Alert>}
                 {todayShifts.length > 0 && (
                     <Box sx={{ mb: 3 }}>
                         <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>

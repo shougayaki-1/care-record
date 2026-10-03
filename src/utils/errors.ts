@@ -1,26 +1,29 @@
 import 'server-only';
 
 import { logError, serializeError } from '@/utils/log';
+import { GENERIC_ACTION_ERROR_MESSAGE, type ActionErrorCode, type ActionResult } from '@/utils/actionResult';
 
 // Server Action のエラー秘匿（3省2ガイドライン: 多層防御 / 情報露出の防止）。
-// 想定済みの利用者向けメッセージ（認可エラー等）はそのまま返してよいが、
+// 想定済みの利用者向けメッセージは withActionResult の戻り値で返す。
+// throw したメッセージは production の React/Next.js により秘匿されるため、
+// withSafeError の rethrow をクライアントへのメッセージ伝達には使わない。
 // 想定外の内部エラー（DBメッセージ・スタックなど）はクライアントへ反射させず、
 // サーバーログにのみ詳細を残し、利用者には汎用メッセージを返す。
 
 /**
- * 利用者に提示してよい想定済みエラー。これを throw したものは withSafeError でそのまま通す。
+ * サーバー内部で使う想定済みエラー。Server Action 境界では withActionResult で値に変換する。
  */
 export class UserFacingError extends Error {
-  constructor(message: string) {
+  constructor(message: string, public readonly code: Exclude<ActionErrorCode, 'UNEXPECTED_ERROR'> = 'VALIDATION_ERROR') {
     super(message);
     this.name = 'UserFacingError';
   }
 }
 
-const GENERIC_MESSAGE = '処理に失敗しました。時間をおいて再度お試しください。';
+const GENERIC_MESSAGE = GENERIC_ACTION_ERROR_MESSAGE;
 
 // 認可・入力検証として既存コードが throw している定型メッセージ。
-// これらは利用者向けに安全なので、移行期間中は素通しする。
+// 旧 API の互換性のためだけに残す。withActionResult ではこの部分一致判定を使わない。
 const SAFE_MESSAGE_PATTERNS = [
   '認証が必要です',
   '権限',
@@ -35,13 +38,6 @@ function isSafeMessage(message: string): boolean {
   return SAFE_MESSAGE_PATTERNS.some((p) => message.includes(p));
 }
 
-/**
- * Server Action 本体を包み、想定外エラーを汎用メッセージへ置き換える。
- * 詳細は console.error に残す（監査が必要な操作は呼び出し側で recordAuditEvent すること）。
- *
- * 使い方:
- *   export const doThing = (input) => withSafeError('doThing', async () => { ... });
- */
 /**
  * DB/外部APIのエラーをサニタイズして返す。生のエラー詳細はサーバーログにのみ残し、
  * 利用者には汎用メッセージを返す（DBスキーマやSQL断片の露出を防ぐ）。
@@ -89,6 +85,11 @@ export function sanitizeExternalError(error: unknown, context: string, opts: Log
   return new Error(GENERIC_MESSAGE);
 }
 
+/**
+ * 旧 API の例外サニタイズ。戻り値の互換性維持のために残すが、
+ * production で catch(e).message を UI 表示する契約ではない。
+ * 新規・移行済みのクライアント向け Action は withActionResult を使う。
+ */
 export async function withSafeError<T>(context: string, fn: () => Promise<T>, opts: LogOptions = {}): Promise<T> {
   try {
     return await fn();
@@ -100,5 +101,18 @@ export async function withSafeError<T>(context: string, fn: () => Promise<T>, op
     // 想定外: 内部詳細はサーバーログにのみ残し、利用者には汎用メッセージを返す。
     logError(`[action:${context}]`, { organizationId: opts.organizationId, error: serializeError(err) });
     throw new Error(GENERIC_MESSAGE);
+  }
+}
+
+/** 明示したドメインエラーだけを公開し、内部例外は詳細ログと汎用結果に分ける。 */
+export async function withActionResult<T>(context: string, fn: () => Promise<T>, opts: LogOptions = {}): Promise<ActionResult<T>> {
+  try {
+    return { ok: true, data: await fn() };
+  } catch (err) {
+    if (err instanceof UserFacingError) {
+      return { ok: false, error: { code: err.code, message: err.message } };
+    }
+    logError(`[action:${context}]`, { organizationId: opts.organizationId, error: serializeError(err) });
+    return { ok: false, error: { code: 'UNEXPECTED_ERROR', message: GENERIC_MESSAGE } };
   }
 }

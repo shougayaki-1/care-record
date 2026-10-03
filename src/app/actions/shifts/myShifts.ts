@@ -1,6 +1,7 @@
 'use server';
 
-import { UserFacingError, withSafeError } from '@/utils/errors';
+import { UserFacingError, withActionResult } from '@/utils/errors';
+import type { ActionResult } from '@/utils/actionResult';
 import { createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 
 import type { MyShiftItem } from './types';
@@ -9,19 +10,20 @@ export async function getMyShiftsWithStatus(
     organizationId: string,
     startDate: string,
     endDate: string
-): Promise<MyShiftItem[]> {
-  return withSafeError('getMyShiftsWithStatus', async () => {
+): Promise<ActionResult<MyShiftItem[]>> {
+  return withActionResult('getMyShiftsWithStatus', async () => {
       const user = await getAuthedUser();
       const supabase = await createSessionClient();
 
-      const { data: staffRow } = await supabase
+      const { data: staffRow, error: staffError } = await supabase
           .from('staffs')
           .select('id')
           .eq('organization_id', organizationId)
           .eq('user_id', user.id)
           .maybeSingle();
 
-      if (!staffRow) throw new UserFacingError('スタッフアカウントが紐付いていません。事業所設定を確認してください。');
+      if (staffError) throw staffError;
+      if (!staffRow) throw new UserFacingError('この事業所にスタッフとして紐付いていません。事業所の管理者に確認してください。', 'STAFF_NOT_LINKED');
 
       const { data: shifts, error } = await supabase
           .from('shifts')
@@ -48,11 +50,13 @@ export async function getMyShiftsWithStatus(
       if (!shifts || shifts.length === 0) return [];
 
       const shiftIds = shifts.map(s => s.id);
-      const { data: reports } = await supabase
+      const { data: reports, error: reportsError } = await supabase
           .from('reports')
           .select('id, shift_id, status')
           .in('shift_id', shiftIds)
           .is('deleted_at', null);
+
+      if (reportsError) throw reportsError;
 
       const reportByShiftId = new Map(
           (reports ?? []).map(r => [r.shift_id, { id: r.id, status: r.status ?? 'draft' }])
@@ -62,5 +66,5 @@ export async function getMyShiftsWithStatus(
           ...shift,
           report: reportByShiftId.get(shift.id) ?? null,
       }));
-  });
+  }, { organizationId });
 }
