@@ -87,7 +87,7 @@ subprocess の環境は用途別の allowlist で分離します。
 |---|---|---|
 | npm ci / typecheck / lint / test / local Git | 実行ごとに新しい mode 0700 の一時 HOME。npm user/global config、XDG config/cache/data、Git global config も空の専用パスへ向け、終了後に削除 | なし。CODEX_HOME、GH token/config、SSH_AUTH_SOCK、API key、NPM_TOKEN を渡さない |
 | Codex exec / resume / help | ChatGPT auth/session を発見する元の HOME / CODEX_HOME | Codex の HOME / CODEX_HOME のみ。GH token/config・SSH agent・API key は渡さない |
-| gh / git fetch / git push | 一時 HOME を使用し、gh の config と Git credential helper の global config を明示的に指定 | GH_CONFIG_DIR、GH_TOKEN / GITHUB_TOKEN、GH_HOST、SSH_AUTH_SOCK。CODEX_HOME は渡さない |
+| gh / git fetch / git push | OS keyring の探索用に元の HOME を使用。cache/tmp は専用一時領域、gh config と Git global config は明示指定 | GH_CONFIG_DIR、GH_TOKEN / GITHUB_TOKEN、GH_HOST、SSH_AUTH_SOCK。Linux Secret Service 用 DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR。CODEX_HOME は渡さない |
 
 `GH_CONFIG_DIR` が未指定なら、元の XDG_CONFIG_HOME または HOME から gh の config directory だけを解決します。GitHub 用の Git global config は `GIT_CONFIG_GLOBAL` または元の HOME の `.gitconfig` を使います。build の npm config/cache は毎回新しく作るため、以前の subprocess が書いた認証設定を再利用しません。repository の `.npmrc` に credential を置かないでください。この環境分離は同じ OS ユーザーのファイルアクセスまで隔離する sandbox ではありません。専用ユーザー・clone と Codex sandbox の運用前提は維持します。
 
@@ -186,3 +186,17 @@ worker の自動テストは CLI/GitHub を mock し、キュー、依存、quot
 2026-10-03 に Context7 `/openai/codex` と [公式の非対話実行](https://developers.openai.com/codex/noninteractive)、[configuration reference](https://developers.openai.com/codex/config-reference)、インストール済み `codex-cli 0.159.0-alpha.12.1` の help を確認しました。確認対象は JSONL / output schema / thread.started / exec resume / workspace-write / approval_policy / forced_login_method と quota error の resets_at 表記です。GitHub CLI は 2.96.0 の help を確認しています。CLI 更新後は exec/resume の help と worker tests を再確認してください。
 
 PR #65 の credential 境界修正では、2026-10-03 に Context7 `/openai/codex` の HOME/CODEX_HOME による認証・session 発見と、`/npm/cli` の userconfig/globalconfig/cache override を再確認しました。npm 11.6.2 の実 lifecycle script と build subprocess を使う自動テストで、認証 capability の除外・一時 HOME の削除を確認します。
+
+macOS の gh 2.96.0 は OS keyring の読み取りに `security` を使います。一時 HOME では keyring が見つからず、公開 repository の API が成功しても `gh auth status` と認証必須 `gh api user` は失敗しました。GitHub 操作だけログイン HOME を維持し、手動 token export／token のファイル化は不要です。Linux の Secret Service session capability も GitHub 操作だけに継承します。build と Codex の allowlist は変更しません。元の HOME を渡す GitHub 操作は信頼できる gh/git に限定してください。同一ユーザーでのファイルアクセス自体は sandbox 境界ではありません。確認: 2026-10-03、Context7 `/cli/cli` の keyring token 解決と gh 2.96.0 の公式実装。
+
+## 既存 worktree の検査と sandbox テストの委譲
+
+Codex 起動前と親の公開検証前に origin/main を fetch し、branch、HEAD、保存 base の祖先関係、origin/main、local commits、tracked/untracked changes を検査します。保存 base は remote の SHA だけでは更新しません。`prepare`、clean、session/progress/result/lastRun なし、local commits なし、HEAD が最新 main の祖先である場合だけ `merge --ff-only` で更新し、成功後に base を保存します。作業済みの stale worktree は `stale_existing_worktree`、保存 base が HEAD の祖先でない場合は `worktree_base_mismatch` として needs-human で停止します。state に SHA と dirty/local commit の診断情報を残し、reset/rebase/clean/stash は実行しません。resume でも session/base/failures は整合性検査が失敗した場合に保持します。
+
+Codex が sandbox の listen EPERM／browser launch restriction で実行できなかったチェックは、親が必ず再実行する場合だけ `unrun_tests` にコマンドと制約を記載して completed に委譲できます。対象は shared UI 変更の Storybook UI と、package.json/package-lock.json 変更で定義された標準 test の unit/UI です。typecheck/lint、任意の検査、assertion failure、DB/RLS/migration、production、認証要求、外部サービス、破壊的操作、security/retention 判断は委譲できません。sandbox bypass は禁止です。
+
+親は実際の scripts を読み、標準 `test` が `npm run test:unit && npm run test:ui`、leaf が `vitest run --project unit` / `vitest run --project storybook` で pre/post hook がないことを検査します。異なる定義は人へ戻し、E2E/DB/外部処理を起動しません。親のテストは credential-free HOME/cache と固定の test/loopback dummy Supabase 値で実行します。Chromium のインストール済み cache は明示的な PLAYWRIGHT_BROWSERS_PATH（未指定なら OS 標準 cache path）で探索し、ブラウザを自動インストールしません。不足時も公開せず人へ戻します。実サービスの認証値は渡しません。全チェック成功後だけ commit/push/Draft PR に進み、親が実行したコマンドを PR の検証記録に追加します。
+
+既存の作業済み stale worktree は人間が安全な4段階で復旧します。まず worker/子プロセス停止と branch/status/history を確認し、レビューした非機密ファイルだけ repo 外へバックアップします。次にそのファイルを明示指定したローカル checkpoint commit に保存します（push せず、E2E禁止時は `[skip ci]` を付ける）。最新 main を fetch し、reset/rebase ではなく通常の merge で取り込み、競合をレビューして解決します。最後に HEAD に最新 main が含まれることを merge-base で確認してから、排他停止中に保存 base をその main SHA と一致させます。session・stage・worktree は保持し、結果/差分の再レビュー後に once/resume します。状態更新は Git の実状態の確認後にのみ行い、単に base の値だけを書き換えないでください。
+
+確認: 2026-10-03、Context7 `/websites/git-scm_doc` の merge-base／fast-forward merge 仕様。実 Git 回帰テストと標準 npm test の実 subprocess で履歴・差分保全と親の成功/失敗の公開ゲートを検証します。

@@ -117,7 +117,9 @@ function mockExecute(items, calls) {
       if (args[0] === 'remote') return 'https://github.com/test/repo.git';
       if (args[0] === 'rev-parse') return args.includes('--git-common-dir') ? '/git-meta' : 'base-sha';
       if (args[0] === 'branch') { const n = options?.cwd?.match(/issue-(\d+)$/)?.[1] ?? '40'; return `codex/issue-${n}-task-${n}`; }
-      if (args[0] === 'rev-list') return '1';
+      if (args[0] === 'merge-base') return 'base-sha';
+      if (args[0] === 'worktree' && args[1] === 'add') await mkdir(args[4], { recursive: true });
+      if (args[0] === 'rev-list') return args.at(-1) === 'base-sha..HEAD' && args.includes('--count') ? '1' : '0';
       if (args[0] === 'diff') return 'A\tscripts/example.mjs';
       return '';
     }
@@ -179,7 +181,7 @@ test('quota wait survives restart and resumes same Issue before queue selection'
   assert.ok(calls.some(([binary, args]) => binary === 'git' && args[0] === 'push'));
   assert.ok(calls.some(([binary, args]) => binary === 'gh' && args[1] === 'create' && args.includes('--draft')));
   assert.ok(!calls.some(([, args]) => args.includes('merge')));
-  assert.ok(!calls.some(([binary, args]) => binary === 'git' && args[0] === 'fetch'));
+  assert.ok(calls.some(([binary, args, options]) => binary === 'git' && args[0] === 'fetch' && options.purpose === 'github'));
 });
 
 test('status is read-only and requires neither GitHub nor Codex', async t => {
@@ -404,7 +406,7 @@ test('environment policies separate build, Codex and GitHub credential capabilit
   const github = safeEnvironment(source, { purpose: 'github', home: '/github-private-home' });
   assertNoCredentials(github, ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR', 'GH_HOST', 'SSH_AUTH_SOCK']);
   for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR', 'GH_HOST', 'SSH_AUTH_SOCK']) assert.equal(github[name], source[name]);
-  assert.equal(github.HOME, '/github-private-home');
+  assert.equal(github.HOME, source.HOME);
   assert.equal(github.GIT_CONFIG_GLOBAL, source.GIT_CONFIG_GLOBAL);
   assert.equal(safeEnvironment({ HOME: '/owner-home', XDG_CONFIG_HOME: '/owner-config' }, { purpose: 'github', home: '/private-home' }).GH_CONFIG_DIR, '/owner-config/gh');
   assert.equal(safeEnvironment({ HOME: '/owner-home' }, { purpose: 'github', home: '/private-home' }).GH_CONFIG_DIR, '/owner-home/.config/gh');
@@ -454,7 +456,7 @@ test('real GitHub subprocess receives GH/SSH capabilities without Codex auth loc
   assertNoCredentials(env, ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR', 'GH_HOST', 'SSH_AUTH_SOCK']);
   assert.equal(env.GH_CONFIG_DIR, '/owner-gh');
   assert.equal(env.SSH_AUTH_SOCK, '/owner-agent');
-  assert.notEqual(env.HOME, '/owner-home');
+  assert.equal(env.HOME, '/owner-home');
 });
 
 test('worker routes authenticated fetch/push/gh and Codex separately from npm/local Git', async t => {
@@ -469,4 +471,26 @@ test('worker routes authenticated fetch/push/gh and Codex separately from npm/lo
   assert.ok(calls.some(([binary, args]) => binary === 'git' && args[0] === 'fetch'));
   assert.ok(calls.some(([binary, args]) => binary === 'git' && args[0] === 'push'));
   assert.ok(calls.some(([binary, args]) => binary === 'npm' && args[0] === 'ci'));
+});
+
+
+test('keyring-only GitHub auth retains login HOME/session without exporting tokens to other purposes', async t => {
+  const path = await directory(t);
+  const owner = join(path, 'owner'); await mkdir(owner);
+  const source = { PATH: process.env.PATH, HOME: owner, CODEX_HOME: join(owner, '.codex'),
+    DBUS_SESSION_BUS_ADDRESS: 'unix:path=/fake-session', XDG_RUNTIME_DIR: '/fake-runtime' };
+  const fakeGh = join(path, 'fake-gh.mjs');
+  await writeFile(fakeGh, '#!/usr/bin/env node\nif (process.env.HOME !== ' + JSON.stringify(owner) + ' || process.env.DBUS_SESSION_BUS_ADDRESS !== "unix:path=/fake-session" || process.env.XDG_RUNTIME_DIR !== "/fake-runtime" || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || process.env.CODEX_HOME) process.exit(1); console.log("keyring authenticated");\n', { mode: 0o700 });
+  for (const args of [['auth', 'status'], ['api', 'user'], ['api', 'repos/owner/repo']]) {
+    assert.equal(await command(fakeGh, args, { purpose: 'github', parentEnv: source }), 'keyring authenticated');
+  }
+  const build = safeEnvironment(source, { purpose: 'build', home: join(path, 'build') });
+  const codex = safeEnvironment(source, { purpose: 'codex' });
+  for (const env of [build, codex]) {
+    assert.equal(env.DBUS_SESSION_BUS_ADDRESS, undefined);
+    assert.equal(env.XDG_RUNTIME_DIR, undefined);
+    assert.equal(env.GH_CONFIG_DIR, undefined);
+  }
+  assert.notEqual(build.HOME, owner);
+  assert.equal(build.CODEX_HOME, undefined);
 });
