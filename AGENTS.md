@@ -45,6 +45,31 @@
 4. セキュリティ要件を緩和しない。CSP（`src/proxy.ts`）や security headers（`next.config.ts`）を緩める必要がある場合は、理由と影響を先に提示して承認を得る。
 5. MFA など意図的な未対応範囲を、明示指示なしに実装しない。
 
+## Branch / worktree rules
+
+- `main` は常に統合済みの正本として扱う。新しい Issue の実装は、作業開始時点の最新 `origin/main` を基点にする。
+- 作業開始前に必ず `git fetch origin` を行い、最新 `origin/main` の SHA と Git の実状態を確認する。AI は作業 branch を会話履歴から推測せず、チャット履歴、過去の worktree、以前の branch を暗黙の基点として使わない。
+- 原則 **1 Issue = 1 branch = 1 PR** とし、複数 Issue を1つの branch に混在させない。
+- branch 名は原則 `codex/issue-<issue番号>-<短い説明>` を使う（例: `codex/issue-34-record-feed`）。`ClaudeCode`、`AI-refactoring`、`worktree-agent3` のように Issue や目的を特定できない恒久的な branch 名を新規作成しない。
+- PR が merge 済みの branch を新しい Issue に再利用しない。closed / merged 済みの古い branch 上で追加実装を始めない。
+- branch が既に存在する場合も、現在の Issue に対応することを PR / commit history から確認してから利用する。
+- 並行作業が必要なら、Issue ごとに専用 worktree + 専用 branch を作成する。
+- 作業開始時に必ず以下を明示・確認する。Issue を伴わない repository maintenance は、その目的と Issue がないことを明記する。
+
+  ```text
+  issue: #XX
+  branch: codex/issue-XX-...
+  base: origin/main @ <SHA>
+  pr: #XX または not created
+  ```
+
+- PR merge 後の branch は、特別な理由がない限り削除する。
+- staging / release / deployment 用 branch を設ける場合は、用途を `AGENTS.md` または deployment documentation に明示し、通常の feature branch と区別する。既存 `staging` は現役の配備参照がないと確認できるまで削除しない。
+
+### Before finishing work
+
+作業終了時に `git status`、現在 branch 名、base に使った `origin/main` SHA、PR 番号、main へ merge 済みか、branch 削除可能かを確認し、最終報告に含める。
+
 ## DB、権限、データ保全
 
 - **RLS と permissions は同時管理する。** RLS policy を変えたら `src/utils/permissions.ts` の対応定義を、`permissions.ts` を変えたら RLS を必ず照合し、整合確認を変更報告へ記載する。UI の非表示だけを認可にしない。
