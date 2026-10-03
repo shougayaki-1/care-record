@@ -2,7 +2,7 @@ import { metadata } from './queue.mjs';
 
 export class GitHub {
   constructor(repo, execute) { this.repo = repo; this.execute = execute; }
-  async gh(args, options) { return this.execute('gh', args, { ...options, github: true }); }
+  async gh(args, options) { return this.execute('gh', args, { ...options, purpose: 'github' }); }
   async api(path) { return JSON.parse(await this.gh(['api', `repos/${this.repo}/${path}`])); }
   async issue(number) { return this.api(`issues/${number}`); }
   async snapshot() {

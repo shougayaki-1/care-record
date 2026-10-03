@@ -82,7 +82,9 @@ test('quota detection handles codes, variants and weekly limits', () => {
 test('credentials are redacted and not inherited by Codex', () => {
   assert.equal(redact('token=my-private-token sk-example123 ghp_example123', { MY_SECRET: 'my-private-token' }).includes('my-private-token'), false);
   assert.equal(redact('https://user:password@host/path'), 'https://[REDACTED]@host/path');
-  assert.deepEqual(safeEnvironment({ PATH: '/bin', OPENAI_API_KEY: 'secret', SUPABASE_SERVICE_ROLE_KEY: 'secret', GH_TOKEN: 'secret' }), { PATH: '/bin', GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' });
+  const env = safeEnvironment({ PATH: '/bin', OPENAI_API_KEY: 'secret', SUPABASE_SERVICE_ROLE_KEY: 'secret', GH_TOKEN: 'secret' }, { home: '/credential-free-home' });
+  for (const name of ['OPENAI_API_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'GH_TOKEN']) assert.equal(env[name], undefined);
+  assert.equal(env.HOME, '/credential-free-home');
   const args = codexArgs({ session: 'session-id' }, '/schema');
   assert.ok(args.includes('resume'));
   assert.ok(args.includes('forced_login_method="chatgpt"'));
@@ -110,7 +112,7 @@ test('atomic state persistence, restart restoration, corrupt state and exclusive
 
 function mockExecute(items, calls) {
   return async (binary, args, options) => {
-    calls.push([binary, args]);
+    calls.push([binary, args, options]);
     if (binary === 'git') {
       if (args[0] === 'remote') return 'https://github.com/test/repo.git';
       if (args[0] === 'rev-parse') return args.includes('--git-common-dir') ? '/git-meta' : 'base-sha';
@@ -368,4 +370,103 @@ test('protected files and RLS changes cannot be committed or published automatic
     assert.equal(state.status, 'needs-human');
     assert.ok(!calls.some(([binary, args]) => binary === 'git' && ['commit', 'push'].includes(args[0])));
   }
+});
+
+
+const credentialNames = ['CODEX_HOME', 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR', 'GH_HOST', 'SSH_AUTH_SOCK', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN', 'SUPABASE_SERVICE_ROLE_KEY', 'NPM_TOKEN'];
+const credentialEnvironment = () => ({
+  PATH: process.env.PATH, HOME: '/owner-home', CODEX_HOME: '/owner-codex',
+  XDG_CONFIG_HOME: '/owner-config', GH_CONFIG_DIR: '/owner-gh',
+  GH_TOKEN: 'dummy-gh-token', GITHUB_TOKEN: 'dummy-github-token', GH_HOST: 'github.com',
+  SSH_AUTH_SOCK: '/owner-agent', OPENAI_API_KEY: 'dummy-openai-key', CODEX_API_KEY: 'dummy-codex-key',
+  CODEX_ACCESS_TOKEN: 'dummy-codex-token', SUPABASE_SERVICE_ROLE_KEY: 'dummy-supabase-key',
+  NPM_TOKEN: 'dummy-npm-token', npm_config_userconfig: '/owner-npmrc', GIT_CONFIG_GLOBAL: '/owner-gitconfig',
+});
+
+function assertNoCredentials(env, allowed = []) {
+  for (const name of credentialNames) if (!allowed.includes(name)) assert.equal(env[name], undefined, name);
+}
+
+test('environment policies separate build, Codex and GitHub credential capabilities', () => {
+  const source = credentialEnvironment();
+  const build = safeEnvironment(source, { purpose: 'build', home: '/private-home' });
+  assertNoCredentials(build);
+  assert.equal(build.HOME, '/private-home');
+  assert.equal(build.XDG_CONFIG_HOME, '/private-home/config');
+  assert.equal(build.npm_config_userconfig, '/private-home/config/npmrc');
+  assert.equal(build.npm_config_globalconfig, '/private-home/config/global-npmrc');
+  assert.equal(build.GIT_CONFIG_GLOBAL, '/private-home/config/gitconfig');
+  const codex = safeEnvironment(source, { purpose: 'codex' });
+  assertNoCredentials(codex, ['CODEX_HOME']);
+  assert.equal(codex.HOME, source.HOME);
+  assert.equal(codex.CODEX_HOME, source.CODEX_HOME);
+  assert.equal(codex.XDG_CONFIG_HOME, undefined);
+  const github = safeEnvironment(source, { purpose: 'github', home: '/github-private-home' });
+  assertNoCredentials(github, ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR', 'GH_HOST', 'SSH_AUTH_SOCK']);
+  for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR', 'GH_HOST', 'SSH_AUTH_SOCK']) assert.equal(github[name], source[name]);
+  assert.equal(github.HOME, '/github-private-home');
+  assert.equal(github.GIT_CONFIG_GLOBAL, source.GIT_CONFIG_GLOBAL);
+  assert.equal(safeEnvironment({ HOME: '/owner-home', XDG_CONFIG_HOME: '/owner-config' }, { purpose: 'github', home: '/private-home' }).GH_CONFIG_DIR, '/owner-config/gh');
+  assert.equal(safeEnvironment({ HOME: '/owner-home' }, { purpose: 'github', home: '/private-home' }).GH_CONFIG_DIR, '/owner-home/.config/gh');
+  assert.throws(() => safeEnvironment(source), /separate absolute HOME/);
+  assert.throws(() => safeEnvironment(source, { home: source.HOME }), /separate absolute HOME/);
+  assert.throws(() => safeEnvironment(source, { purpose: 'untrusted' }), /Unknown subprocess purpose/);
+});
+
+test('real npm lifecycle, typecheck, lint and test subprocesses use fresh credential-free HOME/cache', async t => {
+  const path = await directory(t);
+  const packageData = { name: 'worker-env-fixture', version: '1.0.0', private: true, scripts: Object.fromEntries(['preinstall', 'typecheck', 'lint', 'test'].map(name => [name, 'node probe.mjs'])) };
+  await writeFile(join(path, 'package.json'), JSON.stringify(packageData));
+  await writeFile(join(path, 'package-lock.json'), JSON.stringify({ name: packageData.name, version: packageData.version, lockfileVersion: 3, requires: true, packages: { '': { name: packageData.name, version: packageData.version, hasInstallScript: true } } }));
+  await writeFile(join(path, 'probe.mjs'), "import { writeFileSync, statSync } from 'node:fs'; writeFileSync('environment.json', JSON.stringify({ env: process.env, mode: statSync(process.env.HOME).mode & 0o777 }));");
+  const homes = new Set();
+  for (const args of [['ci', '--offline', '--no-audit', '--no-fund'], ['run', 'typecheck'], ['run', 'lint'], ['run', 'test']]) {
+    await command('npm', args, { cwd: path, parentEnv: credentialEnvironment() });
+    const { env, mode } = JSON.parse(await readFile(join(path, 'environment.json'), 'utf8'));
+    assertNoCredentials(env);
+    assert.notEqual(env.HOME, '/owner-home');
+    assert.equal(mode, 0o700);
+    assert.equal(env.npm_config_cache, join(env.HOME, 'cache/npm'));
+    assert.equal(env.npm_config_userconfig, join(env.HOME, 'config/npmrc'));
+    assert.equal(env.npm_config_globalconfig, join(env.HOME, 'config/global-npmrc'));
+    assert.equal(env.GIT_CONFIG_GLOBAL, join(env.HOME, 'config/gitconfig'));
+    assert.equal(env.XDG_CONFIG_HOME, join(env.HOME, 'config'));
+    assert.ok(!homes.has(env.HOME)); homes.add(env.HOME);
+    await assert.rejects(realpath(env.HOME), { code: 'ENOENT' });
+  }
+});
+
+test('real Codex runner receives only Codex auth locations and no GitHub credentials', async t => {
+  const path = await directory(t);
+  const binary = join(path, 'fake-auth-codex.mjs');
+  await writeFile(binary, '#!/usr/bin/env node\nprocess.stdin.resume();\nconsole.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:JSON.stringify(' + JSON.stringify(result).replace('"Implemented"', 'JSON.stringify(process.env)') + ')}}));\n', { mode: 0o700 });
+  const outcome = await runCodex({ current: { number: 40, branch: 'codex/issue-40-task', worktree: path }, issue: issue(40), schemaPath: '/schema', tracePath: join(path, 'trace'), stderrPath: join(path, 'stderr'), binary, parentEnv: credentialEnvironment(), onSession: async () => {} });
+  assert.equal(outcome.code, 0);
+  const env = JSON.parse(outcome.result.summary);
+  assertNoCredentials(env, ['CODEX_HOME']);
+  assert.equal(env.HOME, '/owner-home');
+  assert.equal(env.CODEX_HOME, '/owner-codex');
+});
+
+test('real GitHub subprocess receives GH/SSH capabilities without Codex auth locations', async t => {
+  const path = await directory(t);
+  const env = JSON.parse(await command(process.execPath, ['-e', 'console.log(JSON.stringify(process.env))'], { cwd: path, purpose: 'github', parentEnv: credentialEnvironment() }));
+  assertNoCredentials(env, ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR', 'GH_HOST', 'SSH_AUTH_SOCK']);
+  assert.equal(env.GH_CONFIG_DIR, '/owner-gh');
+  assert.equal(env.SSH_AUTH_SOCK, '/owner-agent');
+  assert.notEqual(env.HOME, '/owner-home');
+});
+
+test('worker routes authenticated fetch/push/gh and Codex separately from npm/local Git', async t => {
+  const path = await directory(t);
+  const root = join(path, 'root'); await mkdir(root);
+  const calls = [];
+  await worker({ config: { ...config, stateDir: join(path, 'state') }, root, mode: 'once', execute: mockExecute([issue(40)], calls), report: () => {}, run: async () => ({ code: 0, result }) });
+  for (const [binary, args, options] of calls) {
+    const expected = binary === 'codex' ? 'codex' : binary === 'gh' || (binary === 'git' && ['fetch', 'push'].includes(args[0])) ? 'github' : 'build';
+    assert.equal(options?.purpose ?? 'build', expected, `${binary} ${args[0]}`);
+  }
+  assert.ok(calls.some(([binary, args]) => binary === 'git' && args[0] === 'fetch'));
+  assert.ok(calls.some(([binary, args]) => binary === 'git' && args[0] === 'push'));
+  assert.ok(calls.some(([binary, args]) => binary === 'npm' && args[0] === 'ci'));
 });

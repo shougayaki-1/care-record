@@ -19,7 +19,7 @@ cd care-record-worker
 npm ci
 ```
 
-Codex はブラウザから ChatGPT アカウントでログインします。API key login は使いません。Git の author と、`git push` が非対話で認証できることも確認してください。必要なら `gh auth setup-git` を実行します。Codex のユーザー設定には、リポジトリで必須の Context7 MCP を設定しておきます。認証・MCP 設定を repository や worker state にコピーしません。
+Codex はブラウザから ChatGPT アカウントでログインします。API key login は使いません。Git の author は専用 clone の local config（`git config --local user.name` / `user.email`）に設定し、`git push` が非対話で認証できることも確認してください。ローカル commit はユーザーの global Git config を継承しません。必要なら `gh auth setup-git` を実行します。Codex のユーザー設定には、リポジトリで必須の Context7 MCP を設定しておきます。認証・MCP 設定を repository や worker state にコピーしません。
 
 初回に次のラベルを GitHub の画面または `gh label create` で作ります。worker はラベルを自動作成しません。
 
@@ -80,6 +80,16 @@ reset / retry-after が得られればその時刻を優先し、未取得時だ
 ## 実行と安全な停止
 
 Issue ごとに `origin/main` を fetch し、専用 branch/worktree を作成して `npm ci` を行います。main や開発者の未コミット変更は実装用 worktree にコピーしません。Codex は `exec --json --output-schema`、`workspace-write`、`approval_policy=never`、ChatGPT 認証限定、sandbox の network access 無効で起動します。通常の shell に GitHub token、Supabase key、OpenAI API key 等を継承しません。Git metadata の読み取り専用保護を維持し、commit が sandbox で許可されない場合は検証後に親 worker が commit します。GitHub 操作と npm dependency 準備も親 worker が行います。
+
+subprocess の環境は用途別の allowlist で分離します。
+
+| 用途 | HOME / config / cache | 継承する認証 capability |
+|---|---|---|
+| npm ci / typecheck / lint / test / local Git | 実行ごとに新しい mode 0700 の一時 HOME。npm user/global config、XDG config/cache/data、Git global config も空の専用パスへ向け、終了後に削除 | なし。CODEX_HOME、GH token/config、SSH_AUTH_SOCK、API key、NPM_TOKEN を渡さない |
+| Codex exec / resume / help | ChatGPT auth/session を発見する元の HOME / CODEX_HOME | Codex の HOME / CODEX_HOME のみ。GH token/config・SSH agent・API key は渡さない |
+| gh / git fetch / git push | 一時 HOME を使用し、gh の config と Git credential helper の global config を明示的に指定 | GH_CONFIG_DIR、GH_TOKEN / GITHUB_TOKEN、GH_HOST、SSH_AUTH_SOCK。CODEX_HOME は渡さない |
+
+`GH_CONFIG_DIR` が未指定なら、元の XDG_CONFIG_HOME または HOME から gh の config directory だけを解決します。GitHub 用の Git global config は `GIT_CONFIG_GLOBAL` または元の HOME の `.gitconfig` を使います。build の npm config/cache は毎回新しく作るため、以前の subprocess が書いた認証設定を再利用しません。repository の `.npmrc` に credential を置かないでください。この環境分離は同じ OS ユーザーのファイルアクセスまで隔離する sandbox ではありません。専用ユーザー・clone と Codex sandbox の運用前提は維持します。
 
 ユーザー設定の MCP は利用できますが、外部認証・ネットワーク承認・専用試験環境が不足する Issue は `needs-human` に戻します。安全制約を緩めて続行しません。本番 migration、deploy、E2E は実装プロンプトで禁止しています。DB/RLS 変更は公開前検証でも人の確認を求めます。
 
@@ -174,3 +184,5 @@ npm run lint -- --max-warnings=0
 worker の自動テストは CLI/GitHub を mock し、キュー、依存、quota reset/backoff、再起動復元、同一 Issue の再開、dry-run/status の read-only、ログの秘匿、Draft PR を検証します。CI の lint-security job に組み込んでいます。実運用の ChatGPT 消費、push、PR 作成、daemon 登録はこのテストでは行いません。
 
 2026-10-03 に Context7 `/openai/codex` と [公式の非対話実行](https://developers.openai.com/codex/noninteractive)、[configuration reference](https://developers.openai.com/codex/config-reference)、インストール済み `codex-cli 0.159.0-alpha.12.1` の help を確認しました。確認対象は JSONL / output schema / thread.started / exec resume / workspace-write / approval_policy / forced_login_method と quota error の resets_at 表記です。GitHub CLI は 2.96.0 の help を確認しています。CLI 更新後は exec/resume の help と worker tests を再確認してください。
+
+PR #65 の credential 境界修正では、2026-10-03 に Context7 `/openai/codex` の HOME/CODEX_HOME による認証・session 発見と、`/npm/cli` の userconfig/globalconfig/cache override を再確認しました。npm 11.6.2 の実 lifecycle script と build subprocess を使う自動テストで、認証 capability の除外・一時 HOME の削除を確認します。

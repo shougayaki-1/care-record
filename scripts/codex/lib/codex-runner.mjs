@@ -121,9 +121,9 @@ export function implementationPrompt(issue, current) {
     + `Canonical Issue URL: ${issue.html_url ?? issue.url}\nTitle: ${issue.title}\nBody:\n${issue.body ?? ''}\n`;
 }
 
-export async function runCodex({ current, issue, schemaPath, tracePath, stderrPath, signal, maxRunMs, onSession, binary = 'codex', now = Date.now }) {
+export async function runCodex({ current, issue, schemaPath, tracePath, stderrPath, signal, maxRunMs, onSession, binary = 'codex', now = Date.now, parentEnv = process.env }) {
   const child = spawn(binary, codexArgs(current, schemaPath), {
-    cwd: current.worktree, env: safeEnvironment(), detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: current.worktree, env: safeEnvironment(parentEnv, { purpose: 'codex' }), detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
   });
   let interrupted = false;
   let quota = null;

@@ -106,12 +106,12 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
     state.repo = repo;
     if (state.paused && !resume) { report('Worker paused. Review state and use --resume.'); return state; }
     if (resume) { state.paused = false; if (state.current) state.current.failures = 0; await persist(); }
-    const execHelp = await execute('codex', ['exec', '--help']);
+    const execHelp = await execute('codex', ['exec', '--help'], { purpose: 'codex' });
     let resumeHelp = '';
-    try { resumeHelp = await execute('codex', ['exec', 'resume', '--help']); } catch { /* Fall back to same worktree. */ }
+    try { resumeHelp = await execute('codex', ['exec', 'resume', '--help'], { purpose: 'codex' }); } catch { /* Fall back to same worktree. */ }
     for (const flag of ['--json', '--output-schema']) if (!execHelp.includes(flag)) throw new Error('Codex CLI needs JSON and schema support for exec');
     const canResumeSession = ['--json', '--output-schema'].every(flag => resumeHelp.includes(flag));
-    await execute('gh', ['auth', 'status'], { github: true });
+    await execute('gh', ['auth', 'status'], { purpose: 'github' });
     await saveJson(join(config.stateDir, 'result.schema.json'), resultSchema);
     while (!signal?.aborted) {
       if (state.nextRetryAt !== null && now() < state.nextRetryAt) {
@@ -139,7 +139,7 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
       }
       await github.mark(current.number, 'running');
       if (current.stage === 'prepare') {
-        await execute('git', ['fetch', 'origin', 'main'], { cwd: root });
+        await execute('git', ['fetch', 'origin', 'main'], { cwd: root, purpose: 'github' });
         current.base ??= await execute('git', ['rev-parse', 'origin/main'], { cwd: root });
         await persist();
         await mkdir(join(config.stateDir, 'worktrees'), { recursive: true, mode: 0o700 });
@@ -200,7 +200,7 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
       }
       try {
         await verify(current, execute);
-        await execute('git', ['push', 'origin', `${current.branch}:${current.branch}`], { cwd: current.worktree, github: true });
+        await execute('git', ['push', 'origin', `${current.branch}:${current.branch}`], { cwd: current.worktree, purpose: 'github' });
         current.pr = await github.draft(current, current.result);
         await persist();
         await github.mark(current.number, 'completed');
