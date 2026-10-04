@@ -26,7 +26,8 @@
       "codex/issue-51-dx-npm-run-test": false,
       "codex/issue-50-a11y-input": false,
       "codex/issue-70-worker-self-repair": false,
-      "codex/enable-worker-status": false
+      "codex/enable-worker-status": false,
+      "codex/controller-idle-heartbeat": false
     }
   }
 }
