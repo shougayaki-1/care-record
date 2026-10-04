@@ -201,8 +201,12 @@ export default function ShiftManagePage() {
     const handleDeleteShift = async (shiftId: string) => {
         setSyncProgress({ total: 1, current: 0, currentName: 'Googleカレンダーから予定を削除中...' });
         try {
-            await deleteShiftCompletely(shiftId);
-            showToast('シフトを完全に削除しました');
+            const result = await deleteShiftCompletely(shiftId);
+            if (result.googleSync === 'pending') {
+                showToast('シフトは削除しました。Googleカレンダーに予定が残っている可能性があります。管理者が確認し、残っている予定を削除してください。', 'warning');
+            } else {
+                showToast('シフトを完全に削除しました');
+            }
             fetchData(true);
         } catch (error) {
             console.error(error);

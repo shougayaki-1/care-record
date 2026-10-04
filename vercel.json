@@ -25,7 +25,8 @@
       "codex/worker-worktree-verification": false,
       "codex/issue-51-dx-npm-run-test": false,
       "codex/issue-50-a11y-input": false,
-      "codex/issue-70-worker-self-repair": false
+      "codex/issue-70-worker-self-repair": false,
+      "codex/issue-55-bug-db-0": false
     }
   }
 }

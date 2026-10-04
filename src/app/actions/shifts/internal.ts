@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { sanitizeDbError, UserFacingError } from '@/utils/errors';
 import { logError, serializeError } from '@/utils/log';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
@@ -30,7 +31,7 @@ export async function assertShiftsAccessible(shiftIds: string[]): Promise<void> 
     .from('shifts')
     .select('id, organization_id')
     .in('id', shiftIds);
-  if (error) throw error;
+  if (error) throw sanitizeDbError(error, 'assertShiftsAccessible');
   if ((data?.length || 0) !== shiftIds.length) throw new Error('対象シフトが見つかりません');
 
   const orgIds = Array.from(new Set((data || []).map((shift) => shift.organization_id)));
@@ -51,11 +52,12 @@ export async function softDeleteShiftIds(
   const actor = await assertShiftPermission(organizationId, 'delete', { shiftIds });
   const policy = await getRetentionPolicy(organizationId, 'shift');
   const supabase = await createSessionClient();
-  const { error } = await supabase.rpc('soft_delete_shifts_atomic', {
+  const { data, error } = await supabase.rpc('soft_delete_shifts_atomic', {
     p_org_id: organizationId, p_shift_ids: shiftIds, p_reason: reason,
     p_retention_until: retentionDeadline(policy.years), p_sync_status: 'synced',
   });
-  if (error) throw error;
+  if (error) throw sanitizeDbError(error, 'softDeleteShiftIds');
+  if (data !== shiftIds.length) throw new UserFacingError('対象シフトを削除できませんでした。再読み込みしてお試しください。');
   await recordAuditEvent({
     organizationId,
     actorId: actor.userId,
@@ -119,18 +121,20 @@ export async function updateShiftInternal(
     if (payload.cancelReason !== undefined) updateData.cancel_reason = payload.cancelReason;
     updateData.is_modified = payload.isModified ?? true;
 
+    let targetOrgId: string | undefined;
     if (Object.keys(updateData).length > 0) {
       updateData.updated_at = new Date().toISOString();
       updateData.google_sync_status = 'pending_upsert';
       updateData.google_sync_error = null;
       updateData.google_synced_at = null;
-      const { error } = await supabase.from('shifts').update(updateData).eq('id', shiftId);
-      if (error) throw error;
+      let query = supabase.from('shifts').update(updateData).eq('id', shiftId).is('deleted_at', null);
+      if (payload.organizationId) query = query.eq('organization_id', payload.organizationId);
+      const { data, error } = await query.select('id, organization_id').maybeSingle();
+      if (error) throw sanitizeDbError(error, 'updateShiftInternal');
+      if (!data) throw new UserFacingError('シフトを更新できませんでした。再読み込みしてお試しください。');
+      targetOrgId = data.organization_id;
     }
 
-    const targetOrgId = payload.organizationId
-      || (await supabase.from('shifts').select('organization_id').eq('id', shiftId).single())
-        .data?.organization_id;
     if (targetOrgId) {
       if (awaitSync === 'skip') {
         // Intentionally skip calendar sync for bulk generation.
