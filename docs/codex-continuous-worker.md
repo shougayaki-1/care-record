@@ -37,6 +37,8 @@ open かつ `codex:ready` の Issue を選びます。blocked / running / failed
 <!-- codex-queue
 priority: p1
 depends_on: [39]
+model: gpt-6.1-sol
+effort: high
 -->
 ```
 
@@ -67,6 +69,8 @@ once は1 Issue を処理します。同じ Issue 内の有限 retry は行い�
 |---|---|---|
 | `CODEX_WORKER_STATE_DIR` | `~/.local/state/care-record-codex-worker` | repository 外の state/worktree/log 保存先 |
 | `CODEX_WORKER_REPO` | origin から取得 | 指定時は origin と一致する `owner/repo` |
+| `CODEX_WORKER_MODEL` | `gpt-6.1-sol` | Issue が model を省略した場合のモデル |
+| `CODEX_WORKER_REASONING_EFFORT` | `medium` | Issue が effort を省略した場合の reasoning effort |
 | `CODEX_WORKER_POLL_SECONDS` | 60 | キュー空・実装 retry の待ち時間 |
 | `CODEX_WORKER_MAX_RETRIES` | 1 | 初回失敗後の自動 retry 回数 |
 | `CODEX_WORKER_QUOTA_BACKOFF_MINUTES` | 15 | reset 不明時の初期待機 |
@@ -78,6 +82,18 @@ once は1 Issue を処理します。同じ Issue 内の有限 retry は行い�
 reset / retry-after が得られればその時刻を優先し、未取得時だけ指数 backoff を使います。CLI の error event、stderr、構造化結果 `quota_wait` を判断に使います。reset 時刻は epoch seconds/milliseconds、ISO、Retry-After seconds/HTTP date、CLI のローカル時刻表記を扱います。quota は実装失敗の retry count に加算しません。週次上限でも長い backoff で同じ Issue の再利用を待ち、API 課金へ切り替えません。
 
 ## 実行と安全な停止
+
+### Issue ごとのモデル・reasoning effort
+
+metadata の `model` / `effort` は省略可能で、それぞれ独立に Issue → worker 環境変数 →組み込み値の順で解決します。組み込み値は `gpt-6.1-sol` / `medium` です。ユーザーの `~/.codex/config.toml` は変更しません。
+
+worker の管理する allowlist はモデル `gpt-6.1-sol`、`gpt-6-luna`、`gpt-6-astra`、effort `low`、`medium`、`high`、`xhigh`、`max` です。モデルの利用可能性は ChatGPT アカウントと CLI に依存し、利用できなくても別モデル・API 課金へ切り替えません。新しい識別子や effort の追加は公式 CLI 仕様を確認したコード変更で行います。
+
+metadata は単一の `codex-queue` block 内の `priority`、`depends_on`、`model`、`effort` を扱います。空値、重複、未知の model/effort、任意 CLI option、構文不正は拒否します。説明用の `codex-queue-example` block は対象外です。環境変数の値にも同じ validator を適用します。不正な実行設定は worktree 作成・Codex help/exec より前に `codex:needs-human` へ戻し、`invalid_model`、`invalid_reasoning_effort`、`invalid_queue_metadata` などの固定 reason だけを保存します。本文や不正値を診断へ複製しません。
+
+処理開始前に current state の `resolvedModel` / `resolvedEffort` と `modelSource` / `effortSource`（`issue`、`worker-config`、`built-in`）を固定し、新規 exec / exec resume の双方へ `-c model="..."` / `-c model_reasoning_effort="..."` を渡します。retry、quota、再起動、親検証の self-repair、publish 再開でも保存値を使用し、途中の Issue metadata・環境変数変更では更新しません。実行済みの旧 state に設定情報がない場合は `saved_model_settings_required` で停止します。部分的・不正な保存設定も停止します。人が元のモデルと effort を確認して state の4項目を復旧する必要があり、`--resume` だけでは推測・変更しません。既存 session を別モデルへ切り替える自動操作はありません。
+
+dry-run は解決済み4項目と不正設定の preflight reason を JSON に表示し、保存済み current があればその値を優先します。status は同じ4項目をローカル state から表示し、旧 state の未保存値は `null` とします。status は環境変数のモデル設定を検証せず、GitHub API / Codex CLI も呼びません。将来の遠隔 status は公開可能なこれらの値だけを参照でき、session ID・CLI 全引数・ローカルパスの公開は必要ありません。
 
 Issue ごとに `origin/main` を fetch し、専用 branch/worktree を作成して `npm ci` を行います。main や開発者の未コミット変更は実装用 worktree にコピーしません。Codex は `exec --json --output-schema`、`workspace-write`、`approval_policy=never`、ChatGPT 認証限定、sandbox の network access 無効で起動します。通常の shell に GitHub token、Supabase key、OpenAI API key 等を継承しません。Git metadata の読み取り専用保護を維持し、commit が sandbox で許可されない場合は検証後に親 worker が commit します。GitHub 操作と npm dependency 準備も親 worker が行います。
 
@@ -174,6 +190,8 @@ macOS は `~/Library/LaunchAgents/local.care-record.codex-worker.plist` に次�
 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.care-record.codex-worker.plist` で登録し、停止は `launchctl bootout gui/$(id -u)/local.care-record.codex-worker` です。LaunchAgent はユーザーのログイン後に動きます。ログイン前の無人起動を必要とする場合は、専用 Linux ホストの user service 等を使います。needs-human の解決後は foreground の `--resume` で確認し、再度 service を起動してください。
 
 ## 検証とドキュメント確認
+
+Issue #74: 2026-10-04 に Context7 `/openai/codex` の global `-c` override と `model_reasoning_effort`、[公式モデル識別子](https://learn.chatgpt.com/docs/models)、[設定仕様](https://learn.chatgpt.com/docs/config-file/config-reference)、インストール済み `codex-cli 0.160.0` の exec/resume help を確認しました。allowlist は確認済み識別子と effort の保守的な部分集合であり、アカウントごとの利用可能性確認や実モデル呼び出しは行いません。
 
 ```sh
 npm run test:codex-worker

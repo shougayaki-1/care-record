@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, rename, open, unlink, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { repairDiagnostic, localChecks } from './failure.mjs';
+import { hasModelSettings, savedModelSettings } from './model-settings.mjs';
 
 export const emptyState = () => ({ version: 1, repo: null, status: 'idle', current: null, lastReason: null, paused: false, quotaWaitStarted: null, nextRetryAt: null });
 
@@ -20,6 +21,10 @@ export async function loadState(directory) {
       || (state.current.verificationChecks !== undefined && (!Array.isArray(state.current.verificationChecks)
         || state.current.verificationChecks.some(name => !localChecks.includes(name))))))) {
     throw new Error('Invalid worker state; manual recovery required');
+  }
+  if (state.current && hasModelSettings(state.current)) {
+    try { savedModelSettings(state.current); }
+    catch { throw new Error('Invalid saved model settings; manual recovery required'); }
   }
   return state;
 }

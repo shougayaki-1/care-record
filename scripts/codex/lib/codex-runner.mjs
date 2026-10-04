@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline';
 import { appendFile } from 'node:fs/promises';
 import { safeEnvironment } from './process.mjs';
 import { localChecks, reasonCategories, repairDiagnostic } from './failure.mjs';
+import { savedModelSettings } from './model-settings.mjs';
 
 export const resultSchema = {
   type: 'object', additionalProperties: false,
@@ -107,7 +108,9 @@ export function validateResult(value) {
 }
 
 export function codexArgs(current, schemaPath) {
+  const settings = savedModelSettings(current);
   const args = ['exec', '--json', '--output-schema', schemaPath,
+    '-c', `model="${settings.resolvedModel}"`, '-c', `model_reasoning_effort="${settings.resolvedEffort}"`,
     '-c', 'sandbox_mode="workspace-write"', '-c', 'approval_policy="never"',
     '-c', 'forced_login_method="chatgpt"', '-c', 'model_provider="openai"',
     '-c', 'sandbox_workspace_write.network_access=false',

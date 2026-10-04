@@ -9,6 +9,7 @@ import { codexArgs, redact, quotaKind, quotaResetAt, nextQuotaRetry, runCodex, v
 import { command, safeEnvironment } from './lib/process.mjs';
 import { configuration, worker } from './continuous-worker.mjs';
 import { GitHub } from './lib/github.mjs';
+import { builtInSettings, resolveModelSettings } from './lib/model-settings.mjs';
 
 const issue = (number, names = ['codex:ready'], body = '') => ({ number, title: `Task ${number}`, state: 'open', labels: names.map(name => ({ name })), body, html_url: `https://github.com/test/repo/issues/${number}` });
 const result = { status: 'completed', summary: 'Implemented', tests: ['typecheck', 'lint'], unrun_tests: 'E2E: human confirmation required', security_impact: 'None', remaining_work: 'None', safe_to_open_pr: true };
@@ -86,7 +87,7 @@ test('credentials are redacted and not inherited by Codex', () => {
   const env = safeEnvironment({ PATH: '/bin', OPENAI_API_KEY: 'secret', SUPABASE_SERVICE_ROLE_KEY: 'secret', GH_TOKEN: 'secret' }, { home: '/credential-free-home' });
   for (const name of ['OPENAI_API_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'GH_TOKEN']) assert.equal(env[name], undefined);
   assert.equal(env.HOME, '/credential-free-home');
-  const args = codexArgs({ session: 'session-id' }, '/schema');
+  const args = codexArgs({ ...builtInSettings, session: 'session-id' }, '/schema');
   assert.ok(args.includes('resume'));
   assert.ok(args.includes('forced_login_method="chatgpt"'));
   assert.ok(!args.includes('--dangerously-bypass-approvals-and-sandbox'));
@@ -204,7 +205,7 @@ test('JSONL runner persists session and safe projection while extracting structu
   const binary = join(path, 'fake-codex.mjs');
   await writeFile(binary, `#!/usr/bin/env node\nprocess.stdin.resume();\nconsole.log(JSON.stringify({type:'thread.started',thread_id:'session-123'}));\nconsole.log(JSON.stringify({type:'item.completed',item:{type:'command_execution',command:'cat .env',aggregated_output:'PHI secret ghp_secret'}}));\nconsole.log(JSON.stringify({type:'turn.failed',error:{code:'usage_limit_reached',reset_at:1800000060,message:'private patient'}}));\nconsole.error('secret=value');\n`, { mode: 0o700 });
   let session;
-  const outcome = await runCodex({ current: { number: 40, branch: 'codex/issue-40-task', worktree: path }, issue: issue(40), schemaPath: '/schema', tracePath: join(path, 'trace'), stderrPath: join(path, 'stderr'), now: () => 1_800_000_000_000, binary, onSession: async id => { session = id; } });
+  const outcome = await runCodex({ current: { ...builtInSettings, number: 40, branch: 'codex/issue-40-task', worktree: path }, issue: issue(40), schemaPath: '/schema', tracePath: join(path, 'trace'), stderrPath: join(path, 'stderr'), now: () => 1_800_000_000_000, binary, onSession: async id => { session = id; } });
   assert.equal(session, 'session-123');
   assert.equal(outcome.quota, 'window');
   assert.equal(outcome.resetAt, 1_800_000_060_000);
@@ -320,7 +321,7 @@ test('Codex interruption preserves resumable state and captures no raw stderr', 
   const path = await directory(t);
   const binary = join(path, 'fake-interrupt.mjs');
   await writeFile(binary, `#!/usr/bin/env node\nprocess.stdin.resume();\nconsole.log(JSON.stringify({type:'thread.started',thread_id:'interrupted-session'}));\nsetInterval(()=>{},1000);\n`, { mode: 0o700 });
-  const outcome = await runCodex({ current: { number: 40, branch: 'codex/issue-40-task', worktree: path }, issue: issue(40), schemaPath: '/schema', tracePath: join(path, 'trace'), stderrPath: join(path, 'stderr'), binary, maxRunMs: 200, onSession: async () => {} });
+  const outcome = await runCodex({ current: { ...builtInSettings, number: 40, branch: 'codex/issue-40-task', worktree: path }, issue: issue(40), schemaPath: '/schema', tracePath: join(path, 'trace'), stderrPath: join(path, 'stderr'), binary, maxRunMs: 200, onSession: async () => {} });
   assert.equal(outcome.interrupted, true);
   assert.equal(disposition(outcome, 0, config), 'paused');
 });
@@ -449,7 +450,7 @@ test('real Codex runner receives only Codex auth locations and no GitHub credent
   const path = await directory(t);
   const binary = join(path, 'fake-auth-codex.mjs');
   await writeFile(binary, '#!/usr/bin/env node\nprocess.stdin.resume();\nconsole.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:JSON.stringify(' + JSON.stringify(result).replace('"Implemented"', 'JSON.stringify(process.env)') + ')}}));\n', { mode: 0o700 });
-  const outcome = await runCodex({ current: { number: 40, branch: 'codex/issue-40-task', worktree: path }, issue: issue(40), schemaPath: '/schema', tracePath: join(path, 'trace'), stderrPath: join(path, 'stderr'), binary, parentEnv: credentialEnvironment(), onSession: async () => {} });
+  const outcome = await runCodex({ current: { ...builtInSettings, number: 40, branch: 'codex/issue-40-task', worktree: path }, issue: issue(40), schemaPath: '/schema', tracePath: join(path, 'trace'), stderrPath: join(path, 'stderr'), binary, parentEnv: credentialEnvironment(), onSession: async () => {} });
   assert.equal(outcome.code, 0);
   const env = JSON.parse(outcome.result.summary);
   assertNoCredentials(env, ['CODEX_HOME']);
@@ -504,6 +505,167 @@ test('keyring-only GitHub auth retains login HOME/session without exporting toke
 
 // All worker regression cases use a fresh temporary state and mocked publication.
 // No existing worker state, worktree or session is discovered or accessed.
+const queueBody = fields => `<!-- codex-queue\npriority: p1\ndepends_on: []\n${fields}\n-->`;
+
+test('model/effort defaults and independent metadata overrides use reviewed identifiers', () => {
+  assert.deepEqual(resolveModelSettings(metadata(''), configuration({})), builtInSettings);
+  const configured = configuration({ CODEX_WORKER_MODEL: 'gpt-6-luna', CODEX_WORKER_REASONING_EFFORT: 'high' });
+  const defaults = resolveModelSettings(metadata(''), configured);
+  assert.deepEqual(defaults, { resolvedModel: 'gpt-6-luna', resolvedEffort: 'high', modelSource: 'worker-config', effortSource: 'worker-config' });
+  for (const [fields, model, effort, modelSource, effortSource] of [
+    ['model: gpt-6.1-sol', 'gpt-6.1-sol', 'high', 'issue', 'worker-config'],
+    ['effort: medium', 'gpt-6-luna', 'medium', 'worker-config', 'issue'],
+    ['model: gpt-6-astra\neffort: max', 'gpt-6-astra', 'max', 'issue', 'issue'],
+  ]) assert.deepEqual(resolveModelSettings(metadata(queueBody(fields)), configured), { resolvedModel: model, resolvedEffort: effort, modelSource, effortSource });
+  assert.deepEqual(metadata('<!-- codex-queue-example\nmodel: unknown\n-->'), { dependencies: [], priority: undefined });
+  for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) assert.equal(resolveModelSettings({ effort }, {}).resolvedEffort, effort);
+});
+
+for (const fields of [
+  'model: unknown-model', 'effort: unknown-effort', 'model:', 'effort:',
+  'model: gpt-6.1-sol -c approval_policy="always"', 'effort: high"\n-c sandbox_mode="danger-full-access"',
+  'model: gpt-6.1-sol\nmodel: gpt-6-luna', 'effort: medium\neffort: high',
+  'model = gpt-6.1-sol', 'effort: [medium, high]', 'model: "gpt-6.1-sol"',
+]) test(`invalid model metadata stops before worktree/CLI and stores only a fixed reason: ${fields}`, async t => {
+  const f = await repairFixture(t, { body: queueBody(fields) });
+  const state = await worker({ ...f.options, execute: f.execute, run: () => assert.fail('Codex ran') });
+  assert.equal(state.status, 'needs-human'); assert.equal(state.current.stage, 'prepare');
+  assert.ok(['invalid_model', 'invalid_reasoning_effort', 'invalid_queue_metadata'].includes(state.lastReason));
+  assert.ok(f.calls.some(([b, a]) => b === 'gh' && a.includes('codex:needs-human')));
+  assert.ok(!f.calls.some(([b, a]) => b === 'codex' || b === 'npm' || (b === 'git' && ['fetch', 'worktree', 'push'].includes(a[0]))));
+  const saved = await readFile(join(f.stateDir, 'state.json'), 'utf8');
+  assert.ok(!saved.includes(fields));
+});
+
+for (const body of ['<!-- codex-queue model: gpt-6.1-sol -->', '<!-- codex-queue\nmodel: gpt-6.1-sol', `${queueBody('')}\n${queueBody('')}`]) {
+  test('malformed or multiple real queue blocks fail closed', async t => {
+    const f = await repairFixture(t, { body });
+    const state = await worker({ ...f.options, execute: f.execute, run: () => assert.fail('Codex ran') });
+    assert.equal(state.lastReason, 'invalid_queue_metadata');
+    assert.ok(!f.calls.some(([b]) => b === 'codex' || b === 'npm'));
+  });
+}
+
+for (const env of [{ CODEX_WORKER_MODEL: '' }, { CODEX_WORKER_MODEL: 'unknown' }, { CODEX_WORKER_REASONING_EFFORT: 'ultra' }, { CODEX_WORKER_REASONING_EFFORT: 'high -c x=y' }]) {
+  test('invalid worker configuration is validated before execution even with issue override', async t => {
+    const f = await repairFixture(t, { body: queueBody('model: gpt-6.1-sol\neffort: medium') });
+    const state = await worker({ ...f.options, config: { ...configuration(env), stateDir: f.stateDir }, execute: f.execute, run: () => assert.fail('Codex ran') });
+    assert.equal(state.status, 'needs-human');
+    assert.ok(!f.calls.some(([b]) => b === 'codex' || b === 'npm'));
+  });
+}
+
+test('new exec and resume use identical explicit model settings and preserve safety overrides', () => {
+  const settings = resolveModelSettings({ model: 'gpt-6-luna', effort: 'high' }, {});
+  const initial = codexArgs(settings, '/schema');
+  const resumed = codexArgs({ ...settings, session: 'saved-thread' }, '/schema');
+  assert.deepEqual(resumed.filter(arg => !['resume', 'saved-thread'].includes(arg)), initial);
+  for (const value of ['model="gpt-6-luna"', 'model_reasoning_effort="high"', 'sandbox_mode="workspace-write"', 'approval_policy="never"',
+    'forced_login_method="chatgpt"', 'model_provider="openai"', 'sandbox_workspace_write.network_access=false', 'shell_environment_policy.inherit="none"']) assert.ok(initial.includes(value));
+  assert.throws(() => codexArgs({ ...settings, resolvedModel: '-c arbitrary' }, '/schema'), /invalid_model/);
+  assert.throws(() => codexArgs({}, '/schema'), /invalid_model/);
+});
+
+test('real subprocess receives frozen model/effort for exec and resume without starting a model', async t => {
+  const path = await directory(t);
+  const binary = join(path, 'args-probe.mjs');
+  await writeFile(binary, '#!/usr/bin/env node\nprocess.stdin.resume();\nconst result=' + JSON.stringify(result)
+    + ';result.summary=JSON.stringify(process.argv.slice(2));console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:JSON.stringify(result)}}));\n', { mode: 0o700 });
+  const settings = resolveModelSettings({ model: 'gpt-6-luna', effort: 'xhigh' }, {});
+  for (const session of [null, 'saved-session']) {
+    const current = { ...settings, number: 40, worktree: path, session };
+    const outcome = await runCodex({ current, issue: issue(40), schemaPath: '/schema', tracePath: join(path, 'trace'), stderrPath: join(path, 'stderr'), binary, onSession: () => assert.fail('Unexpected session') });
+    assert.equal(outcome.code, 0);
+    assert.deepEqual(JSON.parse(outcome.result.summary), codexArgs(current, '/schema'));
+  }
+});
+
+test('quota/restart/retry/self-repair retain frozen settings despite metadata and worker config edits', async t => {
+  const f = await repairFixture(t, { body: queueBody('model: gpt-6-luna\neffort: high'), maxRetries: 2 });
+  const expected = { resolvedModel: 'gpt-6-luna', resolvedEffort: 'high', modelSource: 'issue', effortSource: 'issue' };
+  let time = 0;
+  const first = await worker({ ...f.options, now: () => time, execute: f.execute, run: async ({ current, onSession }) => {
+    for (const key of Object.keys(expected)) assert.equal(current[key], expected[key]);
+    const saved = await loadState(f.stateDir);
+    for (const key of Object.keys(expected)) assert.equal(saved.current[key], expected[key]);
+    await onSession('frozen-session');
+    return { code: 1, quota: 'window', resetAt: 1000 };
+  } });
+  assert.equal(first.lastReason, 'quota_wait');
+  time = 1000;
+  let turns = 0; let checks = 0;
+  const { CommandFailure } = await import('./lib/failure.mjs');
+  const state = await worker({ ...f.options, now: () => time,
+    config: { ...f.options.config, workerModel: 'INVALID-EDITED-CONFIG', workerEffort: 'INVALID-EDITED-CONFIG' },
+    execute: async (b, a, o) => {
+      if (b === 'gh' && a[0] === 'api' && /issues\/40$/.test(a.at(-1))) return JSON.stringify(issue(40, ['codex:ready'], queueBody('model: INVALID-EDITED-METADATA\neffort: invalid')));
+      if (b === 'npm' && a[1] === 'typecheck' && checks++ === 0) throw new CommandFailure({ assertion: true });
+      return f.execute(b, a, o);
+    }, run: async ({ current }) => {
+      turns++;
+      for (const key of Object.keys(expected)) assert.equal(current[key], expected[key]);
+      assert.equal(current.session, 'frozen-session');
+      if (turns === 1) return { code: 1 };
+      if (turns === 3) assert.equal(current.repair.check, 'typecheck');
+      return { code: 0, result };
+    } });
+  assert.equal(turns, 3); assert.equal(state.lastReason, 'completed');
+  const archive = JSON.parse(await readFile(join(f.stateDir, 'issue-40.json'), 'utf8'));
+  for (const key of Object.keys(expected)) assert.equal(archive[key], expected[key]);
+});
+
+test('dry-run displays resolved settings/sources read-only, including saved overrides and invalid input', async t => {
+  for (const fields of ['', 'model: gpt-6-luna\neffort: high', 'model: unknown']) {
+    const f = await repairFixture(t, { body: queueBody(fields) });
+    let output;
+    await worker({ ...f.options, mode: 'dry-run', execute: f.execute, report: text => { output = JSON.parse(text); } });
+    if (fields === 'model: unknown') { assert.equal(output.preflight, 'invalid_model'); assert.deepEqual(output.commands, []); }
+    else {
+      assert.equal(output.resolvedModel, fields ? 'gpt-6-luna' : 'gpt-6.1-sol');
+      assert.equal(output.resolvedEffort, fields ? 'high' : 'medium');
+      assert.equal(output.modelSource, fields ? 'issue' : 'built-in'); assert.equal(output.effortSource, output.modelSource);
+    }
+    await assert.rejects(readFile(join(f.stateDir, 'state.json')), { code: 'ENOENT' });
+    assert.ok(f.calls.every(([b, a]) => b === 'git' ? a[0] === 'remote' : b === 'gh' && a[0] === 'api'));
+  }
+  const f = await repairFixture(t, { body: queueBody('model: unknown') });
+  await worker({ ...f.options, execute: f.execute, run: async () => assert.fail('Codex ran') });
+  const state = await loadState(f.stateDir);
+  Object.assign(state.current, builtInSettings, { resolvedEffort: 'high', effortSource: 'issue', stage: 'implement', session: 'saved-session' });
+  await saveJson(join(f.stateDir, 'state.json'), state);
+  let output;
+  await worker({ ...f.options, mode: 'dry-run', execute: f.execute, report: text => { output = JSON.parse(text); } });
+  assert.equal(output.resolvedEffort, 'high'); assert.equal(output.effortSource, 'issue'); assert.equal(output.preflight, null);
+});
+
+test('local status uses saved model/effort without configuration validation or external commands', async t => {
+  const f = await repairFixture(t);
+  await worker({ ...f.options, execute: f.execute, run: async () => ({ code: 1, quota: 'window', resetAt: 1000 }), now: () => 0 });
+  let output;
+  await worker({ ...f.options, mode: 'status', config: { ...f.options.config, workerModel: 'invalid' }, execute: () => assert.fail('External command ran'), report: text => { output = JSON.parse(text); } });
+  assert.equal(output.resolvedModel, 'gpt-6.1-sol'); assert.equal(output.resolvedEffort, 'medium');
+});
+
+test('legacy started state requires human recovery instead of inferring another model for its session', async t => {
+  const f = await repairFixture(t);
+  await mkdir(f.stateDir);
+  const current = { number: 40, branch: 'codex/issue-40-task-40', worktree: join(f.stateDir, 'worktrees/issue-40'), failures: 1, quotaWaits: 0, stage: 'implement', session: 'legacy-session', base: 'saved-base' };
+  await saveJson(join(f.stateDir, 'state.json'), { ...emptyState(), current });
+  const state = await worker({ ...f.options, execute: f.execute, resume: true, run: () => assert.fail('Codex ran') });
+  assert.equal(state.lastReason, 'saved_model_settings_required');
+  assert.equal(state.current.session, current.session); assert.equal(state.current.base, current.base); assert.equal(state.current.failures, 1);
+  assert.ok(!f.calls.some(([b, a]) => b === 'codex' || b === 'npm' || (b === 'git' && a[0] === 'fetch')));
+});
+
+test('partial/invalid persisted model settings fail closed with sanitized recovery errors', async t => {
+  const path = await directory(t);
+  const current = { ...builtInSettings, number: 40, branch: 'codex/issue-40-task', worktree: '/worktree', failures: 0, quotaWaits: 0, stage: 'implement', session: 'abc' };
+  for (const corrupt of [{ resolvedModel: 'PRIVATE-RAW-INVALID' }, { resolvedEffort: '-c x=y' }, { modelSource: 'arbitrary' }, { resolvedEffort: undefined }]) {
+    await saveJson(join(path, 'state.json'), { ...emptyState(), current: { ...current, ...corrupt } });
+    await assert.rejects(loadState(path), error => error.message === 'Invalid saved model settings; manual recovery required');
+  }
+});
+
 async function repairFixture(t, { body = '', maxRetries = 1 } = {}) {
   const path = await directory(t);
   const root = join(path, 'root'); await mkdir(root);
@@ -731,7 +893,7 @@ test('real JSONL resume refuses a replacement thread during self-repair', async 
   const path = await directory(t);
   const binary = join(path, 'session-mismatch.mjs');
   await writeFile(binary, `#!/usr/bin/env node\nprocess.stdin.resume();\nconsole.log(JSON.stringify({type:'thread.started',thread_id:'different-thread'}));\n`, { mode: 0o700 });
-  const outcome = await runCodex({ current: { worktree: path, session: 'saved-thread', repair: { category: 'local_verification', check: 'typecheck', diagnostic: 'type_error' } },
+  const outcome = await runCodex({ current: { ...builtInSettings, worktree: path, session: 'saved-thread', repair: { category: 'local_verification', check: 'typecheck', diagnostic: 'type_error' } },
     issue: issue(40), schemaPath: '/schema', tracePath: join(path, 'trace'), stderrPath: join(path, 'stderr'), binary, onSession: () => assert.fail('Session was replaced') });
   assert.equal(outcome.safetyReason, 'repair_session_mismatch');
 });

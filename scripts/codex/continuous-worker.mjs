@@ -12,6 +12,7 @@ import { GitHub } from './lib/github.mjs';
 import { branchName, disposition, labels, metadata, selectIssue } from './lib/queue.mjs';
 import { loadState, lockState, saveJson } from './lib/state.mjs';
 import { codexArgs, nextQuotaRetry, resultSchema, runCodex, validateResult } from './lib/codex-runner.mjs';
+import { ModelSettingsError, executionStarted, hasModelSettings, resolveModelSettings, savedModelSettings } from './lib/model-settings.mjs';
 
 export function configuration(env = process.env) {
   const number = (key, fallback, minimum = 1) => {
@@ -22,6 +23,8 @@ export function configuration(env = process.env) {
   return {
     stateDir: resolve(env.CODEX_WORKER_STATE_DIR ?? join(homedir(), '.local/state/care-record-codex-worker')),
     repo: env.CODEX_WORKER_REPO,
+    workerModel: env.CODEX_WORKER_MODEL,
+    workerEffort: env.CODEX_WORKER_REASONING_EFFORT,
     maxRunMs: number('CODEX_WORKER_MAX_RUN_MINUTES', 0, 0) * 60_000,
     maxRetries: number('CODEX_WORKER_MAX_RETRIES', 1, 0),
     quotaBackoffMs: number('CODEX_WORKER_QUOTA_BACKOFF_MINUTES', 15) * 60_000,
@@ -110,7 +113,9 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
     const state = await loadState(config.stateDir);
     report(JSON.stringify({ status: state.status, paused: state.paused, issue: state.current?.number ?? null, branch: state.current?.branch ?? null,
       worktree: state.current?.worktree ?? null, lastReason: state.lastReason, quotaWaitStarted: state.quotaWaitStarted,
-      nextRetryAt: state.nextRetryAt, failures: state.current?.failures ?? 0, remainingWork: state.current?.progress ?? state.current?.result?.remaining_work ?? null }, null, 2));
+      nextRetryAt: state.nextRetryAt, failures: state.current?.failures ?? 0, remainingWork: state.current?.progress ?? state.current?.result?.remaining_work ?? null,
+      resolvedModel: state.current?.resolvedModel ?? null, resolvedEffort: state.current?.resolvedEffort ?? null,
+      modelSource: state.current?.modelSource ?? null, effortSource: state.current?.effortSource ?? null }, null, 2));
     return state;
   }
   root = await realpath(root);
@@ -127,9 +132,16 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
     const snapshot = await github.snapshot();
     const issue = state.current ? await github.issue(state.current.number) : selectIssue(snapshot.issues, snapshot.dependencies, snapshot.linked);
     const current = state.current ?? (issue ? { number: issue.number, branch: branchName(issue), worktree: join(config.stateDir, 'worktrees', `issue-${issue.number}`) } : null);
-    const preflight = issue ? preflightReason(issue.body) : null;
+    let settings = null;
+    let preflight = issue ? preflightReason(issue.body) : null;
+    if (current) {
+      try { settings = settingsForIssue(current, issue, config); }
+      catch (error) { if (!(error instanceof ModelSettingsError)) throw error; preflight = error.reason; }
+    }
     report(JSON.stringify({ mode, issue: issue?.number ?? null, dependencies: issue ? metadataForReport(issue) : [], branch: current?.branch ?? null, status: state.status, nextRetryAt: state.nextRetryAt, paused: state.paused, preflight,
-      commands: current && !preflight ? [['git', 'fetch', 'origin', 'main'], ['git', 'worktree', 'add', '-b', current.branch, current.worktree, 'origin/main'], ['npm', 'ci'], ['codex', ...codexArgs(current, join(config.stateDir, 'result.schema.json'))], ['git', 'push', 'origin', current.branch], ['gh', 'pr', 'create', '--draft']] : [] }, null, 2));
+      resolvedModel: settings?.resolvedModel ?? null, resolvedEffort: settings?.resolvedEffort ?? null,
+      modelSource: settings?.modelSource ?? null, effortSource: settings?.effortSource ?? null,
+      commands: current && !preflight ? [['git', 'fetch', 'origin', 'main'], ['git', 'worktree', 'add', '-b', current.branch, current.worktree, 'origin/main'], ['npm', 'ci'], ['codex', ...codexArgs({ ...current, ...settings }, join(config.stateDir, 'result.schema.json'))], ['git', 'push', 'origin', current.branch], ['gh', 'pr', 'create', '--draft']] : [] }, null, 2));
     return state;
   }
   let resumePending = resume;
@@ -167,6 +179,18 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
       const intervention = issue.state !== 'open' || labels(issue).some(n => ['codex:blocked', 'codex:failed', 'codex:needs-human'].includes(n));
       if (intervention && !resume) { state.paused = true; state.status = 'needs-human'; state.lastReason = 'needs_human'; await persist(); return state; }
       if (issue.state !== 'open' || labels(issue).includes('codex:blocked')) throw new Error('Current issue is closed or blocked');
+      try {
+        Object.assign(current, settingsForIssue(current, issue, config));
+        await persist();
+      } catch (error) {
+        if (!(error instanceof ModelSettingsError)) throw error;
+        state.paused = true; state.status = 'needs-human'; state.lastReason = error.reason;
+        current.preflight = { category: 'specification', reason: error.reason };
+        await persist();
+        await github.mark(current.number, 'needs_human');
+        report(`Issue #${current.number}: ${error.reason}; stopped before worktree/Codex preparation.`);
+        return state;
+      }
       const preflight = preflightReason(issue.body);
       if (preflight) {
         state.paused = true; state.status = 'needs-human'; state.lastReason = preflight;
@@ -328,6 +352,15 @@ export async function worker({ config, mode = 'normal', resume = false, root = p
 
 function metadataForReport(issue) {
   try { return metadata(issue.body).dependencies; } catch { return 'invalid metadata'; }
+}
+
+function settingsForIssue(current, issue, config) {
+  if (hasModelSettings(current)) return savedModelSettings(current);
+  if (executionStarted(current)) throw new ModelSettingsError('saved_model_settings_required');
+  let info;
+  try { info = metadata(issue.body); }
+  catch (error) { throw error instanceof ModelSettingsError ? error : new ModelSettingsError('invalid_queue_metadata'); }
+  return resolveModelSettings(info, config);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
