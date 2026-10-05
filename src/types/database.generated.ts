@@ -661,6 +661,48 @@ export type Database = {
           },
         ]
       }
+      internal_work_mutation_keys: {
+        Row: {
+          actor_id: string
+          created_at: string
+          idempotency_key: string
+          organization_id: string
+          record_id: string
+          request_hash: string
+        }
+        Insert: {
+          actor_id: string
+          created_at?: string
+          idempotency_key: string
+          organization_id: string
+          record_id: string
+          request_hash: string
+        }
+        Update: {
+          actor_id?: string
+          created_at?: string
+          idempotency_key?: string
+          organization_id?: string
+          record_id?: string
+          request_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "internal_work_mutation_keys_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "internal_work_mutation_keys_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "internal_work_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       internal_work_records: {
         Row: {
           created_at: string
@@ -3015,6 +3057,20 @@ export type Database = {
       save_generated_shift_atomic: {
         Args: { p_org_id: string; p_payload: Json; p_shift_id: string }
         Returns: string
+      }
+      save_internal_work_idempotent: {
+        Args: {
+          p_end_at: string
+          p_idempotency_key: string
+          p_note: string
+          p_organization_id: string
+          p_staff_id: string
+          p_start_at: string
+          p_title: string
+          p_work_hours: number
+          p_work_type: string
+        }
+        Returns: Json
       }
       save_report_atomic: {
         Args: {
