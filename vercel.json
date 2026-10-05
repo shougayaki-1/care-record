@@ -28,7 +28,8 @@
       "codex/issue-70-worker-self-repair": false,
       "codex/enable-worker-status": false,
       "codex/controller-idle-heartbeat": false,
-      "codex/status-fixed-script-download": false
+      "codex/status-fixed-script-download": false,
+      "codex/issue-57-account-email-review": false
     }
   }
 }
