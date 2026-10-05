@@ -56,7 +56,7 @@ runnerはspecパスのみ受け付けるため、checkout外の一時`npx` wrapp
 
 Supabase CLIは2.108.0を使用。Mac上でEdge RuntimeがBus errorで起動しなかったため、checkout外の一時CLI wrapperで `supabase start --exclude edge-runtime` のみ指定した。対象テストはEdge Functionsを使用しない。Auth・DB等は起動し、専用DBへの既存migrationのresetもrunnerに従って行う。本番環境、実データ、共有DBへのmigration、deployは使用しない。
 
-修正前の最初の全spec実行は7件成功・1件失敗だった。対象2シナリオは両projectで成功したが、別の古いキャッシュ復旧ケースで開発サーバーが `/api/auth/recover` に `Unexpected end of JSON input` を返した。全specの安定性は確認済みとしない。対象だけに絞った次の実行はMobile Chromeのfixtureで失敗し、上記タイマーの修正に至った。
+修正前の最初の全spec実行は7件成功・1件失敗だった。対象2シナリオは両projectで成功したが、別の古いキャッシュ復旧ケースで開発サーバーが `/api/auth/recover` に `Unexpected end of JSON input` を返した。この初回失敗の原因は確定していない。対象だけに絞った次の実行はMobile Chromeのfixtureで失敗し、上記タイマーの修正に至った。
 
 タイマー修正後、2026-10-06に次の5回を実行した。全回でPC 2件・mobile 2件が成功し、retryは0。合計PC 10件・mobile 10件、20件成功。
 
@@ -68,7 +68,14 @@ Supabase CLIは2.108.0を使用。Mac上でEdge RuntimeがBus errorで起動し�
 | 4 | 2 / 2 | 2 / 2 | 成功 | 43.9秒 |
 | 5 | 2 / 2 | 2 / 2 | 成功 | 41.0秒 |
 
-この5回の後に見出し階層を修正した。最終版の候補SHAと追加の対象E2E結果は、検証完了後に追記する。
+この5回の後に見出し階層を修正した。コミット済みの最終候補 [`e529283`](https://github.com/shougayaki-1/care-record/commit/e529283bd55786fa19950b46de8fc14014f65867) を固定し、追加で次の検証を実行した。実行前後でHEADと作業treeが変わっていないことも確認した。
+
+| 追加検証 | Chromium | Mobile Chrome | retry | 結果 | テスト時間 |
+| --- | --- | --- | --- | --- | --- |
+| 対象2シナリオ | 2 / 2 | 2 / 2 | 0 | 成功 | 40.9秒 |
+| 認証復旧・workspace routingの2spec全体 | 4 / 4 | 4 / 4 | 0 | 成功 | 40.8秒 |
+
+対象2シナリオは各projectで7回ずつ、PC 14件・mobile 14件、計28件成功した。対象外の独立復旧2ケースも最終候補で各project 1回成功した。初回の開発サーバーJSON parse errorは再現しなかったが、この1回から原因を断定しない。リポジトリの全E2E suiteは実行していない。
 
 ## ローカル検査結果
 
@@ -84,7 +91,7 @@ Supabase CLIは2.108.0を使用。Mac上でEdge RuntimeがBus errorで起動し�
 | `npm run test:ci-scope` | 17件成功 |
 | `npm run security:service-role` | 直接importの制限とledgerの10用途一致 |
 
-`npm run build-storybook` も成功。最終版の追加E2Eは進行中。
+`npm run build-storybook` と `git diff --check` も成功。レビュー用branchに保存し、PR作成時に自動実行される全E2E suiteの許可を待つ。IssueのClose、merge、本番DBへの適用、deployはまだ行っていない。
 
 ## 外部ドキュメント確認
 
