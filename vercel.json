@@ -28,7 +28,9 @@
       "codex/issue-70-worker-self-repair": false,
       "codex/enable-worker-status": false,
       "codex/controller-idle-heartbeat": false,
-      "codex/status-fixed-script-download": false
+      "codex/status-fixed-script-download": false,
+      "codex/issue-39-bug-server-action-react-441": false,
+      "codex/issue-39-expected-errors-review": false
     }
   }
 }
