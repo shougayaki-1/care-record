@@ -56,6 +56,12 @@ Supabase Auth（パスワード + Google OAuth）。`src/proxy.ts`（Next.js 16 
 - 削除承認ワークフロー（申請→owner承認→論理削除）は `src/app/actions/deletionRequests.ts`。
   現状バックエンドのみで、UIはreport限定（要確認: 全面配線の要否）。
 
+## 通知基盤
+
+- イベント・固定本文・3分類は `src/lib/notifications/`、backend helper は `src/utils/supabase/notifications.ts`。
+- 通常業務は認可済みの原子的 RPC から private helper を呼び、受信者限定 RLS で閲覧・既読化する。
+- 業務イベントへの接続は後続 Issue。契約・PHI 制限・重複防止・互換性は [notifications.md](notifications.md) を参照。
+
 ## 監査・コンプライアンス基盤
 
 - `audit_events` は追記専用。認証イベント（`auth.login` / `auth.logout`）、
