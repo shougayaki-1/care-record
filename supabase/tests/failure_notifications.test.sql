@@ -117,5 +117,15 @@ SELECT throws_ok($$ SELECT public.mark_google_calendar_sync_result('62000000-000
 RESET ROLE;
 SELECT is((SELECT count(*) FROM public.notifications WHERE event_type='google_calendar.sync_failed'),9::bigint,'recovered calendar listing can notify again');
 
+-- Reproduce the hosted profiles shape in this disposable test transaction.
+-- Rollback below restores the column and all fixtures for the next test file.
+DROP POLICY "Manage own profile" ON public.profiles;
+ALTER TABLE public.profiles DROP COLUMN role;
+SELECT is((SELECT count(*) FROM private.failure_notification_recipients('62000000-0000-4000-8000-000000000010','google_calendar.sync_failed')),2::bigint,'missing legacy role column still applies sync permissions and disabled-user filters');
+SELECT is((SELECT count(*) FROM public.get_backup_notification_recipients('62000000-0000-4000-8000-000000000010')),2::bigint,'missing legacy role column still applies backup permissions');
+SELECT lives_ok($$ SELECT private.notify_full_backup_failure('123458') $$,'backup notification delivery works with hosted profiles shape');
+SELECT is((SELECT count(*) FROM public.notifications WHERE event_type='backup.failed' AND dedupe_key=md5('backup.failed:full:123458')::uuid),2::bigint,'hosted shape delivers once to current eligible recipients across organizations');
+SELECT ok(NOT has_function_privilege('authenticated','private.failure_notification_recipients(uuid,text)','EXECUTE'),'compatibility helper remains inaccessible to browser sessions');
+
 SELECT * FROM finish();
 ROLLBACK;
