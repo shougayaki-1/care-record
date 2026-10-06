@@ -1,3 +1,5 @@
+import { ExpectedActionError } from '@/utils/errors';
+import { readActionResult } from '@/utils/actionResult';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getAuthedUser: vi.fn(), assertOrgRole: vi.fn(), assertOrgPermission: vi.fn(),
@@ -26,33 +28,33 @@ function target(role: string) {
 describe('account removal authorization', () => {
   it('rejects non-owner removal of an owner before RPC', async () => {
     target('owner');
-    mocks.assertOrgRole.mockRejectedValue(new Error('この操作を行う権限がありません'));
-    await expect(removeAccount('org', { targetId: 'owner', status: 'active' })).rejects.toThrow('権限');
+    mocks.assertOrgRole.mockRejectedValue(new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません'));
+    await expect(readActionResult(removeAccount('org', { targetId: 'owner', status: 'active' }))).rejects.toThrow('権限');
     expect(mocks.assertOrgRole).toHaveBeenCalledWith('org', ['owner']);
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.audit).not.toHaveBeenCalled();
   });
   it('allows account managers to remove general members', async () => {
     target('member');
-    await removeAccount('org', { targetId: 'member', status: 'active' });
+    await readActionResult(removeAccount('org', { targetId: 'member', status: 'active' }));
     expect(mocks.assertOrgPermission).toHaveBeenCalledWith('org', 'accounts');
     expect(mocks.rpc).toHaveBeenCalledWith('account_remove', expect.objectContaining({ p_target_id: 'member' }));
   });
   it('requires owner membership to remove another owner', async () => {
     target('owner');
     mocks.assertOrgRole.mockResolvedValue({ role: 'owner' });
-    await removeAccount('org', { targetId: 'owner', status: 'active' });
+    await readActionResult(removeAccount('org', { targetId: 'owner', status: 'active' }));
     expect(mocks.assertOrgRole).toHaveBeenCalledWith('org', ['owner']);
     expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'account.remove' }));
   });
   it('preserves self withdrawal without accounts permission', async () => {
     target('member');
-    await removeAccount('org', { targetId: 'actor', status: 'active' });
+    await readActionResult(removeAccount('org', { targetId: 'actor', status: 'active' }));
     expect(mocks.assertOrgRole).toHaveBeenCalledWith('org');
     expect(mocks.assertOrgPermission).not.toHaveBeenCalled();
   });
   it('allows invitation cancellation without a member lookup', async () => {
-    await removeAccount('org', { targetId: 'invite', status: 'invited' });
+    await readActionResult(removeAccount('org', { targetId: 'invite', status: 'invited' }));
     expect(mocks.from).not.toHaveBeenCalled();
     expect(mocks.assertOrgPermission).toHaveBeenCalledWith('org', 'accounts');
   });

@@ -84,7 +84,7 @@ async function getVerifiedAuthContext(): Promise<{ id: string; email?: string; a
     return { id: user.id, email: user.email, authSessionId: getAuthSessionId(session.access_token), session };
 }
 
-function assertAuthResponse(error: AuthError | null, hasUser: boolean): void {
+export function assertAuthResponse(error: AuthError | null, hasUser: boolean): void {
     if (error && !isAuthSessionMissingError(error) && error.status !== 401 && error.status !== 403) {
         throw sanitizeDbError(error, 'auth.verify-user');
     }

@@ -1,20 +1,22 @@
 // src/components/auth/TermsAgreementModal.tsx
 'use client';
 
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
+
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import {
-    Button, Typography, Box, FormControlLabel, Checkbox
+    Alert, Button, Typography, Box, FormControlLabel, Checkbox
 } from '@/components/ui/mui';
 import { supabase } from '@/lib/supabase';
 import LaunchIcon from '@mui/icons-material/Launch';
-import { useToast } from '@/components/ui/ToastProvider';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { AppButton, AppDialog } from '@/components/ui';
 import { acceptCurrentTerms } from '@/app/actions/user';
 
 export const TermsAgreementModal = () => {
-    const { showToast } = useToast();
     const pathname = usePathname();
+    const [actionError, setActionError] = useState<unknown>(null);
     const [open, setOpen] = useState(false);
     const [checked, setChecked] = useState(false);
     const [userId, setUserId] = useState<string | null>(null);
@@ -39,12 +41,12 @@ export const TermsAgreementModal = () => {
 
     const handleAgree = async () => {
         if (!userId) return;
+        setActionError(null);
         try {
-            await acceptCurrentTerms();
+            await readActionResult(acceptCurrentTerms());
             setOpen(false);
         } catch (error) {
-            console.error(error);
-            showToast('エラーが発生しました', 'error');
+            setActionError(error);
         }
     };
 
@@ -61,6 +63,7 @@ export const TermsAgreementModal = () => {
             dividers={false}
             actions={<AppButton size="large" fullWidth disabled={!checked} onClick={handleAgree}>同意してサービスを利用する</AppButton>}
         >
+                {actionError != null && <Alert severity="error" action={needsActionRecovery(actionError) ? <RecoveryLogoutButton /> : undefined}>{getActionErrorMessage(actionError)}</Alert>}
                 <Box textAlign="center" py={2}>
                     <Typography variant="body1" paragraph>
                         サービスを利用開始する前に、<br />

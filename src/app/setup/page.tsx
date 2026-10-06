@@ -1,5 +1,6 @@
 'use client';
 
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 import { useState, useEffect } from 'react';
 import {
     Box, Typography, Paper, TextField, Button, Stack, CircularProgress, Card, CardActionArea, Alert, Chip,
@@ -37,15 +38,18 @@ export default function SetupPage() {
 
     // 招待プレビュー（コードが URL から来た場合に取得）
     const [invitePreview, setInvitePreview] = useState<InvitationPreview | null>(null);
+    const [previewError, setPreviewError] = useState<string | null>(null);
+    const [previewAttempt, setPreviewAttempt] = useState(0);
 
     useEffect(() => {
         if (paramInviteCode) {
             queueMicrotask(() => {
                 setInviteCode(paramInviteCode);
-                void getInvitationPreview(paramInviteCode).then(setInvitePreview).catch(() => {});
+                setPreviewError(null);
+                void readActionResult(getInvitationPreview(paramInviteCode)).then(setInvitePreview).catch(error => setPreviewError(getActionErrorMessage(error)));
             });
         }
-    }, [paramInviteCode]);
+    }, [paramInviteCode, previewAttempt]);
 
     useEffect(() => {
         let mounted = true;
@@ -68,7 +72,7 @@ export default function SetupPage() {
 
                 let inviteName: string | undefined;
                 if (paramInviteCode) {
-                    const preview = await getInvitationPreview(paramInviteCode).catch(() => null);
+                    const preview = await readActionResult(getInvitationPreview(paramInviteCode)).catch(error => { setPreviewError(getActionErrorMessage(error)); return null; });
                     if (preview?.valid) {
                         setInvitePreview(preview);
                         inviteName = preview.targetName;
@@ -120,19 +124,13 @@ export default function SetupPage() {
         };
     }, [router, paramInviteCode]);
 
-    const getErrorMessage = (error: unknown): string => {
-        if (error instanceof Error) return error.message;
-        if (typeof error === 'object' && error !== null && 'message' in error) {
-            return String((error as { message: unknown }).message);
-        }
-        return JSON.stringify(error);
-    };
+    const getErrorMessage = getActionErrorMessage;
 
     const handleSaveProfile = async () => {
         if (!userName.trim()) return;
         setSubmitting(true);
         try {
-            await updateOwnProfile(userName, true);
+            await readActionResult(updateOwnProfile(userName, true));
             setStep(inviteCode ? 'join' : 'choice');
         } catch (e) {
             showToast(`プロフィールの保存に失敗しました: ${getErrorMessage(e)}`, 'error');
@@ -145,7 +143,7 @@ export default function SetupPage() {
         if (!orgName.trim()) return;
         setSubmitting(true);
         try {
-            await createOrganization(orgName);
+            await readActionResult(createOrganization(orgName));
             window.location.href = '/app';
         } catch (e) {
             showToast(`事業所の作成に失敗しました: ${getErrorMessage(e)}`, 'error');
@@ -157,7 +155,7 @@ export default function SetupPage() {
         if (!inviteCode.trim()) return;
         setSubmitting(true);
         try {
-            const res = await acceptInvitation(inviteCode.trim());
+            const res = await readActionResult(acceptInvitation(inviteCode.trim()));
             if (res.alreadyMember) {
                 showToast('すでにこの事業所に参加しています。移動します。', 'info');
             }
@@ -289,7 +287,7 @@ export default function SetupPage() {
                         </Box>
 
                         {/* 招待コードが URL から来た場合は事業所詳細を表示 */}
-                        {paramInviteCode && invitePreview?.valid ? (
+                        {previewError ? <Alert severity="error" action={<AppButton variant="text" intent="secondary" onClick={() => setPreviewAttempt(value => value + 1)}>再試行</AppButton>}>{previewError}</Alert> : paramInviteCode && invitePreview?.valid ? (
                             <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.tint', borderRadius: 2 }}>
                                 <Stack spacing={1}>
                                     <Stack direction="row" spacing={1} alignItems="center">
@@ -362,7 +360,7 @@ export default function SetupPage() {
                                 fullWidth size="large"
                                 onClick={handleJoinOrg}
                                 loading={submitting}
-                                disabled={!inviteCode.trim() || (paramInviteCode != null && invitePreview != null && !invitePreview.valid)}
+                                disabled={Boolean(previewError) || !inviteCode.trim() || (paramInviteCode != null && invitePreview != null && !invitePreview.valid)}
                             >
                                 {submitting ? '参加中...' : '参加する'}
                             </AppButton>

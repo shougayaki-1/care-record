@@ -60,6 +60,9 @@ import { ExpectedActionError, withActionResult } from '@/utils/errors';
 export async function outcome(kind: string) {
   return withActionResult('transport-fixture', async () => {
     if (kind === 'empty') return [];
+    if (kind === 'void') return;
+    if (kind === 'reauth') throw new ExpectedActionError('REAUTH_REQUIRED', 'もう一度再認証してください');
+    if (kind === 'limited') throw new ExpectedActionError('RATE_LIMITED', '約15分後にお試しください');
     if (kind === 'forbidden') throw new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません');
     if (kind === 'expired') throw new ExpectedActionError('SESSION_EXPIRED', 'セッションの有効期限が切れています');
     throw new Error('synthetic_private_column 権限 detail');
@@ -74,7 +77,7 @@ import { outcome, unexpectedThrow } from './actions';
 export default function Page() {
   const [result, setResult] = useState('');
   return <><output data-testid="result">{result}</output>
-    {['empty', 'forbidden', 'expired', 'unexpected'].map(kind => <button key={kind} onClick={async () => setResult(JSON.stringify(await outcome(kind)))}>{kind}</button>)}
+    {['empty', 'void', 'forbidden', 'expired', 'reauth', 'limited', 'unexpected'].map(kind => <button key={kind} onClick={async () => setResult(JSON.stringify(await outcome(kind)))}>{kind}</button>)}
     <button onClick={async () => { try { await unexpectedThrow(); } catch (error) { setResult(JSON.stringify({ message: (error as Error).message, digest: (error as Error & { digest?: string }).digest })); } }}>throw</button>
   </>;
 }
@@ -102,6 +105,9 @@ export default function Page() {
   await page.goto(base);
   const cases = {
     empty: { ok: true, data: [] },
+    void: { ok: true },
+    reauth: { ok: false, error: { code: 'REAUTH_REQUIRED', message: 'もう一度再認証してください' } },
+    limited: { ok: false, error: { code: 'RATE_LIMITED', message: '約15分後にお試しください' } },
     forbidden: { ok: false, error: { code: 'FORBIDDEN', message: 'この操作を行う権限がありません' } },
     expired: { ok: false, error: { code: 'SESSION_EXPIRED', message: 'セッションの有効期限が切れています' } },
     unexpected: { ok: false, error: { code: 'UNEXPECTED_ERROR', message: '処理に失敗しました。時間をおいて再度お試しください。' } },
@@ -116,13 +122,13 @@ export default function Page() {
   const thrown = JSON.parse(await page.getByTestId('result').innerText());
   assert.equal(typeof thrown.digest, 'string');
   assert.doesNotMatch(thrown.message, /synthetic_raw_throw_secret/);
-  assert.equal(responses.length, 5);
+  assert.equal(responses.length, Object.keys(cases).length + 1);
   for (const response of responses) {
     assert.match(response.headers()['content-type'], /text\/x-component/);
     assert.doesNotMatch(await response.text(), /synthetic_private_column|synthetic_raw_throw_secret/);
   }
   assert.match(logs, /synthetic_private_column/);
-  console.log('PASS: production next build/start, 5 HTTP Server Action responses, typed codes/messages, empty success, internal-error redaction and server logging');
+  console.log('PASS: production next build/start, 8 HTTP Server Action responses, typed codes/messages, empty success, internal-error redaction and server logging');
 } catch (error) {
   console.error(logs);
   throw error;

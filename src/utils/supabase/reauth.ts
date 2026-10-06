@@ -1,4 +1,5 @@
 import 'server-only';
+import { ExpectedActionError, sanitizeDbError, sanitizeExternalError } from '@/utils/errors';
 
 import { createHash, randomBytes } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
@@ -35,7 +36,7 @@ export async function issueGrantToken(
     purpose,
     expires_at: expiresAt,
   });
-  if (insertError) throw new Error('再認証証明を発行できません');
+  if (insertError) throw sanitizeDbError(insertError, 'reauth.issueGrant');
   return { token, expiresAt };
 }
 
@@ -43,10 +44,10 @@ export async function issueReauthGrant(
   purpose: ReauthPurpose,
   password: string,
 ): Promise<{ token: string; expiresAt: string }> {
-  if (!REAUTH_PURPOSES.includes(purpose) || purpose === 'account_password_reset' || !password) throw new Error('再認証情報が不正です');
+  if (!REAUTH_PURPOSES.includes(purpose) || purpose === 'account_password_reset' || !password) throw new ExpectedActionError('VALIDATION_ERROR', '再認証情報が不正です');
   const user = await getAuthedUser();
-  if (!user.email) throw new Error('メールアドレスを確認できません');
-  if (await isLoginRateLimited(user.email)) throw new Error('再認証の試行回数を超えました。約15分後にお試しください');
+  if (!user.email) throw new ExpectedActionError('REAUTH_REQUIRED', 'メールアドレスを確認できません');
+  if (await isLoginRateLimited(user.email)) throw new ExpectedActionError('RATE_LIMITED', '再認証の試行回数を超えました。約15分後にお試しください');
 
   // Cookieを書き換えない一時クライアントで現在のpasswordを検証する。
   const verifier = createClient<Database>(
@@ -57,16 +58,17 @@ export async function issueReauthGrant(
   const { data, error } = await verifier.auth.signInWithPassword({ email: user.email, password });
   // This temporary session must not globally revoke the real browser session.
   if (data.session) await verifier.auth.signOut({ scope: 'local' }).catch(() => undefined);
+  if (error && error.code !== 'invalid_credentials') throw sanitizeExternalError(error, 'reauth.verifyPassword');
   if (error || data.user?.id !== user.id) {
     await recordLoginAttempt(user.email, 'failure');
-    throw new Error('再認証に失敗しました');
+    throw new ExpectedActionError('VALIDATION_ERROR', '再認証に失敗しました');
   }
 
   return issueGrantToken(purpose, user.id, user.sessionId);
 }
 
 export async function consumeReauthGrant(purpose: ReauthPurpose, token: string): Promise<{ userId: string }> {
-  if (!token) throw new Error('この操作には再認証が必要です');
+  if (!token) throw new ExpectedActionError('REAUTH_REQUIRED', 'この操作には再認証が必要です');
   const user = await getAuthedUser();
   const now = new Date().toISOString();
   const { data, error } = await supabaseAdmin
@@ -80,6 +82,7 @@ export async function consumeReauthGrant(purpose: ReauthPurpose, token: string):
     .gt('expires_at', now)
     .select('user_id')
     .maybeSingle();
-  if (error || !data) throw new Error('再認証証明が無効または使用済みです');
+  if (error) throw sanitizeDbError(error, 'reauth.consumeGrant');
+  if (!data) throw new ExpectedActionError('REAUTH_REQUIRED', '再認証証明が無効または使用済みです');
   return { userId: data.user_id as string };
 }

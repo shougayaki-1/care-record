@@ -101,10 +101,10 @@ export default function LogsPage() {
 
   const handleExport = async () => {
     if (!currentOrg) return;
-    const { filename, csv } = await exportAuditLogsCsv(currentOrg.id, {
+    const { filename, csv } = await readActionResult(exportAuditLogsCsv(currentOrg.id, {
       from: auditFrom ? new Date(`${auditFrom}T00:00:00+09:00`).toISOString() : null,
       to: auditTo ? new Date(`${auditTo}T23:59:59+09:00`).toISOString() : null,
-    });
+    }));
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

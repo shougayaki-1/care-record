@@ -17,7 +17,7 @@ describe('public action results in the client', () => {
     expect(getActionErrorMessage(new Error('private detail'), '取得できませんでした')).toBe('取得できませんでした');
   });
 
-  it.each(['UNAUTHENTICATED', 'SESSION_EXPIRED', 'FORBIDDEN', 'UNEXPECTED_ERROR'])(
+  it.each(['UNAUTHENTICATED', 'SESSION_EXPIRED', 'REAUTH_REQUIRED', 'RATE_LIMITED', 'FORBIDDEN', 'UNEXPECTED_ERROR'])(
     'offers session recovery only for an authentication state: %s', code => {
       expect(needsActionRecovery(new ActionResultError(code, '公開文言')))
         .toBe(code === 'UNAUTHENTICATED' || code === 'SESSION_EXPIRED');

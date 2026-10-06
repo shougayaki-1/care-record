@@ -1,5 +1,5 @@
 'use client';
-import { readActionResult } from '@/utils/actionResult';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { GOOGLE_CONNECTION_LABELS, googleConnectionMessage, googleSyncErrorMessage } from '@/utils/googleSync';
 
@@ -190,7 +190,7 @@ function SettingsContent() {
 
         (async () => {
             try {
-                const grant = await takeProviderReauthGrant(action === 'delete_org' ? 'organization_delete' : 'external_secret_change');
+                const grant = await readActionResult(takeProviderReauthGrant(action === 'delete_org' ? 'organization_delete' : 'external_secret_change'));
                 if (searchParams.get('reauthOrg') !== currentOrg.id) {
                     showToast('本人確認を開始した事業所と一致しません。もう一度お試しください。', 'error');
                     return;
@@ -208,11 +208,11 @@ function SettingsContent() {
                     );
                     window.location.href = url;
                 } else if (action === 'disconnect_calendar') {
-                    await disconnectGoogleCalendar(currentOrg.id, grant.token);
+                    await readActionResult(disconnectGoogleCalendar(currentOrg.id, grant.token));
                     setGoogleCalendarId(null);
                     showToast('連携を解除しました');
                 } else if (action === 'delete_org') {
-                    await deleteOrganization(currentOrg.id, grant.token);
+                    await readActionResult(deleteOrganization(currentOrg.id, grant.token));
                     showToast('事業所を削除しました');
                     window.location.href = '/setup';
                 }
@@ -229,7 +229,7 @@ function SettingsContent() {
         setSaving(true);
         setMessage(null);
         try {
-            await updateOrganizationName(currentOrg.id, orgName);
+            await readActionResult(updateOrganizationName(currentOrg.id, orgName));
             
             if (googleFolderId) {
                 const { data: { user } } = await supabase.auth.getUser();
@@ -271,7 +271,7 @@ function SettingsContent() {
 
             if (result.status === 'success' && result.folderId) {
                 const newFolderId = result.folderId;
-                await updateOrganizationDriveFolder(currentOrg.id, newFolderId);
+                await readActionResult(updateOrganizationDriveFolder(currentOrg.id, newFolderId));
 
                 setGoogleFolderId(newFolderId);
                 if (result.folderUrl) setDriveUrl(result.folderUrl);
@@ -291,7 +291,7 @@ function SettingsContent() {
         if (!(await confirm({ message: '連携を解除しますか？\n（Googleドライブ上のフォルダは削除されません。アプリからの参照のみ解除されます。）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
-            await updateOrganizationDriveFolder(currentOrg.id, null);
+            await readActionResult(updateOrganizationDriveFolder(currentOrg.id, null));
             setGoogleFolderId(null);
             showToast('連携を解除しました');
         } catch(e) { 
@@ -332,7 +332,7 @@ function SettingsContent() {
                 preferredMethod: 'google', next: `/app/settings?stepup=1&action=disconnect_calendar&reauthOrg=${currentOrg.id}`,
             });
             if (!grant) return;
-            await disconnectGoogleCalendar(currentOrg.id, grant.token);
+            await readActionResult(disconnectGoogleCalendar(currentOrg.id, grant.token));
             setGoogleCalendarId(null);
             showToast('連携を解除しました');
         } catch(e) {
@@ -443,12 +443,12 @@ function SettingsContent() {
                 next: `/app/settings?stepup=1&action=delete_org&reauthOrg=${currentOrg.id}`,
             });
             if (!grant) return;
-            await deleteOrganization(currentOrg.id, grant.token);
+            await readActionResult(deleteOrganization(currentOrg.id, grant.token));
             showToast('事業所を削除しました');
             window.location.href = '/setup';
         } catch (e: unknown) {
             console.error(e);
-            const msg = e instanceof Error ? e.message : String(e);
+            const msg = getActionErrorMessage(e);
             showToast('削除失敗: ' + msg, 'error');
         }
     };
@@ -456,11 +456,11 @@ function SettingsContent() {
     const handleLeaveOrg = async () => {
         if (!currentOrg) return;
         try {
-            await leaveOrganization(currentOrg.id);
+            await readActionResult(leaveOrganization(currentOrg.id));
             showToast('事業所から脱退しました');
             window.location.href = '/setup';
         } catch (e: unknown) { 
-            const msg = e instanceof Error ? e.message : String(e);
+            const msg = getActionErrorMessage(e);
             showToast(msg, 'error'); 
         }
     };

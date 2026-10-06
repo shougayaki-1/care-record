@@ -13,7 +13,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   anchor = document.createElement('button'); document.body.append(anchor);
   state.fetch.mockResolvedValue({ data: [notification], error: null });
-  state.read.mockResolvedValue({ success: true, readAt: '2026-10-04T00:00:00Z' });
+  state.read.mockResolvedValue({ ok: true, data: { success: true, readAt: '2026-10-04T00:00:00Z' } });
 });
 afterEach(() => { cleanup(); anchor.remove(); });
 function mount(refreshKey = 0) {

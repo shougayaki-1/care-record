@@ -1,6 +1,7 @@
 'use server';
+import type { ActionResult } from '@/types/actionResult';
 
-import { sanitizeDbError, withSafeError, UserFacingError } from '@/utils/errors';
+import { sanitizeDbError, sanitizeExternalError, withActionResult, ExpectedActionError } from '@/utils/errors';
 
 import { randomUUID } from 'crypto';
 import { getAuthedUser, assertOrgRole, assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
@@ -23,10 +24,10 @@ async function assertDangerousRoleOwnerCheck(
     .select('id, permissions')
     .eq('organization_id', orgId)
     .in('id', roleIds);
-  if (error) throw new Error('ロール情報の取得に失敗しました');
+  if (error) throw sanitizeDbError(error, 'action.accounts.roleSafety');
   const hasDangerous = (orgRoles ?? []).some(r => isDangerousPermissions(r.permissions as RolePermissions));
   if (hasDangerous && !isOwner) {
-    throw new Error('危険な権限を含むロールの付与はオーナーのみ実行できます');
+    throw new ExpectedActionError('FORBIDDEN', '危険な権限を含むロールの付与はオーナーのみ実行できます');
   }
 }
 
@@ -47,106 +48,109 @@ export type AccountOverviewItem = {
     staffName?: string | null;
 };
 
-export async function getAccountOverview(orgId: string): Promise<{ currentUserId: string; accounts: AccountOverviewItem[] }> {
-    const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
-    const sessionClient = await createSessionClient();
-    const [{ data: members, error: membersError }, { data: invitations, error: invitationsError }] = await Promise.all([
-        sessionClient.from('organization_members').select('user_id, role').eq('organization_id', orgId),
-        sessionClient.from('invitations')
-            .select('id, target_name, role, role_ids, code, staff_id, staffs(name)')
-            .eq('organization_id', orgId)
-            .eq('is_used', false)
-            .gt('expires_at', new Date().toISOString()),
-    ]);
-    if (membersError || invitationsError) throw new Error('アカウント情報を取得できませんでした');
+export async function getAccountOverview(orgId: string): Promise<ActionResult<{ currentUserId: string; accounts: AccountOverviewItem[] }>> {
+  return withActionResult('getAccountOverview', async () => {
+      const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
+      const sessionClient = await createSessionClient();
+      const [{ data: members, error: membersError }, { data: invitations, error: invitationsError }] = await Promise.all([
+          sessionClient.from('organization_members').select('user_id, role').eq('organization_id', orgId),
+          sessionClient.from('invitations')
+              .select('id, target_name, role, role_ids, code, staff_id, staffs(name)')
+              .eq('organization_id', orgId)
+              .eq('is_used', false)
+              .gt('expires_at', new Date().toISOString()),
+      ]);
+      if (membersError) throw sanitizeDbError(membersError, 'action.accounts.members');
+      if (invitationsError) throw sanitizeDbError(invitationsError, 'action.accounts.invitations');
 
-    const memberRows = (members || []) as MemberRow[];
-    const memberIds = memberRows.map((member) => member.user_id);
-    const [{ data: profiles, error: profilesError }, { data: memberRoles, error: memberRolesError }] = await Promise.all([
-        memberIds.length
-            ? sessionClient.from('profiles').select('id, name').in('id', memberIds)
-            : Promise.resolve({ data: [], error: null }),
-        memberIds.length
-            ? sessionClient
-                .from('organization_member_roles')
-                .select('user_id, organization_roles(id, name, color)')
-                .eq('organization_id', orgId)
-                .in('user_id', memberIds)
-            : Promise.resolve({ data: [], error: null }),
-    ]);
-    if (profilesError) throw new Error('プロフィール情報を取得できませんでした');
-    if (memberRolesError) throw new Error('ロール情報を取得できませんでした');
+      const memberRows = (members || []) as MemberRow[];
+      const memberIds = memberRows.map((member) => member.user_id);
+      const [{ data: profiles, error: profilesError }, { data: memberRoles, error: memberRolesError }] = await Promise.all([
+          memberIds.length
+              ? sessionClient.from('profiles').select('id, name').in('id', memberIds)
+              : Promise.resolve({ data: [], error: null }),
+          memberIds.length
+              ? sessionClient
+                  .from('organization_member_roles')
+                  .select('user_id, organization_roles(id, name, color)')
+                  .eq('organization_id', orgId)
+                  .in('user_id', memberIds)
+              : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (profilesError) throw sanitizeDbError(profilesError, 'action.accounts.profiles');
+      if (memberRolesError) throw sanitizeDbError(memberRolesError, 'action.accounts.memberRoles');
 
-    const profileNames = new Map((profiles || []).map((profile) => [profile.id, profile.name]));
-    const authEmails = new Map<string, string>();
-    if (memberIds.length > 0) {
-        const memberIdSet = new Set(memberIds);
-        const perPage = 1000;
-        let page = 1;
-        while (true) {
-            const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
-            if (error) throw new Error('アカウント情報を取得できませんでした');
-            for (const user of data.users) {
-                if (memberIdSet.has(user.id) && user.email) authEmails.set(user.id, user.email);
-            }
-            if (data.users.length < perPage) break;
-            page += 1;
-        }
-    }
+      const profileNames = new Map((profiles || []).map((profile) => [profile.id, profile.name]));
+      const authEmails = new Map<string, string>();
+      if (memberIds.length > 0) {
+          const memberIdSet = new Set(memberIds);
+          const perPage = 1000;
+          let page = 1;
+          while (true) {
+              const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
+              if (error) throw sanitizeExternalError(error, 'action.accounts.authUsers');
+              for (const user of data.users) {
+                  if (memberIdSet.has(user.id) && user.email) authEmails.set(user.id, user.email);
+              }
+              if (data.users.length < perPage) break;
+              page += 1;
+          }
+      }
 
-    // Build a map of userId -> roles[]
-    const rolesMap = new Map<string, { id: string; name: string; color: string | null }[]>();
-    for (const row of (memberRoles || []) as { user_id: string; organization_roles: { id: string; name: string; color: string | null } | null }[]) {
-        if (!row.organization_roles) continue;
-        const existing = rolesMap.get(row.user_id) ?? [];
-        existing.push(row.organization_roles);
-        rolesMap.set(row.user_id, existing);
-    }
+      // Build a map of userId -> roles[]
+      const rolesMap = new Map<string, { id: string; name: string; color: string | null }[]>();
+      for (const row of (memberRoles || []) as { user_id: string; organization_roles: { id: string; name: string; color: string | null } | null }[]) {
+          if (!row.organization_roles) continue;
+          const existing = rolesMap.get(row.user_id) ?? [];
+          existing.push(row.organization_roles);
+          rolesMap.set(row.user_id, existing);
+      }
 
-    const accounts: AccountOverviewItem[] = memberRows.map((member) => ({
-        id: member.user_id,
-        name: profileNames.get(member.user_id) || '名前未設定',
-        email: authEmails.get(member.user_id),
-        role: member.role,
-        roles: rolesMap.get(member.user_id) ?? [],
-        status: 'active',
-    }));
-    const inviteRows = (invitations || []) as Array<{
-        id: string;
-        target_name: string | null;
-        role: string | null;
-        role_ids: string[] | null;
-        code: string;
-        staff_id: string | null;
-        staffs: { name: string } | { name: string }[] | null;
-    }>;
-    const inviteRoleIds = Array.from(new Set(inviteRows.flatMap((invitation) => invitation.role_ids ?? [])));
-    const inviteRoleMap = new Map<string, { id: string; name: string; color: string | null }>();
-    if (inviteRoleIds.length > 0) {
-        const { data: inviteRoles, error: inviteRolesError } = await sessionClient
-            .from('organization_roles')
-            .select('id, name, color')
-            .eq('organization_id', orgId)
-            .in('id', inviteRoleIds);
-        if (inviteRolesError) throw new Error('招待ロール情報を取得できませんでした');
-        (inviteRoles || []).forEach((role) => inviteRoleMap.set(role.id, role));
-    }
+      const accounts: AccountOverviewItem[] = memberRows.map((member) => ({
+          id: member.user_id,
+          name: profileNames.get(member.user_id) || '名前未設定',
+          email: authEmails.get(member.user_id),
+          role: member.role,
+          roles: rolesMap.get(member.user_id) ?? [],
+          status: 'active',
+      }));
+      const inviteRows = (invitations || []) as Array<{
+          id: string;
+          target_name: string | null;
+          role: string | null;
+          role_ids: string[] | null;
+          code: string;
+          staff_id: string | null;
+          staffs: { name: string } | { name: string }[] | null;
+      }>;
+      const inviteRoleIds = Array.from(new Set(inviteRows.flatMap((invitation) => invitation.role_ids ?? [])));
+      const inviteRoleMap = new Map<string, { id: string; name: string; color: string | null }>();
+      if (inviteRoleIds.length > 0) {
+          const { data: inviteRoles, error: inviteRolesError } = await sessionClient
+              .from('organization_roles')
+              .select('id, name, color')
+              .eq('organization_id', orgId)
+              .in('id', inviteRoleIds);
+          if (inviteRolesError) throw sanitizeDbError(inviteRolesError, 'action.accounts.inviteRoles');
+          (inviteRoles || []).forEach((role) => inviteRoleMap.set(role.id, role));
+      }
 
-    for (const invitation of inviteRows) {
-        const staff = Array.isArray(invitation.staffs) ? invitation.staffs[0] : invitation.staffs;
-        accounts.push({
-            id: invitation.id,
-            name: invitation.target_name || '名前未設定',
-            role: invitation.role ?? 'member',
-            roles: (invitation.role_ids ?? []).map((roleId) => inviteRoleMap.get(roleId)).filter((role): role is { id: string; name: string; color: string | null } => Boolean(role)),
-            status: 'invited',
-            staffId: invitation.staff_id,
-            staffName: staff?.name ?? null,
-            ...(isOwner ? { invitation_code: invitation.code } : {}),
-        });
-    }
+      for (const invitation of inviteRows) {
+          const staff = Array.isArray(invitation.staffs) ? invitation.staffs[0] : invitation.staffs;
+          accounts.push({
+              id: invitation.id,
+              name: invitation.target_name || '名前未設定',
+              role: invitation.role ?? 'member',
+              roles: (invitation.role_ids ?? []).map((roleId) => inviteRoleMap.get(roleId)).filter((role): role is { id: string; name: string; color: string | null } => Boolean(role)),
+              status: 'invited',
+              staffId: invitation.staff_id,
+              staffName: staff?.name ?? null,
+              ...(isOwner ? { invitation_code: invitation.code } : {}),
+          });
+      }
 
-    return { currentUserId: userId, accounts };
+      return { currentUserId: userId, accounts };
+  });
 }
 
 /**
@@ -155,23 +159,30 @@ export async function getAccountOverview(orgId: string): Promise<{ currentUserId
  * これにより organization_members への自己挿入(任意ロール化)を RLS で禁止できる。
  */
 export async function acceptInvitation(code: string) {
-    const user = await getAuthedUser();
-    if (!code?.trim()) throw new Error('招待コードが不正です');
-    const supabase = await createSessionClient();
-    const { data: organizationId, error } = await supabase.rpc('accept_invitation_atomic', {
-        p_code: code.trim(), p_session_id: user.sessionId,
-    });
-    if (error?.message === 'already_member') {
-        // 招待は消費されていないので code から org_id を逆引きできる
-        const { data: invite } = await supabase
-            .from('invitations')
-            .select('organization_id')
-            .eq('code', code.trim())
-            .maybeSingle();
-        return { success: true, organizationId: invite?.organization_id ?? '', alreadyMember: true };
-    }
-    if (error || !organizationId) throw new Error('無効、期限切れ、または使用済みの招待コードです');
-    return { success: true, organizationId: String(organizationId), alreadyMember: false };
+  return withActionResult('acceptInvitation', async () => {
+      const user = await getAuthedUser();
+      if (!code?.trim()) throw new ExpectedActionError('VALIDATION_ERROR', '招待コードが不正です');
+      const supabase = await createSessionClient();
+      const { data: organizationId, error } = await supabase.rpc('accept_invitation_atomic', {
+          p_code: code.trim(), p_session_id: user.sessionId,
+      });
+      if (error?.message === 'already_member') {
+          // 招待は消費されていないので code から org_id を逆引きできる
+          const { data: invite, error: inviteError } = await supabase
+              .from('invitations')
+              .select('organization_id')
+              .eq('code', code.trim())
+              .maybeSingle();
+          if (inviteError) throw sanitizeDbError(inviteError, 'action.accounts.existingInvitation');
+          if (!invite) throw new ExpectedActionError('NOT_FOUND', '無効、期限切れ、または使用済みの招待コードです');
+          return { success: true, organizationId: invite.organization_id, alreadyMember: true };
+      }
+      if (error?.message === 'invitation_invalid' || error?.message === 'invitation_email_mismatch') throw new ExpectedActionError('VALIDATION_ERROR', '無効、期限切れ、または使用済みの招待コードです');
+      if (error?.message === 'authentication_required') throw new ExpectedActionError('SESSION_EXPIRED', 'セッションの有効期限が切れました。再度ログインしてください');
+      if (error) throw sanitizeDbError(error, 'action.accounts.acceptInvitation');
+      if (!organizationId) throw new Error('accept_invitation_atomic returned no organization');
+      return { success: true, organizationId: String(organizationId), alreadyMember: false };
+  });
 }
 
 /**
@@ -179,38 +190,41 @@ export async function acceptInvitation(code: string) {
  * code はサーバ側で生成し、actor も改ざんできないようセッションから取得する。
  */
 export async function createInvitation(orgId: string, params: { targetName: string; email: string; roleIds?: string[]; staffId?: string | null }) {
-    const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
-    await assertDangerousRoleOwnerCheck(orgId, params.roleIds ?? [], isOwner);
-    const targetName = params.targetName.trim();
-    const email = params.email.trim().toLowerCase();
-    const sessionClient = await createSessionClient();
-    if (targetName.length < 1 || targetName.length > 100) throw new Error('招待する人の名前を1〜100文字で入力してください');
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) || email.length > 254) throw new Error('招待先メールアドレスを入力してください');
+  return withActionResult('createInvitation', async () => {
+      const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
+      await assertDangerousRoleOwnerCheck(orgId, params.roleIds ?? [], isOwner);
+      const targetName = params.targetName.trim();
+      const email = params.email.trim().toLowerCase();
+      const sessionClient = await createSessionClient();
+      if (targetName.length < 1 || targetName.length > 100) throw new ExpectedActionError('VALIDATION_ERROR', '招待する人の名前を1〜100文字で入力してください');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) || email.length > 254) throw new ExpectedActionError('VALIDATION_ERROR', '招待先メールアドレスを入力してください');
 
-    if (params.staffId) {
-        const { data: staff, error: staffError } = await sessionClient
-            .from('staffs')
-            .select('id, user_id')
-            .eq('id', params.staffId)
-            .eq('organization_id', orgId)
-            .is('deleted_at', null)
-            .maybeSingle();
-        if (staffError || !staff) throw new Error('紐付けるスタッフが見つかりません');
-        if (staff.user_id) throw new Error('このスタッフはすでにアカウントに紐付いています');
-    }
+      if (params.staffId) {
+          const { data: staff, error: staffError } = await sessionClient
+              .from('staffs')
+              .select('id, user_id')
+              .eq('id', params.staffId)
+              .eq('organization_id', orgId)
+              .is('deleted_at', null)
+              .maybeSingle();
+          if (staffError) throw sanitizeDbError(staffError, 'action.accounts.inviteStaff');
+          if (!staff) throw new ExpectedActionError('NOT_FOUND', '紐付けるスタッフが見つかりません');
+          if (staff.user_id) throw new ExpectedActionError('VALIDATION_ERROR', 'このスタッフはすでにアカウントに紐付いています');
+      }
 
-    const code = randomUUID().slice(0, 8);
-    const { error } = await sessionClient.rpc('create_invitation_authorized', {
-        p_organization_id: orgId,
-        p_code: code,
-        p_email: email,
-        p_target_name: targetName,
-        p_role_ids: params.roleIds ?? [],
-        p_staff_id: params.staffId ?? undefined,
-    });
-    if (error) throw sanitizeDbError(error, 'action.accounts');
-    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.invitation_create', resourceType: 'invitation', details: { roleIds: params.roleIds ?? [], staffId: params.staffId || null, targetName } });
-    return { success: true, code };
+      const code = randomUUID().slice(0, 8);
+      const { error } = await sessionClient.rpc('create_invitation_authorized', {
+          p_organization_id: orgId,
+          p_code: code,
+          p_email: email,
+          p_target_name: targetName,
+          p_role_ids: params.roleIds ?? [],
+          p_staff_id: params.staffId ?? undefined,
+      });
+      if (error) throw sanitizeDbError(error, 'action.accounts');
+      await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.invitation_create', resourceType: 'invitation', details: { roleIds: params.roleIds ?? [], staffId: params.staffId || null, targetName } });
+      return { success: true, code };
+  });
 }
 
 /**
@@ -221,20 +235,22 @@ export async function updateAccountRole(
     orgId: string,
     params: { targetId: string; status: 'active' | 'invited'; newRole: string }
 ) {
-    const { userId } = await assertOrgPermission(orgId, 'accounts');
-    const { targetId, status, newRole } = params;
-    if (!VALID_ROLES.includes(newRole as Role)) throw new Error('権限が不正です');
-    if (status === 'invited' && newRole === 'owner') {
-        throw new Error('招待でオーナー権限は付与できません。参加後に権限を変更してください');
-    }
+  return withActionResult('updateAccountRole', async () => {
+      const { userId } = await assertOrgPermission(orgId, 'accounts');
+      const { targetId, status, newRole } = params;
+      if (!VALID_ROLES.includes(newRole as Role)) throw new ExpectedActionError('VALIDATION_ERROR', '権限が不正です');
+      if (status === 'invited' && newRole === 'owner') {
+          throw new ExpectedActionError('VALIDATION_ERROR', '招待でオーナー権限は付与できません。参加後に権限を変更してください');
+      }
 
-    const sessionClient = await createSessionClient();
-    const { error } = await sessionClient.rpc('account_update_role', {
-        p_organization_id: orgId, p_target_id: targetId, p_status: status, p_new_role: newRole,
-    });
-    if (error) throw sanitizeDbError(error, 'action.accounts');
-    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.role_update', resourceType: 'account', resourceId: targetId, details: { status, newRole } });
-    return { success: true };
+      const sessionClient = await createSessionClient();
+      const { error } = await sessionClient.rpc('account_update_role', {
+          p_organization_id: orgId, p_target_id: targetId, p_status: status, p_new_role: newRole,
+      });
+      if (error) throw sanitizeDbError(error, 'action.accounts');
+      await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.role_update', resourceType: 'account', resourceId: targetId, details: { status, newRole } });
+      return { success: true };
+  });
 }
 
 /**
@@ -246,7 +262,7 @@ export async function removeAccount(
     orgId: string,
     params: { targetId: string; status: 'active' | 'invited' }
 ) {
-    return withSafeError('removeAccount', async () => {
+    return withActionResult('removeAccount', async () => {
         const { id: callerId } = await getAuthedUser();
         const { targetId, status } = params;
 
@@ -263,7 +279,7 @@ export async function removeAccount(
             const { data: target, error: readError } = await sessionClient.from('organization_members')
                 .select('role').eq('organization_id', orgId).eq('user_id', targetId).maybeSingle();
             if (readError) throw sanitizeDbError(readError, 'action.accounts.remove.read');
-            if (!target) throw new UserFacingError('対象のメンバーが見つかりません');
+            if (!target) throw new ExpectedActionError('NOT_FOUND', '対象のメンバーが見つかりません');
             if (target.role === 'owner') await assertOrgRole(orgId, ['owner']);
         }
         const { error } = await sessionClient.rpc('account_remove', {
@@ -287,21 +303,24 @@ export type InvitationPreview = {
  * 招待コードから事業所名・ロール名を取得する（認証不要）。
  * 招待コードを持つ人に事業所名・ロール名を公開することは意図的。
  */
-export async function getInvitationPreview(code: string): Promise<InvitationPreview> {
-    if (!code?.trim()) return { valid: false };
-    const sessionClient = await createSessionClient();
-    const { data: inv } = await sessionClient.rpc('get_invitation_preview', { p_code: code.trim() });
+export async function getInvitationPreview(code: string): Promise<ActionResult<InvitationPreview>> {
+  return withActionResult('getInvitationPreview', async () => {
+      if (!code?.trim()) return { valid: false };
+      const sessionClient = await createSessionClient();
+      const { data: inv, error } = await sessionClient.rpc('get_invitation_preview', { p_code: code.trim() });
+      if (error) throw sanitizeDbError(error, 'action.accounts.invitationPreview');
 
-    if (!inv) return { valid: false };
+      if (!inv) return { valid: false };
 
-    const preview = inv as { organizationId: string; orgName: string; targetName: string | null; roleNames: string[]; expiresAt: string };
-    return {
-        valid: true,
-        orgName: preview.orgName ?? '事業所',
-        targetName: preview.targetName ?? undefined,
-        roleNames: preview.roleNames,
-        expiresAt: preview.expiresAt,
-    };
+      const preview = inv as { organizationId: string; orgName: string; targetName: string | null; roleNames: string[]; expiresAt: string };
+      return {
+          valid: true,
+          orgName: preview.orgName ?? '事業所',
+          targetName: preview.targetName ?? undefined,
+          roleNames: preview.roleNames,
+          expiresAt: preview.expiresAt,
+      };
+  });
 }
 
 export type InviteStaffCandidate = {
@@ -310,47 +329,53 @@ export type InviteStaffCandidate = {
     positions: string[] | null;
 };
 
-export async function getInviteStaffCandidates(orgId: string): Promise<InviteStaffCandidate[]> {
-    await assertOrgPermission(orgId, 'accounts');
-    const sessionClient = await createSessionClient();
-    const { data, error } = await sessionClient
-        .from('staffs')
-        .select('id, name, positions')
-        .eq('organization_id', orgId)
-        .is('user_id', null)
-        .is('deleted_at', null)
-        .is('archived_at', null)
-        .order('sort_order', { ascending: true, nullsFirst: false })
-        .order('name', { ascending: true });
-    if (error) throw sanitizeDbError(error, 'action.accounts');
-    return (data ?? []) as InviteStaffCandidate[];
+export async function getInviteStaffCandidates(orgId: string): Promise<ActionResult<InviteStaffCandidate[]>> {
+  return withActionResult('getInviteStaffCandidates', async () => {
+      await assertOrgPermission(orgId, 'accounts');
+      const sessionClient = await createSessionClient();
+      const { data, error } = await sessionClient
+          .from('staffs')
+          .select('id, name, positions')
+          .eq('organization_id', orgId)
+          .is('user_id', null)
+          .is('deleted_at', null)
+          .is('archived_at', null)
+          .order('sort_order', { ascending: true, nullsFirst: false })
+          .order('name', { ascending: true });
+      if (error) throw sanitizeDbError(error, 'action.accounts');
+      return (data ?? []) as InviteStaffCandidate[];
+  });
 }
 
-export async function getOrgRoles(orgId: string): Promise<{ id: string; name: string; color: string | null; is_preset: boolean; is_dangerous: boolean }[]> {
-    await assertOrgRole(orgId);
-    const sessionClient = await createSessionClient();
-    const { data, error: rolesError } = await sessionClient
-        .from('organization_roles')
-        .select('id, name, color, is_preset, permissions')
-        .eq('organization_id', orgId)
-        .order('is_preset', { ascending: false });
-    if (rolesError) throw new Error('ロール一覧を取得できませんでした');
-    return (data ?? []).map(r => ({
-        id: r.id,
-        name: r.name,
-        color: r.color,
-        is_preset: r.is_preset,
-        is_dangerous: isDangerousPermissions(r.permissions as RolePermissions),
-    }));
+export async function getOrgRoles(orgId: string): Promise<ActionResult<{ id: string; name: string; color: string | null; is_preset: boolean; is_dangerous: boolean }[]>> {
+  return withActionResult('getOrgRoles', async () => {
+      await assertOrgRole(orgId);
+      const sessionClient = await createSessionClient();
+      const { data, error: rolesError } = await sessionClient
+          .from('organization_roles')
+          .select('id, name, color, is_preset, permissions')
+          .eq('organization_id', orgId)
+          .order('is_preset', { ascending: false });
+      if (rolesError) throw sanitizeDbError(rolesError, 'action.accounts.roles');
+      return (data ?? []).map(r => ({
+          id: r.id,
+          name: r.name,
+          color: r.color,
+          is_preset: r.is_preset,
+          is_dangerous: isDangerousPermissions(r.permissions as RolePermissions),
+      }));
+  });
 }
 
-export async function updateMemberRoles(orgId: string, targetUserId: string, roleIds: string[]): Promise<void> {
-    const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
-    await assertDangerousRoleOwnerCheck(orgId, roleIds, isOwner);
-    const sessionClient = await createSessionClient();
-    const { error } = await sessionClient.rpc('account_replace_member_roles', {
-        p_organization_id: orgId, p_target_user_id: targetUserId, p_role_ids: roleIds,
-    });
-    if (error) throw sanitizeDbError(error, 'action.accounts');
-    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.roles_update', resourceType: 'account', resourceId: targetUserId, details: { roleIds } });
+export async function updateMemberRoles(orgId: string, targetUserId: string, roleIds: string[]): Promise<ActionResult<void>> {
+  return withActionResult('updateMemberRoles', async () => {
+      const { userId, isOwner } = await assertOrgPermission(orgId, 'accounts');
+      await assertDangerousRoleOwnerCheck(orgId, roleIds, isOwner);
+      const sessionClient = await createSessionClient();
+      const { error } = await sessionClient.rpc('account_replace_member_roles', {
+          p_organization_id: orgId, p_target_user_id: targetUserId, p_role_ids: roleIds,
+      });
+      if (error) throw sanitizeDbError(error, 'action.accounts');
+      await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'account.roles_update', resourceType: 'account', resourceId: targetUserId, details: { roleIds } });
+  });
 }

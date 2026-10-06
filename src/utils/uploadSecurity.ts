@@ -1,4 +1,5 @@
 import 'server-only';
+import { ExpectedActionError } from '@/utils/errors';
 
 import sharp from 'sharp';
 
@@ -35,7 +36,7 @@ async function malwareScan(bytes: Buffer): Promise<void> {
     });
     if (!response.ok) throw new Error('ファイル検査に失敗しました');
     const result = await response.json() as { clean?: boolean };
-    if (result.clean !== true) throw new Error('安全でないファイルはアップロードできません');
+    if (result.clean !== true) throw new ExpectedActionError('VALIDATION_ERROR', '安全でないファイルはアップロードできません');
   } finally {
     clearTimeout(timeout);
   }
@@ -46,7 +47,7 @@ async function malwareScan(bytes: Buffer): Promise<void> {
  * EXIF/GPS/コメント等のメタデータと付加ペイロードを除去する。
  */
 export async function sanitizeUploadedImage(file: File): Promise<{ bytes: Buffer; contentType: 'image/webp'; extension: 'webp' }> {
-  if (file.size <= 0 || file.size > 10 * 1024 * 1024) throw new Error('画像サイズは10MB以下にしてください');
+  if (file.size <= 0 || file.size > 10 * 1024 * 1024) throw new ExpectedActionError('VALIDATION_ERROR', '画像サイズは10MB以下にしてください');
   const original = Buffer.from(await file.arrayBuffer());
   await malwareScan(original);
   try {
@@ -59,6 +60,6 @@ export async function sanitizeUploadedImage(file: File): Promise<{ bytes: Buffer
     const bytes = await image.rotate().webp({ quality: 90, effort: 4 }).toBuffer();
     return { bytes, contentType: 'image/webp', extension: 'webp' };
   } catch {
-    throw new Error('JPEG、PNG、WebPの正常な画像のみアップロードできます');
+    throw new ExpectedActionError('VALIDATION_ERROR', 'JPEG、PNG、WebPの正常な画像のみアップロードできます');
   }
 }

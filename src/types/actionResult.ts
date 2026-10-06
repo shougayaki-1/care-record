@@ -2,6 +2,8 @@
 export type ActionErrorCode =
   | 'UNAUTHENTICATED'
   | 'SESSION_EXPIRED'
+  | 'REAUTH_REQUIRED'
+  | 'RATE_LIMITED'
   | 'FORBIDDEN'
   | 'VALIDATION_ERROR'
   | 'NOT_FOUND'
