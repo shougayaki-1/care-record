@@ -17,10 +17,10 @@ const notifications: NotificationItem[] = [
   { id: 'long', type: 'legacy', content: 'long-unbroken-legacy-notification-text'.repeat(5), is_read: false, created_at: null },
 ];
 const onSelect = fn();
-function Showcase() {
+function Showcase({ error, items = notifications }: { error?: string; items?: NotificationItem[] }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   return <><AppButton onClick={event => setAnchorEl(event.currentTarget)}>通知を開く</AppButton>
-    <NotificationsPopover anchorEl={anchorEl} onClose={() => setAnchorEl(null)} notifications={notifications} loading={false} onSelect={onSelect} /></>;
+    <NotificationsPopover anchorEl={anchorEl} onClose={() => setAnchorEl(null)} notifications={items} loading={false} error={error} onSelect={onSelect} /></>;
 }
 
 const screenWidths = [240, 320, 375, 1280];
@@ -103,5 +103,29 @@ export const ScreenWidths: Story = {
         await frameUser.click(close);
         await waitFor(() => expect(frameCanvas.getByRole('button', { name: '通知を開く' })).toHaveFocus());
       }
+  },
+};
+
+export const WorkflowResults: Story = {
+  render: () => <Showcase items={[
+    { id: 'deletion-rejected', type: 'deletion_request.rejected', category: 'action_required', title: '削除申請が却下されました', content: '申請の結果を確認してください。', is_read: false, created_at: null },
+    { id: 'report-approved', type: 'report.approved', category: 'info', title: '記録が承認されました', content: '提出した記録が承認されました。', is_read: false, created_at: null },
+  ]} />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: '通知を開く' }));
+    const dialog = await within(canvasElement.ownerDocument.body).findByRole('dialog', { name: '通知' });
+    await waitFor(() => expect(within(dialog).getByText('要対応 · 未読')).toBeVisible());
+    await expect(within(dialog).getByText('情報 · 未読')).toBeVisible();
+    await expect(within(dialog).getByRole('button', { name: /削除申請が却下されました/ })).toBeEnabled();
+  },
+};
+
+export const DestinationUnavailable: Story = {
+  render: () => <Showcase error="通知を開けませんでした。所属・権限を確認してもう一度お試しください。" />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: '通知を開く' }));
+    const dialog = await within(canvasElement.ownerDocument.body).findByRole('dialog', { name: '通知' });
+    await waitFor(() => expect(within(dialog).getByRole('alert')).toBeVisible());
+    await expect(within(dialog).getByRole('button', { name: '通知を閉じる' })).toBeEnabled();
   },
 };

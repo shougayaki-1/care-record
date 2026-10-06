@@ -31,7 +31,7 @@ import { updateClientGoogleLink } from '@/app/actions/clients';
 import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import { InnerPageHeader, PageBody, PageLayout, TablePageSkeleton } from '@/components/ui';
+import { AppButton, InnerPageHeader, PageBody, PageLayout, TablePageSkeleton } from '@/components/ui';
 import { checkManagementPermission, checkRecordPermission } from '@/utils/permissions';
 import { buildRecordPath } from '@/utils/recordNavigation';
 import { getReportStatusChipColor, getReportStatusLabel, type ReportStatus } from '@/utils/reportStatus';
@@ -558,6 +558,7 @@ export default function ReportsClientPage() {
         <InnerPageHeader icon={<TagIcon />} title={headerTitle} actions={isExportView && checkManagementPermission(currentOrg.effectivePermissions, 'integrations') ? <Button size="small" startIcon={<SettingsIcon />} onClick={() => router.push('/app/settings?tab=google')}>出力先の設定</Button> : undefined} />
 
        <PageBody maxWidth={false}>
+           {!isExportView && <AppButton intent="secondary" variant="outlined" sx={{ mb: 2 }} onClick={() => router.push('/app/reports/deletion-requests')}>削除申請を確認</AppButton>}
            {!isExportView && aiSentCount > 0 && <Alert severity="warning" sx={{ mb: 2 }} action={
              <Button color="inherit" size="small" onClick={() => router.push('/app/ai-candidates')}>確認する</Button>
            }>

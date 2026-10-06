@@ -1,6 +1,6 @@
 # 通知の共通契約
 
-Issue #59 は通知基盤のみを扱い、業務イベントへの接続は後続 Issue で行う。
+Issue #59 の通知基盤に、Issue #60 の記録・記録削除申請と Issue #62 のシステム障害イベントを接続する。
 通知対象は本人の要対応、本人が行った提出・申請の結果、放置すると業務に支障がある異常に限る。
 保存・通常 CRUD・同期の成功は Toast、操作証跡は audit log の責務とする。
 
@@ -14,7 +14,8 @@ DB helper は migration 内の固定テンプレートから生成し、unit tes
 生成 API は任意の title/content/linkUrl を受け付けない。受信者・事業所・actor・resource は UUID のみ。
 dedupeKey は業務イベント発生ごとに発行した UUID を再試行でも再利用する。
 利用者氏名、支援内容、記録本文、差し戻し理由、医療・介護情報、ファイル名を本文・キーへ入れない。
-リンク先も固定のアプリ内一覧に限定し、未実装の詳細画面にはリンクを設けない。
+リンク先は固定のアプリ内導線に限定する。記録・削除申請はDBで対象の事業所を検証したUUIDだけを
+既存の記録詳細URLまたは削除申請一覧のqueryに追加し、任意URLは受け付けない。
 詳細を表示する際は通常画面で再認可する。通知の受信・閲覧はリソースへの権限を付与しない。
 
 ## 生成と認可
@@ -162,3 +163,54 @@ public schema の再生成型はチェックイン型と一致した。
 Production の `profiles` には初期 migration にある `role` 列が存在せず、既存 `is_super_admin()` も常に false を返す。追加 migration `20261006000005_failure_notification_profile_compat.sql` は `to_jsonb(profile)->>'role'` で任意の旧列を参照する。列が存在する環境では super_admin を除外し、存在しない環境では現行の組織権限と無効ユーザー除外をそのまま適用する。管理者列・権限の追加や既存 migration の書き換えは行わない。RLS と `permissions.ts` の定義は変更せず、既存の private 権限 helper を引き続き使用する。
 
 Production で未適用の 000004 と 000005 は同一トランザクションで実行する。000004 の関数作成時だけ `SET LOCAL check_function_bodies=off` で前方参照の検証を遅延し、000005 の前に on に戻して互換関数を検証する。実行した SQL と migration history を同じトランザクションで記録し、不完全な関数を公開しない。Staging 適用済みの 000004 は維持して 000005 のみ通常適用する。PostgreSQL 17 の関数検証と JSON composite 変換を Context7 の公式文書で確認した。
+
+## 記録・削除申請への接続（Issue #60）
+
+記録の `pending / approved / remanded` への実際の状態変更と、記録削除申請の作成・承認・却下で、
+既存の認可済みRPCによる変更のAFTER triggerから `private.create_notification` を呼ぶ。
+通知は `required` とし、通知失敗時は固定文言をDB server logに残してRPC全体をロールバックする。
+保存・監査・版管理のRPCを分割せず、既存audit eventを維持する。過去の状態は遡及通知しない。
+同じstatusの保存、自動保存、draft保存は通知しない。
+
+| イベント | 受信者 | 分類 |
+| --- | --- | --- |
+| report.submitted | 当該組織のreports管理権限と、対象clientのrecords.approve（allまたは担当済みassigned）を持つメンバー | action_required |
+| report.approved | 記録の提出者（helper_id、現所属がある場合） | info |
+| report.remanded | 記録の提出者（同上） | action_required |
+| deletion_request.created | 当該組織のreports管理権限を持つメンバー | action_required |
+| deletion_request.approved | 申請者（現所属がある場合） | info |
+| deletion_request.rejected | 申請者（同上） | action_required |
+
+退会・Auth削除・ban・super admin・削除済み事業所を受信対象から除外する。
+Hosted profilesの任意の旧role列はJSONで参照し、本番の列なし構成と互換にする。
+受信者判定は `transitionReports` / `transition_reports_authorized` と
+`decide_report_deletion` の現行契約に合わせる。ownerという区分だけで列挙しない。
+削除申請の却下はreports管理権限だけで可能なので、削除承認権限のない管理者も作成通知の対象になる。
+承認は既存どおり追加のdelete権限を要求する。assignedの承認条件はActionがclient担当、DBが記録著者を要求する
+既存の差異を維持し、通知のために権限を変更しない。`permissions.ts` のall/assigned/none・管理booleanと照合済み。
+
+記録の発生UUIDは実際の状態変更ごとにDBで生成し、同一受信者へのRPC replay・同じstatusの二重更新では
+新しい通知を作らない。承認→差し戻し→再提出は別UUIDになる。削除申請は申請UUIDをdedupeに使い、
+同じ申請者・組織・記録の未処理申請をadvisory transaction lock下で再利用する。
+二重送信や同時送信でも申請・通知を増やさず、処理後の新しい申請は別UUIDになる。
+
+記録通知は `/app/record/[clientId]?reportId=...`、削除通知は
+`/app/reports/deletion-requests?requestId=...` へ遷移する。
+通知が現在の選択事業所と異なる場合は、`setLastOrganization` で所属を再認可し、workspaceを再取得してから遷移する。
+所属喪失時は通知履歴だけを保持し、対象画面への遷移は拒否する。リソース権限の喪失は通常の画面・Action・RLSで拒否する。
+申請者の結果確認には、所属と有効sessionを要求する本人のreport申請限定SELECT policyを追加した。
+一覧Actionはsession client + RLSを使い、他人・他組織の申請を返さない。記録詳細リンクも通常のreport SELECT RLSで検証する。
+
+Context7確認: 2026-10-06、Supabase（導入SDK 2.91系、DB PostgreSQL 17）の
+trigger、SECURITY DEFINER / search_path、RLS・トランザクションを確認。
+2026-10-07、Next.js 16.2.9のuseSearchParams / Suspenseを確認し、導入16.3.6の同梱ドキュメントと照合。
+
+検証（2026-10-07）: 専用project ID・空きポートの使い捨てローカルSupabase（CLI 2.108.0）で、
+既存migrationからの更新・空DB再構築の両方で全DBテスト11ファイル358件が成功。
+DB lintにwarning/errorはなく、生成型は既存スクリプトと同じ末尾改行正規化後に一致した。
+独立した2つの認証済みトランザクションによる削除申請の同時送信は同じ申請IDを返し、
+申請1件・作成通知1件（単一処理者fixture）のままcommitされることを確認した。
+unitは116ファイル789件、Storybookは29ファイル87件成功。typecheck、lint（warning 0）、
+本番相当build、service-role台帳検査、CI分類17件、diff-checkも成功。
+E2Eは実行していない。Staging / Productionへのmigration適用・配備は実施していない。
+検証用DBは終了後に停止・破棄した。

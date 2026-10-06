@@ -16,7 +16,7 @@ describe('notification display contract', () => {
     expect(getNotificationLink(null)).toBeNull();
   });
   it('uses the same fixed templates in the DB and application', () => {
-    const sql = readFileSync('supabase/migrations/20261004000001_notification_contract.sql', 'utf8');
+    const sql = readFileSync('supabase/migrations/20261007000001_report_workflow_notifications.sql', 'utf8');
     const template = sql.split('$notification_templates$')[1];
     expect(JSON.parse(template)).toEqual(notificationEvents);
     expect(Object.keys(notificationEvents)).toHaveLength(15);

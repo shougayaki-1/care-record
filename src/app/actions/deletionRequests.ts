@@ -68,19 +68,34 @@ export async function requestReportDeletion(organizationId: string, reportId: st
   });
 }
 
-/** 承認待ち（およびそれ以外）の削除申請を一覧する（owner/manager）。 */
-export async function listDeletionRequests(organizationId: string, status: 'requested' | 'approved' | 'rejected' | 'completed' | 'all' = 'requested') {
+/** 承認待ち（およびそれ以外）の削除申請を一覧する（管理権限または本人の申請）。 */
+export async function listDeletionRequests(organizationId: string, status: 'requested' | 'approved' | 'rejected' | 'completed' | 'all' = 'requested', requestId?: string) {
   return withActionResult('listDeletionRequests', async () => {
-    await assertOrgPermission(organizationId, 'reports');
+    await assertOrgRole(organizationId);
     const sessionClient = await createSessionClient();
     let query = sessionClient
       .from('deletion_requests')
       .select('*, requester:requested_by(name)')
       .eq('organization_id', organizationId);
     if (status !== 'all') query = query.eq('status', status);
+    if (requestId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) throw new ExpectedActionError('VALIDATION_ERROR', '申請IDが不正です');
+      query = query.eq('id', requestId);
+    }
     const { data, error } = await query.order('requested_at', { ascending: false }).limit(200);
     if (error) throw sanitizeDbError(error, 'deletionRequests.list');
-    return data ?? [];
+    const rows = data ?? [];
+    const reportIds = rows.filter(row => row.resource_type === 'report').map(row => row.resource_id);
+    const clientIds = new Map<string, string>();
+    if (reportIds.length > 0) {
+      // Ordinary report SELECT RLS still controls the detail link. A request or
+      // notification never provides access to a report that cannot be viewed.
+      const { data: reports, error: reportError } = await sessionClient.from('reports')
+        .select('id, client_id').in('id', reportIds);
+      if (reportError) throw sanitizeDbError(reportError, 'deletionRequests.report-links');
+      for (const report of reports ?? []) clientIds.set(report.id, report.client_id);
+    }
+    return rows.map(row => ({ ...row, clientId: clientIds.get(row.resource_id) ?? null }));
   });
 }
 
