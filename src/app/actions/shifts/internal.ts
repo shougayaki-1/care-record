@@ -47,13 +47,13 @@ export async function softDeleteShiftIds(
   shiftIds: string[],
   reason: string,
 ) {
-  if (shiftIds.length === 0) return;
+  if (shiftIds.length === 0) return 0;
   const actor = await assertShiftPermission(organizationId, 'delete', { shiftIds });
   const policy = await getRetentionPolicy(organizationId, 'shift');
   const supabase = await createSessionClient();
-  const { error } = await supabase.rpc('soft_delete_shifts_atomic', {
+  const { data: deleted, error } = await supabase.rpc('soft_delete_shifts_atomic', {
     p_org_id: organizationId, p_shift_ids: shiftIds, p_reason: reason,
-    p_retention_until: retentionDeadline(policy.years), p_sync_status: 'synced',
+    p_retention_until: retentionDeadline(policy.years), p_sync_status: 'pending_delete',
   });
   if (error) throw error;
   await recordAuditEvent({
@@ -64,6 +64,7 @@ export async function softDeleteShiftIds(
     reason,
     details: { shiftIds, count: shiftIds.length, legalBasis: policy.legalBasis },
   });
+  return deleted ?? 0;
 }
 
 export async function upsertAssignmentsForStaffs(

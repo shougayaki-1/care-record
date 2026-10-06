@@ -261,7 +261,7 @@ export async function trySyncSilently(
   } catch (error) {
     const syncError = classifyGoogleError(error);
     if (syncError.kind !== 'skipped') {
-      await markShiftGoogleSync(shiftId, 'failed', { error: syncError.message })
+      await markShiftGoogleSync(shiftId, 'failed', { error: action === 'delete' ? `Google削除同期に失敗しました（${syncError.kind}）` : syncError.message })
         .catch((err) => logError('markShiftGoogleSync failed', { organizationId, error: serializeError(err) }));
       logError(`Google Calendar sync (${action}) failed for shift ${shiftId} [${syncError.kind}]`, {
         organizationId,
@@ -293,11 +293,11 @@ export async function processShiftsSequential(
         succeeded += 1;
         continue;
       }
-      await markShiftGoogleSync(shift.id, 'failed', { error: syncError.message })
+      await markShiftGoogleSync(shift.id, 'failed', { error: action === 'delete' ? `Google削除同期に失敗しました（${syncError.kind}）` : syncError.message })
         .catch((err) => logError('markShiftGoogleSync failed', { organizationId, error: serializeError(err) }));
       failedIds.push(shift.id);
       errorKind = syncError.kind;
-      if (syncError.kind === 'auth') break;
+      if (syncError.kind === 'auth' && action !== 'delete') break;
     }
     if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
   }

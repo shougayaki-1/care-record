@@ -219,7 +219,7 @@ export default function ShiftSegmentEditor({
           startIcon={<AddIcon />}
           disabled={disabled}
           onClick={addSegment}
-          sx={{ alignSelf: 'flex-start' }}
+          sx={{ alignSelf: 'flex-start', color: 'primary.dark' }}
         >
           区間を追加
         </Button>
