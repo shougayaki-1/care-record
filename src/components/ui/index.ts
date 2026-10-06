@@ -12,3 +12,4 @@ export * from './SelectionFields';
 export * from './UnitAdornment';
 export * from './RecordFormLayout';
 export * from './AiFilePicker';
+export * from './NotificationsPopover';

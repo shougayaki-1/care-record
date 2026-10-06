@@ -46,7 +46,7 @@ SELECT throws_ok(
 SELECT throws_ok(
   $$ INSERT INTO public.organization_members (organization_id, user_id, role)
      VALUES ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'member') $$,
-  '42501', 'new row violates row-level security policy for table "organization_members"',
+  '42501', 'permission denied for table organization_members',
   'clients without an active authorized tenant session cannot add organization members directly');
 RESET ROLE;
 SELECT ok(NOT has_table_privilege('authenticated','public.reports','UPDATE'), 'clients cannot update reports directly');

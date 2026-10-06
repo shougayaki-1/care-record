@@ -1,7 +1,8 @@
 'use server';
 
-import { withSafeError, sanitizeDbError } from '@/utils/errors';
+import { withSafeError, sanitizeDbError, UserFacingError } from '@/utils/errors';
 import { assertOrgRole, assertOrgPermission, createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
+import { asJsonRecord } from '@/types/json';
 import type { InternalWorkAction } from '@/utils/permissions';
 import { normalizePermissions } from '@/utils/permissions';
 
@@ -28,6 +29,7 @@ export type InternalWorkStaffOption = {
 };
 
 export type SaveInternalWorkInput = {
+  idempotencyKey: string;
   organizationId: string;
   staffId?: string | null;
   title: string;
@@ -98,51 +100,58 @@ async function assertStaffInOrg(organizationId: string, staffId: string): Promis
 }
 
 export async function saveInternalWork(input: SaveInternalWorkInput) {
-  const { userId } = await assertOrgRole(input.organizationId);
-  const permission = await getInternalWorkPermission(input.organizationId, userId, 'create');
-  if (permission.scope === 'none') throw new Error('内勤を記録する権限がありません');
+  return withSafeError('saveInternalWork', async () => {
+    const { userId } = await assertOrgRole(input.organizationId);
+    const permission = await getInternalWorkPermission(input.organizationId, userId, 'create');
+    if (permission.scope === 'none') throw new UserFacingError('内勤を記録する権限がありません');
 
-  const requestedStaffId = input.staffId || permission.ownStaffId;
-  if (!requestedStaffId) throw new Error('ログイン中のアカウントに紐づくスタッフが見つかりません');
-  if (permission.scope !== 'all' && requestedStaffId !== permission.ownStaffId) {
-    throw new Error('他のスタッフの内勤を記録する権限がありません');
-  }
-  await assertStaffInOrg(input.organizationId, requestedStaffId);
+    const requestedStaffId = input.staffId || permission.ownStaffId;
+    if (!requestedStaffId) throw new UserFacingError('ログイン中のアカウントに紐づくスタッフが見つかりません');
+    if (permission.scope !== 'all' && requestedStaffId !== permission.ownStaffId) {
+      throw new UserFacingError('他のスタッフの内勤を記録する権限がありません');
+    }
+    await assertStaffInOrg(input.organizationId, requestedStaffId);
 
-  const title = input.title.trim();
-  const workType = input.workType.trim() || 'meeting';
-  const startAt = new Date(input.startAt);
-  const endAt = new Date(input.endAt);
-  const workHours = Number(input.workHours);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.idempotencyKey)) {
+      throw new UserFacingError('冪等性キーが不正です');
+    }
 
-  if (!title || title.length > 100) throw new Error('件名を1〜100文字で入力してください');
-  if (!Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || endAt <= startAt) {
-    throw new Error('開始・終了日時が不正です');
-  }
-  if (!Number.isFinite(workHours) || workHours <= 0 || workHours > 24) {
-    throw new Error('内勤時間を0より大きく24以下で入力してください');
-  }
+    const title = input.title.trim();
+    const workType = input.workType.trim() || 'meeting';
+    const startAt = new Date(input.startAt);
+    const endAt = new Date(input.endAt);
+    const workHours = Number(input.workHours);
 
-  const sessionClient = await createSessionClient();
-  const { data, error } = await sessionClient
-    .from('internal_work_records')
-    .insert({
-      organization_id: input.organizationId,
-      staff_id: requestedStaffId,
-      recorded_by: userId,
-      title,
-      work_type: workType,
-      start_at: startAt.toISOString(),
-      end_at: endAt.toISOString(),
-      work_hours: workHours,
-      status: 'pending',
-      note: input.note?.trim() || null,
-    })
-    .select('id')
-    .single();
+    if (!title || title.length > 100) throw new UserFacingError('件名を1〜100文字で入力してください');
+    if (!Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || endAt <= startAt) {
+      throw new UserFacingError('開始・終了日時が不正です');
+    }
+    if (!Number.isFinite(workHours) || workHours <= 0 || workHours > 24) {
+      throw new UserFacingError('内勤時間を0より大きく24以下で入力してください');
+    }
 
-  if (error || !data) throw sanitizeDbError(error || new Error('内勤実績を保存できませんでした'), 'action.internalWork');
-  return { success: true, id: data.id as string };
+    const sessionClient = await createSessionClient();
+    const { data, error } = await sessionClient.rpc('save_internal_work_idempotent', {
+      p_organization_id: input.organizationId,
+      p_staff_id: requestedStaffId,
+      p_idempotency_key: input.idempotencyKey,
+      p_title: title,
+      p_work_type: workType,
+      p_start_at: startAt.toISOString(),
+      p_end_at: endAt.toISOString(),
+      p_work_hours: workHours,
+      p_note: input.note?.trim() || '',
+    });
+    if (error?.code === 'CR409') {
+      throw new UserFacingError('同じ保存キーで入力内容が変更されています。入力を変更して保存し直してください。');
+    }
+    if (error) throw sanitizeDbError({ code: error.code }, 'action.internalWork');
+    const result = data && asJsonRecord(data);
+    if (!result || typeof result.id !== 'string') {
+      throw sanitizeDbError({ code: 'invalid_save_result' }, 'action.internalWork');
+    }
+    return { success: true, id: result.id };
+  });
 }
 
 export async function listInternalWorkRecords(

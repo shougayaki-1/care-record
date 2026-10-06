@@ -29,6 +29,13 @@
       "codex/enable-worker-status": false,
       "codex/controller-idle-heartbeat": false,
       "codex/status-fixed-script-download": false,
+      "codex/issue-59-notifications": false,
+      "codex/issue-59-notifications-review": false,
+      "codex/issue-57-account-email-review": false,
+      "codex/issue-48-auth-e2e-review": false,
+      "codex/issue-39-bug-server-action-react-441": false,
+      "codex/issue-39-expected-errors-review": false,
+      "codex/issue-47-idempotency-review": false,
       "codex/issue-74-codex-worker-issue-reasoning-effort": false
     }
   }

@@ -661,6 +661,48 @@ export type Database = {
           },
         ]
       }
+      internal_work_mutation_keys: {
+        Row: {
+          actor_id: string
+          created_at: string
+          idempotency_key: string
+          organization_id: string
+          record_id: string
+          request_hash: string
+        }
+        Insert: {
+          actor_id: string
+          created_at?: string
+          idempotency_key: string
+          organization_id: string
+          record_id: string
+          request_hash: string
+        }
+        Update: {
+          actor_id?: string
+          created_at?: string
+          idempotency_key?: string
+          organization_id?: string
+          record_id?: string
+          request_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "internal_work_mutation_keys_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "internal_work_mutation_keys_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "internal_work_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       internal_work_records: {
         Row: {
           created_at: string
@@ -989,29 +1031,59 @@ export type Database = {
       }
       notifications: {
         Row: {
+          actor_id: string | null
+          category: string | null
           content: string
           created_at: string | null
+          dedupe_key: string | null
+          event_type: string | null
           id: string
           is_read: boolean | null
           link_url: string | null
+          organization_id: string | null
+          priority: string | null
+          read_at: string | null
+          resource_id: string | null
+          resource_type: string | null
+          title: string | null
           type: string
           user_id: string | null
         }
         Insert: {
+          actor_id?: string | null
+          category?: string | null
           content: string
           created_at?: string | null
+          dedupe_key?: string | null
+          event_type?: string | null
           id?: string
           is_read?: boolean | null
           link_url?: string | null
+          organization_id?: string | null
+          priority?: string | null
+          read_at?: string | null
+          resource_id?: string | null
+          resource_type?: string | null
+          title?: string | null
           type: string
           user_id?: string | null
         }
         Update: {
+          actor_id?: string | null
+          category?: string | null
           content?: string
           created_at?: string | null
+          dedupe_key?: string | null
+          event_type?: string | null
           id?: string
           is_read?: boolean | null
           link_url?: string | null
+          organization_id?: string | null
+          priority?: string | null
+          read_at?: string | null
+          resource_id?: string | null
+          resource_type?: string | null
+          title?: string | null
           type?: string
           user_id?: string | null
         }
@@ -2789,6 +2861,14 @@ export type Database = {
         }
         Returns: undefined
       }
+      add_organization_owner_atomic: {
+        Args: {
+          p_org_id: string
+          p_reauth_token: string
+          p_target_user_id: string
+        }
+        Returns: undefined
+      }
       add_report_shift_link: {
         Args: { p_org_id: string; p_report_id: string; p_shift_id: string }
         Returns: undefined
@@ -2842,6 +2922,17 @@ export type Database = {
         }
         Returns: string
       }
+      create_notification: {
+        Args: {
+          p_actor_id?: string
+          p_dedupe_key?: string
+          p_event_type: string
+          p_organization_id?: string
+          p_resource_id?: string
+          p_user_id: string
+        }
+        Returns: string
+      }
       create_organization: { Args: { org_name: string }; Returns: string }
       create_service_type_atomic: {
         Args: { p_name: string; p_organization_id: string }
@@ -2890,6 +2981,10 @@ export type Database = {
         }[]
       }
       get_database_capacity_status: { Args: never; Returns: Json }
+      get_deleted_shift_sync_targets: {
+        Args: { p_limit: number; p_org_id: string }
+        Returns: Json
+      }
       get_google_oauth_context: { Args: { p_org_id: string }; Returns: Json }
       get_google_sync_target: {
         Args: { p_org_id: string; p_shift_id: string }
@@ -3015,6 +3110,20 @@ export type Database = {
       save_generated_shift_atomic: {
         Args: { p_org_id: string; p_payload: Json; p_shift_id: string }
         Returns: string
+      }
+      save_internal_work_idempotent: {
+        Args: {
+          p_end_at: string
+          p_idempotency_key: string
+          p_note: string
+          p_organization_id: string
+          p_staff_id: string
+          p_start_at: string
+          p_title: string
+          p_work_hours: number
+          p_work_type: string
+        }
+        Returns: Json
       }
       save_report_atomic: {
         Args: {

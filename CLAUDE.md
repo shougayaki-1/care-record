@@ -59,8 +59,9 @@
 - 公開アクション全体を `withSafeError('アクション名', async () => { ... })` で包む。
 - 内側は `assert*` → 入力検証 → DB/外部API（エラーは `sanitizeDbError`）→ `recordAuditEvent` の順にする。
 - 既存の検証文言・権限判定・監査イベントを、ラッパー導入だけを理由に変更しない。
-- 利用者に見せる検証・業務エラーは `UserFacingError`（`src/utils/errors.ts`）で throw する。
-  素の `Error` は `SAFE_MESSAGE_PATTERNS` に一致しない限り汎用メッセージに置換される。
+- クライアントが判定・表示する想定済み状態は `ActionResult` 等の型付き戻り値で返す。
+  `UserFacingError` と `SAFE_MESSAGE_PATTERNS` の rethrow は既存のサーバー内互換性用で、
+  production でクライアントに文言が届く保証はない。詳細・移行対象は [docs/server-action-errors.md](docs/server-action-errors.md)。
 
 ## context7 の使い方
 

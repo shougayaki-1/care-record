@@ -240,3 +240,5 @@ Issue 本文の Acceptance Criteria / Required Tests / 完了条件、MUST / 必
 
 
 #50復旧の追加検証では、record等のshared UI外のcomponent変更も親unit/UIの対象にします。自動公開前はVercelのdeploymentEnabledが現在branchについてfalse（または全体false）であることを確認します。vercel.jsonの差分は現在branchのfalse設定だけの変更を許可し、それ以外のdeployment/security設定変更は引き続き人へ返します。確認日: 2026-10-03、Context7 `/nodejs/node` のJSON file read/writeとchild process error/closeを再確認。
+
+2026-10-06（PR #83の最新main追従）: OpenAI公式の[Developer settings](https://learn.chatgpt.com/docs/developer-settings)と[Developer commands](https://learn.chatgpt.com/docs/developer-commands)でmodel、model_reasoning_effortの実行時overrideとexec resumeを再確認した。インストール済みCodex CLI 0.160.0のresume helpとも照合した。Context7でNode.js 24のchild_process.spawnの引数配列とshell=falseを確認した。実モデル呼び出し、稼働worker・保存state・LaunchAgent・ユーザーconfigの変更は行っていない。
