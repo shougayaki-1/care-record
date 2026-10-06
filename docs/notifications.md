@@ -156,3 +156,9 @@ CLI 2.108.0 の別 project ID/port を使い、旧schemaからの追加適用と
 public schema の再生成型はチェックイン型と一致した。
 別々の実トランザクションによる同時更新でも、後続が行ロックを待ち、1 episode と
 受信対象2人の通知だけが作られることを確認した。ホスト済み DB への適用は未実施。
+
+### Hosted profiles の互換性（2026-10-06）
+
+Production の `profiles` には初期 migration にある `role` 列が存在せず、既存 `is_super_admin()` も常に false を返す。追加 migration `20261006000005_failure_notification_profile_compat.sql` は `to_jsonb(profile)->>'role'` で任意の旧列を参照する。列が存在する環境では super_admin を除外し、存在しない環境では現行の組織権限と無効ユーザー除外をそのまま適用する。管理者列・権限の追加や既存 migration の書き換えは行わない。RLS と `permissions.ts` の定義は変更せず、既存の private 権限 helper を引き続き使用する。
+
+Production で未適用の 000004 と 000005 は同一トランザクションで実行する。000004 の関数作成時だけ `SET LOCAL check_function_bodies=off` で前方参照の検証を遅延し、000005 の前に on に戻して互換関数を検証する。実行した SQL と migration history を同じトランザクションで記録し、不完全な関数を公開しない。Staging 適用済みの 000004 は維持して 000005 のみ通常適用する。PostgreSQL 17 の関数検証と JSON composite 変換を Context7 の公式文書で確認した。
