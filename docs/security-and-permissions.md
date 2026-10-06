@@ -42,8 +42,9 @@
 
 - 保持期間ポリシー: `src/utils/supabase/retention.ts` / `retentionPolicy.ts`。シフト削除ではsession clientにlookup用4列のみSELECTを許可し、RLSでactive session・同一組織所属・稼働中組織・shifts.delete=allを検証する。`permissions.ts`の削除scopeと原子的削除RPCのall条件に一致し、権限キーは変更しない。方針の承認・更新・削除とreviewer列は公開しない。
 - 自動purge: `src/app/api/cron/purge/`（`CRON_SECRET`保護、dryRun対応）
-- 削除承認ワークフロー: `src/app/actions/deletionRequests.ts`（申請→owner承認→論理削除。
-  現状バックエンドのみでUI配線はreport限定 — 要確認）
+- 削除承認ワークフロー: `src/app/actions/deletionRequests.ts`（申請→reports管理権限での決定→論理削除。
+  記録削除申請の確認画面: `/app/reports/deletion-requests`。
+  作成・結果は通知へ接続し、本人の申請のみ読むRLSと既存のreports管理者RLSを併用）
 
 ## CSP・セキュリティヘッダ
 

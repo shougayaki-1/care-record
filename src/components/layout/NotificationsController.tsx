@@ -4,8 +4,9 @@ import { readActionResult } from '@/utils/actionResult';
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { markNotificationRead } from '@/app/actions/user';
+import { markNotificationRead, setLastOrganization } from '@/app/actions/user';
 import { NotificationsPopover } from '@/components/ui/NotificationsPopover';
+import { useWorkspace } from '@/context/WorkspaceContext';
 import { getNotificationLink, type NotificationItem } from '@/lib/notifications/model';
 
 export const NotificationsController = React.memo(function NotificationsController({ anchorEl, onClose, onRead, refreshKey }: {
@@ -16,6 +17,7 @@ export const NotificationsController = React.memo(function NotificationsControll
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const router = useRouter();
+  const { currentOrg, refreshWorkspace } = useWorkspace();
 
   useEffect(() => {
     if (!anchorEl) return;
@@ -52,11 +54,15 @@ export const NotificationsController = React.memo(function NotificationsControll
       }
       const link = getNotificationLink(notification.link_url);
       if (link) {
+        if (notification.organization_id && notification.organization_id !== currentOrg?.id) {
+          await readActionResult(setLastOrganization(notification.organization_id));
+          await refreshWorkspace();
+        }
         router.push(link);
         onClose();
       }
     } catch {
-      setError('通知を既読にできませんでした。もう一度お試しください。');
+      setError('通知を開けませんでした。所属・権限を確認してもう一度お試しください。');
     } finally {
       setPendingId(null);
     }

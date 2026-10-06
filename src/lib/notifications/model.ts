@@ -13,6 +13,7 @@ export const notificationEvents = events;
 /** Nullable extension fields preserve notifications written by the previous app. */
 export type NotificationItem = {
   id: string;
+  organization_id?: string | null;
   type: string;
   category?: string | null;
   title?: string | null;
