@@ -36,6 +36,7 @@
       "codex/issue-39-bug-server-action-react-441": false,
       "codex/issue-39-expected-errors-review": false,
       "codex/issue-47-idempotency-review": false,
+      "codex/issue-55-bug-db-0": false,
       "codex/issue-74-codex-worker-issue-reasoning-effort": false
     }
   }
