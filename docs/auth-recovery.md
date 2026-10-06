@@ -41,3 +41,5 @@ Docker Desktop・Supabase CLI・Playwright Chromium を用意してください�
 2026-10-06（PR #82の最新main追従）にContext7でNext.jsのCSP nonceとRoute Handlerの独立Responseを再確認し、Next.js 16.3.6同梱のCSPガイドを参照した。現行の復旧処理とCSPを維持したまま文書の競合を解消した。
 
 Issue #58の再検証（2026-10-06、base `c96b60cbdd1304ec1f02067ee27be4488cd1801d`）: `npm run typecheck`、`npm run lint -- --max-warnings=0`、`npm run test:unit`（90 files / 551 tests）、`npm run test:ui`（27 files / 78 tests）、`npm run build`、`npm run security:service-role`、`git diff --check`が成功した。静的HTMLをJavaScript無効で描画し、240pxライトの復旧、375pxダークの完了、1024pxライトの復旧のスクリーンショットも目視確認した。E2Eはローカル未実行。Supabase/Authはunitでmockし、実サービスへの接続は行っていない。
+
+2026-10-06、mainの保持方針読取権限修正（#92、base `6c38fc907813990482a40b47a08b35d58d6eb366`）を取り込み、typecheck、lint（warning 0）、unit（90 files / 551 tests）、production build、service-role検査、diff checkを再実行して成功した。復旧HTMLとstoryには変更がなく、上記UI試験・目視確認の対象を維持している。直前のPR head `2edb2ab`のGitHub Actionsも成功した。
