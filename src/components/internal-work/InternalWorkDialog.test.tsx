@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@/components/ui/mui';
 import theme from '@/theme';
 import InternalWorkDialog from './InternalWorkDialog';
+import { subscribeRecordFeed } from '@/utils/recordFeedUpdates';
 
 const { save, confirm, toast } = vi.hoisted(() => ({ save: vi.fn(), confirm: vi.fn(), toast: vi.fn() }));
 vi.mock('@/app/actions/internalWork', () => ({ saveInternalWork: save }));
@@ -84,8 +85,49 @@ describe('InternalWorkDialog record UI', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(save).toHaveBeenCalledTimes(2); expect(within(dialog).getByDisplayValue('会議')).toBeTruthy();
+    expect(save.mock.calls[1][0].idempotencyKey).toBe(save.mock.calls[0][0].idempotencyKey);
     expect(within(dialog).getByLabelText('メモ')).toHaveProperty('value', '');
     expect(within(dialog).getByLabelText('内勤時間', { exact: false })).toHaveProperty('value', '1');
+  });
+  it('uses a new key after editing failed input, then after success even for identical content', async () => {
+    save.mockRejectedValueOnce(new Error('offline'));
+    const { dialog, onClose } = open();
+    const button = within(dialog).getByRole('button', { name: '保存' });
+    fireEvent.click(button);
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.any(String), 'error'));
+    fireEvent.change(within(dialog).getByLabelText('メモ'), { target: { value: '別件' } });
+    fireEvent.click(button);
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(save.mock.calls[1][0].idempotencyKey).not.toBe(save.mock.calls[0][0].idempotencyKey);
+    fireEvent.change(within(dialog).getByLabelText('メモ'), { target: { value: '別件' } });
+    fireEvent.click(button);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[2][0].idempotencyKey).not.toBe(save.mock.calls[1][0].idempotencyKey);
+  });
+  it('refreshes the feed without duplicates after a committed save loses its response', async () => {
+    const records = new Map<string, string>();
+    let feed: string[] = [];
+    const refresh = vi.fn(async () => { feed = [...records.values()]; });
+    const stop = subscribeRecordFeed('org-1', refresh);
+    save.mockImplementation(async (input: { idempotencyKey: string }) => {
+      records.set(input.idempotencyKey, 'saved-work');
+      if (save.mock.calls.length === 1) throw new Error('response lost');
+      return { success: true, id: records.get(input.idempotencyKey) };
+    });
+    try {
+      const { dialog, onClose } = open();
+      const button = within(dialog).getByRole('button', { name: '保存' });
+      fireEvent.click(button);
+      await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.any(String), 'error'));
+      expect(refresh).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      fireEvent.click(button);
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+      expect(save.mock.calls[1][0]).toEqual(save.mock.calls[0][0]);
+      expect(records.size).toBe(1);
+      expect(refresh).toHaveBeenCalledOnce();
+      expect(feed).toEqual(['saved-work']);
+    } finally { stop(); }
   });
   it('does not save twice while the first request is unresolved', async () => {
     let finish!: () => void; save.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
