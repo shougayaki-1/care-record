@@ -1,0 +1,17 @@
+{
+  "report.submitted": { "category": "action_required", "priority": "high", "title": "記録の承認待ち", "content": "提出された記録を確認してください。", "resourceType": "report", "linkUrl": "/app/reports" },
+  "report.approved": { "category": "info", "priority": "normal", "title": "記録が承認されました", "content": "提出した記録が承認されました。", "resourceType": "report", "linkUrl": "/app/reports" },
+  "report.remanded": { "category": "action_required", "priority": "high", "title": "記録が差し戻されました", "content": "内容を確認して修正してください。", "resourceType": "report", "linkUrl": "/app/reports" },
+  "deletion_request.created": { "category": "action_required", "priority": "high", "title": "削除申請の確認待ち", "content": "削除申請を確認してください。", "resourceType": "deletion_request", "linkUrl": null },
+  "deletion_request.approved": { "category": "info", "priority": "normal", "title": "削除申請が承認されました", "content": "申請の結果を確認してください。", "resourceType": "deletion_request", "linkUrl": null },
+  "deletion_request.rejected": { "category": "info", "priority": "normal", "title": "削除申請が却下されました", "content": "申請の結果を確認してください。", "resourceType": "deletion_request", "linkUrl": null },
+  "shift.assigned": { "category": "info", "priority": "normal", "title": "シフトが割り当てられました", "content": "担当シフトを確認してください。", "resourceType": "shift", "linkUrl": "/app/shifts/my" },
+  "shift.unassigned": { "category": "info", "priority": "normal", "title": "シフトの担当が解除されました", "content": "担当シフトの変更を確認してください。", "resourceType": "shift", "linkUrl": "/app/shifts/my" },
+  "shift.time_changed": { "category": "info", "priority": "high", "title": "シフトの時間が変更されました", "content": "変更後のシフトを確認してください。", "resourceType": "shift", "linkUrl": "/app/shifts/my" },
+  "shift.cancelled": { "category": "info", "priority": "high", "title": "シフトが中止されました", "content": "担当シフトの変更を確認してください。", "resourceType": "shift", "linkUrl": "/app/shifts/my" },
+  "shift.reopened": { "category": "info", "priority": "high", "title": "シフトが再開されました", "content": "担当シフトの変更を確認してください。", "resourceType": "shift", "linkUrl": "/app/shifts/my" },
+  "google_calendar.sync_failed": { "category": "warning", "priority": "high", "title": "Googleカレンダーの同期に失敗しました", "content": "未同期のシフトを確認してください。", "resourceType": null, "linkUrl": "/app/shifts/manage" },
+  "backup.failed": { "category": "warning", "priority": "critical", "title": "バックアップに失敗しました", "content": "バックアップの状態を確認してください。", "resourceType": null, "linkUrl": "/app/backup" },
+  "account.permissions_changed": { "category": "info", "priority": "normal", "title": "権限が変更されました", "content": "事業所で利用できる機能が変更されました。", "resourceType": "account", "linkUrl": null },
+  "account.removed_from_organization": { "category": "info", "priority": "high", "title": "事業所の所属が解除されました", "content": "この事業所へのアクセス権がなくなりました。", "resourceType": "account", "linkUrl": null }
+}

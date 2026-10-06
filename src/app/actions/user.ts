@@ -7,6 +7,7 @@ import { createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 import { serviceRoleForAuthManagement } from '@/utils/supabase/serviceRole';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { sanitizeUploadedImage } from '@/utils/uploadSecurity';
+import { z } from 'zod';
 
 const supabaseAdmin = serviceRoleForAuthManagement();
 
@@ -71,11 +72,17 @@ export async function uploadOwnAvatar(formData: FormData) {
 }
 
 export async function markNotificationRead(notificationId: string) {
-    const { id: userId } = await getAuthedUser();
-    const sessionClient = await createSessionClient();
-    const { error } = await sessionClient.from('notifications').update({ is_read: true }).eq('id', notificationId).eq('user_id', userId);
-    if (error) throw sanitizeDbError(error, 'action.user');
-    return { success: true };
+    return withSafeError('markNotificationRead', async () => {
+        const { id: userId } = await getAuthedUser();
+        if (!z.uuid().safeParse(notificationId).success) throw new UserFacingError('通知の指定が不正です');
+        const sessionClient = await createSessionClient();
+        // The DB trigger uses DB time and preserves the first read timestamp.
+        const { data, error } = await sessionClient.from('notifications').update({ is_read: true })
+            .eq('id', notificationId).eq('user_id', userId).select('read_at').maybeSingle();
+        if (error) throw sanitizeDbError(new Error('notification_read_failed'), 'notification.read');
+        if (!data?.read_at) throw new UserFacingError('通知が見つかりません。通知一覧を開き直してください。');
+        return { success: true, readAt: data.read_at };
+    });
 }
 
 export async function deleteUserAccount(reauthToken: string) {

@@ -33,6 +33,9 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'unit',
+          // 通知の jsdom テストを含む DOM suite の CPU 競合を避ける。
+          // timeout・isolation・アサーションは維持して順番に検証する。
+          maxWorkers: 1,
           environment: 'node',
           include: ['src/**/*.test.{ts,tsx}'],
         },

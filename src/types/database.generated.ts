@@ -1031,29 +1031,59 @@ export type Database = {
       }
       notifications: {
         Row: {
+          actor_id: string | null
+          category: string | null
           content: string
           created_at: string | null
+          dedupe_key: string | null
+          event_type: string | null
           id: string
           is_read: boolean | null
           link_url: string | null
+          organization_id: string | null
+          priority: string | null
+          read_at: string | null
+          resource_id: string | null
+          resource_type: string | null
+          title: string | null
           type: string
           user_id: string | null
         }
         Insert: {
+          actor_id?: string | null
+          category?: string | null
           content: string
           created_at?: string | null
+          dedupe_key?: string | null
+          event_type?: string | null
           id?: string
           is_read?: boolean | null
           link_url?: string | null
+          organization_id?: string | null
+          priority?: string | null
+          read_at?: string | null
+          resource_id?: string | null
+          resource_type?: string | null
+          title?: string | null
           type: string
           user_id?: string | null
         }
         Update: {
+          actor_id?: string | null
+          category?: string | null
           content?: string
           created_at?: string | null
+          dedupe_key?: string | null
+          event_type?: string | null
           id?: string
           is_read?: boolean | null
           link_url?: string | null
+          organization_id?: string | null
+          priority?: string | null
+          read_at?: string | null
+          resource_id?: string | null
+          resource_type?: string | null
+          title?: string | null
           type?: string
           user_id?: string | null
         }
@@ -2881,6 +2911,17 @@ export type Database = {
           p_variable_overtime_period?: string
           p_variable_overtime_threshold_hours?: number
           p_variable_working_hours_enabled?: boolean
+        }
+        Returns: string
+      }
+      create_notification: {
+        Args: {
+          p_actor_id?: string
+          p_dedupe_key?: string
+          p_event_type: string
+          p_organization_id?: string
+          p_resource_id?: string
+          p_user_id: string
         }
         Returns: string
       }
