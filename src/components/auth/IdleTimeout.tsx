@@ -1,5 +1,6 @@
 'use client';
 
+import { readActionResult } from '@/utils/actionResult';
 // セッションのアイドルタイムアウト（3省2ガイドライン: 端末放置対策）。
 // 一定時間無操作で警告し、さらに猶予を過ぎると自動ログアウトする。
 // クライアント側の利便性のための実装であり、サーバー側 middleware による
@@ -59,7 +60,7 @@ export default function IdleTimeout() {
       lastHeartbeat.current = now;
       // heartbeatは補助的な活動記録。通信失敗やCookie反映待ちをログアウトと同一視しない。
       // セッション失効の最終判定はProxy/Server Action側で行う。
-      void heartbeatSession().catch((error) => {
+      void readActionResult(heartbeatSession()).catch((error) => {
         console.warn('session heartbeat failed', error);
       });
     }

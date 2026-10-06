@@ -5,14 +5,14 @@ import { getMyAiSubmissions } from './aiCandidates';
 import { getMyInternalWorkHistory } from './internalWork';
 import { buildRecordFeed } from '@/utils/recordFeed';
 import { createSessionClient } from '@/utils/supabase/auth';
-import { sanitizeDbError, withSafeError } from '@/utils/errors';
+import { requireActionResult, sanitizeDbError, withActionResult } from '@/utils/errors';
 
 export async function getMyRecordFeed(organizationId: string, options: { startAt?: string; endAt?: string } = {}) {
-  return withSafeError('getMyRecordFeed', async () => {
+  return withActionResult('getMyRecordFeed', async () => {
     const [reports, internal, submissions] = await Promise.all([
-      getMyReportHistory(organizationId, options),
-      getMyInternalWorkHistory(organizationId, options),
-      getMyAiSubmissions(organizationId),
+      requireActionResult(getMyReportHistory(organizationId, options)),
+      requireActionResult(getMyInternalWorkHistory(organizationId, options)),
+      requireActionResult(getMyAiSubmissions(organizationId)),
     ]);
     const ids = [...new Set([...reports.items.map((item) => item.authorId), ...internal.map((item) => item.recorded_by), ...submissions.map((item) => item.authorId)].filter((id): id is string => Boolean(id)))];
     const session = await createSessionClient();

@@ -51,3 +51,13 @@ describe('MyShiftsPage action states', () => {
     },
   );
 });
+
+it.each(['FORBIDDEN', 'SESSION_EXPIRED'])('shows %s as a result and offers recovery only for a session failure', async code => {
+  mocks.load.mockResolvedValue({ ok: false, error: { code, message: '安全な状態表示' } });
+  render(<MyShiftsPage />);
+  expect((await screen.findByRole('alert')).textContent).toContain('安全な状態表示');
+  expect(screen.queryByText('この月のシフトはありません')).toBeNull();
+  const recovery = screen.queryByRole('button', { name: 'ログアウトしてやり直す' });
+  if (code === 'SESSION_EXPIRED') expect(recovery?.closest('form')?.getAttribute('action')).toBe('/api/auth/recover');
+  else expect(recovery).toBeNull();
+});

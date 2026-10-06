@@ -1,4 +1,5 @@
 'use client';
+import type { ActionErrorCode } from '@/types/actionResult';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
@@ -115,7 +116,7 @@ export default function MyShiftsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [shifts, setShifts] = useState<MyShiftItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<{ code: 'STAFF_NOT_LINKED' | 'UNEXPECTED'; message: string } | null>(null);
+  const [loadError, setLoadError] = useState<{ code: ActionErrorCode; message: string } | null>(null);
 
   const [currentMonth, setCurrentMonth] = useState<string>(() => {
     const now = new Date();
@@ -138,7 +139,7 @@ export default function MyShiftsPage() {
         setLoadError(result.error);
       }
     } catch {
-      setLoadError({ code: 'UNEXPECTED', message: 'シフトの取得に失敗しました。時間をおいて再度お試しください。' });
+      setLoadError({ code: 'UNEXPECTED_ERROR', message: 'シフトの取得に失敗しました。時間をおいて再度お試しください。' });
     } finally {
       setLoading(false);
     }
@@ -222,7 +223,7 @@ export default function MyShiftsPage() {
               <Typography>この事業所にスタッフとして紐付いていません。管理者に確認してください。</Typography>
             )}
             <AppButton intent="secondary" onClick={() => void fetchShifts(currentMonth)}>再試行</AppButton>
-            <RecoveryLogoutButton />
+            {['STAFF_NOT_LINKED', 'UNAUTHENTICATED', 'SESSION_EXPIRED'].includes(loadError.code) && <RecoveryLogoutButton />}
           </Stack>
         ) : viewMode === 'list' ? (
           <Stack spacing={1.5} maxWidth={600} mx="auto">

@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { googleSyncErrorMessage } from '@/utils/googleSync';
 
@@ -35,7 +36,7 @@ export const useSyncProgress = ({
         }
     }, [showToast]);
 
-    const reportRepairResult = useCallback((res: Awaited<ReturnType<typeof repairGoogleCalendarSync>>) => {
+    const reportRepairResult = useCallback((res: Extract<Awaited<ReturnType<typeof repairGoogleCalendarSync>>, { ok: true }>['data']) => {
         if (!res.connected) {
             showToast('Googleカレンダーが連携されていません。設定画面から接続してください。', 'warning');
         } else if (res.errorKind) {
@@ -49,13 +50,13 @@ export const useSyncProgress = ({
 
     const refreshUnsyncedCount = useCallback(async () => {
         if (!currentOrg) return;
-        const status = await getSyncStatus(currentOrg.id);
+        const status = await readActionResult(getSyncStatus(currentOrg.id));
         setUnsyncedCount(status.unsynced);
     }, [currentOrg, setUnsyncedCount]);
 
     const runUnsyncedSyncLoop = useCallback(async (): Promise<boolean> => {
         if (!currentOrg) return false;
-        const status = await getSyncStatus(currentOrg.id);
+        const status = await readActionResult(getSyncStatus(currentOrg.id));
         if (!status.connected) {
             showToast('Googleカレンダーが連携されていません。設定画面から接続してください。', 'warning');
             return false;
@@ -70,7 +71,7 @@ export const useSyncProgress = ({
             for (;;) {
                 // 進捗モーダルは1件の完了ごとに更新する。まとめて20件を処理すると
                 // 表示が一度に進み、処理が止まったように見えてしまう。
-                const res = await syncUnsyncedBatch(currentOrg.id, 1);
+                const res = await readActionResult(syncUnsyncedBatch(currentOrg.id, 1));
                 done += res.succeeded;
                 failed += res.failed;
                 processed += res.processed;
@@ -89,14 +90,14 @@ export const useSyncProgress = ({
 
     const runForceSyncLoop = useCallback(async (): Promise<boolean> => {
         if (!currentOrg) return false;
-        const status = await getSyncStatus(currentOrg.id);
+        const status = await readActionResult(getSyncStatus(currentOrg.id));
         if (!status.connected) {
             showToast('Googleカレンダーが連携されていません。設定画面から接続してください。', 'warning');
             return false;
         }
         setSyncProgress({ total: 1, current: 0, currentName: 'Googleカレンダーの同期状態を修復中...' });
         try {
-            const res = await repairGoogleCalendarSync(currentOrg.id);
+            const res = await readActionResult(repairGoogleCalendarSync(currentOrg.id));
             setSyncProgress({ total: 1, current: 1, currentName: '同期修復が完了しました' });
             reportRepairResult(res);
             return res.connected && res.failed === 0 && !res.errorKind;
@@ -112,10 +113,12 @@ export const useSyncProgress = ({
         try {
             await runUnsyncedSyncLoop();
             onDataRefresh();
+        } catch (error) {
+            showToast(getActionErrorMessage(error), 'error');
         } finally {
             setRepairingFromBanner(false);
         }
-    }, [currentOrg, runUnsyncedSyncLoop, onDataRefresh]);
+    }, [currentOrg, runUnsyncedSyncLoop, onDataRefresh, showToast]);
 
     const handleForceResyncCalendar = useCallback(async () => {
         if (!currentOrg) return;
@@ -125,10 +128,12 @@ export const useSyncProgress = ({
         try {
             await runForceSyncLoop();
             onDataRefresh();
+        } catch (error) {
+            showToast(getActionErrorMessage(error), 'error');
         } finally {
             setResyncingCal(false);
         }
-    }, [currentOrg, confirm, runForceSyncLoop, onDataRefresh]);
+    }, [currentOrg, confirm, runForceSyncLoop, onDataRefresh, showToast]);
 
     return {
         syncProgress,

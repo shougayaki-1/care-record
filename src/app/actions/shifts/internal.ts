@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { sanitizeDbError, UserFacingError } from '@/utils/errors';
+import { ExpectedActionError, sanitizeDbError } from '@/utils/errors';
 import { logError, serializeError } from '@/utils/log';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
@@ -32,7 +32,7 @@ export async function assertShiftsAccessible(shiftIds: string[]): Promise<void> 
     .select('id, organization_id')
     .in('id', shiftIds);
   if (error) throw sanitizeDbError(error, 'assertShiftsAccessible');
-  if ((data?.length || 0) !== shiftIds.length) throw new Error('対象シフトが見つかりません');
+  if ((data?.length || 0) !== shiftIds.length) throw new ExpectedActionError('NOT_FOUND', '対象シフトが見つかりません');
 
   const orgIds = Array.from(new Set((data || []).map((shift) => shift.organization_id)));
   for (const orgId of orgIds) {
@@ -57,7 +57,7 @@ export async function softDeleteShiftIds(
     p_retention_until: retentionDeadline(policy.years), p_sync_status: 'pending_delete',
   });
   if (error) throw sanitizeDbError(error, 'softDeleteShiftIds');
-  if (data !== shiftIds.length) throw new UserFacingError('対象シフトを削除できませんでした。再読み込みしてお試しください。');
+  if (data !== shiftIds.length) throw new ExpectedActionError('VALIDATION_ERROR', '対象シフトを削除できませんでした。再読み込みしてお試しください。');
   await recordAuditEvent({
     organizationId,
     actorId: actor.userId,
@@ -132,7 +132,7 @@ export async function updateShiftInternal(
       if (payload.organizationId) query = query.eq('organization_id', payload.organizationId);
       const { data, error } = await query.select('id, organization_id').maybeSingle();
       if (error) throw sanitizeDbError(error, 'updateShiftInternal');
-      if (!data) throw new UserFacingError('シフトを更新できませんでした。再読み込みしてお試しください。');
+      if (!data) throw new ExpectedActionError('VALIDATION_ERROR', 'シフトを更新できませんでした。再読み込みしてお試しください。');
       targetOrgId = data.organization_id;
     }
 

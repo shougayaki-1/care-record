@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { useEffect, useState, useCallback } from 'react';
 import { Box, IconButton, Stack, Tooltip } from '@/components/ui/mui';
@@ -82,7 +83,7 @@ export default function ClientsPage() {
     if (!newName.trim() || !currentOrg) return;
     setIsSubmitting(true);
     try {
-      const data = await createClient(currentOrg.id, newName);
+      const data = await readActionResult(createClient(currentOrg.id, newName));
       setClients([{ ...data, assignments: [] }, ...clients]);
       setOpenAdd(false);
       setNewName('');
@@ -90,7 +91,7 @@ export default function ClientsPage() {
       router.push(`/app/clients/${data.id}?setup=1`);
     } catch (error) { 
         console.error(error); 
-        showToast('登録に失敗しました', 'error'); 
+        showToast(getActionErrorMessage(error, '登録に失敗しました'), 'error');
     } finally { 
         setIsSubmitting(false); 
     }
@@ -102,13 +103,13 @@ export default function ClientsPage() {
       if (!editName.trim()) return;
       setIsSubmitting(true);
       try {
-          const result = await updateClientName(currentOrg!.id, editId, editName);
+          const result = await readActionResult(updateClientName(currentOrg!.id, editId, editName));
           setClients(clients.map(c => c.id === editId ? { ...c, name: result.name } : c));
           setOpenEdit(false);
           showToast('更新しました');
       } catch (error) { 
           console.error(error); 
-          showToast('更新に失敗しました', 'error'); 
+          showToast(getActionErrorMessage(error, '更新に失敗しました'), 'error');
       } finally { 
           setIsSubmitting(false); 
       }
@@ -116,25 +117,25 @@ export default function ClientsPage() {
 
   const handleArchive = async (id: string, isArchive: boolean) => {
       try {
-          await setClientArchived(currentOrg!.id, id, isArchive);
+          await readActionResult(setClientArchived(currentOrg!.id, id, isArchive));
           
           showToast(isArchive ? 'アーカイブしました' : '復元しました');
           fetchClients();
       } catch(e) { 
           console.error(e);
-          showToast('エラーが発生しました', 'error'); 
+          showToast(getActionErrorMessage(e, 'エラーが発生しました'), 'error');
       }
   };
 
   const handleDelete = async (id: string) => {
       if(!(await confirm({ title: '利用者の削除', message: 'この利用者を削除状態にしますか？\n介護記録は保持期間中そのまま保存され、通常画面には表示されなくなります。', confirmText: '削除する', confirmColor: 'error' }))) return;
       try {
-          await softDeleteClient(currentOrg!.id, id, '利用者管理画面から削除');
+          await readActionResult(softDeleteClient(currentOrg!.id, id, '利用者管理画面から削除'));
           showToast('削除状態にしました');
           fetchClients();
       } catch(e) { 
           console.error(e);
-          showToast('削除できませんでした。権限などを確認してください。', 'error'); 
+          showToast(getActionErrorMessage(e, '削除できませんでした。権限などを確認してください。'), 'error');
       }
   };
 

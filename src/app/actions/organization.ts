@@ -1,6 +1,7 @@
 'use server';
+import type { ActionResult } from '@/types/actionResult';
 
-import { logExternalError, sanitizeDbError } from '@/utils/errors';
+import { ExpectedActionError, logExternalError, sanitizeDbError, withActionResult } from '@/utils/errors';
 
 import { createSessionClient, assertOrgRole, assertOrgPermission, assertOwner } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
@@ -10,94 +11,106 @@ import { google } from 'googleapis';
 import { consumeReauthGrant } from '@/utils/supabase/reauth';
 
 export async function updateOrganizationName(orgId: string, name: string) {
-    const { userId } = await assertOrgPermission(orgId, 'organization');
-    const normalized = name.trim();
-    if (normalized.length < 1 || normalized.length > 100) throw new Error('事業所名は1〜100文字で入力してください');
-    const sessionClient = await createSessionClient();
-    const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'name', p_value: normalized });
-    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
-    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'organization.update', resourceType: 'organization', resourceId: orgId, details: { fields: ['name'] } });
-    return { success: true };
+  return withActionResult('updateOrganizationName', async () => {
+      const { userId } = await assertOrgPermission(orgId, 'organization');
+      const normalized = name.trim();
+      if (normalized.length < 1 || normalized.length > 100) throw new ExpectedActionError('VALIDATION_ERROR', '事業所名は1〜100文字で入力してください');
+      const sessionClient = await createSessionClient();
+      const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'name', p_value: normalized });
+      if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
+      await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'organization.update', resourceType: 'organization', resourceId: orgId, details: { fields: ['name'] } });
+      return { success: true };
+  });
 }
 
 export async function updateOrganizationDriveFolder(orgId: string, folderId: string | null) {
-    const { userId } = await assertOrgPermission(orgId, 'integrations');
-    const normalized = folderId?.trim() || null;
-    if (normalized && normalized.length > 255) throw new Error('フォルダIDが不正です');
-    const sessionClient = await createSessionClient();
-    const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'drive_folder', p_value: normalized ?? '' });
-    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
-    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: normalized ? 'integration.drive.connect' : 'integration.drive.disconnect', resourceType: 'organization', resourceId: orgId });
-    return { success: true };
+  return withActionResult('updateOrganizationDriveFolder', async () => {
+      const { userId } = await assertOrgPermission(orgId, 'integrations');
+      const normalized = folderId?.trim() || null;
+      if (normalized && normalized.length > 255) throw new ExpectedActionError('VALIDATION_ERROR', 'フォルダIDが不正です');
+      const sessionClient = await createSessionClient();
+      const { error } = await sessionClient.rpc('update_organization_setting', { p_org_id: orgId, p_setting: 'drive_folder', p_value: normalized ?? '' });
+      if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
+      await recordAuditEvent({ organizationId: orgId, actorId: userId, action: normalized ? 'integration.drive.connect' : 'integration.drive.disconnect', resourceType: 'organization', resourceId: orgId });
+      return { success: true };
+  });
 }
 
 export async function disconnectGoogleCalendar(orgId: string, reauthToken: string) {
-    const { userId } = await assertOrgPermission(orgId, 'integrations');
-    const reauth = await consumeReauthGrant('external_secret_change', reauthToken);
-    if (reauth.userId !== userId) throw new Error('再認証した利用者が一致しません');
-    const sessionClient = await createSessionClient();
-    const { data: org, error: readError } = await sessionClient.from('organizations').select('google_refresh_token').eq('id', orgId).single();
-    if (readError) throw new Error(readError.message);
-    let revoked = false;
-    if (org.google_refresh_token) {
-        try {
-            await getGoogleOAuthClient().revokeToken(decryptGoogleToken(org.google_refresh_token));
-            revoked = true;
-        } catch (error) {
-            logExternalError('google.token-revocation', error, { organizationId: orgId });
-        }
-    }
-    const { error } = await sessionClient.rpc('update_organization_setting', {
-        p_org_id: orgId, p_setting: 'calendar_disconnect', p_value: '',
-    });
-    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
-    await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'integration.calendar.disconnect', resourceType: 'organization', resourceId: orgId, details: { providerRevoked: revoked } });
-    return { success: true, providerRevoked: revoked };
+  return withActionResult('disconnectGoogleCalendar', async () => {
+      const { userId } = await assertOrgPermission(orgId, 'integrations');
+      const reauth = await consumeReauthGrant('external_secret_change', reauthToken);
+      if (reauth.userId !== userId) throw new ExpectedActionError('FORBIDDEN', '再認証した利用者が一致しません');
+      const sessionClient = await createSessionClient();
+      const { data: org, error: readError } = await sessionClient.from('organizations').select('google_refresh_token').eq('id', orgId).single();
+      if (readError) throw sanitizeDbError(readError, 'action.organization.disconnect.read', { organizationId: orgId });
+      let revoked = false;
+      if (org.google_refresh_token) {
+          try {
+              await getGoogleOAuthClient().revokeToken(decryptGoogleToken(org.google_refresh_token));
+              revoked = true;
+          } catch (error) {
+              logExternalError('google.token-revocation', error, { organizationId: orgId });
+          }
+      }
+      const { error } = await sessionClient.rpc('update_organization_setting', {
+          p_org_id: orgId, p_setting: 'calendar_disconnect', p_value: '',
+      });
+      if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
+      await recordAuditEvent({ organizationId: orgId, actorId: userId, action: 'integration.calendar.disconnect', resourceType: 'organization', resourceId: orgId, details: { providerRevoked: revoked } });
+      return { success: true, providerRevoked: revoked };
+  });
 }
 
 export async function deleteOrganization(orgId: string, reauthToken: string) {
-    // 権限チェック: owner かつ organizationDelete 権限が必要
-    const { userId, isOwner } = await assertOrgPermission(orgId, 'organizationDelete');
-    if (!isOwner) throw new Error('事業所の削除はオーナーのみ実行できます');
-    const reauth = await consumeReauthGrant('organization_delete', reauthToken);
-    if (reauth.userId !== userId) throw new Error('再認証した利用者が一致しません');
+  return withActionResult('deleteOrganization', async () => {
+      // 権限チェック: owner かつ organizationDelete 権限が必要
+      const { userId, isOwner } = await assertOrgPermission(orgId, 'organizationDelete');
+      if (!isOwner) throw new ExpectedActionError('FORBIDDEN', '事業所の削除はオーナーのみ実行できます');
+      const reauth = await consumeReauthGrant('organization_delete', reauthToken);
+      if (reauth.userId !== userId) throw new ExpectedActionError('FORBIDDEN', '再認証した利用者が一致しません');
 
-    const sessionClient = await createSessionClient();
-    const { error } = await sessionClient.rpc('soft_delete_organization', { p_org_id: orgId });
-    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
+      const sessionClient = await createSessionClient();
+      const { error } = await sessionClient.rpc('soft_delete_organization', { p_org_id: orgId });
+      if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
     
-    return { success: true };
+      return { success: true };
+  });
 }
 
 export async function leaveOrganization(orgId: string) {
-    // 脱退対象はRPC内で auth.uid() から解決する。
-    const sessionClient = await createSessionClient();
-    const { error } = await sessionClient.rpc('leave_organization_atomic', { p_org_id: orgId });
-    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
+  return withActionResult('leaveOrganization', async () => {
+      // 脱退対象はRPC内で auth.uid() から解決する。
+      const sessionClient = await createSessionClient();
+      const { error } = await sessionClient.rpc('leave_organization_atomic', { p_org_id: orgId });
+      if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
 
-    return { success: true };
+      return { success: true };
+  });
 }
 
 export async function transferOwner(orgId: string, newOwnerId: string, reauthToken: string) {
-    // 譲渡できるのは現 owner 本人のみ。現 owner はセッションから取得する
-    const { userId: currentOwnerId } = await assertOwner(orgId);
-    await assertOrgPermission(orgId, 'ownerTransfer');
-    const reauth = await consumeReauthGrant('owner_transfer', reauthToken);
-    if (reauth.userId !== currentOwnerId) throw new Error('再認証した利用者が一致しません');
+  return withActionResult('transferOwner', async () => {
+      // 譲渡できるのは現 owner 本人のみ。現 owner はセッションから取得する
+      const { userId: currentOwnerId } = await assertOwner(orgId);
+      await assertOrgPermission(orgId, 'ownerTransfer');
+      const reauth = await consumeReauthGrant('owner_transfer', reauthToken);
+      if (reauth.userId !== currentOwnerId) throw new ExpectedActionError('FORBIDDEN', '再認証した利用者が一致しません');
 
-    // 両方の UPDATE を単一トランザクション内で原子的に実行する RPC を使用
-    // 分割 UPDATE だと1件目成功・2件目失敗で2オーナー状態になりうるため
-    const sessionClient = await createSessionClient();
-    const { error } = await sessionClient.rpc('transfer_owner_atomic', {
-        p_org_id: orgId,
-        p_new_owner_id: newOwnerId,
-        p_current_owner_id: currentOwnerId,
-    });
-    if (error?.message === 'invalid_transfer_target') throw new Error('譲渡先が不正です');
-    if (error?.message === 'target_not_member') throw new Error('譲渡先がこの事業所のメンバーではありません');
-    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
+      // 両方の UPDATE を単一トランザクション内で原子的に実行する RPC を使用
+      // 分割 UPDATE だと1件目成功・2件目失敗で2オーナー状態になりうるため
+      const sessionClient = await createSessionClient();
+      const { error } = await sessionClient.rpc('transfer_owner_atomic', {
+          p_org_id: orgId,
+          p_new_owner_id: newOwnerId,
+          p_current_owner_id: currentOwnerId,
+      });
+      if (error?.message === 'invalid_transfer_target') throw new ExpectedActionError('VALIDATION_ERROR', '譲渡先が不正です');
+      if (error?.message === 'target_not_member') throw new ExpectedActionError('VALIDATION_ERROR', '譲渡先がこの事業所のメンバーではありません');
+      if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
 
-    return { success: true };
+      return { success: true };
+  });
 }
 
 export type AuditLogFilters = {
@@ -122,6 +135,7 @@ function applyAuditFilters<T extends { gte: (c: string, v: string) => T; lte: (c
 }
 
 export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {}) {
+    return withActionResult('getAuditLogs', async () => {
     await assertOrgPermission(orgId, 'auditLogs');
     const limit = Math.min(Math.max(filters.limit ?? 100, 1), 200);
     const offset = Math.max(filters.offset ?? 0, 0);
@@ -138,56 +152,61 @@ export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {})
 
     if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
     return data;
+    });
 }
 
 /** 監査ログをCSV化して返す。監査エビデンス出力自体も監査記録する。 */
-export async function exportAuditLogsCsv(orgId: string, filters: AuditLogFilters = {}): Promise<{ filename: string; csv: string }> {
-    const { userId } = await assertOrgPermission(orgId, 'auditLogs');
-    const EXPORT_CAP = 10000;
-    const sessionClient = await createSessionClient();
-    let query = sessionClient
-        .from('audit_events')
-        .select('created_at, action_type, resource_type, resource_id, outcome, actor_id, ip_hash, profiles:actor_id(name)')
-        .eq('organization_id', orgId);
-    query = applyAuditFilters(query as never, filters) as never;
-    const { data, error } = await query
-        .order('created_at', { ascending: false })
-        .limit(EXPORT_CAP);
-    if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
+export async function exportAuditLogsCsv(orgId: string, filters: AuditLogFilters = {}): Promise<ActionResult<{ filename: string; csv: string }>> {
+  return withActionResult('exportAuditLogsCsv', async () => {
+      const { userId } = await assertOrgPermission(orgId, 'auditLogs');
+      const EXPORT_CAP = 10000;
+      const sessionClient = await createSessionClient();
+      let query = sessionClient
+          .from('audit_events')
+          .select('created_at, action_type, resource_type, resource_id, outcome, actor_id, ip_hash, profiles:actor_id(name)')
+          .eq('organization_id', orgId);
+      query = applyAuditFilters(query as never, filters) as never;
+      const { data, error } = await query
+          .order('created_at', { ascending: false })
+          .limit(EXPORT_CAP);
+      if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
 
-    const rows = (data ?? []) as Array<Record<string, unknown> & { profiles?: { name?: string } | null }>;
-    const header = ['日時', '操作者', '操作内容', '対象種別', '対象ID', '結果', 'IPハッシュ'];
-    const escape = (v: unknown) => {
-        const s = v == null ? '' : String(v);
-        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = rows.map((r) => [
-        r.created_at, r.profiles?.name ?? '', r.action_type, r.resource_type, r.resource_id ?? '', r.outcome, r.ip_hash ?? '',
-    ].map(escape).join(','));
-    const csv = '﻿' + [header.join(','), ...lines].join('\r\n'); // BOM付きでExcel互換
+      const rows = (data ?? []) as Array<Record<string, unknown> & { profiles?: { name?: string } | null }>;
+      const header = ['日時', '操作者', '操作内容', '対象種別', '対象ID', '結果', 'IPハッシュ'];
+      const escape = (v: unknown) => {
+          const s = v == null ? '' : String(v);
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const lines = rows.map((r) => [
+          r.created_at, r.profiles?.name ?? '', r.action_type, r.resource_type, r.resource_id ?? '', r.outcome, r.ip_hash ?? '',
+      ].map(escape).join(','));
+      const csv = '﻿' + [header.join(','), ...lines].join('\r\n'); // BOM付きでExcel互換
 
-    await recordAuditEvent({
-        organizationId: orgId,
-        actorId: userId,
-        action: 'audit.export',
-        resourceType: 'audit',
-        details: { count: rows.length, filters },
-    });
+      await recordAuditEvent({
+          organizationId: orgId,
+          actorId: userId,
+          action: 'audit.export',
+          resourceType: 'audit',
+          details: { count: rows.length, filters },
+      });
 
-    return { filename: `audit_${orgId}_${new Date().toISOString().slice(0, 10)}.csv`, csv };
+      return { filename: `audit_${orgId}_${new Date().toISOString().slice(0, 10)}.csv`, csv };
+  });
 }
 
 export async function addAuditLog(params: { orgId: string, action: string, target?: string, details?: Record<string, unknown> }) {
-    // actor はセッションから取得し、当該事業所のメンバーであることを検証（ログ偽造防止）
-    const { userId } = await assertOrgRole(params.orgId);
-    await recordAuditEvent({
-        organizationId: params.orgId,
-        actorId: userId,
-        action: params.action,
-        resourceType: 'legacy',
-        resourceId: params.target,
-        details: params.details,
-    });
+  return withActionResult('addAuditLog', async () => {
+      // actor はセッションから取得し、当該事業所のメンバーであることを検証（ログ偽造防止）
+      const { userId } = await assertOrgRole(params.orgId);
+      await recordAuditEvent({
+          organizationId: params.orgId,
+          actorId: userId,
+          action: params.action,
+          resourceType: 'legacy',
+          resourceId: params.target,
+          details: params.details,
+      });
+  });
 }
 
 export type CloudLogFilters = {
@@ -205,10 +224,11 @@ export type CloudLogEntry = {
     text: string;
 };
 
-export async function listCloudLogEntries(orgId: string, filters: CloudLogFilters = {}): Promise<CloudLogEntry[]> {
+export async function listCloudLogEntries(orgId: string, filters: CloudLogFilters = {}): Promise<ActionResult<CloudLogEntry[]>> {
+    return withActionResult('listCloudLogEntries', async () => {
     await assertOrgPermission(orgId, 'auditLogs');
     const projectId = process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-    if (!projectId) throw new Error('GCP_PROJECT_ID が設定されていません');
+    if (!projectId) throw new ExpectedActionError('NOT_CONFIGURED', 'クラウドログの取得先が設定されていません');
 
     const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/cloud-platform.read-only'] });
     const logging = google.logging({ version: 'v2', auth });
@@ -235,5 +255,6 @@ export async function listCloudLogEntries(orgId: string, filters: CloudLogFilter
             logName: entry.logName ?? '',
             text: payload,
         };
+    });
     });
 }

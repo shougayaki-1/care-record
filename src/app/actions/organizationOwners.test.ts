@@ -1,3 +1,5 @@
+import { ExpectedActionError } from '@/utils/errors';
+import { readActionResult } from '@/utils/actionResult';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ owner: vi.fn(), from: vi.fn(), rpc: vi.fn() }));
 vi.mock('@/utils/supabase/auth', () => ({ assertOwner: mocks.owner,
@@ -18,35 +20,35 @@ beforeEach(() => {
 });
 describe('owner addition Action', () => {
   it('delegates grant consumption and audit to the atomic RPC', async () => {
-    await expect(addOrganizationOwner(org, member, 'proof')).resolves.toEqual({ success: true });
+    await expect(readActionResult(addOrganizationOwner(org, member, 'proof'))).resolves.toEqual({ success: true });
     expect(mocks.owner).toHaveBeenCalledWith(org);
     expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('add_organization_owner_atomic', {
       p_org_id: org, p_target_user_id: member, p_reauth_token: 'proof',
     });
   });
   it('rejects non-owners before querying or mutating', async () => {
-    mocks.owner.mockRejectedValue(new Error('オーナー権限が必要です'));
-    await expect(addOrganizationOwner(org, member, 'proof')).rejects.toThrow('権限');
+    mocks.owner.mockRejectedValue(new ExpectedActionError('FORBIDDEN', 'オーナー権限が必要です'));
+    await expect(readActionResult(addOrganizationOwner(org, member, 'proof'))).rejects.toThrow('権限');
     expect(mocks.from).not.toHaveBeenCalled(); expect(mocks.rpc).not.toHaveBeenCalled();
   });
   it.each([['invalid', 'proof'], [member, ''], [actor, 'proof']])('rejects invalid target or proof %s', async (target, proof) => {
-    await expect(addOrganizationOwner(org, target, proof)).rejects.toThrow();
+    await expect(readActionResult(addOrganizationOwner(org, target, proof))).rejects.toThrow();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
   it.each([null, { role: 'owner' }])('rejects a non-member target', async data => {
     mocks.from.mockReturnValue(query(data));
-    await expect(addOrganizationOwner(org, member, 'proof')).rejects.toThrow('参加済み');
+    await expect(readActionResult(addOrganizationOwner(org, member, 'proof'))).rejects.toThrow('参加済み');
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
   it('rejects deleted targets', async () => {
     mocks.from.mockImplementation(table => query(table === 'profiles' ? { deleted_at: '2026-10-01' } : { role: 'member' }));
-    await expect(addOrganizationOwner(org, member, 'proof')).rejects.toThrow('利用できません');
+    await expect(readActionResult(addOrganizationOwner(org, member, 'proof'))).rejects.toThrow('利用できません');
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
   it('shows safe reauth errors and hides unexpected database details', async () => {
     mocks.rpc.mockResolvedValueOnce({ error: { message: 'owner_add_requires_reauthentication' } });
-    await expect(addOrganizationOwner(org, member, 'proof')).rejects.toThrow('もう一度再認証');
+    await expect(readActionResult(addOrganizationOwner(org, member, 'proof'))).rejects.toThrow('もう一度再認証');
     mocks.rpc.mockResolvedValueOnce({ error: { message: 'sensitive database detail' } });
-    await expect(addOrganizationOwner(org, member, 'proof')).rejects.toThrow('処理に失敗しました');
+    await expect(readActionResult(addOrganizationOwner(org, member, 'proof'))).rejects.toThrow('処理に失敗しました');
   });
 });

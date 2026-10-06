@@ -1,5 +1,6 @@
 'use client';
 
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Box, Stack, Typography } from '@/components/ui/mui';
 import { AppButton, AppTextField } from '@/components/ui';
@@ -31,12 +32,12 @@ export function PasswordRecoveryForm({ mode, validLink = true }: { mode: 'reques
     inFlight.current = true; setBusy(true); setMessage(null);
     try {
       if (mode === 'request') {
-        const result = await requestPasswordReset(email);
+        const result = await readActionResult(requestPasswordReset(email));
         if (!result.ok) throw new Error('メールアドレスを確認してください');
         setMessage({ severity: 'success', text: PASSWORD_RESET_SENT_MESSAGE });
         setCooldown(60);
       } else {
-        await finishPasswordReset(password, confirmation);
+        await readActionResult(finishPasswordReset(password, confirmation));
         setPassword(''); setConfirmation('');
         setMessage({ severity: 'success', text: 'パスワードを再設定しました。ログアウトしてログイン画面に戻ります。' });
         const { logoutCurrentUser } = await import('@/utils/clientLogout');
@@ -45,7 +46,7 @@ export function PasswordRecoveryForm({ mode, validLink = true }: { mode: 'reques
     } catch (error) {
       setMessage({ severity: 'error', text: mode === 'request'
         ? '送信処理を完了できませんでした。時間をおいて再度お試しください。'
-        : error instanceof Error ? error.message : '再設定できませんでした。新しいリンクを取得してください。' });
+        : getActionErrorMessage(error, '再設定できませんでした。新しいリンクを取得してください。') });
     } finally {
       setPassword(''); setConfirmation(''); setBusy(false); inFlight.current = false;
     }

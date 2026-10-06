@@ -14,7 +14,7 @@ describe('password reauth and existing grant guarantees', () => {
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
   });
   it('records a wrong password and issues no proof', async () => {
-    mocks.signIn.mockResolvedValue({ data: { user: null, session: null }, error: {} });
+    mocks.signIn.mockResolvedValue({ data: { user: null, session: null }, error: { code: 'invalid_credentials' } });
     await expect(issueReauthGrant('account_delete', 'wrong')).rejects.toThrow('失敗');
     expect(mocks.attempt).toHaveBeenCalledWith('user@example.com', 'failure'); expect(mocks.from).not.toHaveBeenCalled();
   });

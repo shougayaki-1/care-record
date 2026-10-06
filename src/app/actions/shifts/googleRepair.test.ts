@@ -1,3 +1,4 @@
+import { readActionResult } from '@/utils/actionResult';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn(), list: vi.fn(), remove: vi.fn(), mark: vi.fn(), limit: vi.fn() }));
 vi.mock('@/utils/supabase/auth', () => ({ createSessionClient: vi.fn(async () => ({ rpc: mocks.rpc, from: mocks.from })),
@@ -26,7 +27,7 @@ beforeEach(() => {
 });
 describe('repair deleted Google events', () => {
   it('uses authorized deleted identifiers even though normal shift queries hide the row', async () => {
-    const result = await repairGoogleCalendarSync('org');
+    const result = await readActionResult(repairGoogleCalendarSync('org'));
     expect(mocks.rpc).toHaveBeenCalledWith('get_deleted_shift_sync_targets', { p_org_id: 'org', p_limit: 5000 });
     expect(mocks.limit).toHaveBeenCalledWith(4999);
     expect(mocks.remove).toHaveBeenCalledWith(expect.anything(), 'calendar', 'remote');
@@ -34,18 +35,18 @@ describe('repair deleted Google events', () => {
     expect(mocks.mark).toHaveBeenCalledWith('deleted', 'synced', { eventId: null });
   });
   it('prioritizes pending deletions within the repair limit', async () => {
-    await repairGoogleCalendarSync('org', { limit: 1 });
+    await readActionResult(repairGoogleCalendarSync('org', { limit: 1 }));
     expect(mocks.limit).not.toHaveBeenCalled(); expect(mocks.remove).toHaveBeenCalledOnce();
   });
   it('keeps failed deletions pending with a safe diagnostic', async () => {
     mocks.remove.mockRejectedValue(new SyncError('provider details', 'auth'));
-    const result = await repairGoogleCalendarSync('org');
+    const result = await readActionResult(repairGoogleCalendarSync('org'));
     expect(result.failed).toBe(1);
     expect(mocks.mark).toHaveBeenCalledWith('deleted', 'failed', { error: 'Google削除同期に失敗しました（auth）' });
   });
   it('does not delete any remote event if the authorized target query fails', async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: 'private db detail' } });
-    await expect(repairGoogleCalendarSync('org')).rejects.toThrow('処理に失敗しました');
+    await expect(readActionResult(repairGoogleCalendarSync('org'))).rejects.toThrow('処理に失敗しました');
     expect(mocks.remove).not.toHaveBeenCalled();
   });
 });

@@ -1,10 +1,12 @@
 'use client';
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
 
 import { useCallback, useEffect, useState } from 'react';
 import {
   Box, Stack, CircularProgress, Alert,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from '@/components/ui/mui';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { AppButton, AppDialog, AppTextField, SwitchField } from '@/components/ui';
 import {
   getServiceTypes, createServiceType, updateServiceType, deleteServiceType,
@@ -20,7 +22,7 @@ export default function ServiceTypeSettings({
 }) {
   const [rows, setRows] = useState<ServiceType[]>(initialServiceTypes ?? []);
   const [loading, setLoading] = useState(initialServiceTypes === undefined);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
 
   const [editTarget, setEditTarget] = useState<ServiceType | null>(null);
@@ -37,9 +39,9 @@ export default function ServiceTypeSettings({
     setLoading(true);
     setError(null);
     try {
-      setRows(await getServiceTypes(orgId));
+      setRows(await readActionResult(getServiceTypes(orgId)));
     } catch (e) {
-      setError(e instanceof Error ? e.message : '取得に失敗しました');
+      setError(e);
     } finally {
       setLoading(false);
     }
@@ -52,10 +54,10 @@ export default function ServiceTypeSettings({
 
   const handleToggleActive = async (row: ServiceType) => {
     try {
-      await updateServiceType(orgId, row.id, { is_active: !row.is_active });
+      await readActionResult(updateServiceType(orgId, row.id, { is_active: !row.is_active }));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '更新に失敗しました');
+      setError(e);
     }
   };
 
@@ -69,11 +71,11 @@ export default function ServiceTypeSettings({
     if (!editTarget || !editName.trim()) return;
     setSaving(true);
     try {
-      await updateServiceType(orgId, editTarget.id, { name: editName.trim() });
+      await readActionResult(updateServiceType(orgId, editTarget.id, { name: editName.trim() }));
       setEditOpen(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '更新に失敗しました');
+      setError(e);
     } finally {
       setSaving(false);
     }
@@ -83,12 +85,12 @@ export default function ServiceTypeSettings({
     if (!addName.trim()) return;
     setSaving(true);
     try {
-      await createServiceType(orgId, addName.trim());
+      await readActionResult(createServiceType(orgId, addName.trim()));
       setAddOpen(false);
       setAddName('');
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '追加に失敗しました');
+      setError(e);
     } finally {
       setSaving(false);
     }
@@ -98,11 +100,11 @@ export default function ServiceTypeSettings({
     if (!deleteTarget) return;
     setSaving(true);
     try {
-      await deleteServiceType(orgId, deleteTarget.id);
+      await readActionResult(deleteServiceType(orgId, deleteTarget.id));
       setDeleteOpen(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '削除に失敗しました');
+      setError(e);
     } finally {
       setSaving(false);
     }
@@ -112,7 +114,13 @@ export default function ServiceTypeSettings({
 
   return (
     <Box>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
+      {Boolean(error) && <Alert severity="error" sx={{ mb: 2 }}>
+        {getActionErrorMessage(error)}
+        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+          <AppButton size="small" variant="outlined" intent="secondary" onClick={() => void load()}>再試行</AppButton>
+          {needsActionRecovery(error) && <RecoveryLogoutButton attemptClientLogout={false} />}
+        </Stack>
+      </Alert>}
 
       <Box sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
         <Table size="small" sx={{ minWidth: 400 }}>
@@ -120,12 +128,12 @@ export default function ServiceTypeSettings({
             <TableRow>
               <TableCell>種別名</TableCell>
               <TableCell>有効</TableCell>
-              <TableCell />
+              <TableCell>操作</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow><TableCell colSpan={3} align="center">設定なし</TableCell></TableRow>
+              !error && <TableRow><TableCell colSpan={3} align="center">設定なし</TableCell></TableRow>
             ) : (
               rows.map((row) => (
                 <TableRow key={row.id}>
@@ -148,7 +156,7 @@ export default function ServiceTypeSettings({
 
       <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' } }}>
         {rows.length === 0 ? (
-          <Box sx={{ py: 3, textAlign: 'center', color: 'text.secondary' }}>設定なし</Box>
+          !error && <Box sx={{ py: 3, textAlign: 'center', color: 'text.secondary' }}>設定なし</Box>
         ) : (
           rows.map((row) => (
             <Box

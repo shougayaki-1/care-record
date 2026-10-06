@@ -43,7 +43,7 @@ import SetupPage from './page';
 beforeEach(() => {
   mocks.name = '';
   mocks.inviteCode = null;
-  mocks.preview.mockReset().mockResolvedValue({ valid: false });
+  mocks.preview.mockReset().mockResolvedValue({ ok: true, data: { valid: false } });
   mocks.query.mockClear();
 });
 afterEach(cleanup);

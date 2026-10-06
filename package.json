@@ -19,6 +19,7 @@
     "test": "npm run test:unit && npm run test:ui",
     "test:ui": "vitest run --project storybook",
     "test:unit": "vitest run --project unit",
+    "test:action-transport": "node scripts/testing/action-result-transport.mjs",
     "test:e2e": "node scripts/e2e/run-local.mjs all",
     "test:e2e:critical": "node scripts/e2e/run-local.mjs critical",
     "test:ci-scope": "node --test scripts/ci/*.test.mjs scripts/e2e/playwright-arguments.test.mjs",

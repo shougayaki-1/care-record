@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ActionResultError } from '@/utils/actionResult';
 import { FULL_PERMISSIONS } from '@/utils/permissions';
-const mocks = vi.hoisted(() => ({ workspace: vi.fn(), fetch: vi.fn(), refresh: vi.fn(), reauth: vi.fn(), grant: vi.fn(), add: vi.fn(), toast: vi.fn() }));
+const mocks = vi.hoisted(() => ({ workspace: vi.fn(), fetch: vi.fn(), refresh: vi.fn(), reauth: vi.fn(), grant: vi.fn(), add: vi.fn(), toast: vi.fn(), fetchError: null as unknown }));
 vi.mock('@/context/WorkspaceContext', () => ({ useWorkspace: mocks.workspace }));
 vi.mock('@/components/ui/ToastProvider', () => ({ useToast: () => ({ showToast: mocks.toast }) }));
 vi.mock('@/hooks/useReauth', () => ({ useReauth: () => ({ requestReauth: mocks.reauth, reauthDialog: null }) }));
@@ -10,7 +11,7 @@ vi.mock('@/app/actions/authSecurity', () => ({ takeProviderReauthGrant: mocks.gr
 vi.mock('@/app/actions/organizationOwners', () => ({ addOrganizationOwner: mocks.add }));
 vi.mock('@/components/roles/RoleManagementPanel', () => ({ default: () => null }));
 vi.mock('@mui/material/useMediaQuery', () => ({ default: () => false }));
-vi.mock('@/hooks/useFetchData', () => ({ useFetchData: () => ({ data, loading: false, refetch: mocks.fetch }) }));
+vi.mock('@/hooks/useFetchData', () => ({ useFetchData: () => ({ data, error: mocks.fetchError, loading: false, refetch: mocks.fetch }) }));
 vi.mock('@/app/actions/accounts', () => ({ createInvitation: vi.fn(), getAccountOverview: vi.fn(), getInviteStaffCandidates: vi.fn(), getOrgRoles: vi.fn(), updateMemberRoles: vi.fn(), removeAccount: vi.fn() }));
 import AccountsPage from './page';
 import { OWNER_ADD_RESUME_KEY } from '@/utils/ownerAddResume';
@@ -22,10 +23,10 @@ const data = { currentUserId: actor, availableRoles: [], inviteStaffCandidates: 
   { id: target, name: '追加対象', role: 'member', roles: [], status: 'active' },
 ] };
 beforeEach(() => {
-  vi.resetAllMocks(); window.history.replaceState(null, '', '/app/accounts'); sessionStorage.clear();
+  vi.resetAllMocks(); mocks.fetchError = null; window.history.replaceState(null, '', '/app/accounts'); sessionStorage.clear();
   mocks.workspace.mockReturnValue({ currentOrg: { id: org, name: '事業所', role: 'owner', effectivePermissions: FULL_PERMISSIONS }, loading: false, refreshWorkspace: mocks.refresh });
-  mocks.reauth.mockResolvedValue({ token: 'password-proof' }); mocks.grant.mockResolvedValue({ token: 'sso-proof' });
-  mocks.add.mockResolvedValue({ success: true });
+  mocks.reauth.mockResolvedValue({ token: 'password-proof' }); mocks.grant.mockResolvedValue({ ok: true, data: { token: 'sso-proof' } });
+  mocks.add.mockResolvedValue({ ok: true, data: { success: true } });
 });
 afterEach(cleanup);
 async function openAddition() {
@@ -56,7 +57,7 @@ describe('owner addition UI', () => {
     await waitFor(() => expect(mocks.reauth).toHaveBeenCalledOnce()); expect(mocks.add).not.toHaveBeenCalled();
   });
   it('keeps failed additions reviewable and does not refresh success state', async () => {
-    mocks.add.mockRejectedValue(new Error('再認証証明が無効です'));
+    mocks.add.mockResolvedValue({ ok: false, error: { code: 'REAUTH_REQUIRED', message: '再認証証明が無効です' } });
     fireEvent.click(await openAddition());
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('再認証証明が無効です', 'error'));
     expect(mocks.refresh).not.toHaveBeenCalled(); expect(mocks.fetch).not.toHaveBeenCalled();
@@ -79,10 +80,26 @@ describe('owner addition UI', () => {
     expect(mocks.add).not.toHaveBeenCalled();
   });
   it('prevents double submission while addition is pending', async () => {
-    let resolve!: (value: { success: boolean }) => void;
+    let resolve!: (value: { ok: true; data: { success: boolean } }) => void;
     mocks.add.mockReturnValue(new Promise(done => { resolve = done; }));
     const button = await openAddition(); fireEvent.click(button); fireEvent.click(button);
     await waitFor(() => expect(mocks.add).toHaveBeenCalledOnce());
-    await act(async () => resolve({ success: true }));
+    await act(async () => resolve({ ok: true, data: { success: true } }));
   });
+});
+
+
+it.each(['FORBIDDEN', 'SESSION_EXPIRED'])('renders classified read failure %s without empty accounts or invite controls', code => {
+  mocks.fetchError = new ActionResultError(code, '安全な失敗文言');
+  render(<AccountsPage />);
+  expect(screen.getByRole('alert').textContent).toContain('安全な失敗文言');
+  expect(screen.queryByText('アカウントがありません')).toBeNull();
+  expect(screen.queryByRole('button', { name: '新しい人を招待' })).toBeNull();
+  if (code === 'SESSION_EXPIRED') {
+    expect(screen.getByRole('button', { name: 'ログアウトしてやり直す' }).closest('form')?.getAttribute('action')).toBe('/api/auth/recover');
+  } else {
+    expect(screen.queryByRole('button', { name: 'ログアウトしてやり直す' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }));
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+  }
 });

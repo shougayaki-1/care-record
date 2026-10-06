@@ -1,6 +1,7 @@
 'use server';
+import type { ActionResult } from '@/types/actionResult';
 
-import { sanitizeDbError, UserFacingError, withSafeError } from '@/utils/errors';
+import { ExpectedActionError, sanitizeDbError, withActionResult } from '@/utils/errors';
 import { asJson } from '@/types/json';
 
 import { recordAuditEvent } from '@/utils/supabase/audit';
@@ -15,20 +16,21 @@ async function assertClientOrg(supabase: SupabaseClient<Database>, clientId: str
     .eq('id', clientId)
     .eq('organization_id', organizationId)
     .maybeSingle();
-  if (error || !data || data.deleted_at) throw new Error('利用者が見つかりません');
+  if (error) throw sanitizeDbError(error, 'action.clients.target');
+  if (!data || data.deleted_at) throw new ExpectedActionError('NOT_FOUND', '利用者が見つかりません');
   return data;
 }
 
 function normalizeName(name: string) {
   const normalized = name.trim();
   if (normalized.length < 1 || normalized.length > 100) {
-    throw new Error('利用者名は1〜100文字で入力してください');
+    throw new ExpectedActionError('VALIDATION_ERROR', '利用者名は1〜100文字で入力してください');
   }
   return normalized;
 }
 
 export async function createClient(organizationId: string, name: string) {
-  return withSafeError('createClient', async () => {
+  return withActionResult('createClient', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'clients');
     const supabase = await createSessionClient();
     const { data, error } = await supabase
@@ -36,14 +38,14 @@ export async function createClient(organizationId: string, name: string) {
       .insert({ organization_id: organizationId, name: normalizeName(name) })
       .select('id, name, created_at, archived_at')
       .single();
-    if (error || !data) throw new Error(error?.message || '利用者を作成できませんでした');
+    if (error || !data) throw sanitizeDbError(error ?? new Error('利用者を作成できませんでした'), 'action.clients.create');
     await recordAuditEvent({ organizationId, actorId: userId, action: 'client.create', resourceType: 'client', resourceId: data.id });
     return data;
   });
 }
 
 export async function updateClientName(organizationId: string, clientId: string, name: string) {
-  return withSafeError('updateClientName', async () => {
+  return withActionResult('updateClientName', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'clients');
     const supabase = await createSessionClient();
     await assertClientOrg(supabase, clientId, organizationId);
@@ -56,7 +58,7 @@ export async function updateClientName(organizationId: string, clientId: string,
 }
 
 export async function setClientArchived(organizationId: string, clientId: string, archived: boolean) {
-  return withSafeError('setClientArchived', async () => {
+  return withActionResult('setClientArchived', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'clients');
     const supabase = await createSessionClient();
     await assertClientOrg(supabase, clientId, organizationId);
@@ -74,13 +76,13 @@ export async function setClientArchived(organizationId: string, clientId: string
 }
 
 export async function softDeleteClient(organizationId: string, clientId: string, reason: string) {
-  return withSafeError('softDeleteClient', async () => {
+  return withActionResult('softDeleteClient', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'clients');
     const supabase = await createSessionClient();
     const client = await assertClientOrg(supabase, clientId, organizationId);
-    if (!client.archived_at) throw new UserFacingError('完全削除の前に利用者をアーカイブしてください');
+    if (!client.archived_at) throw new ExpectedActionError('VALIDATION_ERROR', '完全削除の前に利用者をアーカイブしてください');
     const normalizedReason = reason.trim();
-    if (normalizedReason.length < 2 || normalizedReason.length > 500) throw new Error('削除理由を2〜500文字で入力してください');
+    if (normalizedReason.length < 2 || normalizedReason.length > 500) throw new ExpectedActionError('VALIDATION_ERROR', '削除理由を2〜500文字で入力してください');
     const { data: org } = await supabase.from('organizations').select('retention_years').eq('id', organizationId).single();
     const deletedAt = new Date();
     const retentionUntil = new Date(deletedAt);
@@ -105,15 +107,15 @@ export async function softDeleteClient(organizationId: string, clientId: string,
 }
 
 export async function saveClientForm(organizationId: string, clientId: string, schema: unknown[]) {
-  return withSafeError('saveClientForm', async () => {
+  return withActionResult('saveClientForm', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'clients');
     const supabase = await createSessionClient();
     await assertClientOrg(supabase, clientId, organizationId);
     if (!Array.isArray(schema) || schema.length > 200 || JSON.stringify(schema).length > 1_000_000) {
-      throw new Error('フォーム設定が不正、または大きすぎます');
+      throw new ExpectedActionError('VALIDATION_ERROR', 'フォーム設定が不正、または大きすぎます');
     }
     const ids = schema.map((item) => typeof item === 'object' && item !== null && 'id' in item ? String(item.id) : '');
-    if (ids.some((id) => !id) || new Set(ids).size !== ids.length) throw new Error('フォーム項目IDが不正または重複しています');
+    if (ids.some((id) => !id) || new Set(ids).size !== ids.length) throw new ExpectedActionError('VALIDATION_ERROR', 'フォーム項目IDが不正または重複しています');
 
     const { error } = await supabase.rpc('upsert_client_form_authorized', {
       p_organization_id: organizationId,
@@ -139,17 +141,17 @@ export async function saveClientAssignments(
   staffIds: string[],
   costsByStaffId: Record<string, number> = {},
 ) {
-  return withSafeError('saveClientAssignments', async () => {
+  return withActionResult('saveClientAssignments', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'clients');
     const supabase = await createSessionClient();
     await assertClientOrg(supabase, clientId, organizationId);
-    if (staffIds.length > 200) throw new UserFacingError('担当者数が多すぎます');
+    if (staffIds.length > 200) throw new ExpectedActionError('VALIDATION_ERROR', '担当者数が多すぎます');
     const uniqueStaffIds = Array.from(new Set(staffIds.filter(Boolean)));
     const costs: Record<string, number> = {};
     for (const staffId of uniqueStaffIds) {
       if (!(staffId in costsByStaffId)) continue;
       const cost = costsByStaffId[staffId];
-      if (!Number.isInteger(cost) || cost < 0 || cost > 100000) throw new UserFacingError('通常の交通費は0〜100000円の整数で入力してください');
+      if (!Number.isInteger(cost) || cost < 0 || cost > 100000) throw new ExpectedActionError('VALIDATION_ERROR', '通常の交通費は0〜100000円の整数で入力してください');
       costs[staffId] = cost;
     }
     const { error } = await supabase.rpc('replace_client_assignments_with_costs_authorized', {
@@ -176,14 +178,14 @@ export async function updateClientGoogleLink(
   clientId: string,
   values: { folderId?: string | null; templateId?: string | null },
 ) {
-  return withSafeError('updateClientGoogleLink', async () => {
+  return withActionResult('updateClientGoogleLink', async () => {
     const { userId } = await assertOrgPermission(organizationId, 'clients');
     const supabase = await createSessionClient();
     await assertClientOrg(supabase, clientId, organizationId);
     const update: { google_folder_id?: string | null; google_template_id?: string | null } = {};
     if ('folderId' in values) update.google_folder_id = values.folderId?.trim() || null;
     if ('templateId' in values) update.google_template_id = values.templateId?.trim() || null;
-    if (Object.keys(update).length === 0) throw new UserFacingError('更新内容がありません');
+    if (Object.keys(update).length === 0) throw new ExpectedActionError('VALIDATION_ERROR', '更新内容がありません');
     const { error } = await supabase.from('clients').update(update).eq('id', clientId).eq('organization_id', organizationId);
     if (error) throw sanitizeDbError(error, 'action.clients');
     await recordAuditEvent({ organizationId, actorId: userId, action: 'client.google_link_update', resourceType: 'client', resourceId: clientId });
@@ -201,8 +203,8 @@ export type AssignmentPermissionHint = {
 export async function getClientAssignmentPermissionHints(
   organizationId: string,
   clientId: string,
-): Promise<AssignmentPermissionHint[]> {
-  return withSafeError('getClientAssignmentPermissionHints', async () => {
+): Promise<ActionResult<AssignmentPermissionHint[]>> {
+  return withActionResult('getClientAssignmentPermissionHints', async () => {
     await assertOrgPermission(organizationId, 'clients');
     const supabase = await createSessionClient();
     await assertClientOrg(supabase, clientId, organizationId);

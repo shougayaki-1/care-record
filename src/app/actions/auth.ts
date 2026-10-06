@@ -1,4 +1,7 @@
 'use server';
+import type { ActionResult } from '@/types/actionResult';
+
+import { logExternalError, withActionResult } from '@/utils/errors';
 
 // 認証のサーバーサイド処理。3省2ガイドライン対応:
 // - ログイン試行のレート制限（ブルートフォース対策）
@@ -27,33 +30,39 @@ export type RegistrationResult =
   | { ok: false; reason: 'rate_limited' | 'invalid_password' | 'already_registered' | 'error'; message?: string };
 
 export async function issueReauthGrant(purpose: ReauthPurpose, password: string) {
-  return createReauthGrant(purpose, password);
+  return withActionResult('issueReauthGrant', async () => {
+    return createReauthGrant(purpose, password);
+  });
 }
 
 /** パスワードを持たない(SSOのみの)アカウント向け。OAuthプロバイダへの再ログインを開始する。 */
 export async function beginStepUpReauth(purpose: ReauthPurpose) {
-  const { nonce, provider } = await createStepUpReauth(purpose);
-  const cookieStore = await cookies();
-  cookieStore.set(STEPUP_NONCE_COOKIE, nonce, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 60 * 10, // 10分。stepup_reauth_challenges の有効期限と揃える。
+  return withActionResult('beginStepUpReauth', async () => {
+    const { nonce, provider } = await createStepUpReauth(purpose);
+    const cookieStore = await cookies();
+    cookieStore.set(STEPUP_NONCE_COOKIE, nonce, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 10, // 10分。stepup_reauth_challenges の有効期限と揃える。
+    });
+    return { nonce, provider };
   });
-  return { nonce, provider };
 }
 
 /**
  * OAuth step-up再認証の完了後、/auth/reauth-callback がhttpOnly Cookieに
  * 一度だけ保存した再認証グラントトークンを読み出し、Cookieを破棄する。
  */
-export async function consumeStepUpGrantCookie(): Promise<{ token: string } | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(STEPUP_GRANT_COOKIE)?.value;
-  if (!token) return null;
-  cookieStore.delete(STEPUP_GRANT_COOKIE);
-  return { token };
+export async function consumeStepUpGrantCookie(): Promise<ActionResult<{ token: string } | null>> {
+  return withActionResult('consumeStepUpGrantCookie', async () => {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(STEPUP_GRANT_COOKIE)?.value;
+    if (!token) return null;
+    cookieStore.delete(STEPUP_GRANT_COOKIE);
+    return { token };
+  });
 }
 
 /**
@@ -69,25 +78,31 @@ async function recordAuthAuditSafely(event: Parameters<typeof recordAuditEvent>[
 }
 
 export async function registerWithPassword(email: string, password: string): Promise<RegistrationResult> {
-  const policy = validatePassword(password);
-  if (!policy.ok) return { ok: false, reason: 'invalid_password', message: policy.message };
-  if (await isLoginRateLimited(email)) return { ok: false, reason: 'rate_limited' };
-  await applyProgressiveLoginDelay(email);
-  const supabase = await createSessionClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
-  if (error || !data.user) {
-    await recordLoginAttempt(email, 'failure');
-    await recordAuthAuditSafely({ organizationId: null, actorId: null, action: 'auth.register', resourceType: 'auth', outcome: 'failure' });
-    if (error?.message.includes('already registered')) return { ok: false, reason: 'already_registered' };
+  try {
+    const policy = validatePassword(password);
+    if (!policy.ok) return { ok: false, reason: 'invalid_password', message: policy.message };
+    if (await isLoginRateLimited(email)) return { ok: false, reason: 'rate_limited' };
+    await applyProgressiveLoginDelay(email);
+    const supabase = await createSessionClient();
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error || !data.user) {
+      await recordLoginAttempt(email, 'failure');
+      await recordAuthAuditSafely({ organizationId: null, actorId: null, action: 'auth.register', resourceType: 'auth', outcome: 'failure' });
+      if (error?.code === 'user_already_exists' || error?.code === 'email_exists') return { ok: false, reason: 'already_registered' };
+      if (error) logExternalError('auth.register', error);
+      return { ok: false, reason: 'error' };
+    }
+    if ((data.user.identities || []).length === 0) return { ok: false, reason: 'already_registered' };
+    let sessionId: string | undefined;
+    if (data.session) sessionId = await registerSessionActivity(data.session);
+    await recordAuthAuditSafely({ organizationId: null, actorId: data.user.id, action: 'auth.register', resourceType: 'auth',
+      outcome: 'success', sessionId, details: { emailConfirmationRequired: !data.session },
+    });
+    return { ok: true, signedIn: !!data.session };
+  } catch (error) {
+    logExternalError('registerWithPassword', error);
     return { ok: false, reason: 'error' };
   }
-  if ((data.user.identities || []).length === 0) return { ok: false, reason: 'already_registered' };
-  let sessionId: string | undefined;
-  if (data.session) sessionId = await registerSessionActivity(data.session);
-  await recordAuthAuditSafely({ organizationId: null, actorId: data.user.id, action: 'auth.register', resourceType: 'auth',
-    outcome: 'success', sessionId, details: { emailConfirmationRequired: !data.session },
-  });
-  return { ok: true, signedIn: !!data.session };
 }
 
 /**
@@ -95,42 +110,47 @@ export async function registerWithPassword(email: string, password: string): Pro
  * レート制限・監査・試行記録をサーバー側で確実に実施する。
  */
 export async function loginWithPassword(email: string, password: string): Promise<LoginResult> {
-  if (await isLoginRateLimited(email)) {
-    return { ok: false, reason: 'rate_limited' };
-  }
-  await applyProgressiveLoginDelay(email);
+  try {
+    if (await isLoginRateLimited(email)) {
+      return { ok: false, reason: 'rate_limited' };
+    }
+    await applyProgressiveLoginDelay(email);
 
-  const supabase = await createSessionClient();
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const supabase = await createSessionClient();
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-  if (error || !data.user) {
-    await recordLoginAttempt(email, 'failure');
+    if (error || !data.user) {
+      await recordLoginAttempt(email, 'failure');
+      await recordAuthAuditSafely({
+        organizationId: null,
+        actorId: data?.user?.id ?? null,
+        action: 'auth.login',
+        resourceType: 'auth',
+        outcome: 'failure',
+      });
+      if (error?.code === 'email_not_confirmed') return { ok: false, reason: 'email_unconfirmed' };
+      if (error?.code === 'invalid_credentials') return { ok: false, reason: 'invalid_credentials' };
+      if (error) logExternalError('auth.login', error);
+      return { ok: false, reason: 'error' };
+    }
+
+    if (!data.session) throw new Error('Auth login returned no session');
+    const sessionId = await registerSessionActivity(data.session);
+    await recordLoginAttempt(email, 'success');
     await recordAuthAuditSafely({
       organizationId: null,
-      actorId: data?.user?.id ?? null,
+      actorId: data.user.id,
       action: 'auth.login',
       resourceType: 'auth',
-      outcome: 'failure',
+      outcome: 'success',
+      sessionId,
+      details: { method: 'password' },
     });
-    const msg = error?.message ?? '';
-    if (msg.includes('Email not confirmed')) return { ok: false, reason: 'email_unconfirmed' };
-    if (msg.includes('Invalid login credentials')) return { ok: false, reason: 'invalid_credentials' };
+    return { ok: true };
+  } catch (error) {
+    logExternalError('loginWithPassword', error);
     return { ok: false, reason: 'error' };
   }
-
-  if (!data.session) return { ok: false, reason: 'error' };
-  const sessionId = await registerSessionActivity(data.session);
-  await recordLoginAttempt(email, 'success');
-  await recordAuthAuditSafely({
-    organizationId: null,
-    actorId: data.user.id,
-    action: 'auth.login',
-    resourceType: 'auth',
-    outcome: 'success',
-    sessionId,
-    details: { method: 'password' },
-  });
-  return { ok: true };
 }
 
 /** ログアウト直前に呼び、監査記録を残す（実際の signOut はクライアントが行う）。 */
@@ -152,8 +172,10 @@ export async function recordLogout(): Promise<void> {
 }
 
 /** アイドルタイムアウト用。ブラウザCookieではなくサーバー側セッション活動を更新する。 */
-export async function heartbeatSession(): Promise<void> {
-  await touchCurrentSession();
+export async function heartbeatSession(): Promise<ActionResult<void>> {
+  return withActionResult('heartbeatSession', async () => {
+    await touchCurrentSession();
+  });
 }
 
 /** OAuth コールバックなど、確立済みセッションのログイン成功を記録する。 */

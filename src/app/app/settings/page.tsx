@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { GOOGLE_CONNECTION_LABELS, googleConnectionMessage, googleSyncErrorMessage } from '@/utils/googleSync';
 
@@ -128,7 +129,7 @@ function SettingsContent() {
 
     useEffect(() => {
         if (!currentOrg || !googleCalendarId || !checkManagementPermission(currentOrg.effectivePermissions, 'integrations')) return;
-        void getGoogleConnectionHealth(currentOrg.id)
+        void readActionResult(getGoogleConnectionHealth(currentOrg.id))
             .then(({ state }) => setGoogleConnectionState(state))
             .catch(() => setGoogleConnectionState('temporarily_unavailable'));
     }, [currentOrg, googleCalendarId]);
@@ -148,7 +149,7 @@ function SettingsContent() {
     useEffect(() => {
         if (!currentOrg) return;
         let cancelled = false;
-        getSettingsSectionsData(currentOrg.id)
+        readActionResult(getSettingsSectionsData(currentOrg.id))
             .then((data) => { if (!cancelled) setSettingsSectionsData(data); })
             .catch((e) => { console.error(e); });
         return () => { cancelled = true; };
@@ -189,7 +190,7 @@ function SettingsContent() {
 
         (async () => {
             try {
-                const grant = await takeProviderReauthGrant(action === 'delete_org' ? 'organization_delete' : 'external_secret_change');
+                const grant = await readActionResult(takeProviderReauthGrant(action === 'delete_org' ? 'organization_delete' : 'external_secret_change'));
                 if (searchParams.get('reauthOrg') !== currentOrg.id) {
                     showToast('本人確認を開始した事業所と一致しません。もう一度お試しください。', 'error');
                     return;
@@ -200,18 +201,18 @@ function SettingsContent() {
                 }
                 if (action === 'connect_calendar' || action === 'reauthorize_calendar') {
                     setConnectingCal(true);
-                    const url = await getGoogleAuthUrlAction(
+                    const url = await readActionResult(getGoogleAuthUrlAction(
                         currentOrg.id,
                         action === 'reauthorize_calendar' ? 'reauthorize' : 'connect',
                         grant.token,
-                    );
+                    ));
                     window.location.href = url;
                 } else if (action === 'disconnect_calendar') {
-                    await disconnectGoogleCalendar(currentOrg.id, grant.token);
+                    await readActionResult(disconnectGoogleCalendar(currentOrg.id, grant.token));
                     setGoogleCalendarId(null);
                     showToast('連携を解除しました');
                 } else if (action === 'delete_org') {
-                    await deleteOrganization(currentOrg.id, grant.token);
+                    await readActionResult(deleteOrganization(currentOrg.id, grant.token));
                     showToast('事業所を削除しました');
                     window.location.href = '/setup';
                 }
@@ -228,18 +229,18 @@ function SettingsContent() {
         setSaving(true);
         setMessage(null);
         try {
-            await updateOrganizationName(currentOrg.id, orgName);
+            await readActionResult(updateOrganizationName(currentOrg.id, orgName));
             
             if (googleFolderId) {
                 const { data: { user } } = await supabase.auth.getUser();
-                await callGasApi({
+                await readActionResult(callGasApi({
                     action: 'manage_org_folder',
                     organizationId: currentOrg.id,
                     orgName: orgName,
                     orgId: currentOrg.id,
                     userEmail: user?.email,
                     currentFolderId: googleFolderId
-                });
+                }));
             }
 
             setMessage({ type: 'success', text: '更新しました' });
@@ -259,18 +260,18 @@ function SettingsContent() {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             
-            const result = await callGasApi({
+            const result = await readActionResult(callGasApi({
                 action: 'manage_org_folder',
                 organizationId: currentOrg.id,
                 orgName: orgName,
                 orgId: currentOrg.id,
                 userEmail: user?.email,
                 currentFolderId: googleFolderId
-            }) as GasResponse;
+            })) as GasResponse;
 
             if (result.status === 'success' && result.folderId) {
                 const newFolderId = result.folderId;
-                await updateOrganizationDriveFolder(currentOrg.id, newFolderId);
+                await readActionResult(updateOrganizationDriveFolder(currentOrg.id, newFolderId));
 
                 setGoogleFolderId(newFolderId);
                 if (result.folderUrl) setDriveUrl(result.folderUrl);
@@ -290,7 +291,7 @@ function SettingsContent() {
         if (!(await confirm({ message: '連携を解除しますか？\n（Googleドライブ上のフォルダは削除されません。アプリからの参照のみ解除されます。）', confirmText: '解除する', confirmColor: 'warning' }))) return;
         if (!currentOrg) return;
         try {
-            await updateOrganizationDriveFolder(currentOrg.id, null);
+            await readActionResult(updateOrganizationDriveFolder(currentOrg.id, null));
             setGoogleFolderId(null);
             showToast('連携を解除しました');
         } catch(e) { 
@@ -307,13 +308,13 @@ function SettingsContent() {
             const grant = await requestReauth('external_secret_change', {
                 preferredMethod: 'google',
                 next: `/app/settings?stepup=1&action=${mode === 'reauthorize' ? 'reauthorize_calendar' : 'connect_calendar'}&reauthOrg=${currentOrg.id}`,
-                calendarAuthorization: () => getGoogleAuthUrlAction(currentOrg.id, mode),
+                calendarAuthorization: () => readActionResult(getGoogleAuthUrlAction(currentOrg.id, mode)),
             });
             if (!grant) {
                 setConnectingCal(false);
                 return;
             }
-            const url = await getGoogleAuthUrlAction(currentOrg.id, mode, grant.token);
+            const url = await readActionResult(getGoogleAuthUrlAction(currentOrg.id, mode, grant.token));
             // Googleのログイン画面へリダイレクト
             window.location.href = url;
         } catch (e) {
@@ -331,7 +332,7 @@ function SettingsContent() {
                 preferredMethod: 'google', next: `/app/settings?stepup=1&action=disconnect_calendar&reauthOrg=${currentOrg.id}`,
             });
             if (!grant) return;
-            await disconnectGoogleCalendar(currentOrg.id, grant.token);
+            await readActionResult(disconnectGoogleCalendar(currentOrg.id, grant.token));
             setGoogleCalendarId(null);
             showToast('連携を解除しました');
         } catch(e) {
@@ -344,7 +345,7 @@ function SettingsContent() {
     const refreshSyncStatus = useCallback(async () => {
         if (!currentOrg || !canRepairCalendarSync) return;
         try {
-            const s = await getSyncStatus(currentOrg.id);
+            const s = await readActionResult(getSyncStatus(currentOrg.id));
             setSyncStatus({ total: s.total, unsynced: s.unsynced });
         } catch (e) {
             console.error('getSyncStatus error', e);
@@ -370,7 +371,7 @@ function SettingsContent() {
         }
     };
 
-    const reportRepairResult = (res: Awaited<ReturnType<typeof repairGoogleCalendarSync>>) => {
+    const reportRepairResult = (res: Extract<Awaited<ReturnType<typeof repairGoogleCalendarSync>>, { ok: true }>['data']) => {
         if (!res.connected) {
             showToast('Googleカレンダーが連携されていません。「連携する」から接続してください。', 'warning');
         } else if (res.errorKind) {
@@ -387,7 +388,7 @@ function SettingsContent() {
         if (!currentOrg) return;
         setRepairingCal(true);
         try {
-            const status = await getSyncStatus(currentOrg.id);
+            const status = await readActionResult(getSyncStatus(currentOrg.id));
             const total = status.unsynced;
             if (total === 0) { showToast('未同期の予定はありません。', 'info'); return; }
             setSyncProgress({ total, current: 0 });
@@ -395,7 +396,7 @@ function SettingsContent() {
             let errorKind: string | undefined;
             for (;;) {
                 // 進捗表示と実際の同期を1件単位でそろえる。
-                const res = await syncUnsyncedBatch(currentOrg.id, 1);
+                const res = await readActionResult(syncUnsyncedBatch(currentOrg.id, 1));
                 done += res.succeeded; failed += res.failed;
                 processed += res.processed;
                 if (res.errorKind) errorKind = res.errorKind;
@@ -421,7 +422,7 @@ function SettingsContent() {
         setResyncingCal(true);
         try {
             setSyncProgress({ total: 1, current: 0 });
-            const res = await repairGoogleCalendarSync(currentOrg.id);
+            const res = await readActionResult(repairGoogleCalendarSync(currentOrg.id));
             setSyncProgress({ total: 1, current: 1 });
             reportRepairResult(res);
         } catch (e) {
@@ -442,12 +443,12 @@ function SettingsContent() {
                 next: `/app/settings?stepup=1&action=delete_org&reauthOrg=${currentOrg.id}`,
             });
             if (!grant) return;
-            await deleteOrganization(currentOrg.id, grant.token);
+            await readActionResult(deleteOrganization(currentOrg.id, grant.token));
             showToast('事業所を削除しました');
             window.location.href = '/setup';
         } catch (e: unknown) {
             console.error(e);
-            const msg = e instanceof Error ? e.message : String(e);
+            const msg = getActionErrorMessage(e);
             showToast('削除失敗: ' + msg, 'error');
         }
     };
@@ -455,11 +456,11 @@ function SettingsContent() {
     const handleLeaveOrg = async () => {
         if (!currentOrg) return;
         try {
-            await leaveOrganization(currentOrg.id);
+            await readActionResult(leaveOrganization(currentOrg.id));
             showToast('事業所から脱退しました');
             window.location.href = '/setup';
         } catch (e: unknown) { 
-            const msg = e instanceof Error ? e.message : String(e);
+            const msg = getActionErrorMessage(e);
             showToast(msg, 'error'); 
         }
     };

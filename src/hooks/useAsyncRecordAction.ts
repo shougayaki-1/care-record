@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActionResultError, getActionErrorMessage } from '@/utils/actionResult';
 import { useToast } from '@/components/ui/ToastProvider';
 
 type Severity = 'success' | 'warning' | 'error' | 'info';
@@ -21,7 +22,7 @@ export function useAsyncRecordAction(scope = '') {
   const scopeGeneration = useRef(0);
   const attempts = useRef(new Map<string, { fingerprint: string; key: string }>());
   const [pending, setPending] = useState(false);
-  const [failure, setFailure] = useState<{ scope: string; message: string } | null>(null);
+  const [failure, setFailure] = useState<{ scope: string; message: string; cause: unknown } | null>(null);
   const error = failure?.scope === scope ? failure.message : null;
   useEffect(() => {
     mounted.current = true;
@@ -61,9 +62,10 @@ export function useAsyncRecordAction(scope = '') {
       if (mounted.current && message) showToast(message, severity);
       return { ok: true, value };
     } catch (cause) {
-      const message = typeof options.errorMessage === 'function' ? options.errorMessage(cause) : options.errorMessage;
+      const fallback = typeof options.errorMessage === 'function' ? options.errorMessage(cause) : options.errorMessage;
+      const message = cause instanceof ActionResultError && cause.code !== 'UNEXPECTED_ERROR' ? getActionErrorMessage(cause) : fallback;
       if (isCurrent()) {
-        setFailure({ scope: requestScope, message });
+        setFailure({ scope: requestScope, message, cause });
         showToast(message, 'error');
       }
       return { ok: false, reason: 'error' };
@@ -72,5 +74,5 @@ export function useAsyncRecordAction(scope = '') {
       if (mounted.current) setPending(false);
     }
   }, [dismissToast, scope, showToast]);
-  return { pending, error, run, isRunning, clearError, attemptKey, finishAttempt };
+  return { pending, error, errorCause: failure?.scope === scope ? failure.cause : null, run, isRunning, clearError, attemptKey, finishAttempt };
 }

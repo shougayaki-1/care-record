@@ -43,10 +43,10 @@ vi.mock('@/utils/permissions', async (importOriginal) => ({
   checkRecordPermission: () => false,
 }));
 vi.mock('@/app/actions/reports', () => ({
-  auditReportView: vi.fn().mockResolvedValue(undefined),
+  auditReportView: vi.fn().mockResolvedValue({ ok: true, data: undefined }),
   discardReportAutosave: vi.fn(),
-  getReportImages: vi.fn().mockResolvedValue([]),
-  loadReportAutosave: vi.fn().mockResolvedValue(null),
+  getReportImages: vi.fn().mockResolvedValue({ ok: true, data: [] }),
+  loadReportAutosave: vi.fn().mockResolvedValue({ ok: true, data: null }),
   saveReportAutosave: vi.fn(),
   saveReport: vi.fn(),
   softDeleteReports: vi.fn(),
@@ -54,8 +54,8 @@ vi.mock('@/app/actions/reports', () => ({
   uploadReportImage: vi.fn(),
 }));
 vi.mock('@/app/actions/reportShifts', () => ({
-  getLinkedShifts: vi.fn().mockResolvedValue([]),
-  getShiftSuggestions: vi.fn().mockResolvedValue([]),
+  getLinkedShifts: vi.fn().mockResolvedValue({ ok: true, data: [] }),
+  getShiftSuggestions: vi.fn().mockResolvedValue({ ok: true, data: [] }),
 }));
 
 vi.mock('@/lib/supabase', () => {
@@ -117,7 +117,7 @@ const report = (id: string, startAt: string) => ({
 describe('useRecordForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(discardReportAutosave).mockResolvedValue({ success: true });
+    vi.mocked(discardReportAutosave).mockResolvedValue({ ok: true, data: { success: true } });
     testState.search = 'reportId=report-a&draftKey=test-draft';
     testState.reports = new Map([
       ['report-a', deferred()],
@@ -177,9 +177,29 @@ describe('useRecordForm', () => {
     await act(async () => { retry = result.current.handleDialogSaveDraft(); await result.current.handleDraftSave(); });
     expect(saveReport).toHaveBeenCalledTimes(2); expect(result.current.submitting).toBe(true);
     expect(vi.mocked(saveReport).mock.calls[1][0].idempotencyKey).toBe(key);
-    await act(async () => { response.resolve({ success: true, reportId: 'report-a', revisionId: 'revision-2', version: 2, replayed: false }); await retry; });
+    await act(async () => { response.resolve({ ok: true, data: { success: true, reportId: 'report-a', revisionId: 'revision-2', version: 2, replayed: false } }); await retry; });
     expect(result.current.openCloseDialog).toBe(false); expect(result.current.submitting).toBe(false); expect(result.current.isDirty).toBe(false);
     expect(testState.router.back).toHaveBeenCalledOnce(); expect(testState.showToast).toHaveBeenLastCalledWith('下書きを保存しました', 'success');
+  });
+  it.each(['VERSION_CONFLICT', 'SESSION_EXPIRED'])('keeps normal record input and its retry key on %s', async code => {
+    const { result } = renderHook(() => useRecordForm());
+    await waitFor(() => expect(testState.requestedReports).toContain('report-a'));
+    await act(async () => { testState.reports.get('report-a')?.resolve(report('report-a', '2026-07-19T09:00:00.000Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => { result.current.handleAnswerChange('note', '競合時に保持する入力'); result.current.setIsDirty(true); });
+    vi.mocked(saveReport).mockResolvedValueOnce({ ok: false, error: { code: code as 'VERSION_CONFLICT' | 'SESSION_EXPIRED', message: '安全な保存拒否' } });
+    await act(async () => { await result.current.handleDraftSave(); });
+    expect(result.current.answers.note).toBe('競合時に保持する入力');
+    expect(result.current.isDirty).toBe(true);
+    expect(result.current.actionError).toBe('安全な保存拒否');
+    expect(result.current.actionErrorCause).toMatchObject({ code });
+    expect(testState.router.back).not.toHaveBeenCalled();
+    expect(discardReportAutosave).not.toHaveBeenCalled();
+    const key = vi.mocked(saveReport).mock.calls[0][0].idempotencyKey;
+    vi.mocked(saveReport).mockResolvedValueOnce({ ok: true, data: { success: true, reportId: 'report-a', revisionId: 'revision-3', version: 3, replayed: false } });
+    await act(async () => { await result.current.handleDraftSave(); });
+    expect(vi.mocked(saveReport).mock.calls[1][0].idempotencyKey).toBe(key);
+    expect(result.current.actionError).toBeNull();
   });
   it('locks a normal submission while its confirmation is still open', async () => {
     const { result } = renderHook(() => useRecordForm());

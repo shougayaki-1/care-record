@@ -1,3 +1,4 @@
+import { readActionResult } from '@/utils/actionResult';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -20,7 +21,7 @@ vi.mock('@/utils/supabase/roleSafety', async (importOriginal) => {
 });
 
 import { FULL_PERMISSIONS, PRESET_MANAGER_PERMISSIONS } from '@/utils/permissions';
-import { createOrgRole, updateOrgRole, deleteOrgRole } from './roles';
+import { createOrgRole as createOrgRoleResult, updateOrgRole as updateOrgRoleResult, deleteOrgRole as deleteOrgRoleResult } from './roles';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -94,3 +95,7 @@ describe('role deletion security', () => {
     expect(mocks.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'role.delete' }));
   });
 });
+
+function createOrgRole(...args: Parameters<typeof createOrgRoleResult>) { return readActionResult(createOrgRoleResult(...args)); }
+function updateOrgRole(...args: Parameters<typeof updateOrgRoleResult>) { return readActionResult(updateOrgRoleResult(...args)); }
+function deleteOrgRole(...args: Parameters<typeof deleteOrgRoleResult>) { return readActionResult(deleteOrgRoleResult(...args)); }

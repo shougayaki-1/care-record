@@ -69,15 +69,15 @@ describe('getMyShiftsWithStatus', () => {
     const error = { message: 'private_column が見つかりません', code: 'TEST_DB_FAILURE' };
     mocks.from.mockImplementation(name => name === table ? query(null, error) :
       query(name === 'staffs' ? { id: 'staff-1' } : [shift]));
-    await expect(load()).rejects.toThrow('処理に失敗しました。時間をおいて再度お試しください。');
+    await expect(load()).resolves.toEqual({ ok: false, error: { code: 'UNEXPECTED_ERROR', message: '処理に失敗しました。時間をおいて再度お試しください。' } });
     expect(mocks.log).toHaveBeenCalledWith(expect.stringContaining('[db:getMyShiftsWithStatus:'), {
       organizationId: 'org-1', error,
     });
   });
 
-  it('logs unexpected failures and throws only a generic error', async () => {
+  it('logs unexpected failures and returns only a generic result', async () => {
     mocks.user.mockRejectedValueOnce(new Error('synthetic internal failure'));
-    await expect(load()).rejects.toThrow('処理に失敗しました。時間をおいて再度お試しください。');
+    await expect(load()).resolves.toEqual({ ok: false, error: { code: 'UNEXPECTED_ERROR', message: '処理に失敗しました。時間をおいて再度お試しください。' } });
     expect(mocks.log).toHaveBeenCalledWith('[action:getMyShiftsWithStatus]', expect.objectContaining({
       error: expect.objectContaining({ message: 'synthetic internal failure' }),
     }));
@@ -109,4 +109,11 @@ describe('getMyShiftsWithStatus', () => {
     expect(JSON.parse(decoded)).toEqual({ expected: result, redacted: true });
     expect(decoded).not.toContain('441');
   });
+});
+
+it('returns classified authentication failure without querying staff', async () => {
+  const { ExpectedActionError } = await import('@/utils/errors');
+  mocks.user.mockRejectedValueOnce(new ExpectedActionError('UNAUTHENTICATED', '認証が必要です'));
+  await expect(load()).resolves.toEqual({ ok: false, error: { code: 'UNAUTHENTICATED', message: '認証が必要です' } });
+  expect(mocks.from).not.toHaveBeenCalled();
 });

@@ -1,5 +1,8 @@
 'use client';
 
+import { needsActionRecovery, readActionResult } from '@/utils/actionResult';
+
+
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useMemo, useRef, useState } from 'react';
 import { Alert, Stack, Typography } from '@/components/ui/mui';
@@ -7,6 +10,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import { AppButton, AppTextField, DateTimeField, NumberField, RecordFormDialog, SectionCard, SelectField, UnitAdornment } from '@/components/ui';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useAsyncRecordAction } from '@/hooks/useAsyncRecordAction';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { saveInternalWork } from '@/app/actions/internalWork';
 import type { InternalWorkStaffOption } from '@/app/actions/internalWork';
 
@@ -36,7 +40,7 @@ export default function InternalWorkDialog({
   onClose: () => void;
   onSaved?: () => void | Promise<void>;
 }) {
-  const { pending: saving, error, run, isRunning, attemptKey, finishAttempt } = useAsyncRecordAction(organizationId);
+  const { pending: saving, error, errorCause, run, isRunning, attemptKey, finishAttempt } = useAsyncRecordAction(organizationId);
   const confirm = useConfirm();
   const [attempted, setAttempted] = useState(false);
   const now = useMemo(() => new Date(), []);
@@ -97,7 +101,7 @@ export default function InternalWorkDialog({
         note,
       };
       const idempotencyKey = attemptKey(`internal-work:${organizationId}`, payload);
-      await commitRecordChange(organizationId, () => saveInternalWork({ ...payload, idempotencyKey }));
+      await commitRecordChange(organizationId, () => readActionResult(saveInternalWork({ ...payload, idempotencyKey })));
       if (isCurrent()) {
         try { await onSaved?.(); } catch (error) { console.error('Saved internal work callback failed', error); }
       }
@@ -119,7 +123,7 @@ export default function InternalWorkDialog({
         <AppButton size="small" startIcon={<SaveIcon />} onClick={handleSave} loading={saving} disabled={staffOptions.length === 0}>保存</AppButton>
       </>}
     >
-      {error && <Alert severity="error">{error}</Alert>}
+      {error && <Alert severity="error" action={needsActionRecovery(errorCause) ? <RecoveryLogoutButton /> : undefined}>{error}</Alert>}
       <SectionCard>
         <Typography component="h3" variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>基本情報</Typography>
         <Stack spacing={3}>

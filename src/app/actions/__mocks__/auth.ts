@@ -5,4 +5,4 @@ import type * as Auth from '../auth';
 export const registerWithPassword = fn<typeof Auth.registerWithPassword>().mockResolvedValue({ ok: true, signedIn: false });
 export const loginWithPassword = fn<typeof Auth.loginWithPassword>().mockResolvedValue({ ok: false, reason: 'invalid_credentials' });
 export const recordLogout = fn<typeof Auth.recordLogout>().mockResolvedValue(undefined);
-export const heartbeatSession = fn<typeof Auth.heartbeatSession>().mockResolvedValue(undefined);
+export const heartbeatSession = fn<typeof Auth.heartbeatSession>().mockResolvedValue({ ok: true, data: undefined });

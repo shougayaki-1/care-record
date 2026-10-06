@@ -1,5 +1,6 @@
 'use client';
 
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Box, Typography, TextField, Button, Alert, Stack, Divider,
@@ -94,7 +95,7 @@ export default function ProfilePage() {
         }
         const purpose = params.get('reauthPurpose');
         if (!['account_password_change', 'account_email_change', 'account_delete'].includes(purpose || '')) return;
-        void takeProviderReauthGrant(purpose as ReauthPurpose).then(grant => {
+        void readActionResult(takeProviderReauthGrant(purpose as ReauthPurpose)).then(grant => {
             if (!grant) { setMessage({ type: 'error', text: '本人確認の有効期限が切れました。もう一度お試しください。' }); return; }
             resumedGrant.current = { purpose: purpose as ReauthPurpose, token: grant.token };
             setMessage({ type: 'success', text: '本人確認が完了しました。変更内容を再入力し、操作を確定してください。' });
@@ -126,13 +127,13 @@ export default function ProfilePage() {
             if (newPassword) {
                 const grant = await reauthFor('account_password_change');
                 if (!grant) return;
-                await changeAccountPassword(newPassword, confirmPassword, grant.token);
+                await readActionResult(changeAccountPassword(newPassword, confirmPassword, grant.token));
             }
-            await updateOwnProfile(name);
+            await readActionResult(updateOwnProfile(name));
             setMessage({ type: 'success', text: '更新しました' });
             setNewPassword(''); setConfirmPassword('');
         } catch (e: unknown) { 
-            if (e instanceof Error) setMessage({ type: 'error', text: e.message }); 
+            setMessage({ type: 'error', text: getActionErrorMessage(e) });
         } finally { 
             setSaving(false);
             setNewPassword(''); setConfirmPassword('');
@@ -146,11 +147,11 @@ export default function ProfilePage() {
         try {
             const grant = await reauthFor('account_email_change');
             if (!grant) return;
-            await changeAccountEmail(newEmail, grant.token);
+            await readActionResult(changeAccountEmail(newEmail, grant.token));
             setMessage({ type: 'success', text: '確認メールを送信しました。新しいメールアドレスを確認してください。' });
             setNewEmail('');
         } catch(e: unknown) {
-            if (e instanceof Error) setMessage({ type: 'error', text: e.message });
+            setMessage({ type: 'error', text: getActionErrorMessage(e) });
         } finally { setSaving(false); }
     };
 
@@ -160,12 +161,12 @@ export default function ProfilePage() {
         try {
             const formData = new FormData();
             formData.set('avatar', event.target.files[0]);
-            const { avatarUrl: nextAvatarUrl } = await uploadOwnAvatar(formData);
+            const { avatarUrl: nextAvatarUrl } = await readActionResult(uploadOwnAvatar(formData));
             setAvatarUrl(nextAvatarUrl);
             showToast('プロフィール画像を更新しました');
         } catch (e: unknown) { 
             console.error(e);
-            if (e instanceof Error) showToast('アップロード失敗: ' + e.message, 'error'); 
+            showToast(getActionErrorMessage(e), 'error');
         } finally { 
             setUploading(false); 
         }
@@ -176,17 +177,17 @@ export default function ProfilePage() {
         try {
             const grant = await reauthFor('account_delete');
             if (!grant) return;
-            await deleteUserAccount(grant.token);
+            await readActionResult(deleteUserAccount(grant.token));
             await logoutCurrentUser();
             window.location.href = '/';
         } catch(e: unknown) { 
-            if (e instanceof Error) setMessage({ type: 'error', text: e.message }); 
+            setMessage({ type: 'error', text: getActionErrorMessage(e) });
         }
     };
 
     const handleLinkIdentity = async (provider: 'google' | 'azure') => {
         const { error } = await supabase.auth.linkIdentity({ provider, options: { redirectTo: `${window.location.origin}/app/profile` } });
-        if (error) setMessage({ type: 'error', text: error.message });
+        if (error) setMessage({ type: 'error', text: 'ログイン方法を連携できませんでした。時間をおいて再度お試しください。' });
     };
 
     if (loading || wsLoading) return <Box p={5} textAlign="center"><CircularProgress /></Box>;

@@ -1,5 +1,6 @@
 'use client';
 
+import { readActionResult } from '@/utils/actionResult';
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -44,7 +45,7 @@ export const NotificationsController = React.memo(function NotificationsControll
     setError(null);
     try {
       if (!notification.is_read) {
-        const result = await markNotificationRead(notification.id);
+        const result = await readActionResult(markNotificationRead(notification.id));
         setNotifications(previous => previous.map(item => item.id === notification.id
           ? { ...item, is_read: true, read_at: result.readAt } : item));
         onRead();

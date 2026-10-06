@@ -3,7 +3,7 @@
 import { createHash } from 'crypto';
 import { assertShiftPermission } from '@/utils/supabase/auth';
 import { serviceRoleForIncidentResponse } from '@/utils/supabase/serviceRole';
-import { sanitizeDbError, withSafeError } from '@/utils/errors';
+import { requireActionResult, ExpectedActionError, sanitizeDbError, withActionResult } from '@/utils/errors';
 
 const supabaseAdmin = serviceRoleForIncidentResponse();
 
@@ -18,7 +18,7 @@ type RepairItem = {
 };
 
 function monthRange(yearMonth: string) {
-  if (!/^\d{4}-\d{2}$/.test(yearMonth)) throw new Error('対象月が不正です');
+  if (!/^\d{4}-\d{2}$/.test(yearMonth)) throw new ExpectedActionError('VALIDATION_ERROR', '対象月が不正です');
   const [year, month] = yearMonth.split('-').map(Number);
   const start = new Date(Date.UTC(year, month - 1, 1)).toISOString();
   const end = new Date(Date.UTC(year, month, 1)).toISOString();
@@ -28,7 +28,7 @@ function monthRange(yearMonth: string) {
 /** Safe first-stage repair: never recreates segments. It only identifies rows
  * and rebuilds the denormalized shift_staffs table from existing segment staff. */
 export async function previewShiftStaffRepair(organizationId: string, yearMonth: string) {
-  return withSafeError('previewShiftStaffRepair', async () => {
+  return withActionResult('previewShiftStaffRepair', async () => {
   await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
   const { start, end } = monthRange(yearMonth);
   const { data: shifts, error } = await supabaseAdmin
@@ -68,9 +68,9 @@ export async function previewShiftStaffRepair(organizationId: string, yearMonth:
 }
 
 export async function applyShiftStaffRepair(organizationId: string, yearMonth: string) {
-  return withSafeError('applyShiftStaffRepair', async () => {
+  return withActionResult('applyShiftStaffRepair', async () => {
   const actor = await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
-  const preview = await previewShiftStaffRepair(organizationId, yearMonth);
+  const preview = await requireActionResult(previewShiftStaffRepair(organizationId, yearMonth));
   const { data: run, error: runError } = await supabaseAdmin.from('maintenance_runs').insert({
     organization_id: organizationId,
     kind: 'shift_staff_denorm_repair',

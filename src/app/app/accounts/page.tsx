@@ -1,10 +1,11 @@
 'use client';
 
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
 import { useId, useState, useCallback, useTransition, useEffect, useRef } from 'react';
 import type { SyntheticEvent } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, Stack,
+  Chip, Stack, Alert,
   IconButton, MenuItem, Menu, ListItemIcon,
   CircularProgress, Divider, LinearProgress, Tabs, Tab,
 } from '@/components/ui/mui';
@@ -26,6 +27,7 @@ import { AppButton, AppDialog, AppTextField, SelectField, StatusChip, EmptyState
 import { checkManagementPermission } from '@/utils/permissions';
 import RoleManagementPanel from '@/components/roles/RoleManagementPanel';
 import { useFetchData } from '@/hooks/useFetchData';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useReauth } from '@/hooks/useReauth';
 import { takeProviderReauthGrant } from '@/app/actions/authSecurity';
 import { addOrganizationOwner } from '@/app/actions/organizationOwners';
@@ -97,9 +99,9 @@ export default function AccountsPage() {
   const fetchAccountsData = useCallback(async (): Promise<AccountsData> => {
     if (!currentOrg) return initialAccountsData;
       const [overview, orgRoles, staffCandidates] = await Promise.all([
-        getAccountOverview(currentOrg.id),
-        getOrgRoles(currentOrg.id).catch(() => []),
-        getInviteStaffCandidates(currentOrg.id).catch(() => []),
+        readActionResult(getAccountOverview(currentOrg.id)),
+        readActionResult(getOrgRoles(currentOrg.id)),
+        readActionResult(getInviteStaffCandidates(currentOrg.id)),
       ]);
       // fetchedUserId をローカル変数で保持し sort に使うことで
       // currentUserId state への依存を断ち、二重フェッチループを防ぐ
@@ -126,6 +128,7 @@ export default function AccountsPage() {
 
   const {
     data: accountsData,
+    error: fetchError,
     loading: isFetching,
     refetch: fetchData,
   } = useFetchData(fetchAccountsData, initialAccountsData, !wsLoading && Boolean(currentOrg), () => {
@@ -143,7 +146,7 @@ export default function AccountsPage() {
     window.history.replaceState(null, '', '/app/accounts');
     sessionStorage.removeItem(OWNER_ADD_RESUME_KEY);
     void (async () => {
-      const grant = await takeProviderReauthGrant('owner_add');
+      const grant = await readActionResult(takeProviderReauthGrant('owner_add'));
       if (!pending || !target || currentOrg.role !== 'owner' || !grant || params.has('stepupError')) {
         showToast('再認証または追加対象を確認できません。もう一度オーナー追加を開始してください。', 'error');
         return;
@@ -167,7 +170,7 @@ export default function AccountsPage() {
       if (orgRef.current?.id !== target.orgId || orgRef.current.role !== 'owner') {
         throw new Error('事業所が変更されています。もう一度追加対象を選んでください。');
       }
-      await addOrganizationOwner(target.orgId, target.id, grant.token);
+      await readActionResult(addOrganizationOwner(target.orgId, target.id, grant.token));
       sessionStorage.removeItem(OWNER_ADD_RESUME_KEY);
       setOwnerTarget(null);
       showToast('オーナーを追加しました。現在のオーナーも引き続きオーナーです。');
@@ -176,7 +179,7 @@ export default function AccountsPage() {
     } catch (error) {
       // 使用済み・期限切れのSSO証明を次の試行に持ち越さない。
       setOwnerTarget({ orgId: target.orgId, id: target.id, name: target.name });
-      showToast(error instanceof Error ? error.message : 'オーナーの追加に失敗しました', 'error');
+      showToast(getActionErrorMessage(error, 'オーナーの追加に失敗しました'), 'error');
     } finally {
       ownerBusy.current = false;
       setOwnerAdding(false);
@@ -191,17 +194,17 @@ export default function AccountsPage() {
   const handleGenerateLink = async () => {
     if (!currentOrg) return;
     try {
-        const { code } = await createInvitation(currentOrg.id, {
+        const { code } = await readActionResult(createInvitation(currentOrg.id, {
           targetName: newInviteName,
           email: newInviteEmail,
           roleIds: selectedRoleIds,
           staffId: selectedInviteStaffId === 'none' ? null : selectedInviteStaffId,
-        });
+        }));
         setGeneratedLink(`${BASE_URL}/join?code=${code}`);
         fetchData();
     } catch (e) {
         console.error(e);
-        showToast(e instanceof Error ? e.message : '招待の発行に失敗しました', 'error');
+        showToast(getActionErrorMessage(e, '招待の発行に失敗しました'), 'error');
     }
   };
 
@@ -240,7 +243,7 @@ export default function AccountsPage() {
     if (!currentOrg || !selectedAccount) return;
     try {
       if (selectedAccount.status === 'active') {
-        await updateMemberRoles(currentOrg.id, selectedAccount.id, editOrgRoleIds);
+        await readActionResult(updateMemberRoles(currentOrg.id, selectedAccount.id, editOrgRoleIds));
       }
 
       showToast('権限を変更しました');
@@ -279,16 +282,16 @@ export default function AccountsPage() {
       if (!currentOrg || !selectedAccount) return;
 
       try {
-          await removeAccount(currentOrg.id, {
+          await readActionResult(removeAccount(currentOrg.id, {
               targetId: selectedAccount.id,
               status: selectedAccount.status === 'active' ? 'active' : 'invited',
-          });
+          }));
           showToast(selectedAccount.status === 'active' ? 'アカウントを事業所から削除しました' : '招待を取り消しました');
           setOpenDeleteDialog(false);
           fetchData(); // 一覧を再取得して表示を更新
       } catch (e) {
           console.error(e);
-          showToast(e instanceof Error ? e.message : 'エラーが発生しました', 'error');
+          showToast(getActionErrorMessage(e, 'エラーが発生しました'), 'error');
           setOpenDeleteDialog(false);
       }
   };
@@ -303,6 +306,7 @@ export default function AccountsPage() {
       <InnerPageHeader icon={<KeyIcon />} title="アカウント・権限管理" />
 
       <PageBody>
+          {fetchError != null && <Alert severity="error" action={needsActionRecovery(fetchError) ? <RecoveryLogoutButton /> : <AppButton variant="text" intent="secondary" onClick={() => void fetchData()}>再試行</AppButton>}>{getActionErrorMessage(fetchError)}</Alert>}
           {canManageRoles && (
             <Box sx={{ mb: 2, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 0, sm: 1 }, pt: 1 }}>
               {isPending && <LinearProgress />}
@@ -313,7 +317,7 @@ export default function AccountsPage() {
             </Box>
           )}
 
-          {activeTab === 'accounts' && (
+          {activeTab === 'accounts' && fetchError == null && (
             <>
             <PageToolbar>
                 <Box sx={{ minWidth: 0 }}>

@@ -1,3 +1,4 @@
+import { ExpectedActionError, sanitizeDbError } from '@/utils/errors';
 import { mergePermissions, normalizePermissions, type RolePermissions } from '@/utils/permissions';
 import { createSessionClient } from '@/utils/supabase/auth';
 
@@ -19,7 +20,7 @@ export function isDangerousPermissions(permissions: RolePermissions): boolean {
 
 export function assertOwnerForDangerousPermissions(permissions: RolePermissions, isOwner: boolean): void {
   if (isDangerousPermissions(permissions) && !isOwner) {
-    throw new Error('危険な権限を含むロールの変更はオーナーのみ実行できます');
+    throw new ExpectedActionError('FORBIDDEN', '危険な権限を含むロールの変更はオーナーのみ実行できます');
   }
 }
 
@@ -43,7 +44,7 @@ export async function assertRoleManagerRemains(
       .eq('organization_id', organizationId),
   ]);
 
-  if (rolesError || membersError || linksError) throw new Error('ロール管理者の安全確認に失敗しました');
+  if (rolesError || membersError || linksError) throw sanitizeDbError(rolesError || membersError || linksError, 'roles.safety');
 
   const roleMap = new Map<string, RolePermissions>();
   for (const role of (roles ?? []) as RoleRow[]) {
@@ -85,5 +86,5 @@ export async function assertRoleManagerRemains(
     if (permissions.management.roles) return;
   }
 
-  throw new Error('ロールを管理できるメンバーが0人になるため、この操作はできません');
+  throw new ExpectedActionError('FORBIDDEN', 'ロールを管理できるメンバーが0人になるため、この操作はできません');
 }

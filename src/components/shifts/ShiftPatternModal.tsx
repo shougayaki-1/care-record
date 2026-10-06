@@ -1,8 +1,10 @@
 'use client';
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
 
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import React, { useState, useEffect } from 'react';
 import {
-    Stack, FormControl,
+    Alert, Stack, FormControl,
     Select, MenuItem, Box, Typography, Checkbox, FormGroup,
     FormControlLabel, IconButton, Tooltip, InputLabel, Button, Chip
 } from '@/components/ui/mui';
@@ -103,6 +105,7 @@ const toPayloadTime = (time: string) => time.length === 5 ? `${time}:00` : time;
 export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, organizationId, initialData }: Props) => {
     const { showToast } = useToast();
     const [loading, setLoading] = useState(false);
+    const [saveError, setSaveError] = useState<unknown>(null);
     const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
     const [staffRoles, setStaffRoles] = useState<StaffRole[]>([]);
     const [clientId, setClientId] = useState('');
@@ -118,16 +121,17 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
 
     useEffect(() => {
         if (open) {
-            Promise.all([getServiceTypes(organizationId), getStaffRoles(organizationId)])
+            Promise.all([readActionResult(getServiceTypes(organizationId)), readActionResult(getStaffRoles(organizationId))])
                 .then(([types, roles]) => {
                     setServiceTypes(types.filter(t => t.is_active));
                     setStaffRoles(roles.filter(r => r.is_active));
                 })
                 .catch((error) => {
                     console.error(error);
-                    showToast('区間設定の選択肢を読み込めませんでした', 'error');
+                    showToast(getActionErrorMessage(error, '区間設定の選択肢を読み込めませんでした'), 'error');
                 });
             queueMicrotask(() => {
+              setSaveError(null);
               if (initialData) {
                 setClientId(initialData.client_id || '');
                 setStartTime(initialData.start_time ? initialData.start_time.slice(0, 5) : '10:00');
@@ -198,6 +202,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
         }
 
         setLoading(true);
+        setSaveError(null);
         try {
             const clientName = clients.find(c => c.id === clientId)?.name || '';
             const segmentStaffIds = Array.from(new Set(segments.flatMap((segment) => segment.staffs.map((staff) => staff.staff_id).filter(Boolean))));
@@ -228,7 +233,8 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
             onClose();
         } catch (e) {
             console.error(e);
-            showToast('ひな形の保存に失敗しました', 'error');
+            setSaveError(e);
+            showToast(getActionErrorMessage(e, 'ひな形の保存に失敗しました'), 'error');
         } finally {
             setLoading(false);
         }
@@ -269,6 +275,7 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
             actions={<><AppButton variant="text" intent="secondary" onClick={onClose} disabled={loading}>閉じる</AppButton><AppButton onClick={handleSave} loading={loading}>{initialData ? '設定を保存' : 'ひな形を登録'}</AppButton></>}
         >
                 <Stack spacing={3}>
+                    {saveError != null && <Alert severity="error" action={needsActionRecovery(saveError) ? <RecoveryLogoutButton /> : undefined}>{getActionErrorMessage(saveError, 'ひな形の保存に失敗しました')}</Alert>}
                     <SelectField
                         required
                         label="利用者"

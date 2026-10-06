@@ -1,3 +1,5 @@
+import { readActionResult } from '@/utils/actionResult';
+import { ExpectedActionError } from '@/utils/errors';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Result = { data: unknown; error: unknown };
@@ -38,13 +40,14 @@ vi.mock('@/utils/supabase/retentionPolicy', () => ({
   getRetentionPolicy: async () => ({ years: 10, legalBasis: 'test-policy' }),
   retentionDeadline: () => '2036-01-01T00:00:00Z',
 }));
-vi.mock('../shiftSegments', () => ({ saveShiftSegments: vi.fn() }));
+vi.mock('../shiftSegments', () => ({ saveShiftSegments: vi.fn().mockResolvedValue({ ok: true, data: undefined }) }));
 vi.mock('./googleSyncInternal', () => ({
   trySyncSilently: mocks.sync, processShiftsSequential: mocks.process,
 }));
 
-import { deleteShift, deleteShiftsBatch, deleteShiftsDbOnly, toggleCancelShift, updateShift, updateShiftTimeOnly } from './crud';
+import { deleteShift as deleteShiftResult, deleteShiftsBatch as deleteShiftsBatchResult, deleteShiftsDbOnly as deleteShiftsDbOnlyResult, toggleCancelShift as toggleCancelShiftResult, updateShift as updateShiftResult, updateShiftTimeOnly as updateShiftTimeOnlyResult } from './crud';
 import { softDeleteShiftIds, updateShiftInternal } from './internal';
+import { saveShiftSegments } from '../shiftSegments';
 
 const existing = { organization_id: 'org-1' };
 const success = { data: { id: 'shift-1', ...existing }, error: null };
@@ -60,6 +63,18 @@ beforeEach(() => {
   mocks.rpc.mockResolvedValue({ data: 1, error: null });
   mocks.sync.mockResolvedValue(undefined);
   mocks.process.mockResolvedValue({ failed: 0, stats: {} });
+  vi.mocked(saveShiftSegments).mockResolvedValue({ ok: true, data: undefined });
+});
+
+it('propagates a failed segment save without updating or auditing the parent shift', async () => {
+  mocks.results.push({ data: existing, error: null });
+  vi.mocked(saveShiftSegments).mockResolvedValue({ ok: false, error: { code: 'FORBIDDEN', message: 'この操作を行う権限がありません' } });
+  await expect(updateShiftResult('shift-1', { segments: [] })).resolves.toEqual({
+    ok: false, error: { code: 'FORBIDDEN', message: 'この操作を行う権限がありません' },
+  });
+  expect(mocks.queries.some(query => query.update)).toBe(false);
+  expect(mocks.sync).not.toHaveBeenCalled();
+  expect(mocks.audit).not.toHaveBeenCalled();
 });
 
 const updates = [
@@ -102,7 +117,7 @@ describe.each(updates)('$name mutation result', ({ name, action, audit }) => {
   });
   it('rejects application permission denial before mutation', async () => {
     mocks.results.push({ data: existing, error: null });
-    mocks.assertPermission.mockRejectedValue(new Error('この操作を行う権限がありません'));
+    mocks.assertPermission.mockRejectedValue(new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません'));
     await expect(action()).rejects.toThrow('権限');
     expect(mocks.queries.some(query => query.update)).toBe(false);
     expect(mocks.sync).not.toHaveBeenCalled();
@@ -169,7 +184,7 @@ describe.each(deletions)('$name deletion result', ({ name, action, audit }) => {
   });
   it('rejects application permission denial before RPC and Google', async () => {
     queueDelete(name);
-    mocks.assertPermission.mockRejectedValue(new Error('権限がありません'));
+    mocks.assertPermission.mockRejectedValue(new ExpectedActionError('FORBIDDEN', '権限がありません'));
     await expect(action()).rejects.toThrow('権限');
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.process).not.toHaveBeenCalled();
@@ -239,3 +254,10 @@ describe('batch deletion preflight race', () => {
     expect(mocks.process).not.toHaveBeenCalled();
   });
 });
+
+function deleteShift(...args: Parameters<typeof deleteShiftResult>) { return readActionResult(deleteShiftResult(...args)); }
+function deleteShiftsBatch(...args: Parameters<typeof deleteShiftsBatchResult>) { return readActionResult(deleteShiftsBatchResult(...args)); }
+function deleteShiftsDbOnly(...args: Parameters<typeof deleteShiftsDbOnlyResult>) { return readActionResult(deleteShiftsDbOnlyResult(...args)); }
+function toggleCancelShift(...args: Parameters<typeof toggleCancelShiftResult>) { return readActionResult(toggleCancelShiftResult(...args)); }
+function updateShift(...args: Parameters<typeof updateShiftResult>) { return readActionResult(updateShiftResult(...args)); }
+function updateShiftTimeOnly(...args: Parameters<typeof updateShiftTimeOnlyResult>) { return readActionResult(updateShiftTimeOnlyResult(...args)); }

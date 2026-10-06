@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import React, { useEffect, useState, useRef, useCallback, useTransition } from 'react';
 import dynamic from 'next/dynamic';
@@ -171,13 +172,10 @@ export default function ShiftManagePage() {
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
         setSyncProgress({ total: 1, current: 0, currentName: shiftId ? 'Googleカレンダーの予定を更新中...' : 'Googleカレンダーへ新規登録中...' });
         try {
-            if (shiftId) await updateShift(shiftId, payload);
-            else await createShift(payload);
+            if (shiftId) await readActionResult(updateShift(shiftId, payload));
+            else await readActionResult(createShift(payload));
             showToast('シフト情報を保存しました');
             fetchData(true);
-        } catch (error) {
-            console.error(error);
-            showToast('保存に失敗しました', 'error');
         } finally {
             setSyncProgress(null);
         }
@@ -186,12 +184,9 @@ export default function ShiftManagePage() {
     const handleToggleCancel = async (shiftId: string, isCancel: boolean, reason: string) => {
         setSyncProgress({ total: 1, current: 0, currentName: isCancel ? '予定をお休みに設定＆Google同期中...' : '予定を通常復元＆Google同期中...' });
         try {
-            await toggleCancelShift(shiftId, isCancel, reason);
+            await readActionResult(toggleCancelShift(shiftId, isCancel, reason));
             showToast(isCancel ? 'シフトをお休みに設定しました' : '通常予定に復元しました');
             fetchData(true);
-        } catch (error) {
-            console.error(error);
-            showToast('変更に失敗しました', 'error');
         } finally {
             setSyncProgress(null);
         }
@@ -200,7 +195,7 @@ export default function ShiftManagePage() {
     const handleDeleteShift = async (shiftId: string) => {
         setSyncProgress({ total: 1, current: 0, currentName: 'シフトを削除・Googleカレンダーに反映中...' });
         try {
-            const result = await deleteShift(shiftId);
+            const result = await readActionResult(deleteShift(shiftId));
             showToast(result.failed > 0
                 ? 'シフトを削除しました。Googleカレンダーへの反映に失敗しました。連携を確認して同期修復を実行してください。'
                 : 'シフトを削除しました', result.failed > 0 ? 'warning' : 'success');
@@ -221,7 +216,7 @@ export default function ShiftManagePage() {
 
         setSyncProgress({ total: 1, current: 0, currentName: '予定時間を更新＆Google同期中...' });
         try {
-            await updateShiftTimeOnly(shiftId, start, end);
+            await readActionResult(updateShiftTimeOnly(shiftId, start, end));
             showToast('シフト時間を調整しました');
             fetchData(true);
         } catch (error) {
@@ -243,30 +238,25 @@ export default function ShiftManagePage() {
     };
 
     const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {
-        try {
-            if (patternId) {
-                await updateShiftPattern(patternId, payload);
-                showToast('ひな形情報を更新しました');
-            } else {
-                await createShiftPattern(payload);
-                showToast('新規ひな形を登録しました');
-            }
-            fetchData(true);
-        } catch (error) {
-            console.error(error);
-            showToast('保存に失敗しました', 'error');
+        if (patternId) {
+            await readActionResult(updateShiftPattern(patternId, payload));
+            showToast('ひな形情報を更新しました');
+        } else {
+            await readActionResult(createShiftPattern(payload));
+            showToast('新規ひな形を登録しました');
         }
+        fetchData(true);
     };
 
     const handleDeletePattern = async (id: string) => {
         if (!(await confirm({ title: 'ひな形の削除', message: 'このひな形を削除しますか？\n（※すでに展開済みのカレンダー上のシフト実体は削除されません）', confirmText: '削除する', confirmColor: 'error' }))) return;
         try {
-            await deleteShiftPattern(id);
+            await readActionResult(deleteShiftPattern(id));
             showToast('ひな形を削除しました');
             fetchData(true);
         } catch (error) {
             console.error(error);
-            showToast('削除に失敗しました', 'error');
+            showToast(getActionErrorMessage(error, '削除に失敗しました'), 'error');
         }
     };
 
@@ -274,12 +264,12 @@ export default function ShiftManagePage() {
         if (!currentOrg) return;
         setGenerating(true);
         try {
-            const res = await previewShiftsForMonth(currentOrg.id, targetMonth);
+            const res = await readActionResult(previewShiftsForMonth(currentOrg.id, targetMonth));
             setPreviewDetails(res);
             setPreviewDialogOpen(true);
         } catch (e) {
             console.error(e);
-            showToast('計算処理に失敗しました', 'error');
+            showToast(getActionErrorMessage(e, '計算処理に失敗しました'), 'error');
         } finally {
             setGenerating(false);
         }
@@ -290,7 +280,7 @@ export default function ShiftManagePage() {
         setPreviewDialogOpen(false);
         setGenerating(true);
         try {
-            const res = await generateShiftsForMonth(currentOrg.id, targetMonth);
+            const res = await readActionResult(generateShiftsForMonth(currentOrg.id, targetMonth));
             setGenerating(false);
             setActiveTab('fullCalendar');
             const resultSummary = `新規${res.count}件 / 更新${res.updated}件 / 編集済みスキップ${res.skipped}件 / 失敗${res.failed}件`;
@@ -307,7 +297,7 @@ export default function ShiftManagePage() {
             fetchData(true);
         } catch (error) {
             console.error(error);
-            showToast('シフトの自動展開に失敗しました。', 'error');
+            showToast(getActionErrorMessage(error, 'シフトの自動展開に失敗しました。'), 'error');
             setGenerating(false);
         }
     };
@@ -351,7 +341,7 @@ export default function ShiftManagePage() {
 
             for (let i = 0; i < shiftIds.length; i += CHUNK) {
                 const chunk = shiftIds.slice(i, i + CHUNK);
-                const res = await deleteShiftsBatch(currentOrg.id, chunk);
+                const res = await readActionResult(deleteShiftsBatch(currentOrg.id, chunk));
                 deleted += res.deleted;
                 failed += res.failed;
                 setSyncProgress({ total, current: Math.min(total, deleted), currentName: `${Math.min(total, deleted)} / ${total} 件 処理済み` });
@@ -367,7 +357,7 @@ export default function ShiftManagePage() {
             fetchData(true);
         } catch (error) {
             console.error('Clear Deployed Shifts Error:', error);
-            showToast(error instanceof Error ? error.message : '消去処理中にエラーが発生しました。', 'error');
+            showToast(getActionErrorMessage(error, '消去処理中にエラーが発生しました。'), 'error');
             setGenerating(false);
             setSyncProgress(null);
         }

@@ -1,5 +1,8 @@
 'use client';
 
+import { needsActionRecovery, readActionResult } from '@/utils/actionResult';
+
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, CircularProgress, Stack } from '@/components/ui/mui';
@@ -27,7 +30,7 @@ type NamedId = { id: string; name: string };
 export default function AiCandidatesPage() {
   const { currentOrg } = useWorkspace();
   const canReview = Boolean(currentOrg && checkManagementPermission(currentOrg.effectivePermissions, 'reports'));
-  const { pending: saving, run, isRunning } = useAsyncRecordAction(currentOrg?.id);
+  const { pending: saving, error: actionError, errorCause: actionErrorCause, run, isRunning } = useAsyncRecordAction(currentOrg?.id);
   const confirm = useConfirm();
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [clients, setClients] = useState<NamedId[]>([]);
@@ -159,7 +162,7 @@ export default function AiCandidatesPage() {
           ...(travelTime ? { travel_time: travelTime } : {}),
         },
       } satisfies Parameters<typeof approveAiCandidate>[0];
-      await commitRecordChange(currentOrg.id, () => approveAiCandidate(payload));
+      await commitRecordChange(currentOrg.id, () => readActionResult(approveAiCandidate(payload)));
     }, {
       successMessage: 'AI送信を確認し、提供記録を承認しました',
       errorMessage: '承認に失敗しました。入力内容は保持しています。もう一度承認してください。',
@@ -178,6 +181,7 @@ export default function AiCandidatesPage() {
       <PageBody maxWidth={false}>
         <RecordListFilterBar source="ai" canViewReports={canReview} />
         <Stack spacing={2}>
+          {actionError && <Alert severity="error" action={needsActionRecovery(actionErrorCause) ? <RecoveryLogoutButton /> : undefined}>{actionError}</Alert>}
         <Alert severity="warning">
           職員がAIから送信した記録です。原本とAIの読み取り結果を照合し、必要な修正と交通費の確認を行ってから承認してください。
         </Alert>

@@ -1,5 +1,6 @@
 'use client';
 
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
@@ -91,7 +92,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         loadedWorkspaceUserId.current = null;
         console.error('Workspace lookup failed', { memberError, profileError });
         const authErr = memberError || profileError;
-        if (authErr?.code === '401' || authErr?.message?.toLowerCase().includes('jwt')) {
+        if (authErr?.code === 'PGRST301' || authErr?.code === 'PGRST302') {
           setOrgList([]);
           setCurrentOrg(null);
           setUserId(null);
@@ -214,9 +215,14 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const switchOrg = useCallback(async (orgId: string) => {
     const target = orgList.find(o => o.id === orgId);
     if (target) {
-      setCurrentOrg(target);
-      await setLastOrganization(orgId);
-      window.location.href = '/app'; 
+      try {
+        await readActionResult(setLastOrganization(orgId));
+        setCurrentOrg(target);
+        window.location.href = '/app';
+      } catch (error) {
+        setStatus(needsActionRecovery(error) ? 'session_expired' : 'error');
+        setErrorMessage(getActionErrorMessage(error));
+      }
     }
   }, [orgList]);
 
