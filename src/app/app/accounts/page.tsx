@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState, useCallback, useTransition } from 'react';
+import { useId, useState, useCallback, useTransition, useEffect, useRef } from 'react';
 import type { SyntheticEvent } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -26,6 +26,10 @@ import { AppButton, AppDialog, AppTextField, SelectField, StatusChip, EmptyState
 import { checkManagementPermission } from '@/utils/permissions';
 import RoleManagementPanel from '@/components/roles/RoleManagementPanel';
 import { useFetchData } from '@/hooks/useFetchData';
+import { useReauth } from '@/hooks/useReauth';
+import { takeProviderReauthGrant } from '@/app/actions/authSecurity';
+import { addOrganizationOwner } from '@/app/actions/organizationOwners';
+import { readOwnerAddResume, OWNER_ADD_RESUME_KEY } from '@/utils/ownerAddResume';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -56,7 +60,7 @@ const initialAccountsData: AccountsData = {
 
 export default function AccountsPage() {
   const roleRestrictionId = useId();
-  const { currentOrg, loading: wsLoading } = useWorkspace();
+  const { currentOrg, loading: wsLoading, refreshWorkspace } = useWorkspace();
   const { showToast } = useToast();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -82,6 +86,13 @@ export default function AccountsPage() {
   
   // ★追加：削除（取り消し）確認ダイアログ用
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+  const { requestReauth, reauthDialog } = useReauth();
+  const [ownerTarget, setOwnerTarget] = useState<{ orgId: string; id: string; name: string; token?: string } | null>(null);
+  const [ownerAdding, setOwnerAdding] = useState(false);
+  const ownerBusy = useRef(false);
+  const resumeHandled = useRef(false);
+  const orgRef = useRef(currentOrg);
+  useEffect(() => { orgRef.current = currentOrg; }, [currentOrg]);
 
   const fetchAccountsData = useCallback(async (): Promise<AccountsData> => {
     if (!currentOrg) return initialAccountsData;
@@ -121,6 +132,56 @@ export default function AccountsPage() {
     showToast('データの取得に失敗しました', 'error');
   }, currentOrg?.id);
   const { accountList, currentUserId, availableRoles, inviteStaffCandidates } = accountsData;
+
+  useEffect(() => {
+    if (!currentOrg || isFetching || !currentUserId || resumeHandled.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('action') !== 'owner_add') return;
+    resumeHandled.current = true;
+    const pending = readOwnerAddResume(params, sessionStorage.getItem(OWNER_ADD_RESUME_KEY), currentOrg.id, currentUserId);
+    const target = pending && accountList.find(account => account.id === pending.targetId && account.status === 'active' && account.role === 'member');
+    window.history.replaceState(null, '', '/app/accounts');
+    sessionStorage.removeItem(OWNER_ADD_RESUME_KEY);
+    void (async () => {
+      const grant = await takeProviderReauthGrant('owner_add');
+      if (!pending || !target || currentOrg.role !== 'owner' || !grant || params.has('stepupError')) {
+        showToast('再認証または追加対象を確認できません。もう一度オーナー追加を開始してください。', 'error');
+        return;
+      }
+      // SSO復帰だけで昇格しない。再検証した対象を確認画面へ戻す。
+      setOwnerTarget({ orgId: pending.orgId, id: target.id, name: target.name, token: grant.token });
+    })().catch(() => showToast('再認証を確認できません。もう一度お試しください。', 'error'));
+  }, [currentOrg, currentUserId, accountList, isFetching, showToast]);
+
+  const executeOwnerAdd = async () => {
+    if (!ownerTarget || !currentOrg || currentOrg.role !== 'owner' || currentOrg.id !== ownerTarget.orgId || ownerBusy.current) return;
+    const target = ownerTarget;
+    ownerBusy.current = true;
+    setOwnerAdding(true);
+    try {
+      sessionStorage.setItem(OWNER_ADD_RESUME_KEY, JSON.stringify({ orgId: target.orgId, targetId: target.id, actorId: currentUserId }));
+      const grant = target.token ? { token: target.token } : await requestReauth('owner_add', {
+        next: `/app/accounts?stepup=1&action=owner_add&reauthOrg=${target.orgId}&target=${target.id}`,
+      });
+      if (!grant) return;
+      if (orgRef.current?.id !== target.orgId || orgRef.current.role !== 'owner') {
+        throw new Error('事業所が変更されています。もう一度追加対象を選んでください。');
+      }
+      await addOrganizationOwner(target.orgId, target.id, grant.token);
+      sessionStorage.removeItem(OWNER_ADD_RESUME_KEY);
+      setOwnerTarget(null);
+      showToast('オーナーを追加しました。現在のオーナーも引き続きオーナーです。');
+      await fetchData();
+      await refreshWorkspace();
+    } catch (error) {
+      // 使用済み・期限切れのSSO証明を次の試行に持ち越さない。
+      setOwnerTarget({ orgId: target.orgId, id: target.id, name: target.name });
+      showToast(error instanceof Error ? error.message : 'オーナーの追加に失敗しました', 'error');
+    } finally {
+      ownerBusy.current = false;
+      setOwnerAdding(false);
+    }
+  };
 
 
   const handleTabChange = useCallback((_: SyntheticEvent, value: 'accounts' | 'roles') => {
@@ -290,7 +351,7 @@ export default function AccountsPage() {
                                         )}
                                     </Box>
                                     {(canManageAccounts || account.id === currentUserId) && (
-                                        <IconButton size="small" onClick={(e) => handleMenuOpen(e, account)} sx={{ flexShrink: 0 }}>
+                                        <IconButton size="small" aria-label={`${account.name}の操作`} onClick={(e) => handleMenuOpen(e, account)} sx={{ flexShrink: 0 }}>
                                             <MoreVertIcon fontSize="small" />
                                         </IconButton>
                                     )}
@@ -386,7 +447,7 @@ export default function AccountsPage() {
                                 </TableCell>
                                 <TableCell align="center">
                                     {(canManageAccounts || account.id === currentUserId) && (
-                                        <IconButton size="small" onClick={(e) => handleMenuOpen(e, account)}>
+                                        <IconButton size="small" aria-label={`${account.name}の操作`} onClick={(e) => handleMenuOpen(e, account)}>
                                             <MoreVertIcon fontSize="small" />
                                         </IconButton>
                                     )}
@@ -421,6 +482,16 @@ export default function AccountsPage() {
               </MenuItem>
           )}
 
+          {isOwner && selectedAccount?.status === 'active' && selectedAccount.role === 'member' && selectedAccount.id !== currentUserId && (
+              <MenuItem onClick={() => {
+                  setOwnerTarget({ orgId: currentOrg.id, id: selectedAccount.id, name: selectedAccount.name });
+                  handleMenuClose();
+              }} sx={{ py: 1.5 }}>
+                  <ListItemIcon><PersonAddIcon fontSize="small" color="primary" /></ListItemIcon>
+                  オーナーに追加
+              </MenuItem>
+          )}
+
           {/* ★修正: onClick を openDeleteConfirmDialog に変更 */}
           <MenuItem disabled={selectedAccount?.role === 'owner' && !isOwner} onClick={openDeleteConfirmDialog} sx={{ color: 'error.main', py: 1.5 }}>
               <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon> 
@@ -445,7 +516,7 @@ export default function AccountsPage() {
             <b>{selectedAccount?.name}</b> さんの権限を変更します。
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            システム権限: {selectedAccount?.role === 'owner' ? 'オーナー' : 'メンバー'}。オーナーの変更には再認証付きの専用移譲フローが必要です。
+            システム権限: {selectedAccount?.role === 'owner' ? 'オーナー' : 'メンバー'}。オーナーの追加は、現在のオーナーが操作メニューの「オーナーに追加」から再認証して行います。
           </Typography>
           {availableRoles.length > 0 && selectedAccount?.status === 'active' && (
             <>
@@ -480,6 +551,18 @@ export default function AccountsPage() {
           )}
         </Box>
       </AppDialog>
+
+      <AppDialog open={Boolean(ownerTarget)} title="オーナーに追加" maxWidth="xs"
+        onClose={() => { if (!ownerAdding) { setOwnerTarget(null); sessionStorage.removeItem(OWNER_ADD_RESUME_KEY); } }}
+        actions={<><AppButton intent="secondary" variant="text" disabled={ownerAdding} onClick={() => { setOwnerTarget(null); sessionStorage.removeItem(OWNER_ADD_RESUME_KEY); }}>キャンセル</AppButton>
+          <AppButton loading={ownerAdding} disabled={currentOrg.id !== ownerTarget?.orgId || !isOwner} onClick={executeOwnerAdd}>オーナーに追加</AppButton></>}>
+        <Stack spacing={2}>
+          <Typography>「{ownerTarget?.name}」さんに、記録の閲覧・出力、権限管理、事業所削除を含むすべての権限を付与します。</Typography>
+          <Typography>現在のオーナーは引き続きオーナーです。業務ロールとスタッフの紐付けは維持されます。</Typography>
+          <Typography variant="body2" color="text.secondary">追加には本人の再認証が必要です。</Typography>
+        </Stack>
+      </AppDialog>
+      {reauthDialog}
 
       {/* --- 新規招待ダイアログ --- */}
       <AppDialog open={openInvite} onClose={() => setOpenInvite(false)} maxWidth="xs" title="新しいアカウントの招待" actions={<AppButton variant="text" intent="secondary" onClick={() => setOpenInvite(false)}>閉じる</AppButton>}>

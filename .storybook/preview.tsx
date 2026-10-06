@@ -5,7 +5,11 @@ import theme from '../src/theme';
 import '../src/app/globals.css';
 
 sb.mock(import('../src/app/actions/authSecurity.ts'));
+sb.mock(import('../src/app/actions/auth.ts'));
 sb.mock(import('../src/app/actions/internalWork.ts'));
+sb.mock(import('../src/app/actions/shiftSegments.ts'));
+sb.mock(import('../src/app/actions/serviceTypes.ts'));
+sb.mock(import('../src/app/actions/staffRoles.ts'));
 
 const preview: Preview = {
   decorators: [
@@ -25,4 +29,3 @@ const preview: Preview = {
 };
 
 export default preview;
-

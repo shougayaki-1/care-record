@@ -10,7 +10,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import ShiftSegmentEditor from './ShiftSegmentEditor';
-import { ShiftPayload } from '@/app/actions/shift';
+import type { ShiftPayload } from '@/app/actions/shift';
 import { getShiftSegments } from '@/app/actions/shiftSegments';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -200,7 +200,7 @@ export const ShiftFormModal = ({
         if (!initialData || !onDelete) return;
         if (!(await confirm({
             title: 'シフトの削除',
-            message: 'このシフトをカレンダーから完全に削除しますか？\n※この操作は取り消せません。Googleカレンダーからも完全に消去されます。',
+            message: 'このシフトを削除しますか？\n一覧・カレンダーから非表示になり、データは保持方針に従って保存されます。Googleカレンダーにも削除を反映しますが、連携エラー時は同期修復が必要です。',
             confirmText: '削除する', confirmColor: 'error',
         }))) return;
 
@@ -210,7 +210,7 @@ export const ShiftFormModal = ({
             onClose();
         } catch (error) {
             console.error(error);
-            showToast('削除に失敗しました', 'error');
+            showToast(error instanceof Error ? error.message : '削除に失敗しました', 'error');
         } finally {
             setLoading(false);
         }
@@ -224,8 +224,8 @@ export const ShiftFormModal = ({
             loading={loading}
             title={initialData ? '単発シフトの編集・詳細' : '新規シフトの追加'}
             titleAction={initialData && (
-                    <Tooltip title="この予定を完全に削除（消去）">
-                        <IconButton color="error" onClick={handleDelete} disabled={loading} size="small">
+                    <Tooltip title="この予定を削除">
+                        <IconButton aria-label="この予定を削除" color="error" onClick={handleDelete} disabled={loading} size="small">
                             <DeleteIcon />
                         </IconButton>
                     </Tooltip>
@@ -276,7 +276,7 @@ export const ShiftFormModal = ({
                 <Stack spacing={3}>
                     {initialData?.status === 'cancelled' && (
                         <Box p={2} bgcolor="error.light" borderRadius={2} border="1px solid" borderColor="error.light" display="flex" flexDirection="column" gap={0.5}>
-                            <Typography color="error" fontWeight="bold" variant="subtitle2">
+                            <Typography component="h3" color="error" fontWeight="bold" variant="subtitle2">
                                 ⚠ この予定はキャンセル（お休み）に設定されています
                             </Typography>
                             {initialData.cancel_reason && (
@@ -315,7 +315,7 @@ export const ShiftFormModal = ({
                     </Stack>
 
                     <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
-                        <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                        <Typography component="h3" variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
                             サービス区間（必須）
                         </Typography>
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
@@ -353,11 +353,11 @@ export const ShiftFormModal = ({
                         <>
                             <Divider sx={{ my: 1 }} />
                             <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
-                                <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                                <Typography component="h3" variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
                                     お休み（キャンセル）の管理
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                                    利用者の急な入院や都合によるキャンセル時は、完全に削除するのではなく「お休み」に設定することを推奨します。実績管理に履歴を残すことができます。
+                                    利用者の急な入院や都合によるキャンセル時は、削除するのではなく「お休み」に設定することを推奨します。実績管理に履歴を残すことができます。
                                 </Typography>
                                 {initialData.status === 'cancelled' ? (
                                     <Button

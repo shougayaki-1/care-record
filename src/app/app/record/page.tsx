@@ -61,16 +61,14 @@ export default function RecordSelectPage() {
             let todayShifts: MyShiftItem[] = [];
             const draftsMap: Record<string, DraftReport[]> = {};
 
-            // getMyShiftsWithStatus is a withSafeError Server Action that CAN throw
-            // (e.g. the acting user has no `staffs` row yet — a normal state for a
-            // fresh organization). Fetch it separately so that failure never
-            // discards the clients list above. Mirrors d7aff24 / ccd1837.
+            // Missing staff is a typed expected state. Keep shifts optional so
+            // neither that state nor an unexpected failure discards the clients.
             if (canViewShifts) {
                 try {
                     const shiftsResult = await getMyShiftsWithStatus(currentOrg.id, start.toISOString(), end.toISOString());
-                    todayShifts = shiftsResult.filter(s => s.status !== 'cancelled');
-                } catch (e) {
-                    console.error('today shifts load failed:', e);
+                    if (shiftsResult.ok) todayShifts = shiftsResult.data.filter(s => s.status !== 'cancelled');
+                } catch {
+                    console.error('today shifts load failed');
                 }
             }
 

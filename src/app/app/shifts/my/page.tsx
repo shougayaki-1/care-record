@@ -6,7 +6,8 @@ import {
   Box, Typography, CircularProgress, Stack, Chip, Paper,
   IconButton, ToggleButton, ToggleButtonGroup, Tooltip
 } from '@/components/ui/mui';
-import { CalendarPageSkeleton } from '@/components/ui';
+import { AppButton, CalendarPageSkeleton } from '@/components/ui';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import ListIcon from '@mui/icons-material/List';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
@@ -114,6 +115,7 @@ export default function MyShiftsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [shifts, setShifts] = useState<MyShiftItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<{ code: 'STAFF_NOT_LINKED' | 'UNEXPECTED'; message: string } | null>(null);
 
   const [currentMonth, setCurrentMonth] = useState<string>(() => {
     const now = new Date();
@@ -123,19 +125,24 @@ export default function MyShiftsPage() {
   const fetchShifts = useCallback(async (month: string) => {
     if (!currentOrg) return;
     setLoading(true);
+    setLoadError(null);
+    setShifts([]);
     try {
       const [year, mon] = month.split('-').map(Number);
       const startDate = new Date(year, mon - 1, 1).toISOString();
       const endDate = new Date(year, mon, 1).toISOString();
-      const data = await getMyShiftsWithStatus(currentOrg.id, startDate, endDate);
-      setShifts(data);
-    } catch (e) {
-      console.error(e);
-      showToast(e instanceof Error ? e.message : 'シフトの取得に失敗しました', 'error');
+      const result = await getMyShiftsWithStatus(currentOrg.id, startDate, endDate);
+      if (result.ok) {
+        setShifts(result.data);
+      } else {
+        setLoadError(result.error);
+      }
+    } catch {
+      setLoadError({ code: 'UNEXPECTED', message: 'シフトの取得に失敗しました。時間をおいて再度お試しください。' });
     } finally {
       setLoading(false);
     }
-  }, [currentOrg, showToast]);
+  }, [currentOrg]);
 
   useEffect(() => {
     if (!wsLoading && currentOrg) {
@@ -208,6 +215,15 @@ export default function MyShiftsPage() {
       <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 }, bgcolor: 'background.default' }}>
         {loading ? (
           <Box display="flex" justifyContent="center" pt={8}><CircularProgress /></Box>
+        ) : loadError ? (
+          <Stack spacing={2} alignItems="flex-start" maxWidth={600} mx="auto">
+            <Box role="alert"><Typography>{loadError.message}</Typography></Box>
+            {loadError.code === 'STAFF_NOT_LINKED' && (
+              <Typography>この事業所にスタッフとして紐付いていません。管理者に確認してください。</Typography>
+            )}
+            <AppButton intent="secondary" onClick={() => void fetchShifts(currentMonth)}>再試行</AppButton>
+            <RecoveryLogoutButton />
+          </Stack>
         ) : viewMode === 'list' ? (
           <Stack spacing={1.5} maxWidth={600} mx="auto">
             {shifts.length === 0 ? (
