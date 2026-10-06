@@ -36,7 +36,7 @@ export default function InternalWorkDialog({
   onClose: () => void;
   onSaved?: () => void | Promise<void>;
 }) {
-  const { pending: saving, error, run, isRunning } = useAsyncRecordAction(organizationId);
+  const { pending: saving, error, run, isRunning, attemptKey, finishAttempt } = useAsyncRecordAction(organizationId);
   const confirm = useConfirm();
   const [attempted, setAttempted] = useState(false);
   const now = useMemo(() => new Date(), []);
@@ -56,7 +56,12 @@ export default function InternalWorkDialog({
     hours: !workHours.trim() || !Number.isFinite(Number(workHours)) || Number(workHours) <= 0 || Number(workHours) > 24 ? '内勤時間を0より大きく24以下で入力してください' : '',
     staff: staffOptions.length === 0 ? '対象スタッフを選択してください' : '',
   };
+  const changeInput = (setValue: (value: string) => void, value: string) => {
+    finishAttempt(`internal-work:${organizationId}`);
+    setValue(value);
+  };
   const resetForm = () => {
+    finishAttempt(`internal-work:${organizationId}`);
     const next = new Date();
     initialDates.current = { start: formatDatetimeLocal(next), end: formatDatetimeLocal(new Date(next.getTime() + 60 * 60 * 1000)) };
     setTitle('会議'); setWorkType('meeting'); setStaffId(''); setWorkHours('1'); setNote('');
@@ -81,7 +86,7 @@ export default function InternalWorkDialog({
     setAttempted(true);
     if (Object.values(errors).some(Boolean)) return;
     const result = await run(async (isCurrent) => {
-      await commitRecordChange(organizationId, () => saveInternalWork({
+      const payload = {
         organizationId,
         staffId: staffId || staffOptions[0]?.id || null,
         title,
@@ -90,7 +95,9 @@ export default function InternalWorkDialog({
         endAt: new Date(endAt).toISOString(),
         workHours: Number(workHours),
         note,
-      }));
+      };
+      const idempotencyKey = attemptKey(`internal-work:${organizationId}`, payload);
+      await commitRecordChange(organizationId, () => saveInternalWork({ ...payload, idempotencyKey }));
       if (isCurrent()) {
         try { await onSaved?.(); } catch (error) { console.error('Saved internal work callback failed', error); }
       }
@@ -116,10 +123,10 @@ export default function InternalWorkDialog({
       <SectionCard>
         <Typography component="h3" variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>基本情報</Typography>
         <Stack spacing={3}>
-          <SelectField required label="担当スタッフ" options={staffOptions.map((staff) => ({ value: staff.id, label: staff.name }))} value={staffId || staffOptions[0]?.id || ''} onChange={setStaffId} disabled={saving || staffOptions.length <= 1} error={attempted && Boolean(errors.staff)} helperText={attempted ? errors.staff : undefined} />
+          <SelectField required label="担当スタッフ" options={staffOptions.map((staff) => ({ value: staff.id, label: staff.name }))} value={staffId || staffOptions[0]?.id || ''} onChange={(value) => changeInput(setStaffId, value)} disabled={saving || staffOptions.length <= 1} error={attempted && Boolean(errors.staff)} helperText={attempted ? errors.staff : undefined} />
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-            <AppTextField required label="件名" value={title} onChange={(event) => setTitle(event.target.value)} disabled={saving} error={attempted && Boolean(errors.title)} helperText={attempted ? errors.title : undefined} />
-            <SelectField label="種別" value={workType} onChange={setWorkType} options={WORK_TYPES} disabled={saving} />
+            <AppTextField required label="件名" value={title} onChange={(event) => changeInput(setTitle, event.target.value)} disabled={saving} error={attempted && Boolean(errors.title)} helperText={attempted ? errors.title : undefined} />
+            <SelectField label="種別" value={workType} onChange={(value) => changeInput(setWorkType, value)} options={WORK_TYPES} disabled={saving} />
           </Stack>
         </Stack>
       </SectionCard>
@@ -127,14 +134,14 @@ export default function InternalWorkDialog({
         <Typography component="h3" variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>勤務日時・時間</Typography>
         <Stack spacing={3}>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-            <DateTimeField required label="開始日時" value={startAt} onChange={(event) => setStartAt(event.target.value)} disabled={saving} error={attempted && Boolean(errors.dates)} />
-            <DateTimeField required label="終了日時" value={endAt} onChange={(event) => setEndAt(event.target.value)} disabled={saving} error={attempted && Boolean(errors.dates)} helperText={attempted ? errors.dates : undefined} />
+            <DateTimeField required label="開始日時" value={startAt} onChange={(event) => changeInput(setStartAt, event.target.value)} disabled={saving} error={attempted && Boolean(errors.dates)} />
+            <DateTimeField required label="終了日時" value={endAt} onChange={(event) => changeInput(setEndAt, event.target.value)} disabled={saving} error={attempted && Boolean(errors.dates)} helperText={attempted ? errors.dates : undefined} />
           </Stack>
-          <NumberField required label="内勤時間" value={workHours} onChange={(event) => setWorkHours(event.target.value)} disabled={saving} error={attempted && Boolean(errors.hours)} helperText={attempted ? errors.hours : undefined} slotProps={{ input: { endAdornment: <UnitAdornment>時間</UnitAdornment> }, htmlInput: { min: 0, max: 24, step: '0.25' } }} />
+          <NumberField required label="内勤時間" value={workHours} onChange={(event) => changeInput(setWorkHours, event.target.value)} disabled={saving} error={attempted && Boolean(errors.hours)} helperText={attempted ? errors.hours : undefined} slotProps={{ input: { endAdornment: <UnitAdornment>時間</UnitAdornment> }, htmlInput: { min: 0, max: 24, step: '0.25' } }} />
         </Stack>
       </SectionCard>
       <SectionCard>
-        <AppTextField label="メモ" value={note} onChange={(event) => setNote(event.target.value)} disabled={saving} multiline minRows={2} />
+        <AppTextField label="メモ" value={note} onChange={(event) => changeInput(setNote, event.target.value)} disabled={saving} multiline minRows={2} />
       </SectionCard>
     </RecordFormDialog>
   );

@@ -6,5 +6,8 @@ describe('step-up return paths', () => {
   });
   it('preserves only allowed same-origin pages and their resume parameters', () => {
     expect(safeReauthNext('/app/profile?stepup=1')).toBe('/app/profile?stepup=1');
+    expect(safeReauthNext('/app/accounts?stepup=1&action=owner_add')).toBe('/app/accounts?stepup=1&action=owner_add');
+    expect(safeReauthNext('/app/accounts/other')).toBe('/app/settings');
+    expect(safeReauthNext('//evil.example/app/accounts')).toBe('/app/settings');
   });
 });

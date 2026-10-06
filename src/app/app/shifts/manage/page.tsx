@@ -24,7 +24,7 @@ import type { EventResizeDoneArg } from '@fullcalendar/interaction';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { supabase } from '@/lib/supabase';
 import {
-    createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShiftCompletely,
+    createShift, updateShift, toggleCancelShift, updateShiftTimeOnly, deleteShift,
     ShiftPayload, createShiftPattern, deleteShiftPattern, updateShiftPattern,
     generateShiftsForMonth, previewShiftsForMonth, ShiftPatternPayload,
     deleteShiftsBatch
@@ -38,7 +38,6 @@ import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport
 import type { DatesSetArg } from '@fullcalendar/core';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
 import { buildRecordPath } from '@/utils/recordNavigation';
-import { googleSyncErrorMessage } from '@/utils/googleSync';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { FetchedPatternData } from '@/hooks/useShiftData';
@@ -199,18 +198,17 @@ export default function ShiftManagePage() {
     };
 
     const handleDeleteShift = async (shiftId: string) => {
-        setSyncProgress({ total: 1, current: 0, currentName: 'Googleカレンダーから予定を削除中...' });
+        setSyncProgress({ total: 1, current: 0, currentName: 'シフトを削除・Googleカレンダーに反映中...' });
         try {
-            const result = await deleteShiftCompletely(shiftId);
-            if (result.googleSync === 'pending') {
-                showToast('シフトは削除しました。Googleカレンダーに予定が残っている可能性があります。管理者が確認し、残っている予定を削除してください。', 'warning');
-            } else {
-                showToast('シフトを完全に削除しました');
-            }
+            const result = await deleteShift(shiftId);
+            showToast(result.failed > 0
+                ? 'シフトを削除しました。Googleカレンダーへの反映に失敗しました。連携を確認して同期修復を実行してください。'
+                : 'シフトを削除しました', result.failed > 0 ? 'warning' : 'success');
             fetchData(true);
         } catch (error) {
             console.error(error);
-            showToast('削除に失敗しました', 'error');
+            // モーダルで安全な業務エラーを表示し、失敗時は編集画面を維持する。
+            throw error;
         } finally {
             setSyncProgress(null);
         }
@@ -329,6 +327,7 @@ export default function ShiftManagePage() {
             let query = supabase.from('shifts')
                 .select('id, title')
                 .eq('organization_id', currentOrg.id)
+                .is('deleted_at', null)
                 .not('pattern_id', 'is', null)
                 .or(`and(start_at.gte.${startDateISO},start_at.lte.${endDateISO})`);
             if (clearMode === 'unmodified') query = query.eq('is_modified', false);
@@ -349,31 +348,26 @@ export default function ShiftManagePage() {
             const shiftIds = targetShifts.map(s => s.id);
             const CHUNK = 20;
             let deleted = 0, failed = 0;
-            let errorKind: string | undefined;
 
             for (let i = 0; i < shiftIds.length; i += CHUNK) {
                 const chunk = shiftIds.slice(i, i + CHUNK);
                 const res = await deleteShiftsBatch(currentOrg.id, chunk);
                 deleted += res.deleted;
                 failed += res.failed;
-                if (res.errorKind) errorKind = res.errorKind;
-                setSyncProgress({ total, current: Math.min(total, deleted + failed), currentName: `${Math.min(total, deleted + failed)} / ${total} 件 処理済み` });
-                if (errorKind === 'auth') break;
+                setSyncProgress({ total, current: Math.min(total, deleted), currentName: `${Math.min(total, deleted)} / ${total} 件 処理済み` });
             }
 
             setSyncProgress(null);
 
-            if (errorKind) {
-                showToast(googleSyncErrorMessage(errorKind) || 'Googleカレンダーから削除できませんでした。', 'warning');
-            } else if (failed > 0) {
-                showToast(`${deleted} 件を消去しました。${failed} 件はGoogleカレンダーから削除できず残っています。通信状況を確認し再度お試しください。`, 'warning');
+            if (failed > 0) {
+                showToast(`${deleted} 件を削除しました。${failed} 件はGoogleカレンダーへの反映に失敗しました。連携を確認して同期修復を実行してください。`, 'warning');
             } else {
-                showToast(`${targetMonth}月のシフトを ${deleted} 件、Googleカレンダーを含めて消去しました。`, 'success');
+                showToast(`${targetMonth}月のシフトを ${deleted} 件削除しました。`, 'success');
             }
             fetchData(true);
         } catch (error) {
             console.error('Clear Deployed Shifts Error:', error);
-            showToast('消去処理中にエラーが発生しました。', 'error');
+            showToast(error instanceof Error ? error.message : '消去処理中にエラーが発生しました。', 'error');
             setGenerating(false);
             setSyncProgress(null);
         }

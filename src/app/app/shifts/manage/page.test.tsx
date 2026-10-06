@@ -35,7 +35,7 @@ vi.mock('@/lib/supabase', () => ({ supabase: {} }));
 vi.mock('@/utils/shiftPdfExport', () => ({ downloadShiftPdf: vi.fn(), downloadShiftMatrixPdf: vi.fn() }));
 vi.mock('@/app/actions/shift', () => ({
   updateShift: state.update, updateShiftTimeOnly: state.time,
-  toggleCancelShift: state.cancel, deleteShiftCompletely: state.remove,
+  toggleCancelShift: state.cancel, deleteShift: state.remove,
   createShift: vi.fn(), createShiftPattern: vi.fn(), deleteShiftPattern: vi.fn(), updateShiftPattern: vi.fn(),
   generateShiftsForMonth: vi.fn(), previewShiftsForMonth: vi.fn(), deleteShiftsBatch: vi.fn(),
 }));
@@ -60,6 +60,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   vi.spyOn(console, 'error').mockImplementation(() => {});
   for (const action of [state.time, state.cancel, state.remove, state.update]) action.mockResolvedValue({ success: true });
+  state.remove.mockResolvedValue({ success: true, deleted: 1, failed: 0 });
   await act(async () => { render(<ShiftManagePage />); });
   state.fetch.mockClear();
 });
@@ -70,22 +71,30 @@ const cases = [
   { name: 'resize', action: state.time, run: () => state.calendar!.onEventResize!({ event: { extendedProps: { shiftId: 'shift-1' }, start: new Date('2026-01-01T09:00:00Z'), end: new Date('2026-01-01T10:00:00Z') }, revert: state.revert } as never), success: 'シフト時間を調整しました' },
   { name: 'cancel', action: state.cancel, run: () => state.form!.onToggleCancel!('shift-1', true, ''), success: 'シフトをお休みに設定しました' },
   { name: 'reopen', action: state.cancel, run: () => state.form!.onToggleCancel!('shift-1', false, ''), success: '通常予定に復元しました' },
-  { name: 'delete', action: state.remove, run: () => state.form!.onDelete!('shift-1'), success: 'シフトを完全に削除しました' },
+  { name: 'delete', action: state.remove, run: () => state.form!.onDelete!('shift-1'), success: 'シフトを削除しました' },
   { name: 'save', action: state.update, run: () => state.form!.onSave({ organizationId: 'org-1', clientId: 'client-1', title: 'test', startAt: 'start', endAt: 'end' }, 'shift-1'), success: 'シフト情報を保存しました' },
 ];
 describe.each(cases)('$name mutation UI', ({ name, action, run, success }) => {
-  it('shows only an error toast and reverts calendar changes when the action rejects', async () => {
+  it('avoids success UI and reverts calendar changes when the action rejects', async () => {
     action.mockRejectedValue(new Error('シフトを更新できませんでした'));
-    await act(async () => { await run(); });
-    expect(state.toast).toHaveBeenCalledTimes(1);
-    expect(state.toast).toHaveBeenCalledWith(expect.any(String), 'error');
+    await act(async () => {
+      if (name === 'delete') await expect(run()).rejects.toThrow();
+      else await run();
+    });
+    if (name === 'delete') {
+      expect(state.toast).not.toHaveBeenCalled(); // The modal displays the propagated error.
+    } else {
+      expect(state.toast).toHaveBeenCalledTimes(1);
+      expect(state.toast).toHaveBeenCalledWith(expect.any(String), 'error');
+    }
     expect(state.fetch).not.toHaveBeenCalled();
     expect(state.revert).toHaveBeenCalledTimes(['drag', 'resize'].includes(name) ? 1 : 0);
     expect(state.progress).toHaveBeenLastCalledWith(null);
   });
   it('preserves success toast and refresh after a confirmed mutation', async () => {
     await act(async () => { await run(); });
-    expect(state.toast).toHaveBeenCalledWith(success);
+    if (name === 'delete') expect(state.toast).toHaveBeenCalledWith(success, 'success');
+    else expect(state.toast).toHaveBeenCalledWith(success);
     expect(state.fetch).toHaveBeenCalledWith(true);
     expect(state.revert).not.toHaveBeenCalled();
     expect(state.progress).toHaveBeenLastCalledWith(null);
@@ -93,10 +102,10 @@ describe.each(cases)('$name mutation UI', ({ name, action, run, success }) => {
 });
 
 it('refreshes a deleted shift and warns instead of claiming Google deletion completed', async () => {
-  state.remove.mockResolvedValue({ success: true, googleSync: 'pending' });
+  state.remove.mockResolvedValue({ success: true, deleted: 1, failed: 1 });
   await act(async () => { await state.form!.onDelete!('shift-1'); });
-  expect(state.toast).toHaveBeenCalledWith('シフトは削除しました。Googleカレンダーに予定が残っている可能性があります。管理者が確認し、残っている予定を削除してください。', 'warning');
-  expect(state.toast).not.toHaveBeenCalledWith('シフトを完全に削除しました');
+  expect(state.toast).toHaveBeenCalledWith('シフトを削除しました。Googleカレンダーへの反映に失敗しました。連携を確認して同期修復を実行してください。', 'warning');
+  expect(state.toast).not.toHaveBeenCalledWith('シフトを削除しました', 'success');
   expect(state.fetch).toHaveBeenCalledWith(true);
   expect(state.progress).toHaveBeenLastCalledWith(null);
 });

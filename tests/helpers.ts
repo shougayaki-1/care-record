@@ -50,34 +50,10 @@ export const setupNewOrg = async (page: Page, user: ReturnType<typeof generateUs
   await page.getByLabel('事業所名').fill(user.orgName);
   await page.getByRole('button', { name: '作成して開始' }).click();
 
-  // 組織作成直後はセッション活動の登録が反映されるまで待つ。
-  // 一時障害の手動再試行画面が出た場合だけ、一度だけ UI から再試行する。
-  const retryButton = page.getByRole('button', { name: '再試行', exact: true });
+  // fixture もアプリ自身の所属解決と遷移を検証する。
+  // 再試行や強制遷移で認証・所属の不具合を隠さない。
   const organizationSelector = page.getByRole('button', { name: user.orgName });
-  const createRecordLink = page.getByRole('link', { name: '記録を作成', exact: true });
-  const waitForWorkspaceReady = async () => {
-    await expect.poll(
-      async () => (
-        await organizationSelector.isVisible()
-        || await createRecordLink.isVisible()
-        || await retryButton.isVisible()
-      ),
-      { timeout: 30_000 },
-    ).toBe(true);
-  };
-
-  await waitForWorkspaceReady();
-  if (await retryButton.isVisible()) {
-    await retryButton.click();
-    await waitForWorkspaceReady();
-  }
-
-  // /app の表示が先に完了しても URL 更新が遅れることがあるため、記録画面へ明示的に移動する。
-  await expect(page).toHaveURL(/\/app(?:\/record)?$/, { timeout: 30000 });
-  if (new URL(page.url()).pathname === '/app') {
-    await page.goto('/app/record');
-    await expect(page).toHaveURL(/\/app\/record$/, { timeout: 30000 });
-  }
+  await expect(page).toHaveURL(/\/app\/record$/, { timeout: 30000 });
   await expect(organizationSelector).toBeVisible({ timeout: 15000 });
 };
 

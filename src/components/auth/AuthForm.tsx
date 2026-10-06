@@ -44,6 +44,16 @@ export const AuthForm = () => {
     const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info', text: string } | null>(null);
     const [origin] = useState(() => typeof window === 'undefined' ? '' : window.location.origin);
     const oauthInFlight = useRef(false);
+    const mounted = useRef(false);
+    const registrationRedirectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+    useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+            clearTimeout(registrationRedirectTimer.current);
+        };
+    }, []);
 
     const isRegisterMode = tabIndex === 1;
 
@@ -92,6 +102,7 @@ export const AuthForm = () => {
                     return;
                 }
                 const result = await registerWithPassword(email, password);
+                if (!mounted.current) return;
                 if (!result.ok && result.reason === 'already_registered') {
                     setMessage({ 
                         type: 'info', 
@@ -104,7 +115,8 @@ export const AuthForm = () => {
                     throw new Error('アカウントを作成できませんでした。');
                 } else if (result.signedIn) {
                     setMessage({ type: 'success', text: 'アカウントを作成しました。自動的にログインします…' });
-                    setTimeout(() => { window.location.href = nextUrl; }, 1000);
+                    clearTimeout(registrationRedirectTimer.current);
+                    registrationRedirectTimer.current = setTimeout(() => { window.location.href = nextUrl; }, 1000);
                 } else {
                     setMessage({ type: 'success', text: '確認メールを送信しました。メール内のリンクから登録を完了してください。' });
                 }
@@ -112,6 +124,7 @@ export const AuthForm = () => {
                 // --- ログイン ---
                 // レート制限・監査・試行記録を確実に行うためサーバーアクション経由でログインする。
                 const result = await loginWithPassword(email, password);
+                if (!mounted.current) return;
                 if (!result.ok) {
                     if (result.reason === 'rate_limited') throw new Error(RATE_LIMIT_MESSAGE);
                     if (result.reason === 'email_unconfirmed') throw new Error('メールアドレスの確認が完了していません。');
@@ -176,7 +189,7 @@ export const AuthForm = () => {
             <Fade in={true} key={tabIndex}>
                 <Box>
                     <Box textAlign="center" mb={3}>
-                        <Typography variant="h6" fontWeight="bold">
+                        <Typography variant="h6" component="h2" fontWeight="bold">
                             {isRegisterMode ? 'アカウントを作成' : 'おかえりなさい'}
                         </Typography>
                         <Typography variant="body2" color="text.secondary">

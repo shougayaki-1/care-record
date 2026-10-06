@@ -2,7 +2,7 @@
 
 import { type calendar_v3, google } from 'googleapis';
 
-import { logExternalError, sanitizeExternalError, withSafeError } from '@/utils/errors';
+import { logExternalError, sanitizeDbError, sanitizeExternalError, withSafeError } from '@/utils/errors';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import {
@@ -230,12 +230,22 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
           }
       }
 
-      const { data: shifts } = await supabase
+      const { data: deletedTargets, error: deletedError } = await supabase.rpc('get_deleted_shift_sync_targets', {
+          p_org_id: organizationId, p_limit: limit,
+      });
+      if (deletedError) throw sanitizeDbError(deletedError, 'google.sync.deleted-targets', { organizationId });
+      const pendingDeletes = (deletedTargets ?? []) as unknown as ShiftForGoogle[];
+      const { data: activeShifts, error: shiftsError } = pendingDeletes.length >= limit
+          ? { data: [], error: null }
+          : await supabase
           .from('shifts')
           .select('id, title, start_at, end_at, status, cancel_reason, google_event_id, deleted_at, google_sync_status, shift_staffs(staff_id)')
           .eq('organization_id', organizationId)
+          .is('deleted_at', null)
           .order('id', { ascending: true })
-          .limit(limit);
+          .limit(limit - pendingDeletes.length);
+      if (shiftsError) throw sanitizeDbError(shiftsError, 'google.sync.active-targets', { organizationId });
+      const shifts = [...pendingDeletes, ...(activeShifts ?? [])];
 
       const stats = emptyGoogleSyncStats();
       let processed = 0;
@@ -299,7 +309,7 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
               succeeded++;
           } catch (e) {
               const se = classifyGoogleError(e);
-              await markShiftGoogleSync(shift.id, 'failed', { error: se.message }).catch((error) => logExternalError('google.sync.mark-failed', error));
+              await markShiftGoogleSync(shift.id, 'failed', { error: shift.deleted_at ? `Google削除同期に失敗しました（${se.kind}）` : se.message }).catch((error) => logExternalError('google.sync.mark-failed', error));
               failedIds.push(shift.id);
               errorKind = se.kind;
               if (se.kind === 'auth') break;
