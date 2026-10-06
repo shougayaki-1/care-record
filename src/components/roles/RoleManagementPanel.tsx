@@ -1,9 +1,10 @@
 'use client';
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Box, Typography, IconButton,
-  Stack, CircularProgress,
+  Stack, CircularProgress, Alert,
 } from '@/components/ui/mui';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -11,6 +12,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { AppButton, AppDialog, AppTextField, SectionCard, EmptyState } from '@/components/ui';
 import {
   getOrgRolesFull, createOrgRole, updateOrgRole, deleteOrgRole,
@@ -43,6 +45,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
   const { showToast } = useToast();
   const [roles, setRoles] = useState<OrgRole[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [editRole, setEditRole] = useState<OrgRole | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [formName, setFormName] = useState('');
@@ -54,15 +57,16 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
   const fetchRoles = useCallback(async () => {
     if (!currentOrg) return;
     setLoading(true);
+    setLoadError(null);
     try {
-      const data = await getOrgRolesFull(currentOrg.id);
+      const data = await readActionResult(getOrgRolesFull(currentOrg.id));
       setRoles((data as unknown as OrgRole[]).map((role) => ({ ...role, permissions: normalizePermissions(role.permissions) })));
-    } catch {
-      showToast('ロール一覧の取得に失敗しました', 'error');
+    } catch (error) {
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
-  }, [currentOrg, showToast]);
+  }, [currentOrg]);
 
   const refreshAfterChange = async () => {
     await fetchRoles();
@@ -102,17 +106,17 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
     setSaving(true);
     try {
       if (isNew) {
-        await createOrgRole(currentOrg.id, formName.trim(), formColor, formPerms);
+        await readActionResult(createOrgRole(currentOrg.id, formName.trim(), formColor, formPerms));
         showToast('ロールを作成しました', 'success');
       } else if (editRole) {
-        await updateOrgRole(currentOrg.id, editRole.id, { name: formName.trim(), color: formColor, permissions: formPerms });
+        await readActionResult(updateOrgRole(currentOrg.id, editRole.id, { name: formName.trim(), color: formColor, permissions: formPerms }));
         showToast('ロールを更新しました', 'success');
       }
       setEditRole(null);
       setIsNew(false);
       await refreshAfterChange();
     } catch (e) {
-      showToast((e as Error).message, 'error');
+      showToast(getActionErrorMessage(e), 'error');
     } finally {
       setSaving(false);
     }
@@ -121,12 +125,12 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
   const handleDelete = async () => {
     if (!currentOrg || !deleteTarget) return;
     try {
-      await deleteOrgRole(currentOrg.id, deleteTarget.id);
+      await readActionResult(deleteOrgRole(currentOrg.id, deleteTarget.id));
       showToast('ロールを削除しました', 'success');
       setDeleteTarget(null);
       await refreshAfterChange();
     } catch (e) {
-      showToast((e as Error).message, 'error');
+      showToast(getActionErrorMessage(e), 'error');
     }
   };
 
@@ -146,12 +150,19 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
         </AppButton>
       </Stack>
 
-      {currentOrg.role !== 'owner' && <Typography variant="caption" color="text.secondary">危険な権限を含むロールの編集・削除はオーナーのみ実行できます。</Typography>}
+      {Boolean(loadError) && <Alert severity="error" sx={{ mb: 2 }}>
+        {getActionErrorMessage(loadError)}
+        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+          <AppButton size="small" variant="outlined" intent="secondary" onClick={() => void fetchRoles()}>再試行</AppButton>
+          {needsActionRecovery(loadError) && <RecoveryLogoutButton attemptClientLogout={false} />}
+        </Stack>
+      </Alert>}
+      {currentOrg.role !== 'owner'  && <Typography variant="caption" color="text.secondary">危険な権限を含むロールの編集・削除はオーナーのみ実行できます。</Typography>}
       {loading ? (
         <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box>
       ) : (
         <Stack spacing={2}>
-          {roles.length === 0 && <EmptyState title="ロールがありません" />}
+          {!loadError && roles.length === 0 && <EmptyState title="ロールがありません" />}
           {roles.map(role => (
             <SectionCard key={role.id} sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
               <Box width={16} height={16} borderRadius="50%" bgcolor={role.color ?? 'grey.400'} flexShrink={0} />

@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { useState, useCallback, useTransition } from 'react';
 import { 
@@ -118,7 +119,7 @@ export default function StaffPage() {
       return {
         staffList: (staffsData as unknown as StaffData[]) || [],
         accountList: accounts,
-        positionPresets: await getStaffPositionPresets(currentOrg.id),
+        positionPresets: await readActionResult(getStaffPositionPresets(currentOrg.id)),
       };
   }, [currentOrg]);
 
@@ -139,18 +140,18 @@ export default function StaffPage() {
     const finalPositions = Array.from(new Set(staffPositions.map(p => p.trim()).filter(Boolean)));
 
     try {
-        await saveStaff(currentOrg.id, {
+        await readActionResult(saveStaff(currentOrg.id, {
           staffId: editId,
           name: staffName,
           positions: finalPositions,
           employmentType,
           workStyle,
           linkedUserId: finalUserId,
-        });
+        }));
         showToast(editId ? '更新しました' : '追加しました');
         setModalOpen(false);
         fetchData();
-    } catch (e) { console.error(e); showToast('保存に失敗しました', 'error'); }
+    } catch (e) { console.error(e); showToast(getActionErrorMessage(e, '保存に失敗しました'), 'error'); }
   };
 
   const handleOpenAdd = () => { setEditId(null); setStaffName(''); setStaffPositions([]); setEmploymentType('常勤'); setWorkStyle('兼務'); setLinkedUserId('none'); setModalOpen(true); };
@@ -165,41 +166,41 @@ export default function StaffPage() {
   };
   const handleDelete = async (id: string, name: string) => {
       if(!(await confirm({ title: 'スタッフの削除', message: `「${name}」さんを名簿から削除しますか？\n過去のシフトや記録は法定保存期間中そのまま保持されます。`, confirmText: '削除する', confirmColor: 'error' }))) return;
-      try { await softDeleteStaff(currentOrg!.id, id, 'スタッフ管理画面から削除'); showToast('削除しました'); fetchData(); } catch (e) { console.error(e); showToast(e instanceof Error ? e.message : '削除に失敗しました', 'error'); }
+      try { await readActionResult(softDeleteStaff(currentOrg!.id, id, 'スタッフ管理画面から削除')); showToast('削除しました'); fetchData(); } catch (e) { console.error(e); showToast(getActionErrorMessage(e, '削除に失敗しました'), 'error'); }
   };
 
   // 退職スタッフをアーカイブ（過去の記録・シフトは残したまま、新規割当の選択肢から外す）
   const handleArchive = async (id: string, name: string) => {
       if(!(await confirm({ title: 'スタッフのアーカイブ', message: `「${name}」さんをアーカイブ（退職）しますか？\n過去のシフト・記録はそのまま残り、今後のシフトや記録の担当者選択には表示されなくなります。\n（いつでも復元できます）`, confirmText: 'アーカイブする' }))) return;
-      try { await setStaffArchived(currentOrg!.id, id, true); showToast('アーカイブしました'); fetchData(); } catch (e) { console.error(e); showToast('アーカイブに失敗しました', 'error'); }
+      try { await readActionResult(setStaffArchived(currentOrg!.id, id, true)); showToast('アーカイブしました'); fetchData(); } catch (e) { console.error(e); showToast(getActionErrorMessage(e, 'アーカイブに失敗しました'), 'error'); }
   };
 
   const handleRestore = async (id: string) => {
-      try { await setStaffArchived(currentOrg!.id, id, false); showToast('復元しました'); fetchData(); } catch (e) { console.error(e); showToast('復元に失敗しました', 'error'); }
+      try { await readActionResult(setStaffArchived(currentOrg!.id, id, false)); showToast('復元しました'); fetchData(); } catch (e) { console.error(e); showToast(getActionErrorMessage(e, '復元に失敗しました'), 'error'); }
   };
 
   const handleAddPositionPreset = async () => {
       if (!currentOrg || !newPositionName.trim()) return;
       try {
-          await saveStaffPositionPreset(currentOrg.id, newPositionName);
+          await readActionResult(saveStaffPositionPreset(currentOrg.id, newPositionName));
           setNewPositionName('');
           await fetchData();
           showToast('役職プリセットを追加しました');
       } catch (e) {
           console.error(e);
-          showToast(e instanceof Error ? e.message : '役職プリセットの追加に失敗しました', 'error');
+          showToast(getActionErrorMessage(e, '役職プリセットの追加に失敗しました'), 'error');
       }
   };
 
   const handleDeletePositionPreset = async (presetId: string) => {
       if (!currentOrg) return;
       try {
-          await deleteStaffPositionPreset(currentOrg.id, presetId);
+          await readActionResult(deleteStaffPositionPreset(currentOrg.id, presetId));
           await fetchData();
           showToast('役職プリセットを削除しました');
       } catch (e) {
           console.error(e);
-          showToast('役職プリセットの削除に失敗しました', 'error');
+          showToast(getActionErrorMessage(e, '役職プリセットの削除に失敗しました'), 'error');
       }
   };
 
@@ -220,7 +221,7 @@ export default function StaffPage() {
 
     try {
       // 連番で sort_order を書き込み、順序を確定する
-      await reorderStaffs(currentOrg!.id, reordered.map(s => s.id));
+      await readActionResult(reorderStaffs(currentOrg!.id, reordered.map(s => s.id)));
     } catch (e) {
       console.error(e);
       showToast('並び替えの保存に失敗しました', 'error');

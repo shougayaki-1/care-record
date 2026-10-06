@@ -1,4 +1,5 @@
 'use client';
+import { readActionResult } from '@/utils/actionResult';
 
 import { useRecordQuery } from '@/hooks/useRecordQuery';
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
@@ -465,7 +466,7 @@ export default function ReportsClientPage() {
 
               if (folderRes.status !== 'success') throw new Error(`Folder Error: ${folderRes.message}`);
               if (folderRes.folderId !== client.google_folder_id) {
-                  await updateClientGoogleLink(currentOrg!.id, client.id, { folderId: folderRes.folderId });
+                  await readActionResult(updateClientGoogleLink(currentOrg!.id, client.id, { folderId: folderRes.folderId }));
               }
               const clientRootFolderId = folderRes.folderId;
 

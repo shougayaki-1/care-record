@@ -1,6 +1,6 @@
 'use server';
 
-import { withSafeError } from '@/utils/errors';
+import { sanitizeDbError, withSafeError, withActionResult } from '@/utils/errors';
 import { logError, serializeError } from '@/utils/log';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
@@ -11,7 +11,7 @@ import { normalizePatternSegments } from './helpers';
 import type { ShiftPatternPayload } from './types';
 
 export async function getShiftPatterns(organizationId: string) {
-  return withSafeError('getShiftPatterns', async () => {
+  return withActionResult('getShiftPatterns', async () => {
       await assertShiftPermission(organizationId, 'view', { requireAllScope: true });
       const supabase = await createSessionClient();
       const { data, error } = await supabase.from('shift_patterns').select(`
@@ -38,8 +38,8 @@ export async function getShiftPatterns(organizationId: string) {
               )
           )
       `).eq('organization_id', organizationId).is('deleted_at', null).order('start_time', { ascending: true });
-      if (error) throw error;
-      return data;
+      if (error) throw sanitizeDbError(error, 'action.shift-patterns');
+      return data ?? [];
   });
 }
 
@@ -75,7 +75,7 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
               p_payload: { client_id: payload.clientId, title: payload.title, start_time: payload.startTime,
                   end_time: payload.endTime, rrule: payload.rrule, segments, auto_assign: false },
           });
-          if (error) throw error;
+          if (error) throw sanitizeDbError(error, 'action.shift-patterns');
           await recordAuditEvent({ organizationId: actor.organizationId, actorId: actor.userId, action: 'shift_pattern.update', resourceType: 'shift_pattern', resourceId: patternId });
           return { success: true };
       } catch (error) {
@@ -94,7 +94,7 @@ export async function deleteShiftPattern(patternId: string) {
       const policy = await getRetentionPolicy(actor.organizationId, 'shift');
       const { error } = await supabase.from('shift_patterns').update({ deleted_at: new Date().toISOString(),
           deleted_by: actor.userId, retention_until: retentionDeadline(policy.years) }).eq('id', patternId).is('deleted_at', null);
-      if (error) throw error;
+      if (error) throw sanitizeDbError(error, 'action.shift-patterns');
       await recordAuditEvent({ organizationId: actor.organizationId, actorId: actor.userId, action: 'shift_pattern.soft_delete',
           resourceType: 'shift_pattern', resourceId: patternId, reason: '管理者による削除', details: { legalBasis: policy.legalBasis } });
       return { success: true };

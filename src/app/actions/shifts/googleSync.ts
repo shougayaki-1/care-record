@@ -2,7 +2,7 @@
 
 import { type calendar_v3, google } from 'googleapis';
 
-import { logExternalError, sanitizeDbError, sanitizeExternalError, withSafeError } from '@/utils/errors';
+import { logExternalError, sanitizeDbError, sanitizeExternalError, withSafeError, withActionResult } from '@/utils/errors';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import {
@@ -36,33 +36,36 @@ import type { RepairGoogleCalendarSyncOptions } from './types';
 // 呼び出し元で権限確認済みのセッションクライアントを使い、バッチごとの
 // 全シフト件数集計と追加の権限確認を避ける。
 async function hasCalendarConnection(supabase: Awaited<ReturnType<typeof createSessionClient>>, organizationId: string) {
-  const { data: orgData } = await supabase
+  const { data: orgData, error } = await supabase
     .from('organizations')
     .select('google_calendar_id, google_refresh_token')
     .eq('id', organizationId)
     .single();
+  if (error) throw sanitizeDbError(error, 'action.sync-status.connection');
   return !!(orgData?.google_calendar_id && orgData?.google_refresh_token);
 }
 
 export async function getSyncStatus(organizationId: string) {
-  return withSafeError('getSyncStatus', async () => {
+  return withActionResult('getSyncStatus', async () => {
       await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
       const supabase = await createSessionClient();
       const connected = await hasCalendarConnection(supabase, organizationId);
 
-      const { count: total } = await supabase
+      const { count: total, error: totalError } = await supabase
           .from('shifts')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', organizationId)
           .is('deleted_at', null);
 
-      const { count: unsynced } = await supabase
+      const { count: unsynced, error: unsyncedError } = await supabase
           .from('shifts')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', organizationId)
           .is('deleted_at', null)
           .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)');
 
+      if (totalError) throw sanitizeDbError(totalError, 'action.sync-status.total');
+      if (unsyncedError) throw sanitizeDbError(unsyncedError, 'action.sync-status.unsynced');
       return { connected, total: total || 0, unsynced: unsynced || 0 };
   });
 }

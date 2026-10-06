@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import {
@@ -60,14 +61,14 @@ export default function LogsPage() {
     if (!currentOrg || !canView) return;
     setMessage(null);
     try {
-      const data = await getAuditLogs(currentOrg.id, {
+      const data = await readActionResult(getAuditLogs(currentOrg.id, {
         from: auditFrom ? new Date(`${auditFrom}T00:00:00+09:00`).toISOString() : null,
         to: auditTo ? new Date(`${auditTo}T23:59:59+09:00`).toISOString() : null,
-      });
+      }));
       setAuditLogs((data as unknown as AuditLog[]) || []);
     } catch (e) {
       console.error(e);
-      setMessage(e instanceof Error ? e.message : '監査ログを取得できませんでした');
+      setMessage(getActionErrorMessage(e, '監査ログを取得できませんでした'));
     }
   };
 
@@ -75,15 +76,15 @@ export default function LogsPage() {
     if (!currentOrg || !canView) return;
     setMessage(null);
     try {
-      const data = await listCloudLogEntries(currentOrg.id, {
+      const data = await readActionResult(listCloudLogEntries(currentOrg.id, {
         from: cloudFrom ? new Date(`${cloudFrom}T00:00:00+09:00`).toISOString() : null,
         to: cloudTo ? new Date(`${cloudTo}T23:59:59+09:00`).toISOString() : null,
         text: cloudText || null,
-      });
+      }));
       setCloudLogs(data);
     } catch (e) {
       console.error(e);
-      setMessage(e instanceof Error ? e.message : 'GCPログを取得できませんでした');
+      setMessage(getActionErrorMessage(e, 'GCPログを取得できませんでした'));
     }
   };
 

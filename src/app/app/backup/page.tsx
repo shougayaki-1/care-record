@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
@@ -105,7 +106,7 @@ export default function BackupPage() {
 
   useEffect(() => {
     if (!currentOrg) return;
-    getLastBackupRun(currentOrg.id)
+    readActionResult(getLastBackupRun(currentOrg.id))
       .then((run) => {
         setLastRun(run);
         setLastRunStale(!run || (Date.now() - new Date(run.createdAt).getTime()) > 30 * 60 * 60 * 1000);
@@ -119,7 +120,7 @@ export default function BackupPage() {
     setError(null);
     setGcsNotConfigured(false);
     try {
-      const result: ListDailyBackupsResult = await listDailyBackups(orgId);
+      const result: ListDailyBackupsResult = await readActionResult(listDailyBackups(orgId));
       if (!result.configured) {
         setGcsNotConfigured(true);
         return;
@@ -130,8 +131,8 @@ export default function BackupPage() {
         setSelectedDate(selected.date);
         setSelectedBackupPath(selected.path);
       }
-    } catch {
-      setError('バックアップファイルの取得に失敗しました');
+    } catch (error) {
+      setError(getActionErrorMessage(error, 'バックアップファイルの取得に失敗しました'));
     } finally {
       setLoadingFiles(false);
     }
@@ -164,10 +165,10 @@ export default function BackupPage() {
     setRecords([]);
     setSelectedRecord(null);
     try {
-      const data = await getBackupRecords(orgId, backupPath);
+      const data = await readActionResult(getBackupRecords(orgId, backupPath));
       setRecords(data);
-    } catch {
-      setError('記録の取得に失敗しました');
+    } catch (error) {
+      setError(getActionErrorMessage(error, '記録の取得に失敗しました'));
     } finally {
       setLoadingRecords(false);
     }

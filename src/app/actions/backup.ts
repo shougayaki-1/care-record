@@ -1,4 +1,5 @@
 'use server';
+import type { ActionResult } from '@/types/actionResult';
 
 import { assertOrgPermission } from '@/utils/supabase/auth';
 import { serviceRoleForBackup } from '@/utils/supabase/serviceRole';
@@ -6,7 +7,7 @@ import { isGcsBackupConfigured, listGCSFiles, readGCSFile, uploadToGCS } from '@
 import { exportReportsAsCsv } from '@/utils/gcs/export';
 import { generateBackupHtml } from '@/utils/gcs/html';
 import { convertDataToReadable, type FormItem, type FormValue } from '@/utils/templateHelper';
-import { sanitizeDbError, sanitizeExternalError, withSafeError } from '@/utils/errors';
+import { ExpectedActionError, sanitizeDbError, sanitizeExternalError, withSafeError, withActionResult } from '@/utils/errors';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 
 const supabaseAdmin = serviceRoleForBackup();
@@ -44,8 +45,8 @@ export type LastBackupRun = {
 } | null;
 
 /** 直近の自動バックアップcron実行状況を監査ログから取得する（cron側で action: 'backup.cron_run' として記録） */
-export async function getLastBackupRun(orgId: string): Promise<LastBackupRun> {
-  return withSafeError('getLastBackupRun', async () => {
+export async function getLastBackupRun(orgId: string): Promise<ActionResult<LastBackupRun>> {
+  return withActionResult('getLastBackupRun', async () => {
   await assertOrgPermission(orgId, 'backupStatus');
 
   const { data, error } = await supabaseAdmin
@@ -68,8 +69,8 @@ export async function getLastBackupRun(orgId: string): Promise<LastBackupRun> {
   });
 }
 
-export async function listDailyBackups(orgId: string): Promise<ListDailyBackupsResult> {
-  return withSafeError('listDailyBackups', async () => {
+export async function listDailyBackups(orgId: string): Promise<ActionResult<ListDailyBackupsResult>> {
+  return withActionResult('listDailyBackups', async () => {
   await assertOrgPermission(orgId, 'backupStatus');
 
   if (!isGcsBackupConfigured()) return { configured: false };
@@ -99,10 +100,10 @@ export async function listDailyBackups(orgId: string): Promise<ListDailyBackupsR
   });
 }
 
-export async function getBackupRecords(orgId: string, filePath: string): Promise<BackupRecord[]> {
-  return withSafeError('getBackupRecords', async () => {
+export async function getBackupRecords(orgId: string, filePath: string): Promise<ActionResult<BackupRecord[]>> {
+  return withActionResult('getBackupRecords', async () => {
   const { userId } = await assertOrgPermission(orgId, 'backupStatus');
-  if (!isGcsBackupConfigured()) throw new Error('GCS_NOT_CONFIGURED');
+  if (!isGcsBackupConfigured()) throw new ExpectedActionError('NOT_CONFIGURED', 'バックアップ保存先が設定されていません');
 
   const path = resolveBackupFilePath(orgId, filePath);
   const csv = await readGCSFile(DAILY_BUCKET, path).catch((error) => { throw sanitizeExternalError(error, 'gcs.backup.read'); });
@@ -139,7 +140,7 @@ export async function getBackupRecords(orgId: string, filePath: string): Promise
 export async function triggerDailyBackup(orgId: string): Promise<{ date: string; path: string; records: number }> {
   return withSafeError('triggerDailyBackup', async () => {
   const { userId } = await assertOrgPermission(orgId, 'backupStatus');
-  if (!isGcsBackupConfigured()) throw new Error('GCS_NOT_CONFIGURED');
+  if (!isGcsBackupConfigured()) throw new ExpectedActionError('NOT_CONFIGURED', 'バックアップ保存先が設定されていません');
 
   const now = new Date();
   const date = formatTokyoDate(now);
@@ -170,7 +171,7 @@ function resolveBackupFilePath(orgId: string, input: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return `daily/${orgId}/${input}.csv`;
   const prefix = `daily/${orgId}/`;
   if (!input.startsWith(prefix) || !input.endsWith('.csv') || input.includes('..')) {
-    throw new Error('バックアップファイルの指定が不正です');
+    throw new ExpectedActionError('VALIDATION_ERROR', 'バックアップファイルの指定が不正です');
   }
   return input;
 }

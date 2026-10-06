@@ -1,4 +1,5 @@
 'use client';
+import { readActionResult } from '@/utils/actionResult';
 
 import { GOOGLE_CONNECTION_LABELS, googleConnectionMessage, googleSyncErrorMessage } from '@/utils/googleSync';
 
@@ -128,7 +129,7 @@ function SettingsContent() {
 
     useEffect(() => {
         if (!currentOrg || !googleCalendarId || !checkManagementPermission(currentOrg.effectivePermissions, 'integrations')) return;
-        void getGoogleConnectionHealth(currentOrg.id)
+        void readActionResult(getGoogleConnectionHealth(currentOrg.id))
             .then(({ state }) => setGoogleConnectionState(state))
             .catch(() => setGoogleConnectionState('temporarily_unavailable'));
     }, [currentOrg, googleCalendarId]);
@@ -148,7 +149,7 @@ function SettingsContent() {
     useEffect(() => {
         if (!currentOrg) return;
         let cancelled = false;
-        getSettingsSectionsData(currentOrg.id)
+        readActionResult(getSettingsSectionsData(currentOrg.id))
             .then((data) => { if (!cancelled) setSettingsSectionsData(data); })
             .catch((e) => { console.error(e); });
         return () => { cancelled = true; };
@@ -344,7 +345,7 @@ function SettingsContent() {
     const refreshSyncStatus = useCallback(async () => {
         if (!currentOrg || !canRepairCalendarSync) return;
         try {
-            const s = await getSyncStatus(currentOrg.id);
+            const s = await readActionResult(getSyncStatus(currentOrg.id));
             setSyncStatus({ total: s.total, unsynced: s.unsynced });
         } catch (e) {
             console.error('getSyncStatus error', e);
@@ -387,7 +388,7 @@ function SettingsContent() {
         if (!currentOrg) return;
         setRepairingCal(true);
         try {
-            const status = await getSyncStatus(currentOrg.id);
+            const status = await readActionResult(getSyncStatus(currentOrg.id));
             const total = status.unsynced;
             if (total === 0) { showToast('未同期の予定はありません。', 'info'); return; }
             setSyncProgress({ total, current: 0 });

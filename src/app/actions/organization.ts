@@ -1,6 +1,7 @@
 'use server';
+import type { ActionResult } from '@/types/actionResult';
 
-import { logExternalError, sanitizeDbError } from '@/utils/errors';
+import { ExpectedActionError, logExternalError, sanitizeDbError, withActionResult } from '@/utils/errors';
 
 import { createSessionClient, assertOrgRole, assertOrgPermission, assertOwner } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
@@ -122,6 +123,7 @@ function applyAuditFilters<T extends { gte: (c: string, v: string) => T; lte: (c
 }
 
 export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {}) {
+    return withActionResult('getAuditLogs', async () => {
     await assertOrgPermission(orgId, 'auditLogs');
     const limit = Math.min(Math.max(filters.limit ?? 100, 1), 200);
     const offset = Math.max(filters.offset ?? 0, 0);
@@ -138,6 +140,7 @@ export async function getAuditLogs(orgId: string, filters: AuditLogFilters = {})
 
     if (error) throw sanitizeDbError(error, 'action.organization', { organizationId: orgId });
     return data;
+    });
 }
 
 /** 監査ログをCSV化して返す。監査エビデンス出力自体も監査記録する。 */
@@ -205,10 +208,11 @@ export type CloudLogEntry = {
     text: string;
 };
 
-export async function listCloudLogEntries(orgId: string, filters: CloudLogFilters = {}): Promise<CloudLogEntry[]> {
+export async function listCloudLogEntries(orgId: string, filters: CloudLogFilters = {}): Promise<ActionResult<CloudLogEntry[]>> {
+    return withActionResult('listCloudLogEntries', async () => {
     await assertOrgPermission(orgId, 'auditLogs');
     const projectId = process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-    if (!projectId) throw new Error('GCP_PROJECT_ID が設定されていません');
+    if (!projectId) throw new ExpectedActionError('NOT_CONFIGURED', 'クラウドログの取得先が設定されていません');
 
     const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/cloud-platform.read-only'] });
     const logging = google.logging({ version: 'v2', auth });
@@ -235,5 +239,6 @@ export async function listCloudLogEntries(orgId: string, filters: CloudLogFilter
             logName: entry.logName ?? '',
             text: payload,
         };
+    });
     });
 }

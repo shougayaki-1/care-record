@@ -4,10 +4,10 @@
 // クッキーセッションから解決した本人 (getAuthedUser) を信頼の起点とする。
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
-import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient, isAuthSessionMissingError, type AuthError, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
 import type { Database } from '@/types/database.generated';
-import { sanitizeDbError } from '@/utils/errors';
+import { ExpectedActionError, sanitizeDbError } from '@/utils/errors';
 import { decodeJwtSessionId } from '@/utils/jwt';
 import { SESSION_ABSOLUTE_HOURS, SESSION_IDLE_MINUTES } from '@/utils/authConstants';
 import {
@@ -69,17 +69,26 @@ function hashAccessToken(accessToken: string): string {
 
 function getAuthSessionId(accessToken: string): string {
     const sessionId = decodeJwtSessionId(accessToken);
-    if (!sessionId) throw new Error('認証セッション識別子を検証できません');
+    if (!sessionId) throw new ExpectedActionError('SESSION_EXPIRED', '認証セッション識別子を検証できません');
     return sessionId;
 }
 
 async function getVerifiedAuthContext(): Promise<{ id: string; email?: string; authSessionId: string; session: Session }> {
     const supabase = await createSessionClient();
     const { data: { user }, error } = await supabase.auth.getUser();
-    if (error || !user) throw new Error('認証が必要です');
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('有効なセッションがありません');
+    assertAuthResponse(error, Boolean(user));
+    if (!user) throw new ExpectedActionError('UNAUTHENTICATED', '認証が必要です');
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sanitizeDbError(sessionError, 'auth.read-session');
+    if (!session?.access_token) throw new ExpectedActionError('SESSION_EXPIRED', '有効なセッションがありません');
     return { id: user.id, email: user.email, authSessionId: getAuthSessionId(session.access_token), session };
+}
+
+function assertAuthResponse(error: AuthError | null, hasUser: boolean): void {
+    if (error && !isAuthSessionMissingError(error) && error.status !== 401 && error.status !== 403) {
+        throw sanitizeDbError(error, 'auth.verify-user');
+    }
+    if (error || !hasUser) throw new ExpectedActionError('UNAUTHENTICATED', '認証が必要です');
 }
 
 /** ログイン直後に、検証済みSupabaseセッションをサーバー管理の活動記録へ登録する。 */
@@ -125,7 +134,8 @@ export async function touchCurrentSession(): Promise<{ userId: string; sessionId
         .gt('absolute_expires_at', now)
         .select('session_hash')
         .maybeSingle();
-    if (error || !data) throw new Error('セッションの有効期限が切れています');
+    if (error) throw sanitizeDbError(error, 'auth.session');
+    if (!data) throw new ExpectedActionError('SESSION_EXPIRED', 'セッションの有効期限が切れています');
     return { userId: context.id, sessionId: context.authSessionId };
 }
 
@@ -151,7 +161,8 @@ export async function getAuthedUser(): Promise<{ id: string; email?: string; ses
         .gte('last_activity', idleCutoff)
         .gt('absolute_expires_at', now)
         .maybeSingle();
-    if (error || !data) throw new Error('セッションの有効期限が切れています');
+    if (error) throw sanitizeDbError(error, 'auth.session');
+    if (!data) throw new ExpectedActionError('SESSION_EXPIRED', 'セッションの有効期限が切れています');
     return { id: context.id, email: context.email, sessionId: context.authSessionId };
 }
 
@@ -159,9 +170,10 @@ export async function getAuthedUser(): Promise<{ id: string; email?: string; ses
 export async function getAuthedUserFromAccessToken(
     accessToken: string
 ): Promise<{ id: string; email?: string; sessionId: string }> {
-    if (!accessToken) throw new Error('認証が必要です');
+    if (!accessToken) throw new ExpectedActionError('UNAUTHENTICATED', '認証が必要です');
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(accessToken);
-    if (error || !user) throw new Error('認証が必要です');
+    assertAuthResponse(error, Boolean(user));
+    if (!user) throw new ExpectedActionError('UNAUTHENTICATED', '認証が必要です');
 
     const sessionId = getAuthSessionId(accessToken);
     const idleCutoff = new Date(Date.now() - SESSION_IDLE_MINUTES * 60 * 1000).toISOString();
@@ -175,7 +187,8 @@ export async function getAuthedUserFromAccessToken(
         .gte('last_activity', idleCutoff)
         .gt('absolute_expires_at', now)
         .maybeSingle();
-    if (activityError || !activity) throw new Error('セッションの有効期限が切れています');
+    if (activityError) throw sanitizeDbError(activityError, 'auth.token-session');
+    if (!activity) throw new ExpectedActionError('SESSION_EXPIRED', 'セッションの有効期限が切れています');
     return { id: user.id, email: user.email, sessionId };
 }
 
@@ -188,7 +201,7 @@ export async function assertOrgRole(
     organizationId: string,
     allowedRoles: OrgRole[] = ['owner', 'member']
 ): Promise<{ userId: string; role: OrgRole }> {
-    if (!organizationId) throw new Error('organizationId が不正です');
+    if (!organizationId) throw new ExpectedActionError('VALIDATION_ERROR', 'organizationId が不正です');
     const user = await getAuthedUser();
 
     const { data: member, error } = await supabaseAdmin
@@ -196,11 +209,12 @@ export async function assertOrgRole(
         .select('role')
         .eq('organization_id', organizationId)
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
-    if (error || !member) throw new Error('この事業所へのアクセス権がありません');
+    if (error) throw sanitizeDbError(error, 'auth.membership');
+    if (!member) throw new ExpectedActionError('FORBIDDEN', 'この事業所へのアクセス権がありません');
     if (!allowedRoles.includes(member.role as OrgRole)) {
-        throw new Error('この操作を行う権限がありません');
+        throw new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません');
     }
     return { userId: user.id, role: member.role as OrgRole };
 }
@@ -214,13 +228,14 @@ export async function assertResourceOrgRole(
     resourceId: string,
     allowedRoles: OrgRole[] = ['owner', 'member']
 ): Promise<{ organizationId: string; userId: string; role: OrgRole }> {
-    if (!resourceId) throw new Error('リソースIDが不正です');
+    if (!resourceId) throw new ExpectedActionError('VALIDATION_ERROR', 'リソースIDが不正です');
     const query = supabaseAdmin
         .from(table as keyof Database['public']['Tables'])
-        .select('*') as unknown as { eq: (column: string, value: string) => { single: () => Promise<{ data: unknown; error: unknown }> } };
-    const { data, error } = await query.eq('id', resourceId).single();
+        .select('*') as unknown as { eq: (column: string, value: string) => { maybeSingle: () => Promise<{ data: unknown; error: unknown }> } };
+    const { data, error } = await query.eq('id', resourceId).maybeSingle();
     const resource = data as unknown as { organization_id?: string } | null;
-    if (error || !resource?.organization_id) throw new Error('リソースが見つかりません');
+    if (error) throw sanitizeDbError(error, 'auth.resource');
+    if (!resource?.organization_id) throw new ExpectedActionError('NOT_FOUND', 'リソースが見つかりません');
 
     const { userId, role } = await assertOrgRole(resource.organization_id, allowedRoles);
     return { organizationId: resource.organization_id, userId, role };
@@ -235,9 +250,10 @@ export async function assertSuperAdmin(): Promise<{ userId: string }> {
         .from('profiles')
         .select('role')
         .eq('id', user.id)
-        .single();
-    if (error || profile?.role !== 'super_admin') {
-        throw new Error('管理者権限が必要です');
+        .maybeSingle();
+    if (error) throw sanitizeDbError(error, 'auth.super-admin');
+    if (profile?.role !== 'super_admin') {
+        throw new ExpectedActionError('FORBIDDEN', '管理者権限が必要です');
     }
     return { userId: user.id };
 }
@@ -256,13 +272,16 @@ export async function getEffectivePermissions(
     .select('role')
     .eq('organization_id', organizationId)
     .eq('user_id', userId)
-    .single();
-  if (error || !member) throw new Error('この事業所へのアクセス権がありません');
-  const { data: roleLinks } = await supabaseAdmin
+    .maybeSingle();
+  if (error) throw sanitizeDbError(error, 'auth.membership');
+  if (!member) throw new ExpectedActionError('FORBIDDEN', 'この事業所へのアクセス権がありません');
+  const { data: roleLinks, error: roleLinksError } = await supabaseAdmin
     .from('organization_member_roles')
     .select('organization_roles(permissions)')
     .eq('organization_id', organizationId)
     .eq('user_id', userId);
+
+  if (roleLinksError) throw sanitizeDbError(roleLinksError, 'auth.member-roles');
 
   const rolePerms: RolePermissions[] = (roleLinks ?? [])
     .map((r) => (Array.isArray(r.organization_roles) ? r.organization_roles[0]?.permissions : r.organization_roles?.permissions) as RolePermissions | undefined)
@@ -280,10 +299,10 @@ export async function assertOrgPermission(
   organizationId: string,
   area: ManagementArea
 ): Promise<{ userId: string; isOwner: boolean }> {
-  if (!organizationId) throw new Error('organizationId が不正です');
+  if (!organizationId) throw new ExpectedActionError('VALIDATION_ERROR', 'organizationId が不正です');
   const user = await getAuthedUser();
   const { isOwner, permissions } = await getEffectivePermissions(organizationId, user.id);
-  if (!isOwner && !permissions.management[area]) throw new Error('この操作を行う権限がありません');
+  if (!isOwner && !permissions.management[area]) throw new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません');
   return { userId: user.id, isOwner };
 }
 
@@ -316,7 +335,7 @@ async function getActorStaffId(organizationId: string, userId: string): Promise<
     .eq('user_id', userId)
     .is('deleted_at', null)
     .maybeSingle();
-  if (error) throw new Error('スタッフ情報を確認できませんでした');
+  if (error) throw sanitizeDbError(error, 'auth.permission-target');
   return data?.id ?? null;
 }
 
@@ -333,7 +352,7 @@ async function getAssignedClientIds(organizationId: string, userId: string): Pro
     query = query.eq('helper_id', userId);
   }
   const { data, error } = await query;
-  if (error) throw new Error('担当利用者を確認できませんでした');
+  if (error) throw sanitizeDbError(error, 'auth.permission-target');
   return new Set((data ?? []).map((row) => row.client_id as string));
 }
 
@@ -353,12 +372,12 @@ async function resolveReportClientIds(
       .eq('clients.organization_id', organizationId);
     if (!target.includeDeleted) query = query.is('deleted_at', null);
     const { data, error } = await query;
-    if (error) throw new Error('記録の所属を確認できませんでした');
-    if ((data ?? []).length !== reportIds.length) throw new Error('記録にアクセスできません');
+    if (error) throw sanitizeDbError(error, 'auth.permission-target');
+    if ((data ?? []).length !== reportIds.length) throw new ExpectedActionError('NOT_FOUND', '記録にアクセスできません');
     for (const row of data ?? []) clientIds.add(row.client_id as string);
   }
 
-  if (clientIds.size === 0) throw new Error('権限確認対象が不正です');
+  if (clientIds.size === 0) throw new ExpectedActionError('VALIDATION_ERROR', '権限確認対象が不正です');
   return [...clientIds];
 }
 
@@ -381,8 +400,8 @@ async function resolveShiftTargets(
       .eq('organization_id', organizationId);
     if (!target.includeDeleted) query = query.is('deleted_at', null);
     const { data, error } = await query;
-    if (error) throw new Error('シフトの所属を確認できませんでした');
-    if ((data ?? []).length !== directShiftIds.length) throw new Error('シフトにアクセスできません');
+    if (error) throw sanitizeDbError(error, 'auth.permission-target');
+    if ((data ?? []).length !== directShiftIds.length) throw new ExpectedActionError('NOT_FOUND', 'シフトにアクセスできません');
     for (const row of data ?? []) {
       shiftIds.add(row.id as string);
       const clientId = row.client_id as string;
@@ -400,13 +419,13 @@ async function resolveShiftTargets(
       .eq('organization_id', organizationId);
     if (!target.includeDeleted) query = query.is('deleted_at', null);
     const { data, error } = await query;
-    if (error) throw new Error('シフトひな形の所属を確認できませんでした');
-    if ((data ?? []).length !== patternIds.length) throw new Error('シフトひな形にアクセスできません');
+    if (error) throw sanitizeDbError(error, 'auth.permission-target');
+    if ((data ?? []).length !== patternIds.length) throw new ExpectedActionError('NOT_FOUND', 'シフトひな形にアクセスできません');
     for (const row of data ?? []) clientIds.add(row.client_id as string);
   }
 
   if (clientIds.size === 0 && shiftIds.size === 0 && target.requireAllScope == null) {
-    throw new Error('権限確認対象が不正です');
+    throw new ExpectedActionError('VALIDATION_ERROR', '権限確認対象が不正です');
   }
   return { clientIds: [...clientIds], shiftIds: [...shiftIds], clientIdByShiftId };
 }
@@ -414,7 +433,7 @@ async function resolveShiftTargets(
 async function assertAssignedClients(organizationId: string, userId: string, clientIds: string[]): Promise<void> {
   const assignedClientIds = await getAssignedClientIds(organizationId, userId);
   if (clientIds.some((id) => !assignedClientIds.has(id))) {
-    throw new Error('この操作を行う権限がありません');
+    throw new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません');
   }
 }
 
@@ -434,20 +453,20 @@ async function assertAssignedShifts(
       .select('shift_id')
       .in('shift_id', shiftIds)
       .eq('staff_id', staffId);
-    if (error) throw new Error('シフト担当を確認できませんでした');
+    if (error) throw sanitizeDbError(error, 'auth.permission-target');
     for (const row of data ?? []) ownShiftIds.add(row.shift_id as string);
   }
 
   for (const shiftId of shiftIds) {
     const clientId = clientIdByShiftId.get(shiftId);
     if (!ownShiftIds.has(shiftId) && (!clientId || !assignedClientIds.has(clientId))) {
-      throw new Error('この操作を行う権限がありません');
+      throw new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません');
     }
   }
 
   const standaloneClientIds = clientIds.filter((clientId) => ![...clientIdByShiftId.values()].includes(clientId));
   if (standaloneClientIds.some((id) => !assignedClientIds.has(id))) {
-    throw new Error('この操作を行う権限がありません');
+    throw new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません');
   }
 }
 
@@ -456,7 +475,7 @@ export async function assertRecordPermission(
   action: RecordAction,
   target: ReportPermissionTarget,
 ): Promise<ReportPermissionActor> {
-  if (!organizationId) throw new Error('organizationId が不正です');
+  if (!organizationId) throw new ExpectedActionError('VALIDATION_ERROR', 'organizationId が不正です');
   const user = await getAuthedUser();
   const { isOwner, permissions } = await getEffectivePermissions(organizationId, user.id);
   const clientIds = await resolveReportClientIds(organizationId, target);
@@ -465,7 +484,7 @@ export async function assertRecordPermission(
     await assertAssignedClients(organizationId, user.id, clientIds);
     return { userId: user.id, isOwner, clientIds };
   }
-  throw new Error('この操作を行う権限がありません');
+  throw new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません');
 }
 
 export async function assertShiftPermission(
@@ -473,14 +492,14 @@ export async function assertShiftPermission(
   action: ShiftAction,
   target: ShiftPermissionTarget,
 ): Promise<ShiftPermissionActor> {
-  if (!organizationId) throw new Error('organizationId が不正です');
+  if (!organizationId) throw new ExpectedActionError('VALIDATION_ERROR', 'organizationId が不正です');
   const user = await getAuthedUser();
   const { isOwner, permissions } = await getEffectivePermissions(organizationId, user.id);
   const { clientIds, shiftIds, clientIdByShiftId } = await resolveShiftTargets(organizationId, target);
   const staffId = await getActorStaffId(organizationId, user.id);
   if (isOwner || permissions.shifts[action] === 'all') return { organizationId, userId: user.id, isOwner, clientIds, staffId };
   if (target.requireAllScope || permissions.shifts[action] !== 'assigned') {
-    throw new Error('この操作を行う権限がありません');
+    throw new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません');
   }
   if (clientIds.length === 0 && shiftIds.length === 0) {
     const assignedClientIds = await getAssignedClientIds(organizationId, user.id);
@@ -498,13 +517,14 @@ export async function assertResourceOrgPermission(
   resourceId: string,
   area: ManagementArea
 ): Promise<{ organizationId: string; userId: string; isOwner: boolean }> {
-  if (!resourceId) throw new Error('リソースIDが不正です');
+  if (!resourceId) throw new ExpectedActionError('VALIDATION_ERROR', 'リソースIDが不正です');
   const query = supabaseAdmin
     .from(table as keyof Database['public']['Tables'])
-    .select('*') as unknown as { eq: (column: string, value: string) => { single: () => Promise<{ data: unknown; error: unknown }> } };
-  const { data, error } = await query.eq('id', resourceId).single();
+    .select('*') as unknown as { eq: (column: string, value: string) => { maybeSingle: () => Promise<{ data: unknown; error: unknown }> } };
+  const { data, error } = await query.eq('id', resourceId).maybeSingle();
   const resource = data as unknown as { organization_id?: string } | null;
-  if (error || !resource?.organization_id) throw new Error('リソースが見つかりません');
+  if (error) throw sanitizeDbError(error, 'auth.resource');
+  if (!resource?.organization_id) throw new ExpectedActionError('NOT_FOUND', 'リソースが見つかりません');
   const { userId, isOwner } = await assertOrgPermission(resource.organization_id, area);
   return { organizationId: resource.organization_id, userId, isOwner };
 }
@@ -513,14 +533,15 @@ export async function assertResourceOrgPermission(
  * セッションのユーザーが対象 org のオーナーか検証する。満たさなければ例外。
  */
 export async function assertOwner(organizationId: string): Promise<{ userId: string }> {
-  if (!organizationId) throw new Error('organizationId が不正です');
+  if (!organizationId) throw new ExpectedActionError('VALIDATION_ERROR', 'organizationId が不正です');
   const user = await getAuthedUser();
   const { data: member, error } = await supabaseAdmin
     .from('organization_members')
     .select('role')
     .eq('organization_id', organizationId)
     .eq('user_id', user.id)
-    .single();
-  if (error || !member || member.role !== 'owner') throw new Error('オーナー権限が必要です');
+    .maybeSingle();
+  if (error) throw sanitizeDbError(error, 'auth.owner');
+  if (!member || member.role !== 'owner') throw new ExpectedActionError('FORBIDDEN', 'オーナー権限が必要です');
   return { userId: user.id };
 }

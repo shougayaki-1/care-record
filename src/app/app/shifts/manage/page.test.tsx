@@ -59,8 +59,8 @@ import ShiftManagePage from './page';
 beforeEach(async () => {
   vi.clearAllMocks();
   vi.spyOn(console, 'error').mockImplementation(() => {});
-  for (const action of [state.time, state.cancel, state.remove, state.update]) action.mockResolvedValue({ success: true });
-  state.remove.mockResolvedValue({ success: true, deleted: 1, failed: 0 });
+  for (const action of [state.time, state.cancel, state.remove, state.update]) action.mockResolvedValue({ ok: true, data: { success: true } });
+  state.remove.mockResolvedValue({ ok: true, data: { success: true, deleted: 1, failed: 0 } });
   await act(async () => { render(<ShiftManagePage />); });
   state.fetch.mockClear();
 });
@@ -75,13 +75,13 @@ const cases = [
   { name: 'save', action: state.update, run: () => state.form!.onSave({ organizationId: 'org-1', clientId: 'client-1', title: 'test', startAt: 'start', endAt: 'end' }, 'shift-1'), success: 'シフト情報を保存しました' },
 ];
 describe.each(cases)('$name mutation UI', ({ name, action, run, success }) => {
-  it('avoids success UI and reverts calendar changes when the action rejects', async () => {
-    action.mockRejectedValue(new Error('シフトを更新できませんでした'));
+  it('avoids success UI and preserves modal rejection or reverts calendar changes for a failed result', async () => {
+    action.mockResolvedValue({ ok: false, error: { code: 'FORBIDDEN', message: 'シフトを更新できませんでした' } });
     await act(async () => {
-      if (name === 'delete') await expect(run()).rejects.toThrow();
+      if (['delete', 'save', 'cancel', 'reopen'].includes(name)) await expect(run()).rejects.toThrow();
       else await run();
     });
-    if (name === 'delete') {
+    if (['delete', 'save', 'cancel', 'reopen'].includes(name)) {
       expect(state.toast).not.toHaveBeenCalled(); // The modal displays the propagated error.
     } else {
       expect(state.toast).toHaveBeenCalledTimes(1);
@@ -102,7 +102,7 @@ describe.each(cases)('$name mutation UI', ({ name, action, run, success }) => {
 });
 
 it('refreshes a deleted shift and warns instead of claiming Google deletion completed', async () => {
-  state.remove.mockResolvedValue({ success: true, deleted: 1, failed: 1 });
+  state.remove.mockResolvedValue({ ok: true, data: { success: true, deleted: 1, failed: 1 } });
   await act(async () => { await state.form!.onDelete!('shift-1'); });
   expect(state.toast).toHaveBeenCalledWith('シフトを削除しました。Googleカレンダーへの反映に失敗しました。連携を確認して同期修復を実行してください。', 'warning');
   expect(state.toast).not.toHaveBeenCalledWith('シフトを削除しました', 'success');

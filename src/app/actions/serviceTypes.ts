@@ -1,5 +1,6 @@
 'use server';
-import { sanitizeDbError, withSafeError } from '@/utils/errors';
+import type { ActionResult } from '@/types/actionResult';
+import { sanitizeDbError, withActionResult } from '@/utils/errors';
 import { assertOrgPermission, assertOrgRole, createSessionClient } from '@/utils/supabase/auth';
 
 export type ServiceType = {
@@ -11,8 +12,8 @@ export type ServiceType = {
   created_at: string;
 };
 
-export async function getServiceTypes(orgId: string): Promise<ServiceType[]> {
-  return withSafeError('getServiceTypes', async () => {
+export async function getServiceTypes(orgId: string): Promise<ActionResult<ServiceType[]>> {
+  return withActionResult('getServiceTypes', async () => {
     await assertOrgRole(orgId);
     const supabase = await createSessionClient();
     const { data, error } = await supabase
@@ -26,15 +27,15 @@ export async function getServiceTypes(orgId: string): Promise<ServiceType[]> {
   });
 }
 
-export async function createServiceType(orgId: string, name: string): Promise<void> {
-  return withSafeError('createServiceType', async () => {
+export async function createServiceType(orgId: string, name: string): Promise<ActionResult<void>> {
+  return withActionResult('createServiceType', async () => {
     await assertOrgPermission(orgId, 'organization');
     const supabase = await createSessionClient();
     const { error } = await supabase.rpc('create_service_type_atomic', {
       p_organization_id: orgId,
       p_name: name,
     });
-    if (error) throw new Error('サービス種別の追加に失敗しました');
+    if (error) throw sanitizeDbError(error, 'action.master-data');
   });
 }
 
@@ -42,8 +43,8 @@ export async function updateServiceType(
   orgId: string,
   id: string,
   patch: { name?: string; is_active?: boolean; sort_order?: number }
-): Promise<void> {
-  return withSafeError('updateServiceType', async () => {
+): Promise<ActionResult<void>> {
+  return withActionResult('updateServiceType', async () => {
     await assertOrgPermission(orgId, 'organization');
     const supabase = await createSessionClient();
     const { error } = await supabase
@@ -51,12 +52,12 @@ export async function updateServiceType(
       .update(patch)
       .eq('id', id)
       .eq('organization_id', orgId);
-    if (error) throw new Error('サービス種別の更新に失敗しました');
+    if (error) throw sanitizeDbError(error, 'action.master-data');
   });
 }
 
-export async function deleteServiceType(orgId: string, id: string): Promise<void> {
-  return withSafeError('deleteServiceType', async () => {
+export async function deleteServiceType(orgId: string, id: string): Promise<ActionResult<void>> {
+  return withActionResult('deleteServiceType', async () => {
     await assertOrgPermission(orgId, 'organization');
     const supabase = await createSessionClient();
     const { error } = await supabase
@@ -64,6 +65,6 @@ export async function deleteServiceType(orgId: string, id: string): Promise<void
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)
       .eq('organization_id', orgId);
-    if (error) throw new Error('サービス種別の削除に失敗しました');
+    if (error) throw sanitizeDbError(error, 'action.master-data');
   });
 }

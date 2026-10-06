@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { useState, useEffect, useCallback, useRef, RefObject } from 'react';
 import type { EventInput } from '@fullcalendar/core';
@@ -184,7 +185,7 @@ export const useShiftData = ({
         if (!currentOrg) return;
         const generation = nextPatterns();
         const isStale = () => !isCurrentPatterns(generation);
-        const fetchedPatterns = await getShiftPatterns(currentOrg.id);
+        const fetchedPatterns = await readActionResult(getShiftPatterns(currentOrg.id));
         if (isStale()) return;
         setPatterns((fetchedPatterns as unknown as FetchedPatternData[]) || []);
     }, [currentOrg, isCurrentPatterns, nextPatterns]);
@@ -239,12 +240,12 @@ export const useShiftData = ({
                 return;
             }
 
-            const fetchedShifts = await getShifts(
+            const fetchedShifts = await readActionResult(getShifts(
                 currentOrg.id,
                 targetRange.start.toISOString(),
                 targetRange.end.toISOString(),
                 filter
-            );
+            ));
             if (isStale()) return;
             const typedShifts = (fetchedShifts as unknown as FetchedShiftData[]) || [];
 
@@ -255,7 +256,7 @@ export const useShiftData = ({
         } catch (error) {
             if (isStale()) return;
             console.error(error);
-            showToast('データの取得に失敗しました', 'error');
+            showToast(getActionErrorMessage(error, 'データの取得に失敗しました'), 'error');
         } finally {
             if (!isStale()) {
                 setInitialLoading(false);

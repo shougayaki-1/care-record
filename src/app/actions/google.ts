@@ -1,4 +1,5 @@
 'use server';
+import type { ActionResult } from '@/types/actionResult';
 
 import { randomBytes } from 'crypto';
 import { cookies } from 'next/headers';
@@ -9,17 +10,17 @@ import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { google } from 'googleapis';
 import { googleConnectionStateFromError, type GoogleConnectionState } from '@/utils/googleSync';
 import { withRetry } from '@/utils/googleRetry';
-import { sanitizeDbError, withSafeError } from '@/utils/errors';
+import { sanitizeDbError, withSafeError, withActionResult } from '@/utils/errors';
 import { consumeReauthGrant } from '@/utils/supabase/reauth';
 import { asNullableRpcArg } from '@/types/json';
 import { areExternalIntegrationsEnabled } from '@/lib/env/server';
 
 export type { GoogleConnectionState } from '@/utils/googleSync';
 
-export async function getGoogleConnectionHealth(organizationId: string): Promise<{ state: GoogleConnectionState }> {
-    return withSafeError('getGoogleConnectionHealth', async () => {
-    if (!areExternalIntegrationsEnabled()) return { state: 'disconnected' };
+export async function getGoogleConnectionHealth(organizationId: string): Promise<ActionResult<{ state: GoogleConnectionState }>> {
+    return withActionResult('getGoogleConnectionHealth', async () => {
     await assertOrgPermission(organizationId, 'integrations');
+    if (!areExternalIntegrationsEnabled()) return { state: 'disconnected' };
     const supabase = await createSessionClient();
     const { data: org, error } = await supabase
         .from('organizations')

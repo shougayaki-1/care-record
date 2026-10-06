@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { logError, serializeError } from '@/utils/log';
+import type { ActionErrorCode, ActionResult } from '@/types/actionResult';
 
 // Server Action のエラー秘匿（3省2ガイドライン: 多層防御 / 情報露出の防止）。
 // 想定済み状態は ActionResult 等のシリアライズ可能な戻り値で明示的に返す。
@@ -20,24 +21,45 @@ export class UserFacingError extends Error {
   }
 }
 
+/** Only explicitly classified application states may become public result data. */
+export class ExpectedActionError extends UserFacingError {
+  constructor(readonly code: Exclude<ActionErrorCode, 'UNEXPECTED_ERROR'>, message: string) {
+    super(message);
+    this.name = 'ExpectedActionError';
+  }
+}
+
+/** Server-to-server callers keep the same classified state without nesting result envelopes. */
+export async function requireActionResult<T>(request: Promise<ActionResult<T>>): Promise<T> {
+  const result = await request;
+  if (result.ok) return result.data;
+  if (result.error.code === 'UNEXPECTED_ERROR') throw new Error(GENERIC_MESSAGE);
+  throw new ExpectedActionError(result.error.code, result.error.message);
+}
+
+export async function withActionResult<T>(
+  context: string,
+  fn: () => Promise<T>,
+  opts: LogOptions = {},
+): Promise<ActionResult<T>> {
+  try {
+    const data = await withSafeError(context, fn, { ...opts, strict: true });
+    return { ok: true, data };
+  } catch (error) {
+    if (error instanceof ExpectedActionError) {
+      return { ok: false, error: { code: error.code, message: error.message } };
+    }
+    return { ok: false, error: { code: 'UNEXPECTED_ERROR', message: GENERIC_MESSAGE } };
+  }
+}
+
 const GENERIC_MESSAGE = '処理に失敗しました。時間をおいて再度お試しください。';
 
-// 認可・入力検証として既存コードが throw している定型メッセージ。
-// 移行期間中のサーバー内互換性のためだけに素通しする。
-// この部分一致判定を型付き結果のメッセージ公開判定には使用しない。
+// Legacy server-only compatibility until the remaining write actions are migrated.
+// Typed result conversion always opts into strict handling and never uses this list.
 const SAFE_MESSAGE_PATTERNS = [
-  '認証が必要です',
-  '権限',
-  'アクセス権',
-  '不正',
-  '見つかりません',
-  '入力してください',
-  '文字で',
+  '認証が必要です', '権限', 'アクセス権', '不正', '見つかりません', '入力してください', '文字で',
 ];
-
-function isSafeMessage(message: string): boolean {
-  return SAFE_MESSAGE_PATTERNS.some((p) => message.includes(p));
-}
 
 /**
  * Server Action 本体を包み、想定外エラーを汎用メッセージへ置き換える。
@@ -95,14 +117,14 @@ export function sanitizeExternalError(error: unknown, context: string, opts: Log
   return new Error(GENERIC_MESSAGE);
 }
 
-export async function withSafeError<T>(context: string, fn: () => Promise<T>, opts: LogOptions = {}): Promise<T> {
+export async function withSafeError<T>(context: string, fn: () => Promise<T>, opts: LogOptions & { strict?: boolean } = {}): Promise<T> {
   try {
     return await fn();
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (err instanceof UserFacingError || isSafeMessage(message)) {
-      throw err instanceof Error ? err : new Error(message);
+    if (err instanceof ExpectedActionError || (!opts.strict && err instanceof UserFacingError)) {
+      throw err;
     }
+    if (!opts.strict && err instanceof Error && SAFE_MESSAGE_PATTERNS.some(pattern => err.message.includes(pattern))) throw err;
     // 想定外: 内部詳細はサーバーログにのみ残し、利用者には汎用メッセージを返す。
     logError(`[action:${context}]`, { organizationId: opts.organizationId, error: serializeError(err) });
     throw new Error(GENERIC_MESSAGE);

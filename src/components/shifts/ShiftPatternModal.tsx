@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -118,14 +119,14 @@ export const ShiftPatternModal = ({ open, onClose, onSave, clients, staffs, orga
 
     useEffect(() => {
         if (open) {
-            Promise.all([getServiceTypes(organizationId), getStaffRoles(organizationId)])
+            Promise.all([readActionResult(getServiceTypes(organizationId)), readActionResult(getStaffRoles(organizationId))])
                 .then(([types, roles]) => {
                     setServiceTypes(types.filter(t => t.is_active));
                     setStaffRoles(roles.filter(r => r.is_active));
                 })
                 .catch((error) => {
                     console.error(error);
-                    showToast('区間設定の選択肢を読み込めませんでした', 'error');
+                    showToast(getActionErrorMessage(error, '区間設定の選択肢を読み込めませんでした'), 'error');
                 });
             queueMicrotask(() => {
               if (initialData) {

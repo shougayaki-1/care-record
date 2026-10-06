@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { googleSyncErrorMessage } from '@/utils/googleSync';
 
@@ -49,13 +50,13 @@ export const useSyncProgress = ({
 
     const refreshUnsyncedCount = useCallback(async () => {
         if (!currentOrg) return;
-        const status = await getSyncStatus(currentOrg.id);
+        const status = await readActionResult(getSyncStatus(currentOrg.id));
         setUnsyncedCount(status.unsynced);
     }, [currentOrg, setUnsyncedCount]);
 
     const runUnsyncedSyncLoop = useCallback(async (): Promise<boolean> => {
         if (!currentOrg) return false;
-        const status = await getSyncStatus(currentOrg.id);
+        const status = await readActionResult(getSyncStatus(currentOrg.id));
         if (!status.connected) {
             showToast('Googleカレンダーが連携されていません。設定画面から接続してください。', 'warning');
             return false;
@@ -89,7 +90,7 @@ export const useSyncProgress = ({
 
     const runForceSyncLoop = useCallback(async (): Promise<boolean> => {
         if (!currentOrg) return false;
-        const status = await getSyncStatus(currentOrg.id);
+        const status = await readActionResult(getSyncStatus(currentOrg.id));
         if (!status.connected) {
             showToast('Googleカレンダーが連携されていません。設定画面から接続してください。', 'warning');
             return false;
@@ -112,10 +113,12 @@ export const useSyncProgress = ({
         try {
             await runUnsyncedSyncLoop();
             onDataRefresh();
+        } catch (error) {
+            showToast(getActionErrorMessage(error), 'error');
         } finally {
             setRepairingFromBanner(false);
         }
-    }, [currentOrg, runUnsyncedSyncLoop, onDataRefresh]);
+    }, [currentOrg, runUnsyncedSyncLoop, onDataRefresh, showToast]);
 
     const handleForceResyncCalendar = useCallback(async () => {
         if (!currentOrg) return;
@@ -125,10 +128,12 @@ export const useSyncProgress = ({
         try {
             await runForceSyncLoop();
             onDataRefresh();
+        } catch (error) {
+            showToast(getActionErrorMessage(error), 'error');
         } finally {
             setResyncingCal(false);
         }
-    }, [currentOrg, confirm, runForceSyncLoop, onDataRefresh]);
+    }, [currentOrg, confirm, runForceSyncLoop, onDataRefresh, showToast]);
 
     return {
         syncProgress,
