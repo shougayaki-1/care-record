@@ -9,6 +9,7 @@ import { verificationTests } from './lib/verification.mjs';
 import { implementationPrompt } from './lib/codex-runner.mjs';
 import { worker, configuration } from './continuous-worker.mjs';
 import { saveJson, emptyState, loadState } from './lib/state.mjs';
+import { builtInSettings } from './lib/model-settings.mjs';
 
 const scripts = { typecheck: 'tsc --noEmit', lint: 'eslint', test: 'npm run test:unit && npm run test:ui', 'test:unit': 'vitest run --project unit', 'test:ui': 'vitest run --project storybook' };
 const result = { status: 'completed', safe_to_open_pr: true, summary: 'Done', tests: ['unit'], unrun_tests: 'npm run test: UI listen EPERM in sandbox, delegated to parent', security_impact: 'none', remaining_work: 'none' };
@@ -44,7 +45,7 @@ async function fixture(t, { advance = true, packageData } = {}) {
     return command(binary, args, options);
   };
   return { root, stateDir, worktree, old, latest, git, execute, calls,
-    current: { number: 51, branch, worktree, base: old, stage: 'prepare', session: null, failures: 0, quotaWaits: 0 } };
+    current: { ...builtInSettings, number: 51, branch, worktree, base: old, stage: 'prepare', session: null, failures: 0, quotaWaits: 0 } };
 }
 
 test('existing HEAD == saved base == latest is reused without changing history', async t => {
