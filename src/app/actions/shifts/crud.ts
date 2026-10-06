@@ -1,7 +1,7 @@
 'use server';
 
 import { saveShiftSegments } from '../shiftSegments';
-import { UserFacingError, withSafeError } from '@/utils/errors';
+import { sanitizeDbError, UserFacingError, withSafeError } from '@/utils/errors';
 import { emptyGoogleSyncStats, type SyncErrorKind } from '@/utils/googleSync';
 import { logError, serializeError } from '@/utils/log';
 import { recordAuditEvent } from '@/utils/supabase/audit';
@@ -106,7 +106,7 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
           await saveShiftSegments(organizationId, shiftId, payload.segments);
       }
       const title = await getCurrentShiftTitle(shiftId, payload.title, payload.clientId);
-      const result = await updateShiftInternal(shiftId, { ...payload, title }, awaitSync);
+      const result = await updateShiftInternal(shiftId, { ...payload, organizationId, title }, awaitSync);
       const fields = Object.keys(payload).filter((field) => field !== 'segments');
       if (payload.segments !== undefined) fields.push('segments');
       await recordAuditEvent({ organizationId, actorId: actor.userId, action: 'shift.update', resourceType: 'shift', resourceId: shiftId, details: { fields } });
@@ -121,7 +121,7 @@ export async function updateShiftTimeOnly(shiftId: string, startAt: string, endA
       if (!existing?.organization_id) throw new Error('シフトが見つかりません');
       const actor = await assertShiftPermission(existing.organization_id, 'edit', { shiftId });
       try {
-          await supabase.from('shifts').update({
+          const { data: updated, error } = await supabase.from('shifts').update({
               start_at: startAt,
               end_at: endAt,
               updated_at: new Date().toISOString(),
@@ -129,10 +129,12 @@ export async function updateShiftTimeOnly(shiftId: string, startAt: string, endA
               google_sync_status: 'pending_upsert',
               google_sync_error: null,
               google_synced_at: null
-          }).eq('id', shiftId);
+          }).eq('id', shiftId).eq('organization_id', actor.organizationId).is('deleted_at', null)
+              .select('id').maybeSingle();
+          if (error) throw sanitizeDbError(error, 'updateShiftTimeOnly');
+          if (!updated) throw new UserFacingError('シフトを更新できませんでした。再読み込みしてお試しください。');
 
-          const { data } = await supabase.from('shifts').select('organization_id').eq('id', shiftId).single();
-          if (data) await trySyncSilently(data.organization_id, shiftId, 'sync');
+          await trySyncSilently(actor.organizationId, shiftId, 'sync');
           await recordAuditEvent({ organizationId: actor.organizationId, actorId: actor.userId, action: 'shift.time_update', resourceType: 'shift', resourceId: shiftId });
           return { success: true };
       } catch (error) { logError('updateShiftTimeOnly failed', { organizationId: actor.organizationId, error: serializeError(error) }); throw error; }
@@ -148,7 +150,7 @@ export async function toggleCancelShift(shiftId: string, isCancel: boolean, reas
       try {
           const status = isCancel ? 'cancelled' : 'published';
           const cancelReason = isCancel ? reason : null;
-          await supabase.from('shifts').update({
+          const { data: updated, error } = await supabase.from('shifts').update({
               status,
               cancel_reason: cancelReason,
               updated_at: new Date().toISOString(),
@@ -156,10 +158,12 @@ export async function toggleCancelShift(shiftId: string, isCancel: boolean, reas
               google_sync_status: 'pending_upsert',
               google_sync_error: null,
               google_synced_at: null
-          }).eq('id', shiftId);
+          }).eq('id', shiftId).eq('organization_id', actor.organizationId).is('deleted_at', null)
+              .select('id').maybeSingle();
+          if (error) throw sanitizeDbError(error, 'toggleCancelShift');
+          if (!updated) throw new UserFacingError('シフトを更新できませんでした。再読み込みしてお試しください。');
 
-          const { data } = await supabase.from('shifts').select('organization_id').eq('id', shiftId).single();
-          if (data) await trySyncSilently(data.organization_id, shiftId, 'sync');
+          await trySyncSilently(actor.organizationId, shiftId, 'sync');
           await recordAuditEvent({ organizationId: actor.organizationId, actorId: actor.userId, action: isCancel ? 'shift.cancel' : 'shift.reopen', resourceType: 'shift', resourceId: shiftId, reason: isCancel ? reason : null });
           return { success: true };
       } catch (error) { logError('toggleCancelShift failed', { organizationId: actor.organizationId, error: serializeError(error) }); throw error; }
@@ -232,8 +236,8 @@ export async function deleteShiftsBatch(organizationId: string, shiftIds: string
       const supabase = await createSessionClient();
       const { data: shifts, error } = await supabase.from('shifts').select('id')
           .eq('organization_id', organizationId).in('id', ids).is('deleted_at', null);
-      if (error) throw error;
-      if (!shifts?.length) return { success: true, deleted: 0, failed: 0, errorKind: undefined as SyncErrorKind | undefined, ...emptyGoogleSyncStats() };
+      if (error) throw sanitizeDbError(error, 'deleteShiftsBatch');
+      if (shifts?.length !== ids.length) throw new UserFacingError('対象シフトが見つかりません');
 
       // 保持方針の検証とDB削除が成功するまで、Googleには触れない。
       const deleted = await softDeleteShiftIds(organizationId, shifts.map(shift => shift.id), 'シフト削除');
@@ -259,19 +263,21 @@ export async function deleteShiftsDbOnly(shiftIds: string[]) {
       await assertShiftsAccessible(shiftIds);
       const supabase = await createSessionClient();
       try {
-          const { data: shifts } = await supabase.from('shifts').select('id, organization_id').in('id', shiftIds);
+          const { data: shifts, error: readError } = await supabase.from('shifts').select('id, organization_id').in('id', shiftIds);
+          if (readError) throw sanitizeDbError(readError, 'deleteShiftsDbOnly');
+          if ((shifts?.length ?? 0) !== shiftIds.length) throw new UserFacingError('対象シフトが見つかりません');
           const grouped = new Map<string, { id: string }[]>();
           for (const shift of shifts || []) grouped.set(shift.organization_id, [...(grouped.get(shift.organization_id) || []), { id: shift.id }]);
           for (const [orgId, ids] of grouped) {
               const targets = (ids || []).map((shift) => shift.id);
               const actor = await assertShiftPermission(orgId, 'delete', { shiftIds: targets });
               const policy = await getRetentionPolicy(orgId, 'shift');
-              const { error } = await supabase.from('shifts').update({
-                  deleted_at: new Date().toISOString(), deleted_by: actor.userId,
-                  deletion_reason: 'DB一括削除', retention_until: retentionDeadline(policy.years),
-                  google_sync_status: 'pending_delete', google_sync_error: null, google_synced_at: null,
-              }).in('id', targets).is('deleted_at', null);
-              if (error) throw error;
+              const { data: deleted, error } = await supabase.rpc('soft_delete_shifts_atomic', {
+                  p_org_id: orgId, p_shift_ids: targets, p_reason: 'DB一括削除',
+                  p_retention_until: retentionDeadline(policy.years), p_sync_status: 'pending_delete',
+              });
+              if (error) throw sanitizeDbError(error, 'deleteShiftsDbOnly');
+              if (deleted !== targets.length) throw new UserFacingError('対象シフトを削除できませんでした。再読み込みしてお試しください。');
               await recordAuditEvent({ organizationId: orgId, actorId: actor.userId, action: 'shift.bulk_soft_delete', resourceType: 'shift', reason: 'DB一括削除', details: { shiftIds: targets } });
           }
           return { success: true };
