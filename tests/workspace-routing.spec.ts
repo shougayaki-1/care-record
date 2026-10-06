@@ -4,7 +4,9 @@ import { generateUser, setupNewOrg } from './helpers';
 test.describe('既存アカウントの所属解決', () => {
   test('再ログイン時にSETUPへ誤遷移しない', async ({ page }) => {
     const user = generateUser();
-    await setupNewOrg(page, user);
+    await test.step('再ログイン前の事業所fixtureを作成する', async () => {
+      await setupNewOrg(page, user);
+    });
 
     await page.getByRole('button', { name: 'アカウント' }).click();
     await page.getByRole('menuitem', { name: 'ログアウト' }).click();
