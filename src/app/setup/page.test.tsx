@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   callback: null as ((event: AuthChangeEvent, session: Session | null) => void | Promise<void>) | null,
   name: '', inviteCode: null as string | null,
   preview: vi.fn(), replace: vi.fn(), push: vi.fn(),
+  query: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -19,10 +20,13 @@ vi.mock('@/lib/supabase', () => ({ supabase: {
     mocks.callback = callback;
     return { data: { subscription: { unsubscribe: vi.fn() } } };
   } },
-  from: (table: string) => ({ select: () => ({ eq: () => table === 'profiles'
+  from: (table: string) => {
+    mocks.query(table);
+    return { select: () => ({ eq: () => table === 'profiles'
     ? { single: async () => ({ data: { name: mocks.name }, error: null }) }
     : Promise.resolve({ data: [] }),
-  }) }),
+    }) };
+  },
 } }));
 vi.mock('@/app/actions/accounts', () => ({ acceptInvitation: vi.fn(), getInvitationPreview: mocks.preview }));
 vi.mock('@/app/actions/user', () => ({ createOrganization: vi.fn(), updateOwnProfile: vi.fn() }));
@@ -40,13 +44,14 @@ beforeEach(() => {
   mocks.name = '';
   mocks.inviteCode = null;
   mocks.preview.mockReset().mockResolvedValue({ valid: false });
+  mocks.query.mockClear();
 });
 afterEach(cleanup);
 
-async function loadUser(name = '') {
+async function loadUser(name = '', { email }: { email?: string } = { email: 'user@example.com' }) {
   mocks.name = name;
   await act(async () => {
-    mocks.callback!('INITIAL_SESSION', { user: { id: 'user-without-membership' } } as Session);
+    mocks.callback!('INITIAL_SESSION', { user: { id: 'user-without-membership', email } } as Session);
     await new Promise(resolve => setTimeout(resolve, 0));
   });
 }
@@ -61,6 +66,17 @@ describe('setup recovery is always accessible', () => {
   it('初期ロード中にログアウトできる', () => {
     render(<SetupPage />);
     expect(screen.getByText('セットアップ情報を取得中...')).toBeTruthy();
+    expect(screen.queryByText(/現在ログイン中:/)).toBeNull();
+    expectRecoveryForm();
+  });
+
+  it('セッション判明時に初期ロード中でもメールを表示する', () => {
+    render(<SetupPage />);
+    act(() => {
+      mocks.callback!('INITIAL_SESSION', { user: { id: 'user-without-membership', email: 'user@example.com' } } as Session);
+    });
+    expect(screen.getByText('セットアップ情報を取得中...')).toBeTruthy();
+    expect(screen.getByText('現在ログイン中: user@example.com')).toBeTruthy();
     expectRecoveryForm();
   });
 
@@ -68,6 +84,7 @@ describe('setup recovery is always accessible', () => {
     render(<SetupPage />);
     await loadUser();
     expect(screen.getByText('ようこそ！')).toBeTruthy();
+    expect(screen.getByText('現在ログイン中: user@example.com')).toBeTruthy();
     expectRecoveryForm();
   });
 
@@ -76,6 +93,7 @@ describe('setup recovery is always accessible', () => {
     await loadUser('利用者');
     if (step === 'create') fireEvent.click(screen.getByText('新しい事業所を作成する'));
     if (step === 'join') fireEvent.click(screen.getByText('既存の事業所に参加する'));
+    expect(screen.getByText('現在ログイン中: user@example.com')).toBeTruthy();
     expectRecoveryForm();
   });
 
@@ -84,22 +102,61 @@ describe('setup recovery is always accessible', () => {
     render(<SetupPage />);
     await loadUser('利用者');
     expect(screen.getByText(/招待コードが無効または期限切れ/)).toBeTruthy();
+    expect(screen.getByText('現在ログイン中: user@example.com')).toBeTruthy();
     expectRecoveryForm();
+  });
+
+  it.each([undefined, ''])('メールが %s のときメール行を表示しない', async email => {
+    render(<SetupPage />);
+    await loadUser('', { email });
+    expect(screen.queryByText(/現在ログイン中:/)).toBeNull();
+    expectRecoveryForm();
+  });
+
+  it('セッションからメールがなくなると以前の表示を消す', async () => {
+    render(<SetupPage />);
+    await loadUser();
+    act(() => {
+      mocks.callback!('USER_UPDATED', { user: { id: 'user-without-membership' } } as Session);
+    });
+    expect(screen.queryByText(/現在ログイン中:/)).toBeNull();
+    expectRecoveryForm();
+  });
+
+  it('ログアウト通知でメールを消して既存の遷移を維持する', async () => {
+    render(<SetupPage />);
+    await loadUser();
+    act(() => { mocks.callback!('SIGNED_OUT', null); });
+    expect(screen.queryByText(/現在ログイン中:/)).toBeNull();
+    expect(mocks.replace).toHaveBeenCalledWith('/');
   });
 });
 
 
 describe('setup auth notifications preserve wizard progress', () => {
-  it.each(['SIGNED_IN', 'TOKEN_REFRESHED'] as const)('does not reset the create step on %s', async event => {
+  it('returns from the auth notification before starting Supabase queries', async () => {
+    render(<SetupPage />);
+    await act(async () => {
+      const result = mocks.callback!('INITIAL_SESSION', { user: { id: 'setup-user' } } as Session);
+      expect(result).toBeUndefined();
+      expect(mocks.query).not.toHaveBeenCalled();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(mocks.query.mock.calls).toEqual([['profiles'], ['organization_members']]);
+    expect(screen.getByText('ようこそ！')).toBeTruthy();
+  });
+
+  it.each(['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'] as const)('does not reset the create step on %s', async event => {
     render(<SetupPage />);
     await loadUser('利用者');
     fireEvent.click(screen.getByText('新しい事業所を作成する'));
     fireEvent.change(screen.getByLabelText('事業所名'), { target: { value: '入力中の事業所' } });
     await act(async () => {
-      mocks.callback!(event, { user: { id: 'user-without-membership' } } as Session);
+      mocks.callback!(event, { user: { id: 'user-without-membership', email: 'updated@example.com' } } as Session);
       await new Promise(resolve => setTimeout(resolve, 0));
     });
     expect(screen.getByRole('button', { name: '作成して開始' })).toBeTruthy();
     expect((screen.getByLabelText('事業所名') as HTMLInputElement).value).toBe('入力中の事業所');
+    expect(screen.getByText('現在ログイン中: updated@example.com')).toBeTruthy();
   });
 });

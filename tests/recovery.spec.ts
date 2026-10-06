@@ -61,13 +61,20 @@ test.describe('独立復旧ページ', () => {
 test('所属なしのアカウントからログアウトし、別アカウントの事業所で入り直せる', async ({ page }) => {
   test.setTimeout(120_000);
   const member = generateUser();
-  await setupNewOrg(page, member);
+  await test.step('復旧元の事業所fixtureを作成する', async () => {
+    await setupNewOrg(page, member);
+  });
   await logout(page);
 
   const noMembership = generateUser();
   await signUp(page, noMembership.email, noMembership.password);
   await acceptTerms(page);
-  await page.goto('/app');
+  // Observe /app committing before its client-side membership redirect to /setup.
+  await expect(page.getByRole('button', { name: '別のアカウントでログインする' })).toBeVisible();
+  await Promise.all([
+    page.waitForURL(url => url.pathname === '/app', { waitUntil: 'commit' }),
+    page.evaluate(() => window.location.assign(new URL('/app', window.location.origin).href)),
+  ]);
   await expect(page).toHaveURL(/\/setup(?:\?|$)/);
   await page.getByRole('button', { name: '別のアカウントでログインする' }).click();
   await expect(page).toHaveURL('/');
