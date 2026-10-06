@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   callback: null as ((event: AuthChangeEvent, session: Session | null) => void | Promise<void>) | null,
   name: '', inviteCode: null as string | null,
   preview: vi.fn(), replace: vi.fn(), push: vi.fn(),
+  query: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -19,10 +20,13 @@ vi.mock('@/lib/supabase', () => ({ supabase: {
     mocks.callback = callback;
     return { data: { subscription: { unsubscribe: vi.fn() } } };
   } },
-  from: (table: string) => ({ select: () => ({ eq: () => table === 'profiles'
+  from: (table: string) => {
+    mocks.query(table);
+    return { select: () => ({ eq: () => table === 'profiles'
     ? { single: async () => ({ data: { name: mocks.name }, error: null }) }
     : Promise.resolve({ data: [] }),
-  }) }),
+    }) };
+  },
 } }));
 vi.mock('@/app/actions/accounts', () => ({ acceptInvitation: vi.fn(), getInvitationPreview: mocks.preview }));
 vi.mock('@/app/actions/user', () => ({ createOrganization: vi.fn(), updateOwnProfile: vi.fn() }));
@@ -40,6 +44,7 @@ beforeEach(() => {
   mocks.name = '';
   mocks.inviteCode = null;
   mocks.preview.mockReset().mockResolvedValue({ valid: false });
+  mocks.query.mockClear();
 });
 afterEach(cleanup);
 
@@ -129,7 +134,19 @@ describe('setup recovery is always accessible', () => {
 
 
 describe('setup auth notifications preserve wizard progress', () => {
-  it.each(['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'] as const)('does not reset the create step on %s', async event => {
+  it('returns from the auth notification before starting Supabase queries', async () => {
+    render(<SetupPage />);
+    await act(async () => {
+      const result = mocks.callback!('INITIAL_SESSION', { user: { id: 'setup-user' } } as Session);
+      expect(result).toBeUndefined();
+      expect(mocks.query).not.toHaveBeenCalled();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(mocks.query.mock.calls).toEqual([['profiles'], ['organization_members']]);
+    expect(screen.getByText('ようこそ！')).toBeTruthy();
+  });
+
+  it.each(['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'] as const)('does not reset the create step on %s', async event => {
     render(<SetupPage />);
     await loadUser('利用者');
     fireEvent.click(screen.getByText('新しい事業所を作成する'));
