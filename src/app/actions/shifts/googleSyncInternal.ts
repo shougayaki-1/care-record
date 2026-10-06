@@ -5,6 +5,7 @@ import { withRetry } from '@/utils/googleRetry';
 import { type calendar_v3, google } from 'googleapis';
 
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
+import { logExternalError } from '@/utils/errors';
 import { logError, serializeError } from '@/utils/log';
 import {
   GOOGLE_PROP_ORG_ID,
@@ -14,6 +15,7 @@ import {
   choosePrimaryGoogleEvent,
   classifyGoogleError,
   emptyGoogleSyncStats,
+  googleSyncErrorMessage,
   isActiveGoogleEvent,
   mergeGoogleSyncStats,
   type GoogleSyncStats,
@@ -261,7 +263,7 @@ export async function trySyncSilently(
   } catch (error) {
     const syncError = classifyGoogleError(error);
     if (syncError.kind !== 'skipped') {
-      await markShiftGoogleSync(shiftId, 'failed', { error: action === 'delete' ? `Google削除同期に失敗しました（${syncError.kind}）` : syncError.message })
+      await markShiftGoogleSync(shiftId, 'failed', { error: action === 'delete' ? `Google削除同期に失敗しました（${syncError.kind}）` : googleSyncErrorMessage(syncError.kind) || 'Googleカレンダーへの同期に失敗しました' })
         .catch((err) => logError('markShiftGoogleSync failed', { organizationId, error: serializeError(err) }));
       logError(`Google Calendar sync (${action}) failed for shift ${shiftId} [${syncError.kind}]`, {
         organizationId,
@@ -289,11 +291,12 @@ export async function processShiftsSequential(
       succeeded += 1;
     } catch (error) {
       const syncError = classifyGoogleError(error);
+      logExternalError('google.sync.batch', error, { organizationId });
       if (syncError.kind === 'skipped') {
         succeeded += 1;
         continue;
       }
-      await markShiftGoogleSync(shift.id, 'failed', { error: action === 'delete' ? `Google削除同期に失敗しました（${syncError.kind}）` : syncError.message })
+      await markShiftGoogleSync(shift.id, 'failed', { error: action === 'delete' ? `Google削除同期に失敗しました（${syncError.kind}）` : googleSyncErrorMessage(syncError.kind) || 'Googleカレンダーへの同期に失敗しました' })
         .catch((err) => logError('markShiftGoogleSync failed', { organizationId, error: serializeError(err) }));
       failedIds.push(shift.id);
       errorKind = syncError.kind;

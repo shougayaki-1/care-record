@@ -16,17 +16,17 @@ export function useRecordQuery<T>({ organizationId, queryKey, load, empty, onErr
 }) {
   const key = `${organizationId ?? ''}:${queryKey}`;
   const generation = useRef(0);
-  const [snapshot, setSnapshot] = useState<{ key: string; data: T; loading: boolean }>({ key: '', data: empty, loading: true });
+  const [snapshot, setSnapshot] = useState<{ key: string; data: T; loading: boolean; error: unknown }>({ key: '', data: empty, loading: true, error: null });
   const refresh = useCallback(async () => {
     if (!organizationId) return;
     const request = ++generation.current;
-    setSnapshot((previous) => ({ key, data: previous.key === key ? previous.data : empty, loading: true }));
+    setSnapshot((previous) => ({ key, data: previous.key === key ? previous.data : empty, loading: true, error: null }));
     try {
       const data = await load();
-      if (request === generation.current) setSnapshot({ key, data, loading: false });
+      if (request === generation.current) setSnapshot({ key, data, loading: false, error: null });
     } catch (error) {
       if (request === generation.current) {
-        setSnapshot({ key, data: empty, loading: false });
+        setSnapshot({ key, data: empty, loading: false, error });
         onError(error);
       }
     }
@@ -53,5 +53,5 @@ export function useRecordQuery<T>({ organizationId, queryKey, load, empty, onErr
     };
   }, [organizationId, refresh, refreshInterval, cancel]);
 
-  return { data: snapshot.key === key ? snapshot.data : empty, loading: !organizationId || snapshot.key !== key || snapshot.loading, refresh };
+  return { error: snapshot.key === key ? snapshot.error : null, data: snapshot.key === key ? snapshot.data : empty, loading: !organizationId || snapshot.key !== key || snapshot.loading, refresh };
 }

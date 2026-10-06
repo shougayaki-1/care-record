@@ -2,7 +2,7 @@
 
 import { type calendar_v3, google } from 'googleapis';
 
-import { logExternalError, sanitizeDbError, sanitizeExternalError, withSafeError, withActionResult } from '@/utils/errors';
+import { ExpectedActionError, logExternalError, sanitizeDbError, sanitizeExternalError, withActionResult } from '@/utils/errors';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import {
@@ -12,6 +12,7 @@ import {
   choosePrimaryGoogleEvent,
   classifyGoogleError,
   emptyGoogleSyncStats,
+  googleSyncErrorMessage,
   getEventBodySignature,
   getGoogleEventPrivateProp,
   getLegacyEventSignature,
@@ -76,18 +77,18 @@ export async function getSyncStatus(organizationId: string) {
  * remaining が 0 になるまで繰り返し呼ぶ（タイムアウト回避＆再開可能）。
  */
 export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
-  return withSafeError('syncUnsyncedBatch', async () => {
-      if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
-          throw new Error('同期件数が不正です');
-      }
+  return withActionResult('syncUnsyncedBatch', async () => {
       const actor = await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
+      if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+          throw new ExpectedActionError('VALIDATION_ERROR', '同期件数が不正です');
+      }
       const supabase = await createSessionClient();
       const connected = await hasCalendarConnection(supabase, organizationId);
       if (!connected) {
           return { processed: 0, succeeded: 0, failed: 0, remaining: 0, errorKind: 'skipped' as SyncErrorKind, connected: false };
       }
 
-      const { data: shifts } = await supabase
+      const { data: shifts, error: shiftsError } = await supabase
           .from('shifts')
           .select('id')
           .eq('organization_id', organizationId)
@@ -95,6 +96,7 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
           .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)')
           .limit(limit);
 
+      if (shiftsError) throw sanitizeDbError(shiftsError, 'action.google-sync.targets');
       if (!shifts || shifts.length === 0) {
           return { processed: 0, succeeded: 0, failed: 0, remaining: 0, connected: true, ...emptyGoogleSyncStats() };
       }
@@ -107,7 +109,7 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
       });
 
       // 呼び出し元は残件の有無だけを使う。毎回の exact count は避ける。
-      const { data: nextShift } = await supabase
+      const { data: nextShift, error: nextError } = await supabase
           .from('shifts')
           .select('id')
           .eq('organization_id', organizationId)
@@ -115,6 +117,7 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
           .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)')
           .limit(1);
 
+      if (nextError) throw sanitizeDbError(nextError, 'action.google-sync.remaining');
       return {
           processed: shifts.length,
           succeeded: outcome.succeeded,
@@ -133,11 +136,11 @@ export async function syncUnsyncedBatch(organizationId: string, limit = 20) {
  * クライアントは remaining が 0 になるまで nextCursor を渡して繰り返す。
  */
 export async function forceSyncBatch(organizationId: string, cursor: string | null, limit = 20) {
-  return withSafeError('forceSyncBatch', async () => {
-      if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
-          throw new Error('同期件数が不正です');
-      }
+  return withActionResult('forceSyncBatch', async () => {
       const actor = await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
+      if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+          throw new ExpectedActionError('VALIDATION_ERROR', '同期件数が不正です');
+      }
       const supabase = await createSessionClient();
       const connected = await hasCalendarConnection(supabase, organizationId);
       if (!connected) {
@@ -153,8 +156,9 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
           .limit(limit);
       if (cursor) query = query.gt('id', cursor);
 
-      const { data: shifts } = await query;
+      const { data: shifts, error: shiftsError } = await query;
 
+      if (shiftsError) throw sanitizeDbError(shiftsError, 'action.google-sync.targets');
       if (!shifts || shifts.length === 0) {
           return { processed: 0, succeeded: 0, failed: 0, nextCursor: cursor, remaining: 0, connected: true, ...emptyGoogleSyncStats() };
       }
@@ -166,13 +170,14 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
       });
       const nextCursor = shifts[shifts.length - 1].id;
 
-      const { count: remaining } = await supabase
+      const { count: remaining, error: remainingError } = await supabase
           .from('shifts')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', organizationId)
           .is('deleted_at', null)
           .gt('id', nextCursor);
 
+      if (remainingError) throw sanitizeDbError(remainingError, 'action.google-sync.remaining');
       return {
           processed: shifts.length,
           succeeded: outcome.succeeded,
@@ -187,16 +192,17 @@ export async function forceSyncBatch(organizationId: string, cursor: string | nu
 }
 
 export async function repairGoogleCalendarSync(organizationId: string, options: RepairGoogleCalendarSyncOptions = {}) {
-  return withSafeError('repairGoogleCalendarSync', async () => {
+  return withActionResult('repairGoogleCalendarSync', async () => {
       const actor = await assertShiftPermission(organizationId, 'edit', { requireAllScope: true });
       const supabase = await createSessionClient();
       const limit = options.limit && Number.isInteger(options.limit) ? Math.min(Math.max(options.limit, 1), 5000) : 5000;
 
-      const { data: orgData } = await supabase
+      const { data: orgData, error: orgError } = await supabase
           .from('organizations')
           .select('google_calendar_id, google_refresh_token')
           .eq('id', organizationId)
           .single();
+      if (orgError) throw sanitizeDbError(orgError, 'action.google-sync.connection');
       if (!orgData?.google_calendar_id || !orgData?.google_refresh_token) {
           return { processed: 0, succeeded: 0, failed: 0, connected: false, errorKind: 'skipped' as SyncErrorKind, failedIds: [] as string[], ...emptyGoogleSyncStats() };
       }
@@ -209,6 +215,7 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
           calendarApi = google.calendar({ version: 'v3', auth: oauth2Client });
           allEvents = await listAllActiveGoogleEvents(calendarApi, orgData.google_calendar_id);
       } catch (e) {
+          logExternalError('google.sync.repair', e, { organizationId });
           const se = classifyGoogleError(e);
           return {
               processed: 0,
@@ -311,8 +318,9 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
               }
               succeeded++;
           } catch (e) {
+              logExternalError('google.sync.repair-item', e, { organizationId });
               const se = classifyGoogleError(e);
-              await markShiftGoogleSync(shift.id, 'failed', { error: shift.deleted_at ? `Google削除同期に失敗しました（${se.kind}）` : se.message }).catch((error) => logExternalError('google.sync.mark-failed', error));
+              await markShiftGoogleSync(shift.id, 'failed', { error: shift.deleted_at ? `Google削除同期に失敗しました（${se.kind}）` : googleSyncErrorMessage(se.kind) || 'Googleカレンダーへの同期に失敗しました' }).catch((error) => logExternalError('google.sync.mark-failed', error));
               failedIds.push(shift.id);
               errorKind = se.kind;
               if (se.kind === 'auth') break;
@@ -336,7 +344,7 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
 }
 
 export async function syncSingleShift(organizationId: string, shiftId: string, action: 'sync' | 'delete' = 'sync') {
-  return withSafeError('syncSingleShift', async () => {
+  return withActionResult('syncSingleShift', async () => {
       const actor = await assertShiftPermission(organizationId, action === 'delete' ? 'delete' : 'edit', { shiftId });
       try {
           await syncToGoogleCalendarDirect(organizationId, shiftId, action);

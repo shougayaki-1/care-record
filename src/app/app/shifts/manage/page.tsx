@@ -1,5 +1,5 @@
 'use client';
-import { readActionResult } from '@/utils/actionResult';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import React, { useEffect, useState, useRef, useCallback, useTransition } from 'react';
 import dynamic from 'next/dynamic';
@@ -238,30 +238,25 @@ export default function ShiftManagePage() {
     };
 
     const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {
-        try {
-            if (patternId) {
-                await updateShiftPattern(patternId, payload);
-                showToast('ひな形情報を更新しました');
-            } else {
-                await createShiftPattern(payload);
-                showToast('新規ひな形を登録しました');
-            }
-            fetchData(true);
-        } catch (error) {
-            console.error(error);
-            showToast('保存に失敗しました', 'error');
+        if (patternId) {
+            await readActionResult(updateShiftPattern(patternId, payload));
+            showToast('ひな形情報を更新しました');
+        } else {
+            await readActionResult(createShiftPattern(payload));
+            showToast('新規ひな形を登録しました');
         }
+        fetchData(true);
     };
 
     const handleDeletePattern = async (id: string) => {
         if (!(await confirm({ title: 'ひな形の削除', message: 'このひな形を削除しますか？\n（※すでに展開済みのカレンダー上のシフト実体は削除されません）', confirmText: '削除する', confirmColor: 'error' }))) return;
         try {
-            await deleteShiftPattern(id);
+            await readActionResult(deleteShiftPattern(id));
             showToast('ひな形を削除しました');
             fetchData(true);
         } catch (error) {
             console.error(error);
-            showToast('削除に失敗しました', 'error');
+            showToast(getActionErrorMessage(error, '削除に失敗しました'), 'error');
         }
     };
 
@@ -269,12 +264,12 @@ export default function ShiftManagePage() {
         if (!currentOrg) return;
         setGenerating(true);
         try {
-            const res = await previewShiftsForMonth(currentOrg.id, targetMonth);
+            const res = await readActionResult(previewShiftsForMonth(currentOrg.id, targetMonth));
             setPreviewDetails(res);
             setPreviewDialogOpen(true);
         } catch (e) {
             console.error(e);
-            showToast('計算処理に失敗しました', 'error');
+            showToast(getActionErrorMessage(e, '計算処理に失敗しました'), 'error');
         } finally {
             setGenerating(false);
         }
@@ -285,7 +280,7 @@ export default function ShiftManagePage() {
         setPreviewDialogOpen(false);
         setGenerating(true);
         try {
-            const res = await generateShiftsForMonth(currentOrg.id, targetMonth);
+            const res = await readActionResult(generateShiftsForMonth(currentOrg.id, targetMonth));
             setGenerating(false);
             setActiveTab('fullCalendar');
             const resultSummary = `新規${res.count}件 / 更新${res.updated}件 / 編集済みスキップ${res.skipped}件 / 失敗${res.failed}件`;
@@ -302,7 +297,7 @@ export default function ShiftManagePage() {
             fetchData(true);
         } catch (error) {
             console.error(error);
-            showToast('シフトの自動展開に失敗しました。', 'error');
+            showToast(getActionErrorMessage(error, 'シフトの自動展開に失敗しました。'), 'error');
             setGenerating(false);
         }
     };
@@ -362,7 +357,7 @@ export default function ShiftManagePage() {
             fetchData(true);
         } catch (error) {
             console.error('Clear Deployed Shifts Error:', error);
-            showToast(error instanceof Error ? error.message : '消去処理中にエラーが発生しました。', 'error');
+            showToast(getActionErrorMessage(error, '消去処理中にエラーが発生しました。'), 'error');
             setGenerating(false);
             setSyncProgress(null);
         }

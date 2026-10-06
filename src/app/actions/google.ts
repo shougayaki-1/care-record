@@ -4,13 +4,13 @@ import type { ActionResult } from '@/types/actionResult';
 import { randomBytes } from 'crypto';
 import { cookies } from 'next/headers';
 import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar';
-import { assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
+import { assertAuthResponse, assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { storeOAuthNonce } from '@/utils/supabase/oauthNonce';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { google } from 'googleapis';
 import { googleConnectionStateFromError, type GoogleConnectionState } from '@/utils/googleSync';
 import { withRetry } from '@/utils/googleRetry';
-import { sanitizeDbError, withSafeError, withActionResult } from '@/utils/errors';
+import { ExpectedActionError, logExternalError, sanitizeDbError, withActionResult } from '@/utils/errors';
 import { consumeReauthGrant } from '@/utils/supabase/reauth';
 import { asNullableRpcArg } from '@/types/json';
 import { areExternalIntegrationsEnabled } from '@/lib/env/server';
@@ -36,6 +36,7 @@ export async function getGoogleConnectionHealth(organizationId: string): Promise
         const calendar = google.calendar({ version: 'v3', auth: oauth });
         await withRetry(() => calendar.calendars.get({ calendarId: org.google_calendar_id! }), 2);
     } catch (error) {
+        logExternalError('google.health', error, { organizationId });
         state = googleConnectionStateFromError(error);
     }
     const { error: updateError } = await supabase.rpc('update_google_connection_health', {
@@ -51,13 +52,13 @@ export async function getGoogleAuthUrlAction(
     mode: 'connect' | 'reauthorize',
     reauthToken?: string,
 ) {
-    return withSafeError('getGoogleAuthUrlAction', async () => {
-    if (!areExternalIntegrationsEnabled()) throw new Error('EXTERNAL_INTEGRATIONS_DISABLED');
+    return withActionResult('getGoogleAuthUrlAction', async () => {
+    if (!areExternalIntegrationsEnabled()) throw new ExpectedActionError('NOT_CONFIGURED', '外部連携は無効です');
     const { userId } = await assertOrgPermission(organizationId, 'integrations');
     let requiresGoogleIdentityMatch = false;
     if (reauthToken) {
         const reauth = await consumeReauthGrant('external_secret_change', reauthToken);
-        if (reauth.userId !== userId) throw new Error('再認証した利用者が一致しません');
+        if (reauth.userId !== userId) throw new ExpectedActionError('FORBIDDEN', '再認証した利用者が一致しません');
     } else {
         // A user with a linked Google identity can prove possession of the same
         // account while granting Calendar access. Running a separate Supabase
@@ -69,8 +70,10 @@ export async function getGoogleAuthUrlAction(
             supabase.rpc('current_user_has_password'),
         ]);
         const hasGoogleIdentity = user?.identities?.some((identity) => identity.provider === 'google') ?? false;
-        if (userError || passwordError || !user || user.id !== userId || !hasGoogleIdentity) {
-            throw new Error('この操作には再認証が必要です');
+        assertAuthResponse(userError, !!user);
+        if (passwordError) throw sanitizeDbError(passwordError, 'action.google.reauth-method');
+        if (!user || user.id !== userId || !hasGoogleIdentity) {
+            throw new ExpectedActionError('REAUTH_REQUIRED', 'この操作には再認証が必要です');
         }
         requiresGoogleIdentityMatch = true;
     }

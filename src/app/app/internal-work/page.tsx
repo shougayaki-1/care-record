@@ -1,5 +1,7 @@
 'use client';
 
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
+
 import { useCallback, useMemo, useState } from 'react';
 import {
   Alert, Box, Chip, Divider, Stack, TextField, Typography,
@@ -15,6 +17,7 @@ import {
   type InternalWorkRecord,
   type InternalWorkStaffOption,
 } from '@/app/actions/internalWork';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useRecordQuery } from '@/hooks/useRecordQuery';
 import InternalWorkDialog from '@/components/internal-work/InternalWorkDialog';
 import { normalizePermissions } from '@/utils/permissions';
@@ -48,10 +51,10 @@ export default function InternalWorkPage() {
   const organizationId = currentOrg?.id;
   const load = useCallback(() => {
     const { start, end } = monthRange(targetMonth);
-    return getInternalWorkPageData(organizationId!, start, end, canViewAll && selectedStaffId !== 'all' ? selectedStaffId : null);
+    return readActionResult(getInternalWorkPageData(organizationId!, start, end, canViewAll && selectedStaffId !== 'all' ? selectedStaffId : null));
   }, [organizationId, targetMonth, canViewAll, selectedStaffId]);
   const onError = useCallback((error: unknown) => { console.error(error); showToast('内勤実績の取得に失敗しました', 'error'); }, [showToast]);
-  const { data: { records, staffOptions }, loading } = useRecordQuery({ organizationId: wsLoading ? undefined : organizationId, queryKey: `${targetMonth}/${canViewAll}/${selectedStaffId}`, load, empty: EMPTY_PAGE, onError });
+  const { data: { records, staffOptions }, loading, error: loadError, refresh } = useRecordQuery({ organizationId: wsLoading ? undefined : organizationId, queryKey: `${targetMonth}/${canViewAll}/${selectedStaffId}`, load, empty: EMPTY_PAGE, onError });
 
   if (wsLoading || !currentOrg) return <FormPageSkeleton />;
 
@@ -95,6 +98,8 @@ export default function InternalWorkPage() {
             <Stack divider={<Divider />}>
               {loading ? (
                 <Box p={3} textAlign="center" color="text.secondary">読み込み中...</Box>
+              ) : loadError != null ? (
+                <Alert severity="error" action={needsActionRecovery(loadError) ? <RecoveryLogoutButton /> : <AppButton variant="text" intent="secondary" onClick={() => void refresh()}>再試行</AppButton>}>{getActionErrorMessage(loadError)}</Alert>
               ) : records.length === 0 ? (
                 <Box p={3} textAlign="center" color="text.secondary">この月の内勤実績はありません</Box>
               ) : records.map((record) => (

@@ -1,6 +1,6 @@
 'use server';
 
-import { sanitizeDbError, withSafeError } from '@/utils/errors';
+import { ExpectedActionError, sanitizeDbError, withActionResult } from '@/utils/errors';
 import type { ActionResult } from '@/types/actionResult';
 import { createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 
@@ -10,8 +10,8 @@ export async function getMyShiftsWithStatus(
     organizationId: string,
     startDate: string,
     endDate: string
-): Promise<ActionResult<MyShiftItem[], 'STAFF_NOT_LINKED'>> {
-  return withSafeError('getMyShiftsWithStatus', async () => {
+): Promise<ActionResult<MyShiftItem[]>> {
+  return withActionResult('getMyShiftsWithStatus', async () => {
       const user = await getAuthedUser();
       const supabase = await createSessionClient();
 
@@ -23,13 +23,7 @@ export async function getMyShiftsWithStatus(
           .maybeSingle();
 
       if (staffError) throw sanitizeDbError(staffError, 'getMyShiftsWithStatus:staff', { organizationId });
-      if (!staffRow) return {
-          ok: false,
-          error: {
-              code: 'STAFF_NOT_LINKED',
-              message: 'スタッフアカウントが紐付いていません。事業所設定を確認してください。',
-          },
-      };
+      if (!staffRow) throw new ExpectedActionError('STAFF_NOT_LINKED', 'スタッフアカウントが紐付いていません。事業所設定を確認してください。');
 
       const { data: shifts, error } = await supabase
           .from('shifts')
@@ -53,7 +47,7 @@ export async function getMyShiftsWithStatus(
           .order('start_at', { ascending: true });
 
       if (error) throw sanitizeDbError(error, 'getMyShiftsWithStatus:shifts', { organizationId });
-      if (!shifts || shifts.length === 0) return { ok: true, data: [] };
+      if (!shifts || shifts.length === 0) return [];
 
       const shiftIds = shifts.map(s => s.id);
       const { data: reports, error: reportsError } = await supabase
@@ -68,12 +62,9 @@ export async function getMyShiftsWithStatus(
           (reports ?? []).map(r => [r.shift_id, { id: r.id, status: r.status ?? 'draft' }])
       );
 
-      return {
-          ok: true,
-          data: (shifts as unknown as Omit<MyShiftItem, 'report'>[]).map(shift => ({
-              ...shift,
-              report: reportByShiftId.get(shift.id) ?? null,
-          })),
-      };
+      return (shifts as unknown as Omit<MyShiftItem, 'report'>[]).map(shift => ({
+          ...shift,
+          report: reportByShiftId.get(shift.id) ?? null,
+      }));
   });
 }

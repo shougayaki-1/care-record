@@ -2,7 +2,7 @@
 
 import { rrulestr } from 'rrule';
 
-import { withSafeError } from '@/utils/errors';
+import { ExpectedActionError, sanitizeDbError, withActionResult } from '@/utils/errors';
 import { buildFloatingDate, buildJstIsoString } from '@/utils/googleSync';
 import { logError, serializeError } from '@/utils/log';
 import {
@@ -24,9 +24,10 @@ import {
  * ひな形から1ヶ月分のシフトをプレビュー表示用に計算する (DB書き込みは行わない)
  */
 export async function previewShiftsForMonth(organizationId: string, yearMonth: string) {
-  return withSafeError('previewShiftsForMonth', async () => {
+  return withActionResult('previewShiftsForMonth', async () => {
       await assertShiftPermission(organizationId, 'view', { requireAllScope: true });
       const supabase = await createSessionClient();
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) throw new ExpectedActionError('VALIDATION_ERROR', '対象月が不正です');
       const [year, month] = yearMonth.split('-').map(Number);
       const lastDayNum = new Date(year, month, 0).getDate();
 
@@ -34,7 +35,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
       const endDateJST = buildFloatingDate(year, month, lastDayNum, 23, 59);
 
       try {
-          const { data: patterns } = await supabase.from('shift_patterns').select(`
+          const { data: patterns, error: patternsError } = await supabase.from('shift_patterns').select(`
               *,
               shift_pattern_staffs(staff_id),
               shift_pattern_segments(
@@ -48,6 +49,7 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
               )
           `).eq('organization_id', organizationId).is('deleted_at', null);
 
+          if (patternsError) throw sanitizeDbError(patternsError, 'action.shift-generation.patterns');
           if (!patterns || patterns.length === 0) return { total: 0, details: [] };
 
           let totalNewCount = 0;
@@ -93,9 +95,10 @@ export async function previewShiftsForMonth(organizationId: string, yearMonth: s
  * ひな形から対象月のシフトを一括生成する
  */
 export async function generateShiftsForMonth(organizationId: string, yearMonth: string) {
-  return withSafeError('generateShiftsForMonth', async () => {
+  return withActionResult('generateShiftsForMonth', async () => {
       await assertShiftPermission(organizationId, 'create', { requireAllScope: true });
       const supabase = await createSessionClient();
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) throw new ExpectedActionError('VALIDATION_ERROR', '対象月が不正です');
       const [year, month] = yearMonth.split('-').map(Number);
       const lastDayNum = new Date(year, month, 0).getDate();
 
@@ -108,7 +111,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
           endSearchDate.setDate(endSearchDate.getDate() + 2);
           const endSearchISO = endSearchDate.toISOString();
 
-          const { data: existingShifts } = await supabase.from('shifts')
+          const { data: existingShifts, error: existingError } = await supabase.from('shifts')
               .select('id, pattern_id, start_at, is_modified')
               .eq('organization_id', organizationId)
               .is('deleted_at', null)
@@ -116,13 +119,14 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
               .gte('start_at', startSearchISO)
               .lte('start_at', endSearchISO);
 
+          if (existingError) throw sanitizeDbError(existingError, 'action.shift-generation.existing');
           const existingMap = new Map<string, { id: string, is_modified: boolean }>();
           existingShifts?.forEach(s => {
               const key = patternDateKey(s.pattern_id, jstDateStrFromStartAt(s.start_at));
               existingMap.set(key, { id: s.id, is_modified: s.is_modified || false });
           });
 
-          const { data: patterns } = await supabase.from('shift_patterns').select(`
+          const { data: patterns, error: patternsError } = await supabase.from('shift_patterns').select(`
               *,
               shift_pattern_staffs(staff_id),
               shift_pattern_segments(
@@ -136,6 +140,7 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
               )
           `).eq('organization_id', organizationId).is('deleted_at', null);
 
+          if (patternsError) throw sanitizeDbError(patternsError, 'action.shift-generation.patterns');
           if (!patterns || patterns.length === 0) {
               return { success: true, count: 0, updated: 0, skipped: 0, failed: 0, failureReasons: [] as string[] };
           }
@@ -229,10 +234,9 @@ export async function generateShiftsForMonth(organizationId: string, yearMonth: 
               .map((result) => {
                   const serialized = serializeError(result.reason);
                   logError('Generate Shift DB Error', { organizationId, reason: serialized });
-                  if (serialized && typeof serialized === 'object' && 'message' in serialized) {
-                      return String(serialized.message);
-                  }
-                  return String(serialized);
+                  return result.reason instanceof ExpectedActionError
+                      ? result.reason.message
+                      : '処理に失敗しました。時間をおいて再度お試しください。';
               })
               .filter((reason, index, all) => all.indexOf(reason) === index)
               .slice(0, 3);

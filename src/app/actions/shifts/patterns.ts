@@ -1,6 +1,6 @@
 'use server';
 
-import { sanitizeDbError, withSafeError, withActionResult } from '@/utils/errors';
+import { ExpectedActionError, sanitizeDbError, withActionResult } from '@/utils/errors';
 import { logError, serializeError } from '@/utils/log';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
@@ -44,7 +44,7 @@ export async function getShiftPatterns(organizationId: string) {
 }
 
 export async function createShiftPattern(payload: ShiftPatternPayload) {
-  return withSafeError('createShiftPattern', async () => {
+  return withActionResult('createShiftPattern', async () => {
       const actor = await assertShiftPermission(payload.organizationId, 'create', { clientId: payload.clientId });
       const supabase = await createSessionClient();
       const segments = normalizePatternSegments(payload);
@@ -54,7 +54,8 @@ export async function createShiftPattern(payload: ShiftPatternPayload) {
           p_payload: asJson({ client_id: payload.clientId, title: payload.title, start_time: payload.startTime,
               end_time: payload.endTime, rrule: payload.rrule, segments, auto_assign: Boolean(payload.autoAssign) }),
       });
-      if (error || !patternId) throw error;
+      if (error) throw sanitizeDbError(error, 'action.shift-patterns.create');
+      if (!patternId) throw new Error('save_shift_pattern_atomic returned no pattern');
 
       await recordAuditEvent({ organizationId: payload.organizationId, actorId: actor.userId, action: 'shift_pattern.create', resourceType: 'shift_pattern', resourceId: patternId });
       return { success: true };
@@ -62,10 +63,11 @@ export async function createShiftPattern(payload: ShiftPatternPayload) {
 }
 
 export async function updateShiftPattern(patternId: string, payload: ShiftPatternPayload) {
-  return withSafeError('updateShiftPattern', async () => {
+  return withActionResult('updateShiftPattern', async () => {
       const supabase = await createSessionClient();
-      const { data: existing } = await supabase.from('shift_patterns').select('organization_id').eq('id', patternId).single();
-      if (!existing?.organization_id) throw new Error('シフトひな形が見つかりません');
+      const { data: existing, error: readError } = await supabase.from('shift_patterns').select('organization_id').eq('id', patternId).maybeSingle();
+      if (readError) throw sanitizeDbError(readError, 'action.shift-patterns.read');
+      if (!existing?.organization_id) throw new ExpectedActionError('NOT_FOUND', 'シフトひな形が見つかりません');
       const actor = await assertShiftPermission(existing.organization_id, 'edit', { patternId, clientId: payload.clientId });
       try {
           const segments = normalizePatternSegments(payload);
@@ -86,10 +88,11 @@ export async function updateShiftPattern(patternId: string, payload: ShiftPatter
 }
 
 export async function deleteShiftPattern(patternId: string) {
-  return withSafeError('deleteShiftPattern', async () => {
+  return withActionResult('deleteShiftPattern', async () => {
       const supabase = await createSessionClient();
-      const { data: existing } = await supabase.from('shift_patterns').select('organization_id').eq('id', patternId).single();
-      if (!existing?.organization_id) throw new Error('シフトひな形が見つかりません');
+      const { data: existing, error: readError } = await supabase.from('shift_patterns').select('organization_id').eq('id', patternId).maybeSingle();
+      if (readError) throw sanitizeDbError(readError, 'action.shift-patterns.read');
+      if (!existing?.organization_id) throw new ExpectedActionError('NOT_FOUND', 'シフトひな形が見つかりません');
       const actor = await assertShiftPermission(existing.organization_id, 'delete', { patternId });
       const policy = await getRetentionPolicy(actor.organizationId, 'shift');
       const { error } = await supabase.from('shift_patterns').update({ deleted_at: new Date().toISOString(),

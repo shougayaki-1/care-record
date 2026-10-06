@@ -62,3 +62,14 @@ describe('record snapshot query', () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 });
+
+it('keeps classified failure distinct from empty success and clears it after retry', async () => {
+  const { ActionResultError } = await import('@/utils/actionResult');
+  const cause = new ActionResultError('SESSION_EXPIRED', '再度ログインしてください');
+  const load = vi.fn().mockRejectedValueOnce(cause).mockResolvedValueOnce([]);
+  const { result } = renderHook(() => useRecordQuery({ organizationId: 'org', queryKey: '', load, empty, onError: ignoreError }));
+  await waitFor(() => expect(result.current.error).toBe(cause));
+  expect(result.current.loading).toBe(false);
+  await act(() => result.current.refresh());
+  expect(result.current.data).toEqual([]); expect(result.current.error).toBeNull();
+});

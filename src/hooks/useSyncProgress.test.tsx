@@ -35,7 +35,7 @@ describe('repair error reporting', () => {
     it.each(['transient', 'forbidden', 'misconfigured', 'auth'])(
         'does not report success when initial remote scan fails with %s before processing any shifts',
         async (errorKind) => {
-            mocks.repair.mockResolvedValue({ connected: true, failed: 0, succeeded: 0, errorKind });
+            mocks.repair.mockResolvedValue({ ok: true, data: { connected: true, failed: 0, succeeded: 0, errorKind } });
             const showToast = vi.fn();
             const { result } = renderHook(() => useSyncProgress({
                 currentOrg: { id: 'test-org' }, showToast, confirm: vi.fn(),

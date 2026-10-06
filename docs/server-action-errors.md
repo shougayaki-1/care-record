@@ -22,7 +22,7 @@
 公開できるのはアプリが明示した `ExpectedActionError(code, 固定文言)` だけで、裸の `Error`、未分類の `UserFacingError`、DB/SDK 由来の文字列はログへ記録して `UNEXPECTED_ERROR` にする。
 「権限」「見つかりません」などを含む内部エラーも公開しない。正常値は `{ ok: true, data }`、想定済み状態は `{ ok: false, error: { code, message } }` とする。
 
-共通コードは `UNAUTHENTICATED`、`SESSION_EXPIRED`、`FORBIDDEN`、`VALIDATION_ERROR`、`NOT_FOUND`、`NOT_CONFIGURED`、`REAUTH_REQUIRED`、`RATE_LIMITED`、`UNEXPECTED_ERROR`。
+共通コードは `UNAUTHENTICATED`、`SESSION_EXPIRED`、`FORBIDDEN`、`VALIDATION_ERROR`、`NOT_FOUND`、`NOT_CONFIGURED`、`REAUTH_REQUIRED`、`RATE_LIMITED`、`STAFF_NOT_LINKED`、`UNEXPECTED_ERROR`。
 `ActionResult<T, Code>` は #39 の固有コードも引き続き扱える。
 サーバー内で移行済み Action を呼ぶ場合は `requireActionResult` で unwrap し、二重の envelope や失敗値を成功値に包むことを防ぐ。
 
@@ -55,7 +55,8 @@ Auth の通信失敗、活動記録・所属・ロール照会の DB 失敗は�
 
 ### 残る移行対象
 
-シフトひな形 write/生成/同期 write、バックアップ実行、内勤記録などの旧契約は引き続き移行する。
+シフトひな形 write/生成/同期 write、バックアップ実行、内勤記録・本人履歴は移行済み。
+AI候補、記録保存・版競合・削除申請、GAS、労働時間ルール、統計等の旧契約は引き続き移行する。
 記録保存は版管理・競合・RPC の契約と全呼出し元を合わせて確認する。
 未移行のサーバー内呼出しとの互換性のため、`withSafeError` の非 strict 経路には旧 `SAFE_MESSAGE_PATTERNS` を残す。
 型付き結果への変換ではこの部分一致判定を使用しない。全移行後の旧判定撤去は #45 で追跡し、今回の段階だけで Issue を完了扱いしない。
@@ -92,3 +93,12 @@ Issue #45 の段階移行では、server/client helper、認証・所属・DB失
 旧判定の撤去、シフト生成・同期write、記録・バックアップなどの残りは引き続き#45で追跡する。
 
 追加移行の検証: `typecheck`、警告0の`lint`、unit 100 files / 701 tests、Storybook/a11y 29 files / 84 tests、production buildが成功。HTTP transportは再認証要求・試行制限・void成功を含む8回のPOSTで成功した。DB・RLS・permissions・migrationは変更していない。専用SupabaseのE2Eは未実行。
+
+### シフト生成・同期・内勤の追加移行
+
+ひな形作成/更新/削除、月次プレビュー/生成、Google同期/修復、スタッフ修復、Google接続URL、バックアップ実行、内勤の全Actionと本人履歴/統合feedを型付き結果へ移行した。サーバー内の入れ子呼出しもunwrapし、失敗値を成功に包まない。
+同期対象・残件数・月次生成の既存記録/ひな形のDB照会失敗を、正常0件・完了に置き換えない。部分成功の件数契約は維持し、失敗理由と同期エラー保存列に外部APIの生の文言を公開しない。詳細はサーバーログへ記録する。
+ひな形と内勤の保存失敗時はダイアログ/編集入力を保持する。内勤は失敗後の再試行にも同じ冪等性キーを維持する。認証/session切れだけに復旧導線を表示する。本人シフトの権限拒否にも型付きcodeを使い、スタッフ未紐付けの既存復旧導線を維持する。
+共通useRecordQueryはscopeに対応した失敗を保持し、再試行でリセットする。内勤・本人履歴は失敗時に空一覧を表示せず、常設エラーと再試行/必要な復旧を提供する。
+
+追加移行の検証: typecheck、警告0のlint、unit 105 files / 727 tests、Storybook/a11y 29 files / 85 tests、production buildが成功。DB・RLS・permissions・migration・監査・保持・版管理の条件は変更していない。専用SupabaseのE2Eは未実行。記録保存等の残りと旧SAFE_MESSAGE_PATTERNS撤去まで#45は継続する。

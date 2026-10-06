@@ -6,6 +6,7 @@ export type ActionErrorCode =
   | 'RATE_LIMITED'
   | 'FORBIDDEN'
   | 'VALIDATION_ERROR'
+  | 'STAFF_NOT_LINKED'
   | 'NOT_FOUND'
   | 'NOT_CONFIGURED'
   | 'UNEXPECTED_ERROR';

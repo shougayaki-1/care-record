@@ -7,7 +7,7 @@ import { isGcsBackupConfigured, listGCSFiles, readGCSFile, uploadToGCS } from '@
 import { exportReportsAsCsv } from '@/utils/gcs/export';
 import { generateBackupHtml } from '@/utils/gcs/html';
 import { convertDataToReadable, type FormItem, type FormValue } from '@/utils/templateHelper';
-import { ExpectedActionError, sanitizeDbError, sanitizeExternalError, withSafeError, withActionResult } from '@/utils/errors';
+import { ExpectedActionError, sanitizeDbError, sanitizeExternalError, withActionResult } from '@/utils/errors';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 
 const supabaseAdmin = serviceRoleForBackup();
@@ -137,8 +137,8 @@ export async function getBackupRecords(orgId: string, filePath: string): Promise
   });
 }
 
-export async function triggerDailyBackup(orgId: string): Promise<{ date: string; path: string; records: number }> {
-  return withSafeError('triggerDailyBackup', async () => {
+export async function triggerDailyBackup(orgId: string): Promise<ActionResult<{ date: string; path: string; records: number }>> {
+  return withActionResult('triggerDailyBackup', async () => {
   const { userId } = await assertOrgPermission(orgId, 'backupStatus');
   if (!isGcsBackupConfigured()) throw new ExpectedActionError('NOT_CONFIGURED', 'バックアップ保存先が設定されていません');
 

@@ -201,11 +201,11 @@ function SettingsContent() {
                 }
                 if (action === 'connect_calendar' || action === 'reauthorize_calendar') {
                     setConnectingCal(true);
-                    const url = await getGoogleAuthUrlAction(
+                    const url = await readActionResult(getGoogleAuthUrlAction(
                         currentOrg.id,
                         action === 'reauthorize_calendar' ? 'reauthorize' : 'connect',
                         grant.token,
-                    );
+                    ));
                     window.location.href = url;
                 } else if (action === 'disconnect_calendar') {
                     await readActionResult(disconnectGoogleCalendar(currentOrg.id, grant.token));
@@ -308,13 +308,13 @@ function SettingsContent() {
             const grant = await requestReauth('external_secret_change', {
                 preferredMethod: 'google',
                 next: `/app/settings?stepup=1&action=${mode === 'reauthorize' ? 'reauthorize_calendar' : 'connect_calendar'}&reauthOrg=${currentOrg.id}`,
-                calendarAuthorization: () => getGoogleAuthUrlAction(currentOrg.id, mode),
+                calendarAuthorization: () => readActionResult(getGoogleAuthUrlAction(currentOrg.id, mode)),
             });
             if (!grant) {
                 setConnectingCal(false);
                 return;
             }
-            const url = await getGoogleAuthUrlAction(currentOrg.id, mode, grant.token);
+            const url = await readActionResult(getGoogleAuthUrlAction(currentOrg.id, mode, grant.token));
             // Googleのログイン画面へリダイレクト
             window.location.href = url;
         } catch (e) {
@@ -371,7 +371,7 @@ function SettingsContent() {
         }
     };
 
-    const reportRepairResult = (res: Awaited<ReturnType<typeof repairGoogleCalendarSync>>) => {
+    const reportRepairResult = (res: Extract<Awaited<ReturnType<typeof repairGoogleCalendarSync>>, { ok: true }>['data']) => {
         if (!res.connected) {
             showToast('Googleカレンダーが連携されていません。「連携する」から接続してください。', 'warning');
         } else if (res.errorKind) {
@@ -396,7 +396,7 @@ function SettingsContent() {
             let errorKind: string | undefined;
             for (;;) {
                 // 進捗表示と実際の同期を1件単位でそろえる。
-                const res = await syncUnsyncedBatch(currentOrg.id, 1);
+                const res = await readActionResult(syncUnsyncedBatch(currentOrg.id, 1));
                 done += res.succeeded; failed += res.failed;
                 processed += res.processed;
                 if (res.errorKind) errorKind = res.errorKind;
@@ -422,7 +422,7 @@ function SettingsContent() {
         setResyncingCal(true);
         try {
             setSyncProgress({ total: 1, current: 0 });
-            const res = await repairGoogleCalendarSync(currentOrg.id);
+            const res = await readActionResult(repairGoogleCalendarSync(currentOrg.id));
             setSyncProgress({ total: 1, current: 1 });
             reportRepairResult(res);
         } catch (e) {

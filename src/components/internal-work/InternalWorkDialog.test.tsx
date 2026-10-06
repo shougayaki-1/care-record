@@ -12,7 +12,7 @@ vi.mock('@/components/ui/ConfirmProvider', () => ({ useConfirm: () => confirm })
 vi.mock('@/components/ui/ToastProvider', () => ({ useToast: () => ({ showToast: toast }) }));
 
 afterEach(cleanup);
-beforeEach(() => { vi.clearAllMocks(); save.mockResolvedValue({ success: true, id: 'work-1' }); confirm.mockResolvedValue(false); });
+beforeEach(() => { vi.clearAllMocks(); save.mockResolvedValue({ ok: true, data: { success: true, id: 'work-1' } }); confirm.mockResolvedValue(false); });
 function open(onClose = vi.fn(), onSaved = vi.fn()) {
   render(<ThemeProvider theme={theme}><InternalWorkDialog open organizationId="org-1" staffOptions={[{ id: 'staff-1', name: 'テスト担当' }]} onClose={onClose} onSaved={onSaved} /></ThemeProvider>);
   return { onClose, onSaved, dialog: screen.getByRole('dialog', { name: '内勤を記録' }) };
@@ -60,7 +60,7 @@ describe('InternalWorkDialog record UI', () => {
   });
   it('uses the shared busy button and disables controls while the existing save is pending', async () => {
     let finish!: () => void;
-    save.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    save.mockReturnValue(new Promise((resolve) => { finish = () => resolve({ ok: true, data: { success: true, id: 'work-1' } }); }));
     const { dialog } = open();
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
     expect(within(dialog).getByRole('button', { name: /保存/ }).getAttribute('aria-busy')).toBe('true');
@@ -112,7 +112,7 @@ describe('InternalWorkDialog record UI', () => {
     save.mockImplementation(async (input: { idempotencyKey: string }) => {
       records.set(input.idempotencyKey, 'saved-work');
       if (save.mock.calls.length === 1) throw new Error('response lost');
-      return { success: true, id: records.get(input.idempotencyKey) };
+      return { ok: true, data: { success: true, id: records.get(input.idempotencyKey) } };
     });
     try {
       const { dialog, onClose } = open();
@@ -130,11 +130,24 @@ describe('InternalWorkDialog record UI', () => {
     } finally { stop(); }
   });
   it('does not save twice while the first request is unresolved', async () => {
-    let finish!: () => void; save.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    let finish!: () => void; save.mockReturnValue(new Promise((resolve) => { finish = () => resolve({ ok: true, data: { success: true, id: 'work-1' } }); }));
     const { dialog, onClose } = open(); const button = within(dialog).getByRole('button', { name: '保存' });
     fireEvent.click(button); fireEvent.click(button); fireEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
     expect(save).toHaveBeenCalledOnce(); expect(onClose).not.toHaveBeenCalled();
     finish(); await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
+});
+
+it.each(['FORBIDDEN', 'SESSION_EXPIRED'])('keeps internal-work input after a classified %s result', async code => {
+  save.mockResolvedValue({ ok: false, error: { code, message: '安全な状態表示' } });
+  const { dialog, onClose, onSaved } = open();
+  fireEvent.change(within(dialog).getByLabelText('メモ'), { target: { value: '保持するメモ' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+  expect((await within(dialog).findByRole('alert')).textContent).toContain('安全な状態表示');
+  expect(within(dialog).getByDisplayValue('保持するメモ')).toBeTruthy();
+  expect(onClose).not.toHaveBeenCalled(); expect(onSaved).not.toHaveBeenCalled();
+  const recovery = within(dialog).queryByRole('button', { name: 'ログアウトしてやり直す' });
+  if (code === 'SESSION_EXPIRED') expect(recovery?.closest('form')?.getAttribute('method')).toBe('post');
+  else expect(recovery).toBeNull();
 });

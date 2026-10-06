@@ -147,13 +147,13 @@ export default function BackupPage() {
     if (!currentOrg) return;
     setTriggering(true);
     try {
-      const { date, path, records } = await triggerDailyBackup(currentOrg.id);
+      const { date, path, records } = await readActionResult(triggerDailyBackup(currentOrg.id));
       showToast(`バックアップ完了（${date}：${records} 件）`, 'success');
       await refreshFiles(currentOrg.id, path);
       setSelectedDate(date);
       setSelectedBackupPath(path);
-    } catch {
-      showToast('バックアップに失敗しました', 'error');
+    } catch (error) {
+      showToast(getActionErrorMessage(error, 'バックアップに失敗しました'), 'error');
     } finally {
       setTriggering(false);
     }

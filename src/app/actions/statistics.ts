@@ -1,6 +1,6 @@
 'use server';
 
-import { sanitizeDbError } from '@/utils/errors';
+import { requireActionResult, sanitizeDbError } from '@/utils/errors';
 import { assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { listInternalWorkRecordsForStatistics } from '@/app/actions/internalWork';
 
@@ -62,7 +62,7 @@ export async function getStatisticsData(
       .eq('organization_id', organizationId)
       .eq('is_enabled', true)
       .order('display_order'),
-    listInternalWorkRecordsForStatistics(organizationId, startAt, endAt),
+    requireActionResult(listInternalWorkRecordsForStatistics(organizationId, startAt, endAt)),
   ]);
 
   if (shiftsError) throw sanitizeDbError(shiftsError, 'action.statistics.shifts');
