@@ -3,12 +3,15 @@ import 'server-only';
 import { logError, serializeError } from '@/utils/log';
 
 // Server Action のエラー秘匿（3省2ガイドライン: 多層防御 / 情報露出の防止）。
-// 想定済みの利用者向けメッセージ（認可エラー等）はそのまま返してよいが、
+// 想定済み状態は ActionResult 等のシリアライズ可能な戻り値で明示的に返す。
+// throw されたメッセージは安全化しても production の Next.js/React により秘匿される。
 // 想定外の内部エラー（DBメッセージ・スタックなど）はクライアントへ反射させず、
 // サーバーログにのみ詳細を残し、利用者には汎用メッセージを返す。
 
 /**
- * 利用者に提示してよい想定済みエラー。これを throw したものは withSafeError でそのまま通す。
+ * サーバー内で利用者向けの想定済みエラーを識別するためのクラス。
+ * withSafeError は既存のサーバー内契約として rethrow するが、クライアントへ
+ * メッセージが届く保証はない。UI が判定する状態は ActionResult 等で返すこと。
  */
 export class UserFacingError extends Error {
   constructor(message: string) {
@@ -20,7 +23,8 @@ export class UserFacingError extends Error {
 const GENERIC_MESSAGE = '処理に失敗しました。時間をおいて再度お試しください。';
 
 // 認可・入力検証として既存コードが throw している定型メッセージ。
-// これらは利用者向けに安全なので、移行期間中は素通しする。
+// 移行期間中のサーバー内互換性のためだけに素通しする。
+// この部分一致判定を型付き結果のメッセージ公開判定には使用しない。
 const SAFE_MESSAGE_PATTERNS = [
   '認証が必要です',
   '権限',
@@ -37,7 +41,9 @@ function isSafeMessage(message: string): boolean {
 
 /**
  * Server Action 本体を包み、想定外エラーを汎用メッセージへ置き換える。
- * 詳細は console.error に残す（監査が必要な操作は呼び出し側で recordAuditEvent すること）。
+ * 詳細はサーバーログに残す（監査が必要な操作は呼び出し側で recordAuditEvent すること）。
+ * エラー transport ではない。Client Component は catch した e.message を表示せず
+ * 汎用エラーを表示し、想定済み状態は Action の戻り値で判定すること。
  *
  * 使い方:
  *   export const doThing = (input) => withSafeError('doThing', async () => { ... });
