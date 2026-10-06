@@ -18,3 +18,5 @@ mainで導入済みの削除後Google同期失敗の通知・修復経路を維�
 
 - [Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security)
 - [Next.js Data Security](https://nextjs.org/docs/app/guides/data-security)
+
+2026-10-06、mainの保持方針読取権限修正（#92、base `6c38fc907813990482a40b47a08b35d58d6eb366`）を取り込み、typecheck、lint（warning 0）、unit（92 files / 628 tests）、production build、diff checkを再実行して成功した。PR固有のmigration・permissions変更はない。直前のPR head `4aaa54b`ではGitHub Actionsの空DB migration/pgTAPとChromium E2Eも成功した。

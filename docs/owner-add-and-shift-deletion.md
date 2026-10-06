@@ -31,3 +31,7 @@ Google未連携は削除成功として扱う。Google認証切れ・APIエラ�
 反映時は`20261006000001_add_organization_owner.sql`と`20261006000002_retry_deleted_shift_google_sync.sql`を先に適用する。上記ローカル検証時点ではホスト環境に未適用。実際のリリース結果はPRの適用証跡を参照する。既存migrationは変更していない。
 
 並行操作試験は`node scripts/db/test-owner-add-concurrency.mjs <専用DBコンテナ名>`で実行する。専用名`supabase_db_care-record-owner-add-test`または`supabase_db_care-record-issues-84-85-test`（任意の英数字suffixも可）以外は拒否する。fixtureをcommitするため、実行後は専用stackを破棄またはresetし、開発・共有環境には使用しない。
+
+## 保持方針読み取りの修正（2026-10-06）
+
+本番の42501は、既存retention_policiesにsession client用SELECT権限とRLSがなかったため発生した。新規migration `20261006000003_read_shift_retention_policy.sql`でlookup用4列のみSELECTを許可し、有効なsession・同一事業所所属・稼働中組織・シフトdelete=allに限定する。方針の変更、保持期間の代替値、service roleによる通常業務アクセスは追加しない。DB回帰試験は実際のauthenticatedロールで保持方針を読んでから削除RPCを呼び、他組織・失効session・権限なし/assignedのみの拒否も確認する。Context7でSupabase公式のcolumn privilegeとRLSの二重チェックを確認した（CLI 2.108.0 / PostgreSQL 17）。
