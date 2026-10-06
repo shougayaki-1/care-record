@@ -21,6 +21,7 @@ import {
 } from '@/utils/googleSync';
 import { assertShiftPermission, createSessionClient } from '@/utils/supabase/auth';
 import { recordAuditEvent } from '@/utils/supabase/audit';
+import { markGoogleCalendarSyncResult } from '@/utils/supabase/googleSyncNotifications';
 
 import {
   deleteDuplicateGoogleEvents,
@@ -217,6 +218,7 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
       } catch (e) {
           logExternalError('google.sync.repair', e, { organizationId });
           const se = classifyGoogleError(e);
+          if (se.kind !== 'skipped') await markGoogleCalendarSyncResult(supabase, organizationId, true);
           return {
               processed: 0,
               succeeded: 0,
@@ -227,6 +229,7 @@ export async function repairGoogleCalendarSync(organizationId: string, options: 
               ...emptyGoogleSyncStats(),
           };
       }
+      await markGoogleCalendarSyncResult(supabase, organizationId, false);
       const eventsByShiftId = new Map<string, calendar_v3.Schema$Event[]>();
       const legacyEventsBySignature = new Map<string, calendar_v3.Schema$Event[]>();
       for (const event of allEvents) {
@@ -348,13 +351,18 @@ export async function syncSingleShift(organizationId: string, shiftId: string, a
       const actor = await assertShiftPermission(organizationId, action === 'delete' ? 'delete' : 'edit', { shiftId });
       try {
           await syncToGoogleCalendarDirect(organizationId, shiftId, action);
-          await recordAuditEvent({
-              organizationId, actorId: actor.userId, action: 'integration.calendar.sync', resourceType: 'shift', resourceId: shiftId,
-              details: { mode: action === 'delete' ? 'single_delete' : 'single_sync', processed: 1, succeeded: 1, failed: 0 },
-          });
-          return { success: true };
       } catch (error) {
+          const syncError = classifyGoogleError(error);
+          if (syncError.kind !== 'skipped') {
+              await markShiftGoogleSync(shiftId, 'failed', { error: googleSyncErrorMessage(syncError.kind) || 'Googleカレンダーへの同期に失敗しました' })
+                  .catch((markError) => logExternalError('google.sync.mark-failed', markError));
+          }
           throw sanitizeExternalError(error, 'google.sync.single');
       }
+      await recordAuditEvent({
+          organizationId, actorId: actor.userId, action: 'integration.calendar.sync', resourceType: 'shift', resourceId: shiftId,
+          details: { mode: action === 'delete' ? 'single_delete' : 'single_sync', processed: 1, succeeded: 1, failed: 0 },
+      });
+      return { success: true };
   });
 }

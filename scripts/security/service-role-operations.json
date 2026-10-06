@@ -11,7 +11,7 @@
     "accessor": "serviceRoleForBackup",
     "purpose": "Authorized backup generation and export",
     "targets": ["backup_runs", "reports", "clients", "form_templates", "notifications"],
-    "authorization": "management.backupStatus is checked for every organization input; notification creation is limited to backup.failed for authorized backup-status recipients",
+    "authorization": "management.backupStatus is checked for every organization input; authorized daily/monthly cron reuses the existing export client to select active same-organization backupStatus recipients via DB RPC, with delivery-time permission revalidation; notification creation is limited to backup.failed",
     "audit": "backup view and generation actions emit organization-scoped audit events",
     "consumers": ["src/app/actions/backup.ts", "src/utils/gcs/export.ts"]
   },

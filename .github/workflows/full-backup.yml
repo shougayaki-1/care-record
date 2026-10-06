@@ -91,6 +91,10 @@ jobs:
           path: backup-receipt.json
           retention-days: 90
 
+      - name: Create permission-scoped bell notifications on failure
+        if: failure() && steps.backup.outcome != 'success'
+        run: bash scripts/backup/notify-bell.sh
+
       - name: Notify after all three attempts fail
         if: failure()
         env:

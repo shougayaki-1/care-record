@@ -1,8 +1,14 @@
 import { serviceRoleForBackup } from '@/utils/supabase/serviceRole';
 import { sanitizeDbError } from '@/utils/errors';
+import { notifyAutomaticBackupFailure } from './backupFailure';
 import { convertDataToReadable, type FormItem, type FormValue } from '@/utils/templateHelper';
 
 const supabaseAdmin = serviceRoleForBackup();
+
+/** Only authorized cron callers use this existing backup client. */
+export async function notifyBackupFailure(kind: 'daily' | 'monthly', period: string, organizationId: string | null) {
+  await notifyAutomaticBackupFailure(supabaseAdmin, kind, period, organizationId);
+}
 
 type ReportRow = {
   id: string;
