@@ -14,7 +14,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import { useToast } from '@/components/ui/ToastProvider';
 import { createOrganization, updateOwnProfile } from '@/app/actions/user';
 import { AppButton } from '@/components/ui';
-import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
+import { AccountSwitchRecovery } from '@/components/auth/AccountSwitchRecovery';
 
 type Step = 'profile' | 'choice' | 'create' | 'join';
 
@@ -28,6 +28,7 @@ export default function SetupPage() {
     const [submitting, setSubmitting] = useState(false);
     const [step, setStep] = useState<Step>('profile');
     const [hasMembership, setHasMembership] = useState(false);
+    const [email, setEmail] = useState<string | undefined>();
 
     // 入力値
     const [userName, setUserName] = useState('');
@@ -92,6 +93,7 @@ export default function SetupPage() {
         };
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            if (mounted) setEmail(session?.user.email);
             if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
                 if (session) {
                     // SIGNED_IN can repeat for the same session. Reinitializing would
@@ -171,7 +173,7 @@ export default function SetupPage() {
             <Box p={5} textAlign="center">
                 <CircularProgress />
                 <Typography mt={2}>セットアップ情報を取得中...</Typography>
-                <RecoveryLogoutButton label="別のアカウントでログインする" />
+                <AccountSwitchRecovery email={email} />
             </Box>
         );
     }
@@ -369,7 +371,7 @@ export default function SetupPage() {
                 )}
 
                 <Box mt={3} textAlign="center">
-                    <RecoveryLogoutButton label="別のアカウントでログインする" />
+                    <AccountSwitchRecovery email={email} />
                 </Box>
             </Paper>
         </Box>
