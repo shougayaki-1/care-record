@@ -49,4 +49,11 @@ describe('repair deleted Google events', () => {
     await expect(readActionResult(repairGoogleCalendarSync('org'))).rejects.toThrow('処理に失敗しました');
     expect(mocks.remove).not.toHaveBeenCalled();
   });
+  it('records calendar listing failure before processing any shift', async () => {
+    mocks.list.mockRejectedValue(new SyncError('provider secret fixture', 'auth'));
+    const result = await readActionResult(repairGoogleCalendarSync('org'));
+    expect(result.errorKind).toBe('auth');
+    expect(mocks.rpc).toHaveBeenCalledWith('mark_google_calendar_sync_result', { p_org_id: 'org', p_failed: true });
+    expect(mocks.remove).not.toHaveBeenCalled();
+  });
 });

@@ -106,3 +106,53 @@ public schemaの再生成型はチェックイン対象と一致し、DB lintの
 PHIを含められる任意本文入力・ブラウザからの通知生成・他受信者の閲覧/既読更新は拒否する。
 StorybookのinteractionとMUI Popoverのiframe/transitionの現行ドキュメント、
 Supabase CLIのlocal migration/test/type generationの現行ドキュメントをContext7で確認した。
+
+## システム障害通知（Issue #62）
+
+Google 同期の受信者は、同じ事業所で `shifts.view = all` と `shifts.edit = all` の両方を持つ
+ユーザー。`getSyncStatus` の操作認可と `/app/shifts/manage` の画面認可を照合した。
+owner は既存の暗黙許可を使い、カスタムロールも同じ DB 権限 helper で選ぶ。
+integrations のみ、delete のみ、assigned のみでは状態画面で同期に対応できないため通知しない。
+バックアップは `management.backupStatus` を使用する。全イベントで退会・Auth 削除・ban・
+super admin・削除済み事業所を除外し、受信者限定通知 RLS と `permissions.ts` は変更しない。
+
+シフトの `google_sync_status = failed` 更新を trigger で検知し、private の事業所・シフト別
+episode UUID を `private.create_notification` へ渡す。pending を挟む再試行でも UUID を維持し、
+synced で閉じる。削除済みシフトの削除同期も対象。個別同期失敗も安全な failed status を保存する。
+修復処理のカレンダー一覧取得に失敗した場合は、edit=all・有効所属・有効 session を検証する
+`mark_google_calendar_sync_result` RPC が事業所単位の episode を管理する。一覧取得成功で閉じる。
+任意本文・外部エラー・受信者・dedupe key はブラウザから渡せない。
+状態行への同時更新と episode の一意制約、既存通知の一意制約で重複を防止する。
+
+日次・月次 cron は既存の backup export client と #59 の `createNotification(..., 'best_effort')`
+を使う。受信者を DB で選び、生成時にも現在の権限を再確認する。固定 job 名と対象日/月から
+UUID を導出するため、同じ定期実行の再試行・二重実行は同一キー、翌日/月は別キーとなる。
+組織の export/upload 失敗はその組織だけ、設定欠落・組織列挙失敗は影響する有効事業所へ通知する。
+認証拒否は通知しない。手動バックアップ Action は通知に接続しない。
+
+12時間ごとの完全バックアップは既存 `BACKUP_DATABASE_URL` の管理 DB 接続から
+`private.notify_full_backup_failure` を呼ぶ。数値の `GITHUB_RUN_ID` を UUID に変換し、workflow
+の再実行でも同一キー、次回 run は別キー。既存の30分後・2時間後の再試行、実行頻度を維持する。
+全失敗またはバックアップ開始前の失敗時に呼び、backup 成功後の receipt/artifact だけの失敗では
+ベル通知を作らない。追加の service role key、メール、外部通知 endpoint は不要。
+この private 関数は migration 所有者（既存管理接続の postgres）専用で、API role へ grant しない。
+
+通知生成はすべて best effort。通知 DB 障害でも元の同期状態・診断、cron response、workflow
+の失敗を維持し、固定の server log を残す。成功・復旧の通知は作らない。
+通知本文・リンク・category/priority は #59 の固定契約を維持する（warning は category）。
+private episode table は RLS 有効、API role の DML grant なし。監査・状態の正本には使用しない。
+新規 migration `20261006000004_failure_notifications.sql` は追加のみで旧アプリと互換。
+Staging、Production の順にこの migration を適用してから main へ統合する。
+
+Context7 確認: 2026-10-06、Supabase（導入 SDK 2.91 系）の SECURITY DEFINER・search_path・
+RLS・EXECUTE grant と Supabase CLI（検証 2.108.0）の一時 workdir・local migration・
+pgTAP・type generation を確認。Next.js 16.3.6 の同梱 route handler 文書とも照合した。
+
+ローカル検証（2026-10-06）: 専用 worktree で typecheck、lint（warning 0）、unit 114ファイル/
+774件、本番相当 build、service-role 台帳、CI分類17件、backup shell 2件が成功。
+ユーザー承認済みの critical E2E は使い捨てローカル Supabase で5件成功。
+CLI 2.108.0 の別 project ID/port を使い、旧schemaからの追加適用と空DBからの再構築の
+両方で pgTAP 10ファイル/311件（security_hardening を含む）が成功。DB lint の警告なし、
+public schema の再生成型はチェックイン型と一致した。
+別々の実トランザクションによる同時更新でも、後続が行ロックを待ち、1 episode と
+受信対象2人の通知だけが作られることを確認した。ホスト済み DB への適用は未実施。

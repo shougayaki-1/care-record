@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getActiveOrganizationIds, exportReportsAsJson } from '@/utils/gcs/export';
+import { getActiveOrganizationIds, exportReportsAsJson, notifyBackupFailure } from '@/utils/gcs/export';
 import { isGcsBackupConfigured, uploadToGCS } from '@/utils/gcs/upload';
 import { logError, serializeError } from '@/utils/log';
 
@@ -15,23 +15,25 @@ function authorized(request: NextRequest): boolean {
 
 export async function GET(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  if (!isGcsBackupConfigured()) {
-    return NextResponse.json({ ok: false, error: 'gcs_not_configured' }, { status: 500 });
-  }
-
-  const bucket = 'care-record-archive-7y';
-
   const now = new Date();
   const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const year = lastMonth.getFullYear();
   const month = lastMonth.getMonth() + 1;
   const monthStr = `${year}-${String(month).padStart(2, '0')}`;
+  if (!isGcsBackupConfigured()) {
+    await notifyBackupFailure('monthly', monthStr, null);
+    return NextResponse.json({ ok: false, error: 'gcs_not_configured' }, { status: 500 });
+  }
 
+  const bucket = 'care-record-archive-7y';
+
+  let failedOrganizationId: string | null = null;
   try {
     const orgIds = await getActiveOrganizationIds();
     let succeeded = 0;
 
     for (const orgId of orgIds) {
+      failedOrganizationId = orgId;
       const json = await exportReportsAsJson(orgId, year, month);
       await uploadToGCS(bucket, `monthly/${orgId}/${monthStr}.json`, json);
       succeeded++;
@@ -40,6 +42,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: true, orgs: succeeded, month: monthStr });
   } catch (err) {
     logError('[cron:backup-monthly]', { error: serializeError(err) });
+    await notifyBackupFailure('monthly', monthStr, failedOrganizationId);
     return NextResponse.json({ ok: false, error: 'backup_failed' }, { status: 500 });
   }
 }

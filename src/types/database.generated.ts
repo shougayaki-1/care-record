@@ -2971,6 +2971,13 @@ export type Database = {
         Args: { p_completed: boolean; p_reservation_id: string }
         Returns: undefined
       }
+      get_backup_notification_recipients: {
+        Args: { p_org_id?: string }
+        Returns: {
+          organization_id: string
+          user_id: string
+        }[]
+      }
       get_client_assignment_permission_hints_authorized: {
         Args: { p_client_id: string; p_organization_id: string }
         Returns: {
@@ -3013,6 +3020,10 @@ export type Database = {
       load_report_autosave_authorized: {
         Args: { p_draft_key: string; p_organization_id: string }
         Returns: Json
+      }
+      mark_google_calendar_sync_result: {
+        Args: { p_failed: boolean; p_org_id: string }
+        Returns: undefined
       }
       mark_shift_google_sync: {
         Args: {

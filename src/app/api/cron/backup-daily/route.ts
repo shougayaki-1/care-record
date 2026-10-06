@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getActiveOrganizationIds, exportReportsAsCsv } from '@/utils/gcs/export';
+import { getActiveOrganizationIds, exportReportsAsCsv, notifyBackupFailure } from '@/utils/gcs/export';
 import { isGcsBackupConfigured, uploadToGCS } from '@/utils/gcs/upload';
 import { generateBackupHtml } from '@/utils/gcs/html';
 import { recordAuditEvent } from '@/utils/supabase/audit';
@@ -36,14 +36,15 @@ export async function GET(request: NextRequest) {
     await logBackupRun({ organizationId: null, outcome: 'failure', details: { reason: 'unauthorized' } });
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
+  const now = new Date();
+  const today = formatTokyoDate(now);
   if (!isGcsBackupConfigured()) {
     await logBackupRun({ organizationId: null, outcome: 'failure', details: { reason: 'gcs_not_configured' } });
+    await notifyBackupFailure('daily', today, null);
     return NextResponse.json({ ok: false, error: 'gcs_not_configured' }, { status: 500 });
   }
 
   const bucket = 'care-record-search-daily';
-  const now = new Date();
-  const today = formatTokyoDate(now);
   const version = formatTokyoTime(now).replace(/:/g, '-');
 
   try {
@@ -67,6 +68,7 @@ export async function GET(request: NextRequest) {
       } catch (orgErr) {
         logError('[cron:backup-daily] org failed', { organizationId: orgId, error: serializeError(orgErr) });
         await logBackupRun({ organizationId: orgId, outcome: 'failure', details: { date: today, reason: orgErr instanceof Error ? orgErr.message : 'unknown' } });
+        await notifyBackupFailure('daily', today, orgId);
       }
     }
 
@@ -74,6 +76,7 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     logError('[cron:backup-daily]', { error: serializeError(err) });
     await logBackupRun({ organizationId: null, outcome: 'failure', details: { date: today, reason: err instanceof Error ? err.message : 'unknown' } });
+    await notifyBackupFailure('daily', today, null);
     return NextResponse.json({ ok: false, error: 'backup_failed' }, { status: 500 });
   }
 }
