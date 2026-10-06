@@ -47,12 +47,12 @@ describe('AI batch lifecycle', () => {
     let first!: Promise<void>;
     await act(async () => { first = state.review!.onSaveSelected(ids); await state.review!.onSaveSelected(ids); });
     expect(state.save).toHaveBeenCalledTimes(2); expect(state.review!.saving).toBe(true); expect(refresh).not.toHaveBeenCalled();
-    await act(async () => { finish({ reportId: 'report-a', version: 1 }); await first; });
+    await act(async () => { finish({ ok: true, data: { reportId: 'report-a', version: 1 } }); await first; });
     expect(state.review!.saving).toBe(false); expect(state.review!.rows.map((row) => row.saveStatus)).toEqual(['saved', 'error']);
     expect(state.review!.rows[1].result!.values.note).toBe('入力1'); expect(state.review!.rows[1].saveError).toContain('再試行');
     expect(state.toast).toHaveBeenLastCalledWith(expect.stringContaining('1 件を保存、1 件'), 'warning'); expect(refresh).toHaveBeenCalledOnce();
     const key = state.save.mock.calls[1][0].idempotencyKey;
-    state.save.mockResolvedValueOnce({ reportId: 'report-b', version: 1 });
+    state.save.mockResolvedValueOnce({ ok: true, data: { reportId: 'report-b', version: 1 } });
     await act(async () => { await state.review!.onSaveSelected(ids); });
     expect(state.save).toHaveBeenCalledTimes(3); expect(state.save.mock.calls[2][0].idempotencyKey).toBe(key);
     expect(state.review!.rows.map((row) => row.saveStatus)).toEqual(['saved', 'saved']); expect(refresh).toHaveBeenCalledTimes(2);

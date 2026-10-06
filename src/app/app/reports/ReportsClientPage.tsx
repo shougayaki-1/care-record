@@ -1,6 +1,7 @@
 'use client';
-import { readActionResult } from '@/utils/actionResult';
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
 
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useRecordQuery } from '@/hooks/useRecordQuery';
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useEffect, useState, useCallback } from 'react';
@@ -172,7 +173,7 @@ export default function ReportsClientPage() {
     } catch (e) { throw e; }
   }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order, filterShiftId]);
 
-  const { data: { reports, aiSentCount }, loading, refresh: fetchReports } = useRecordQuery({ organizationId: wsLoading ? undefined : currentOrg?.id, queryKey: `${filterClientId}/${filterStatus}/${startDate}/${endDate}/${onlyPending}/${orderBy}/${order}/${filterShiftId}`, load: loadReports, empty: EMPTY_REPORTS, onError: logReportError });
+  const { data: { reports, aiSentCount }, loading, error: loadError, refresh: fetchReports } = useRecordQuery({ organizationId: wsLoading ? undefined : currentOrg?.id, queryKey: `${filterClientId}/${filterStatus}/${startDate}/${endDate}/${onlyPending}/${orderBy}/${order}/${filterShiftId}`, load: loadReports, empty: EMPTY_REPORTS, onError: logReportError });
 
   useEffect(() => {
     if (!wsLoading && currentOrg) {
@@ -201,7 +202,7 @@ export default function ReportsClientPage() {
       if (!(await confirm({ message: `${selected.length}件を一括承認しますか？`, confirmText: '承認する' }))) return;
       setProcessing(true);
       try {
-        await commitRecordChange(currentOrg!.id, () => transitionReports(currentOrg!.id, [...selected], 'approve'));
+        await commitRecordChange(currentOrg!.id, () => readActionResult(transitionReports(currentOrg!.id, [...selected], 'approve')));
         setSelected([]);
         showToast('一括承認しました');
       } catch (e) { console.error(e); showToast('エラーが発生しました', 'error'); } finally { setProcessing(false); }
@@ -212,7 +213,7 @@ export default function ReportsClientPage() {
     if (!(await confirm({ message: `${selected.length}件を一括で差戻ししますか？`, confirmText: '差し戻す' }))) return;
     setProcessing(true);
     try {
-        await commitRecordChange(currentOrg!.id, () => transitionReports(currentOrg!.id, [...selected], 'remand'));
+        await commitRecordChange(currentOrg!.id, () => readActionResult(transitionReports(currentOrg!.id, [...selected], 'remand')));
         setSelected([]);
         showToast('差し戻しました');
     } catch (e) { 
@@ -234,7 +235,7 @@ export default function ReportsClientPage() {
 
     setProcessing(true);
     try {
-        await commitRecordChange(currentOrg!.id, () => softDeleteReports(currentOrg!.id, [...selected], '帳票一覧から削除'));
+        await commitRecordChange(currentOrg!.id, () => readActionResult(softDeleteReports(currentOrg!.id, [...selected], '帳票一覧から削除')));
         setSelected([]);
         showToast('削除しました');
     } catch (e) { 
@@ -262,7 +263,7 @@ export default function ReportsClientPage() {
       if (!(await confirm({ message: `${targetReports.length}件のデータをエクスポートします。\n差し込み印刷用に全ての項目を列に展開します。よろしいですか？` }))) return;
       setProcessing(true);
       try {
-        await auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'csv');
+        await readActionResult(auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'csv'));
         const clientIds = Array.from(new Set(targetReports.map(r => r.clients.id)));
         const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
 
@@ -295,7 +296,7 @@ export default function ReportsClientPage() {
           return;
         }
         if (itemCount === 0) { showToast('出力できる承認済みの交通費がありません', 'warning'); return; }
-        await auditReportExport(currentOrg!.id, exportReports.filter((report) => report.status === 'approved').map((report) => report.id), 'csv');
+        await readActionResult(auditReportExport(currentOrg!.id, exportReports.filter((report) => report.status === 'approved').map((report) => report.id), 'csv'));
         const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
         const link = document.createElement('a');
         link.href = url;
@@ -319,7 +320,7 @@ export default function ReportsClientPage() {
       if (!(await confirm({ message: pdfConfirmMsg }))) return;
 
       try {
-        await auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'pdf');
+        await readActionResult(auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'pdf'));
         const exportReports = await loadReportValues(targetReports);
         const pdfReports = await Promise.all(exportReports.map(async (report) => {
           const data = getReportData(report);
@@ -455,29 +456,29 @@ export default function ReportsClientPage() {
 
               setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: フォルダ確認中...` }));
               
-              const folderRes = await callGasApi({
+              const folderRes = await readActionResult(callGasApi({
                   action: 'manage_client_folder',
                   organizationId: currentOrg!.id,
                   clientId: client.id,
                   orgFolderId: orgInfo.google_folder_id,
                   clientName: client.name,
                   currentFolderId: client.google_folder_id
-              });
+              }));
 
-              if (folderRes.status !== 'success') throw new Error(`Folder Error: ${folderRes.message}`);
-              if (folderRes.folderId !== client.google_folder_id) {
+
+              if (folderRes.folderId && folderRes.folderId !== client.google_folder_id) {
                   await readActionResult(updateClientGoogleLink(currentOrg!.id, client.id, { folderId: folderRes.folderId }));
               }
               const clientRootFolderId = folderRes.folderId;
 
               setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: サブフォルダ作成中...` }));
-              const subFolderRes = await callGasApi({
+              const subFolderRes = await readActionResult(callGasApi({
                   action: 'create_sub_folder',
                   organizationId: currentOrg!.id,
                   clientId: client.id,
                   parentId: clientRootFolderId,
                   folderName: exportFolderName
-              });
+              }));
               const targetFolderId = subFolderRes.folderId; 
               lastOpenedFolderUrl = subFolderRes.folderUrl;
 
@@ -505,7 +506,7 @@ export default function ReportsClientPage() {
                   const readableData = preparePdfData(data, clientSchema, clientKeyMap);
                   const finalPayload = { ...flatData, ...readableData } as Record<string, unknown>;
 
-                  await callGasApi({
+                  await readActionResult(callGasApi({
                       action: 'create_pdf',
                       organizationId: currentOrg!.id,
                       clientId: client.id,
@@ -514,7 +515,7 @@ export default function ReportsClientPage() {
                       templateId: client.google_template_id,
                       data: finalPayload, 
                       fileName: `${client.name}_${(flatData['開始日付'] as string).replace(/\//g,'-')}_提供記録`
-                  });
+                  }));
                   processedCount++;
                   setGasProgress({ total: targetReports.length, current: processedCount, currentName: '' });
               }
@@ -522,7 +523,7 @@ export default function ReportsClientPage() {
           showToast('作成が完了しました。保存先のフォルダを開きます。');
           if (lastOpenedFolderUrl) window.open(lastOpenedFolderUrl, '_blank');
 
-      } catch (e) { console.error(e); showToast('エラーが発生しました: ' + e, 'error'); }
+      } catch (e) { console.error(e); showToast(getActionErrorMessage(e, 'エラーが発生しました'), 'error'); }
       finally { setGasProgress(null); }
   };
 
@@ -547,6 +548,7 @@ export default function ReportsClientPage() {
   if (filterShiftId) headerTitle = "シフト内の記録";
   if (isExportView) headerTitle = "帳票・出力";
 
+  if (loadError != null) return <PageLayout><PageBody><Alert severity="error" action={needsActionRecovery(loadError) ? <RecoveryLogoutButton /> : <Button onClick={() => void fetchReports()}>再試行</Button>}>{getActionErrorMessage(loadError, '記録の読み込みに失敗しました')}</Alert></PageBody></PageLayout>;
   if (wsLoading || !currentOrg) return <TablePageSkeleton />;
   const canApproveRecords = checkRecordPermission(currentOrg.effectivePermissions, 'approve', true);
   const canDeleteRecords = checkRecordPermission(currentOrg.effectivePermissions, 'delete', true);

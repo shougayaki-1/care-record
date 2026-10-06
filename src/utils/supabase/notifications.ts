@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import type { Database } from '@/types/database.generated';
 import { notificationEvents, type NotificationEventType } from '@/lib/notifications/model';
-import { sanitizeDbError, UserFacingError } from '@/utils/errors';
+import { sanitizeDbError, ExpectedActionError } from '@/utils/errors';
 import { logError } from '@/utils/log';
 
 const notificationInput = z.strictObject({
@@ -31,7 +31,7 @@ export async function createNotification(
   failureMode: 'required' | 'best_effort' = 'required',
 ): Promise<NotificationCreationResult> {
   const parsed = notificationInput.safeParse(input);
-  if (!parsed.success) throw new UserFacingError('通知の入力が不正です');
+  if (!parsed.success) throw new ExpectedActionError('VALIDATION_ERROR', '通知の入力が不正です');
   const value = parsed.data;
   try {
     const { data, error } = await client.rpc('create_notification', {

@@ -62,6 +62,8 @@ export async function outcome(kind: string) {
     if (kind === 'empty') return [];
     if (kind === 'void') return;
     if (kind === 'reauth') throw new ExpectedActionError('REAUTH_REQUIRED', 'もう一度再認証してください');
+    if (kind === 'conflict') throw new ExpectedActionError('VERSION_CONFLICT', '他の利用者がこの記録を更新しました');
+    if (kind === 'unlinked') throw new ExpectedActionError('STAFF_NOT_LINKED', 'スタッフアカウントが紐付いていません');
     if (kind === 'limited') throw new ExpectedActionError('RATE_LIMITED', '約15分後にお試しください');
     if (kind === 'forbidden') throw new ExpectedActionError('FORBIDDEN', 'この操作を行う権限がありません');
     if (kind === 'expired') throw new ExpectedActionError('SESSION_EXPIRED', 'セッションの有効期限が切れています');
@@ -77,7 +79,7 @@ import { outcome, unexpectedThrow } from './actions';
 export default function Page() {
   const [result, setResult] = useState('');
   return <><output data-testid="result">{result}</output>
-    {['empty', 'void', 'forbidden', 'expired', 'reauth', 'limited', 'unexpected'].map(kind => <button key={kind} onClick={async () => setResult(JSON.stringify(await outcome(kind)))}>{kind}</button>)}
+    {['empty', 'void', 'forbidden', 'expired', 'reauth', 'limited', 'conflict', 'unlinked', 'unexpected'].map(kind => <button key={kind} onClick={async () => setResult(JSON.stringify(await outcome(kind)))}>{kind}</button>)}
     <button onClick={async () => { try { await unexpectedThrow(); } catch (error) { setResult(JSON.stringify({ message: (error as Error).message, digest: (error as Error & { digest?: string }).digest })); } }}>throw</button>
   </>;
 }
@@ -101,11 +103,14 @@ export default function Page() {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const responses = [];
+  const flightBodies = [];
   page.on('response', response => { if (response.request().headers()['next-action']) responses.push(response); });
   await page.goto(base);
   const cases = {
     empty: { ok: true, data: [] },
     void: { ok: true },
+    conflict: { ok: false, error: { code: 'VERSION_CONFLICT', message: '他の利用者がこの記録を更新しました' } },
+    unlinked: { ok: false, error: { code: 'STAFF_NOT_LINKED', message: 'スタッフアカウントが紐付いていません' } },
     reauth: { ok: false, error: { code: 'REAUTH_REQUIRED', message: 'もう一度再認証してください' } },
     limited: { ok: false, error: { code: 'RATE_LIMITED', message: '約15分後にお試しください' } },
     forbidden: { ok: false, error: { code: 'FORBIDDEN', message: 'この操作を行う権限がありません' } },
@@ -116,19 +121,25 @@ export default function Page() {
     await page.getByRole('button', { name: kind, exact: true }).click();
     await page.waitForFunction(value => document.querySelector('output')?.textContent === value, JSON.stringify(expected));
     assert.deepEqual(JSON.parse(await page.getByTestId('result').innerText()), expected);
+    // Read each completed response before Chromium may evict an older resource body.
+    flightBodies.push(await responses.at(-1).text());
   }
   await page.getByRole('button', { name: 'throw', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('output')?.textContent?.includes('digest'));
   const thrown = JSON.parse(await page.getByTestId('result').innerText());
   assert.equal(typeof thrown.digest, 'string');
   assert.doesNotMatch(thrown.message, /synthetic_raw_throw_secret/);
+  flightBodies.push(await responses.at(-1).text());
   assert.equal(responses.length, Object.keys(cases).length + 1);
+  assert.equal(flightBodies.length, responses.length);
   for (const response of responses) {
     assert.match(response.headers()['content-type'], /text\/x-component/);
-    assert.doesNotMatch(await response.text(), /synthetic_private_column|synthetic_raw_throw_secret/);
+  }
+  for (const body of flightBodies) {
+    assert.doesNotMatch(body, /synthetic_private_column|synthetic_raw_throw_secret/);
   }
   assert.match(logs, /synthetic_private_column/);
-  console.log('PASS: production next build/start, 8 HTTP Server Action responses, typed codes/messages, empty success, internal-error redaction and server logging');
+  console.log('PASS: production next build/start, 10 HTTP Server Action responses, typed codes/messages, empty success, internal-error redaction and server logging');
 } catch (error) {
   console.error(logs);
   throw error;

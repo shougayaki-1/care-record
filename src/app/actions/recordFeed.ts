@@ -10,9 +10,9 @@ import { requireActionResult, sanitizeDbError, withActionResult } from '@/utils/
 export async function getMyRecordFeed(organizationId: string, options: { startAt?: string; endAt?: string } = {}) {
   return withActionResult('getMyRecordFeed', async () => {
     const [reports, internal, submissions] = await Promise.all([
-      getMyReportHistory(organizationId, options),
+      requireActionResult(getMyReportHistory(organizationId, options)),
       requireActionResult(getMyInternalWorkHistory(organizationId, options)),
-      getMyAiSubmissions(organizationId),
+      requireActionResult(getMyAiSubmissions(organizationId)),
     ]);
     const ids = [...new Set([...reports.items.map((item) => item.authorId), ...internal.map((item) => item.recorded_by), ...submissions.map((item) => item.authorId)].filter((id): id is string => Boolean(id)))];
     const session = await createSessionClient();

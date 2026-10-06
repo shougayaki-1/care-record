@@ -1,5 +1,7 @@
 'use client';
 
+import { ActionResultError, getActionErrorMessage, readActionResult } from '@/utils/actionResult';
+
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -422,7 +424,7 @@ export default function AiImportPage() {
               auditSource: 'ai_import',
               auditFileCount: row.fileCount,
             } satisfies Omit<Parameters<typeof saveReport>[0], 'idempotencyKey'>;
-            await saveReport({ ...payload, idempotencyKey: attemptKey(id, payload) });
+            await readActionResult(saveReport({ ...payload, idempotencyKey: attemptKey(id, payload) }));
             finishAttempt(id);
             return id;
           }),
@@ -433,7 +435,7 @@ export default function AiImportPage() {
             if (!selectedIds.includes(r.id)) return r;
             const result = results[selectedIds.indexOf(r.id)];
             if (result.status === 'fulfilled') return { ...r, saveStatus: 'saved', saveError: undefined };
-            return { ...r, saveStatus: 'error', saveError: '保存に失敗しました。入力内容を確認して再試行してください。' };
+            return { ...r, saveStatus: 'error', saveError: result.reason instanceof ActionResultError && result.reason.code !== 'UNEXPECTED_ERROR' ? getActionErrorMessage(result.reason) : '保存に失敗しました。入力内容を確認して再試行してください。' };
           }),
         );
 

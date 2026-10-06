@@ -13,7 +13,7 @@ export type RecordFeedItem = {
   authorName?: string;
 };
 
-export function buildRecordFeed(reports: MyReportHistoryResult['items'], internal: InternalWorkRecord[], submissions: Awaited<ReturnType<typeof getMyAiSubmissions>>, options: { startAt?: string; endAt?: string; limit?: number; authors?: Record<string, string> } = {}): RecordFeedItem[] {
+export function buildRecordFeed(reports: MyReportHistoryResult['items'], internal: InternalWorkRecord[], submissions: Extract<Awaited<ReturnType<typeof getMyAiSubmissions>>, { ok: true }>['data'], options: { startAt?: string; endAt?: string; limit?: number; authors?: Record<string, string> } = {}): RecordFeedItem[] {
   const items: RecordFeedItem[] = [
     ...reports.map((report): RecordFeedItem => ({ id: report.id, kind: 'report', startAt: report.start_at, title: `${report.clients?.name ?? '利用者未設定'} 様`, status: report.status, authorName: options.authors?.[report.authorId ?? ''], href: `/app/record/${report.client_id}?reportId=${report.id}` })),
     ...internal.map((record): RecordFeedItem => ({ id: record.id, kind: 'internal', startAt: record.start_at, title: record.title, status: record.status, authorName: options.authors?.[record.recorded_by ?? ''], detail: `${record.staffs?.name ?? 'スタッフ未設定'} · ${Number(record.work_hours).toFixed(2)}時間` })),

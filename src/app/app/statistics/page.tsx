@@ -1,8 +1,11 @@
 'use client';
 
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
+
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import React, { useDeferredValue, useState, useMemo, useCallback, useTransition } from 'react';
 import {
-    Box, Typography, Paper, CircularProgress, LinearProgress, Tabs, Tab, Stack, Button,
+    Alert, Box, Typography, Paper, CircularProgress, LinearProgress, Tabs, Tab, Stack, Button,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, IconButton, Collapse, Divider
 } from '@/components/ui/mui';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -130,7 +133,7 @@ export default function StatisticsPage() {
             const shiftStartRange = new Date(monthStart.getTime() - (24 * 60 * 60 * 1000)).toISOString();
             const shiftEndRange = new Date(monthEnd.getTime() + (24 * 60 * 60 * 1000)).toISOString();
 
-            const data = await getStatisticsData(currentOrg.id, shiftStartRange, shiftEndRange);
+            const data = await readActionResult(getStatisticsData(currentOrg.id, shiftStartRange, shiftEndRange));
             return {
                 rawShifts: data.shifts as ShiftData[],
                 rawReports: data.reports as ReportData[],
@@ -142,7 +145,7 @@ export default function StatisticsPage() {
 
     const {
         data: statisticsSourceData,
-        loading,
+        loading, error: loadError, refetch: retryStatistics,
     } = useFetchData(fetchStatisticsData, initialStatisticsSourceData, !wsLoading && Boolean(currentOrg), (message) => {
         showToast(`データの取得に失敗しました: ${message}`, 'error');
     }, `${currentOrg?.id ?? ''}:${targetMonth}`);
@@ -262,6 +265,7 @@ export default function StatisticsPage() {
         document.body.removeChild(link);
     };
 
+    if (loadError != null) return <Box p={3}><Alert severity="error" action={needsActionRecovery(loadError) ? <RecoveryLogoutButton /> : <Button onClick={() => void retryStatistics()}>再試行</Button>}>{getActionErrorMessage(loadError)}</Alert></Box>;
     if (wsLoading || !currentOrg) return <TablePageSkeleton />;
 
     return (

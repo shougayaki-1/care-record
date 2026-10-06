@@ -1,104 +1,64 @@
 # Server Action の想定済みエラー（Issue #39 / #45）
 
-確認日: 2026-10-04〜06。Context7 の Next.js 最新資料と、使用中の Next.js 16.3.6 に同梱された `10-error-handling.md` を確認した。
-想定済みエラーは戻り値で扱う。production では throw したエラーの詳細が React/Next.js により秘匿されるため、安全な文言であっても `catch(e).message` に届く前提にしない。
+確認日: 2026-10-06。Context7のNext.js一次資料と、使用中のNext.js 16.3.6に同梱されたerror-handling資料を確認した。想定済み状態は戻り値で扱う。productionではthrowした詳細がReact/Next.jsに秘匿されるため、例外のmessageがクライアントへ届く前提にしない。
 
-## 契約と今回の範囲
+## 最終契約
 
-- `src/types/actionResult.ts` の `ActionResult<T, Code>` は通常のデータとして transport する。
-- `getMyShiftsWithStatus`: スタッフが存在しシフト0件なら `{ ok: true, data: [] }`。記録0件も正常値として各シフトの `report: null` を返す。
-- スタッフ未紐付けは `{ ok: false, error: { code: 'STAFF_NOT_LINKED', message: ... } }`。文言は既存の定型文を維持し、画面は常設表示、再試行、Issue #29 の `RecoveryLogoutButton` を提供する。
-- 同じ Action を呼ぶ記録作成の利用者選択画面も typed result を処理する。今日のシフトを任意の補助情報として扱う既存仕様を維持し、未紐付け・取得失敗でも独立した利用者一覧を表示する。
-- 各 DB クエリの失敗は `sanitizeDbError` で詳細をサーバーログに残し汎用例外にする。スタッフ照会の失敗を未紐付けと誤認したり、記録照会の失敗を未記録と誤認したりしない。
-- `withSafeError` と `UserFacingError` の既存の rethrow はサーバー内の互換性を維持するための契約であり、クライアントへのメッセージ伝送保証ではない。未移行 Action の契約は維持し、Action と全呼出し元をセットで段階移行する。
-- `SAFE_MESSAGE_PATTERNS` は移行中のサーバー内互換性の判定に限る。部分一致した内部エラーを型付き結果の公開メッセージへ転用しない。
-- クライアントは予期しない例外の message/stack を表示・記録せず、固定の汎用表示と再試行を提供する。
+- `ActionResult<T, Code>`: 正常値は`{ ok: true, data }`。想定済み状態は`{ ok: false, error: { code, message } }`。
+- `withActionResult`は公開Action全体を`withSafeError`で包む。公開できるのはアプリが明示した`ExpectedActionError(code, 安全な文言)`だけ。
+- `SAFE_MESSAGE_PATTERNS`と部分一致による公開判定を撤去した。`withSafeError`は裸のErrorや未分類のUserFacingErrorも汎用化し、元の詳細をサーバーログへ記録する。
+- DB/SDKのエラーは`sanitizeDbError`/`sanitizeExternalError`で扱う。「権限」「見つかりません」などを含む内部エラーも公開しない。
+- RPCの想定済み状態は、既存migrationに定義されたSQLSTATEと識別子の完全一致で判定する。公開文言はアプリの定型文言とし、DBのmessageを反射しない。未定義の組合せはDB障害として汎用化する。
+- サーバー内の入れ子呼出しは`requireActionResult`でunwrapし、失敗値を成功値に包まない。
+- クライアントは`readActionResult`でunwrapする。失敗はローカルの`ActionResultError`に変換する。戻り値が届かない通信失敗も固定の汎用文言にする。
+- `getActionErrorMessage`はこのローカルクラスの文言だけを表示する。任意の例外のmessage/stackを画面へ反射しない。
+- `needsActionRecovery`は未認証・セッション切れだけを対象とする。再認証証明の不足/失効/使用済みは`REAUTH_REQUIRED`、試行制限は`RATE_LIMITED`として区別する。
 
-認証、session client、組織/本人のクエリ条件、RLS、監査、保持期間、記録履歴、migration は変更しない。所属なし・権限なしの拒否を成功扱いする変更も行わない。
+共通コード: `UNAUTHENTICATED`、`SESSION_EXPIRED`、`FORBIDDEN`、`VALIDATION_ERROR`、`NOT_FOUND`、`NOT_CONFIGURED`、`REAUTH_REQUIRED`、`RATE_LIMITED`、`STAFF_NOT_LINKED`、`VERSION_CONFLICT`、`UNEXPECTED_ERROR`。
 
-## Issue #45 の段階移行
+## 移行済みの対象
 
-`withActionResult` は公開 Action 全体を `withSafeError(..., { strict: true })` で包む。
-公開できるのはアプリが明示した `ExpectedActionError(code, 固定文言)` だけで、裸の `Error`、未分類の `UserFacingError`、DB/SDK 由来の文字列はログへ記録して `UNEXPECTED_ERROR` にする。
-「権限」「見つかりません」などを含む内部エラーも公開しない。正常値は `{ ok: true, data }`、想定済み状態は `{ ok: false, error: { code, message } }` とする。
-
-共通コードは `UNAUTHENTICATED`、`SESSION_EXPIRED`、`FORBIDDEN`、`VALIDATION_ERROR`、`NOT_FOUND`、`NOT_CONFIGURED`、`REAUTH_REQUIRED`、`RATE_LIMITED`、`STAFF_NOT_LINKED`、`UNEXPECTED_ERROR`。
-`ActionResult<T, Code>` は #39 の固有コードも引き続き扱える。
-サーバー内で移行済み Action を呼ぶ場合は `requireActionResult` で unwrap し、二重の envelope や失敗値を成功値に包むことを防ぐ。
-
-クライアントは `readActionResult` で成功値を unwrap する。失敗値はローカルの `ActionResultError` に変換し、既存の async UI フローを維持する。
-通信エラーなど戻り値が届かない例外は固定の汎用文言にする。`getActionErrorMessage` はこのローカルクラスの文言だけを表示し、任意の例外の message を表示しない。
-`needsActionRecovery` は未認証・セッション切れだけを対象とし、権限拒否をログアウトへ誘導しない。
-
-### 移行済みの対象
+Actionと全呼出し元をセットで移行した。
 
 | 対象 | Action / UI |
 | --- | --- |
-| シフト入力マスタ | `getServiceTypes`、`getStaffRoles` と各モジュールの write、`ShiftSegmentEditor`、各設定画面 |
-| スタッフ | `getStaffPositionPresets` と `staffs.ts` の write、スタッフ管理画面 |
-| シフト | `getShifts`、`getShiftPatterns`、`getShiftSegments`、`shifts/crud.ts` の write、`saveShiftSegments`、管理画面・区間入力・各 hook |
-| ロール | `getOrgRolesFull` と `roles.ts` の write、`RoleManagementPanel` |
-| 同期・接続状態 | `getSyncStatus`、`getGoogleConnectionHealth`、同期進捗 hook・設定画面 |
-| バックアップ | `getLastBackupRun`、`listDailyBackups`、`getBackupRecords`、バックアップ画面 |
-| 利用者 | `getClientAssignmentPermissionHints` と `clients.ts` の write、利用者管理・設定画面 |
-| アカウント・プロフィール・再認証 | `accounts.ts`、`user.ts`、`authSecurity.ts`、`organizationOwners.ts`、事業所 write、再認証開始・証明取得・heartbeatと全呼出し元 |
-| ログ・設定一括読取 | `getAuditLogs`、`listCloudLogEntries`、`getSettingsSectionsData`、ログ・設定画面 |
+| マスタ・スタッフ・利用者 | `serviceTypes.ts`、`staffRoles.ts`、`staffs.ts`、`clients.ts`のread/write、各管理・設定画面、区間入力 |
+| ロール・事業所 | `roles.ts`、`organization.ts`、`organizationOwners.ts`、ロール管理・事業所設定・setup |
+| アカウント・再認証 | `accounts.ts`、`user.ts`、`authSecurity.ts`、再認証開始/証明取得/heartbeat、招待・プロフィール・規約同意・アカウント管理 |
+| シフト | 一覧/本人シフト、CRUD/区間保存、ひな形write、月次プレビュー/生成、各画面/hook/modal |
+| 同期・接続・修復 | Google接続状態/URL、同期batch/単件/修復、スタッフ修復、設定画面・同期進捗hook |
+| バックアップ・ログ | バックアップ状態/一覧/読取/実行、監査/Cloudログ、設定一括read、各画面 |
+| 内勤・本人履歴 | `internalWork.ts`全Action、`recordFeed.ts`、履歴・内勤画面と保存dialog |
+| 提供記録 | `reports.ts`全Action、autosave/版保存/承認/差戻し/論理削除/復元/画像/監査と全呼出し元 |
+| 記録周辺 | AI候補read/承認、削除申請read/write、シフト紐付けread/write、AI取込・確認・記録編集 |
+| GAS・労働時間・統計・platform | `gas.ts`、`laborPremium.ts`、`statistics.ts`、`super-admin.ts`、各設定/統計/platform画面 |
 
-認証 helper は Supabase Auth のセッション欠落/拒否、活動記録の期限切れ、所属・権限なしを明示的に分類する。
-Auth の通信失敗、活動記録・所属・ロール照会の DB 失敗は汎用失敗とし、「未所属」「権限なし」「有効期限切れ」と誤認しない。
-組織/本人/session の条件、session 有効期限、scope 判定は維持する。
-同期状態の各 query の失敗は未接続・未同期0件に置き換えない。
+TypeScript compiler APIによる最終点検で、公開Action 136件が`withActionResult`を使用し、その本番呼出し163箇所を確認した。161箇所は共通unwrapを使用する。本人シフトの2箇所は`ok`分岐で型付き結果を直接処理する。
 
-シフト区間・マスタ読取、ロール一覧で失敗時の常設表示と再試行を提供し、認証・session の状態には既存の recovery POST を表示する。
-読取失敗時に「設定なし」「ロールがありません」と表示しない。
-既存シフトの区間読取に失敗した場合は保存を停止し、失敗値を空の区間として保存しない。
+既存のdomain resultを持つ`loginWithPassword`、`registerWithPassword`、`getMyWorkspaces`は既存契約を維持し、想定済み状態と予期しない例外を安全な戻り値へ変換する。Authの判定にmessageの部分一致を使わない。`recordLogout`、`recordOAuthLogin`は監査のbest-effort用途で、失敗をサーバーログへ記録する既存void契約を維持する。旧rethrow型の公開業務Actionは残っていない。
 
-### 残る移行対象
+## 失敗時の動作と保持する条件
 
-シフトひな形 write/生成/同期 write、バックアップ実行、内勤記録・本人履歴は移行済み。
-AI候補、記録保存・版競合・削除申請、GAS、労働時間ルール、統計等の旧契約は引き続き移行する。
-記録保存は版管理・競合・RPC の契約と全呼出し元を合わせて確認する。
-未移行のサーバー内呼出しとの互換性のため、`withSafeError` の非 strict 経路には旧 `SAFE_MESSAGE_PATTERNS` を残す。
-型付き結果への変換ではこの部分一致判定を使用しない。全移行後の旧判定撤去は #45 で追跡し、今回の段階だけで Issue を完了扱いしない。
+認証helperはAuthのセッション欠落/拒否、活動記録の期限切れ、所属・権限なしを明示的に分類する。通信失敗、所属・ロール・活動記録等のDB照会失敗を、未所属・権限なし・期限切れと誤認しない。
 
-## 検証範囲
+正常0件と失敗を分離する。シフトのスタッフ照会失敗を未紐付けとせず、記録照会失敗を未記録としない。招待・所属・アカウント照会の障害を無効な招待・空一覧にしない。月次生成の既存記録/ひな形、同期対象/残件の照会失敗を正常0件・同期完了にしない。
 
-Action unit は正常0件、シフト/記録あり・記録なし、未紐付け、各 DB クエリ失敗、予期しない例外を検査する。
-同梱の production React Flight encoder/decoder で Action の戻り値を action-result promise として往復させ、未紐付けの code/message が保持されることと、throw の詳細が秘匿される対照ケースを検査する。
-画面 unit は empty state、未紐付けと既存 recovery POST、予期しない失敗の固定文言と再試行を検査する。
-このローカル検証は Next HTTP・ログイン・実 DB を含む E2E ではない。E2E は専用環境と承認を伴う別検証として扱う。
+主要read画面は常設エラーと再試行を提供し、認証/session切れの場合だけ共通復旧POSTを表示する。マスタ・ロール・内勤・履歴・統計等で失敗時に「設定なし」や空一覧を表示しない。本人シフトのスタッフ未紐付けには#39/#29の既存復旧導線を維持する。利用者選択では任意の補助情報である本人シフトの失敗が、独立した利用者一覧を破棄しない。
 
+既存シフトの区間read失敗時は保存を停止する。保存拒否後もシフト・ひな形・内勤・提供記録のdialog/入力を保持し、再試行できる。内勤・提供記録・AI一括下書きは失敗後も冪等性キーを保持する。提供記録の`CR409`は`VERSION_CONFLICT`へ変換し、版/現在のrevision ID等のDB詳細を公開しない。競合後は入力を保持して再読み込み・差分確認を案内する。
 
-2026-10-06 の検証結果: `npm run typecheck`、`npm run lint -- --max-warnings=0`、`npm run build`が成功。`npm run test:unit`は76 files / 455 tests、`npm run test:ui`は22 files / 66 testsが成功した。production Flightの往復試験にはインストール済みNext.js 16.3.6のencoder/decoderを使用し、想定済み状態のcode/message保持と、throwされた内部詳細の秘匿を両方確認した。service-roleの用途台帳は10用途が一致し、CI分類テスト17件も成功。DB/RLS/permissionsの変更はない。実HTTP・ログイン・DBを含むE2Eは明示確認待ちで未実行。
+シフト生成の部分成功とAI一括保存の行別成功/失敗は維持する。生のDB/SDK文言を失敗理由や同期エラー保存列へ公開しない。GASの失敗応答を成功値に包まず、成功時もfolder/doc等の利用する結果項目だけを返す。
 
+認可・session期限・本人/組織scope・RLS・permissions、原子的RPC、監査・保持期間・論理削除・記録版管理・訂正・再認証証明の一回限り条件を維持している。DB/RLS/permissions/migrationの変更はない。通常業務のservice role追加もない。
 
-Issue #45 の段階移行では、server/client helper、認証・所属・DB失敗の分離、マスタ0件、更新拒否後の副作用抑止、シフト管理、同期UI、Storybookの再試行・復旧を検査する。
-`npm run test:action-transport` は DB・ログイン・環境変数を使わない専用 fixture に実装中の result helper と logger をコピーし、インストール済み Next.js の `next build --webpack` と `next start` を実行する。
-実ブラウザから8回の Server Action POST を行い、正常0件・voidの成功・権限拒否・session切れ・再認証要求・試行制限・汎用失敗の戻り値、内部詳細の秘匿、サーバーログ記録、throw の production redaction を検査する。
-これは実 DB の認可/RLS を含む `test:e2e` とは別の transport 検証であり、専用 Supabase の E2E は実行しない。
+## 検証
 
+- `npm run typecheck`、`npm run lint -- --max-warnings=0`、production buildが成功。
+- `npm run test:unit`: 110 files / 754 tests。正常0件、認証/所属/権限/DB障害の分離、RPC識別子の完全一致、旧判定語を含む内部エラーの秘匿、副作用抑止、入力/冪等性キー保持、再試行・scope切替を検証した。
+- `npm run test:ui`: Storybook/a11y 29 files / 85 tests。共通UIと、主要read/writeの失敗・再試行・復旧を検証した。
+- `npm run test:action-transport`: DB・ログイン・本番設定を使わない独立fixtureに実装中のhelper/logger/typesをコピーし、インストール済みNext.jsの`next build --webpack`と`next start`を実行した。実ブラウザから10回のServer Action POSTで正常0件・void成功・権限拒否・session切れ・再認証要求・試行制限・版競合・スタッフ未紐付け・汎用失敗・raw throwを検証した。code/message保持、レスポンス本文への内部詳細非露出、サーバーログ記録、production redactionを確認した。
+- `npm run security:service-role`の台帳10用途と、`npm run test:ci-scope`の分類テスト17件も最終状態で成功。該当境界は変更していない。
 
-2026-10-06 の #45 検証結果: `npm run typecheck`、`npm run lint -- --max-warnings=0`、`npm run build` が成功。`npm run test:unit` は96 files / 668 tests、`npm run test:ui` は29 files / 84 testsが成功。`npm run test:action-transport` のproduction HTTP検証も成功。service-roleの用途台帳10用途とCI分類テスト17件も成功した。build・UIの初回失敗はフォント取得制限、worktreeの依存symlink、既存Auth story用の公開設定不足によるもので、独立した依存ディレクトリとダミー設定で再検証した。新しいstoryで確認したselectのラベル関連付け、ボタン名・コントラスト、空の表ヘッダーも修正し、a11y検査を通過した。
-認可・session条件、RLS、permissions.ts、監査・保持期間・記録履歴、migration の変更はない。認可 helper のエラー分類は変更したが、許可条件は維持している。専用SupabaseのE2Eは未実行。
+HTTP fixtureで本文を全POST後に取得した初回はChromiumの古いresource body取得に失敗した。各POST直後に本文を取得する方式へ修正し、全10本文の非露出検証を維持して再実行した。
 
-### アカウント・再認証の追加移行
-
-`accounts.ts`、`user.ts`、`authSecurity.ts`、`organizationOwners.ts`、事業所のwrite、再認証開始・証明取得・heartbeatと全呼出し元を型付き結果へ移行した。
-`REAUTH_REQUIRED` は証明の不足・失効・使用済みを示し、ログインセッション切れとは分ける。`RATE_LIMITED` は再認証の試行制限を示す。どちらも共通ログアウトの自動誘導対象にはしない。
-再認証の条件付きUPDATE、本人/session/用途/期限/一回限りの条件、owner追加の原子的RPC、監査・保持・権限判定は維持する。
-再認証方法・招待プレビュー・所属・アカウント一覧のDB/SDK失敗を、方法なし・無効な招待・未所属・空一覧へ置き換えない。既存参加者の招待も事業所IDが取れない場合は失敗とする。
-アカウント一覧と招待プレビューには常設エラーと再試行を設け、アカウント一覧の認証失敗だけに共通復旧POSTを表示する。規約同意失敗時もダイアログを維持し、安全な文言と必要な復旧を表示する。
-共通`useFetchData`は失敗を保持し、再試行・組織切替でリセットする。任意の例外文言をerror callbackへ返さない。
-ログイン・登録・workspaceの既存のdomain resultは維持し、例外経路も固定の失敗値へ変換する。AuthエラーはSDKの`error.code`で判定し、文言の部分一致を使わない。パスワード再設定要求のアカウント存在を明かさない応答は維持する。
-旧判定の撤去、シフト生成・同期write、記録・バックアップなどの残りは引き続き#45で追跡する。
-
-追加移行の検証: `typecheck`、警告0の`lint`、unit 100 files / 701 tests、Storybook/a11y 29 files / 84 tests、production buildが成功。HTTP transportは再認証要求・試行制限・void成功を含む8回のPOSTで成功した。DB・RLS・permissions・migrationは変更していない。専用SupabaseのE2Eは未実行。
-
-### シフト生成・同期・内勤の追加移行
-
-ひな形作成/更新/削除、月次プレビュー/生成、Google同期/修復、スタッフ修復、Google接続URL、バックアップ実行、内勤の全Actionと本人履歴/統合feedを型付き結果へ移行した。サーバー内の入れ子呼出しもunwrapし、失敗値を成功に包まない。
-同期対象・残件数・月次生成の既存記録/ひな形のDB照会失敗を、正常0件・完了に置き換えない。部分成功の件数契約は維持し、失敗理由と同期エラー保存列に外部APIの生の文言を公開しない。詳細はサーバーログへ記録する。
-ひな形と内勤の保存失敗時はダイアログ/編集入力を保持する。内勤は失敗後の再試行にも同じ冪等性キーを維持する。認証/session切れだけに復旧導線を表示する。本人シフトの権限拒否にも型付きcodeを使い、スタッフ未紐付けの既存復旧導線を維持する。
-共通useRecordQueryはscopeに対応した失敗を保持し、再試行でリセットする。内勤・本人履歴は失敗時に空一覧を表示せず、常設エラーと再試行/必要な復旧を提供する。
-
-追加移行の検証: typecheck、警告0のlint、unit 105 files / 727 tests、Storybook/a11y 29 files / 85 tests、production buildが成功。DB・RLS・permissions・migration・監査・保持・版管理の条件は変更していない。専用SupabaseのE2Eは未実行。記録保存等の残りと旧SAFE_MESSAGE_PATTERNS撤去まで#45は継続する。
+このHTTP fixtureは実DBの認可/RLS・ログインを含むE2Eではない。`npm run test:e2e`は専用Supabase環境とユーザー確認が必要なため未実行。環境変数は検証専用のダミー設定を使用し、実secretはworktreeへコピーしていない。

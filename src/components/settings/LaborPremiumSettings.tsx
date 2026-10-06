@@ -1,5 +1,8 @@
 'use client';
 
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
+
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Box, Stack, Chip, CircularProgress, Alert,
@@ -62,6 +65,8 @@ export default function LaborPremiumSettings({
   const [rows, setRows] = useState<PremiumRow[]>((initialLaborPremiumTypes as PremiumRow[]) ?? []);
   const [loading, setLoading] = useState(initialLaborPremiumTypes === undefined);
   const [error, setError] = useState<string | null>(null);
+  const [errorCause, setErrorCause] = useState<unknown>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Edit dialog
@@ -76,11 +81,15 @@ export default function LaborPremiumSettings({
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setErrorCause(null);
+    setLoadFailed(false);
     try {
-      const data = await getLaborPremiumTypes(orgId);
+      const data = await readActionResult(getLaborPremiumTypes(orgId));
       setRows(data as PremiumRow[]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '取得に失敗しました');
+      setLoadFailed(true);
+      setErrorCause(e);
+      setError(getActionErrorMessage(e, '取得に失敗しました'));
     } finally {
       setLoading(false);
     }
@@ -94,13 +103,14 @@ export default function LaborPremiumSettings({
   const handleToggleEnabled = async (row: PremiumRow) => {
     try {
       if (row.is_enabled) {
-        await disableLaborPremiumType(orgId, row.id);
+        await readActionResult(disableLaborPremiumType(orgId, row.id));
       } else {
-        await updateLaborPremiumType(orgId, row.id, { is_enabled: true });
+        await readActionResult(updateLaborPremiumType(orgId, row.id, { is_enabled: true }));
       }
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '更新に失敗しました');
+      setErrorCause(e);
+      setError(getActionErrorMessage(e, '更新に失敗しました'));
     }
   };
 
@@ -132,11 +142,12 @@ export default function LaborPremiumSettings({
           ? parseFloat(editState.variable_overtime_threshold_hours)
           : null;
       }
-      await updateLaborPremiumType(orgId, editTarget.id, patch);
+      await readActionResult(updateLaborPremiumType(orgId, editTarget.id, patch));
       setEditOpen(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '更新に失敗しました');
+      setErrorCause(e);
+      setError(getActionErrorMessage(e, '更新に失敗しました'));
     } finally {
       setSaving(false);
     }
@@ -145,18 +156,19 @@ export default function LaborPremiumSettings({
   const handleAddSave = async () => {
     setSaving(true);
     try {
-      await createLaborPremiumType(orgId, {
+      await readActionResult(createLaborPremiumType(orgId, {
         name: addState.name,
         rate: parseFloat(addState.ratePercent) / 100,
         calc_method: addState.calc_method,
         night_start_hour: parseInt(addState.night_start_hour),
         night_end_hour: parseInt(addState.night_end_hour),
-      });
+      }));
       setAddOpen(false);
       setAddState(defaultEditState());
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '追加に失敗しました');
+      setErrorCause(e);
+      setError(getActionErrorMessage(e, '追加に失敗しました'));
     } finally {
       setSaving(false);
     }
@@ -174,11 +186,13 @@ export default function LaborPremiumSettings({
     return [daily, weekly].filter(Boolean).join(' / ') || null;
   };
 
+  const errorAlert = error && <Alert severity="error" sx={{ mb: 2 }} action={needsActionRecovery(errorCause) ? <RecoveryLogoutButton /> : <AppButton variant="text" intent="secondary" onClick={() => void load()}>再試行</AppButton>}>{error}</Alert>;
+  if (loadFailed) return <Box>{errorAlert}</Box>;
   if (loading) return <Box py={3} textAlign="center"><CircularProgress size={24} /></Box>;
 
   return (
     <Box>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
+      {errorAlert}
 
       <Box sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
         <Table size="small" sx={{ minWidth: 520 }}>

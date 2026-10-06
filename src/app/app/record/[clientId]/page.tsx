@@ -1,5 +1,7 @@
 'use client';
 
+import { getActionErrorMessage, needsActionRecovery } from '@/utils/actionResult';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
@@ -26,8 +28,8 @@ export default function RecordPage() {
     selectedHelpers, actualStaffs, actualServiceTypeId, startDateTime, endDateTime,
     serviceTime, travelTime, travelExpenses, images,
     aiFilledFields, isSpanningMonth, selectedPart, originalShiftTimes,
-    currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting, actionError,
-    shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId,
+    currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting, actionError, actionErrorCause,
+    shiftSuggestions, linkedShifts, linkedLoadError, retryLinkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId,
     dismissShiftSuggestion, setShiftSuggestions, setLinkedShifts,
     setActualServiceTypeId, setActualStaffs, setStartDateTime, setEndDateTime,
     setServiceTime, setTravelTime, setTravelExpenses,
@@ -86,7 +88,7 @@ export default function RecordPage() {
        />
 
       <RecordFormBody>
-            {actionError && <Alert severity="error">{actionError}</Alert>}
+            {actionError && <Alert severity="error" action={needsActionRecovery(actionErrorCause) ? <RecoveryLogoutButton /> : undefined}>{actionError}</Alert>}
             {currentStatus !== 'approved' && autosaveState !== 'idle' && (
               <Alert severity={autosaveState === 'error' ? 'warning' : 'info'}>
                 {autosaveState === 'saving' ? '入力内容を保存中です…' : autosaveState === 'saved' ? '入力内容は自動保存されています' : '自動保存に失敗しました。通信を確認して入力を続けてください。'}
@@ -138,6 +140,7 @@ export default function RecordPage() {
                 </Alert>
             )}
 
+            {linkedLoadError != null && <Alert severity="error" action={needsActionRecovery(linkedLoadError) ? <RecoveryLogoutButton /> : <AppButton variant="text" intent="secondary" onClick={retryLinkedShifts}>再試行</AppButton>}>{getActionErrorMessage(linkedLoadError)}</Alert>}
             <ShiftSuggestions
               disabled={submitting}
               organizationId={currentOrg?.id}
@@ -226,7 +229,7 @@ export default function RecordPage() {
         dividers={false}
         actions={<><AppButton variant="text" intent="danger" onClick={handleDialogDiscard} disabled={submitting}>破棄して移動</AppButton><AppButton onClick={handleDialogSaveDraft} loading={submitting} autoFocus>下書き保存</AppButton></>}
       >
-        {actionError && <Alert severity="error">{actionError}</Alert>}
+        {actionError && <Alert severity="error" action={needsActionRecovery(actionErrorCause) ? <RecoveryLogoutButton /> : undefined}>{actionError}</Alert>}
         <Typography>入力内容が保存されていません。下書きとして保存しますか？</Typography>
       </AppDialog>
     </PageLayout>

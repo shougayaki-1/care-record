@@ -233,14 +233,14 @@ function SettingsContent() {
             
             if (googleFolderId) {
                 const { data: { user } } = await supabase.auth.getUser();
-                await callGasApi({
+                await readActionResult(callGasApi({
                     action: 'manage_org_folder',
                     organizationId: currentOrg.id,
                     orgName: orgName,
                     orgId: currentOrg.id,
                     userEmail: user?.email,
                     currentFolderId: googleFolderId
-                });
+                }));
             }
 
             setMessage({ type: 'success', text: '更新しました' });
@@ -260,14 +260,14 @@ function SettingsContent() {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             
-            const result = await callGasApi({
+            const result = await readActionResult(callGasApi({
                 action: 'manage_org_folder',
                 organizationId: currentOrg.id,
                 orgName: orgName,
                 orgId: currentOrg.id,
                 userEmail: user?.email,
                 currentFolderId: googleFolderId
-            }) as GasResponse;
+            })) as GasResponse;
 
             if (result.status === 'success' && result.folderId) {
                 const newFolderId = result.folderId;

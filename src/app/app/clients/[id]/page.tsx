@@ -138,7 +138,7 @@ export default function ClientSettingsPage() {
         }
 
         // Permission hints are advisory UI. getClientAssignmentPermissionHints is
-        // a withSafeError Server Action that CAN throw (unlike the supabase queries
+        // a typed-result Server Action unwrapped by readActionResult (unlike the supabase queries
         // above), so it is fetched separately: a hints failure must not discard the
         // core client data. Mirrors d7aff24 for record/[clientId].
         if (currentOrg) {
@@ -319,31 +319,31 @@ export default function ClientSettingsPage() {
                 throw new Error('事業所のGoogleドライブ連携が設定されていません。「事業所設定」から連携を行ってください。');
             }
 
-            const folderRes = await callGasApi({
+            const folderRes = await readActionResult(callGasApi({
                 action: 'manage_client_folder',
                 organizationId: currentOrg.id,
                 clientId,
                 orgFolderId: orgData.google_folder_id,
                 clientName: clientName,
                 currentFolderId: clientData?.google_folder_id
-            });
+            }));
             
-            if (folderRes.status !== 'success') throw new Error('フォルダ作成エラー: ' + folderRes.message);
             
-            if (folderRes.folderId !== clientData?.google_folder_id) {
+
+            if (folderRes.folderId && folderRes.folderId !== clientData?.google_folder_id) {
                 await readActionResult(updateClientGoogleLink(currentOrg.id, clientId, { folderId: folderRes.folderId }));
             }
 
             const readableSchema = convertSchemaToReadable(formItems);
 
-            const createRes = await callGasApi({
+            const createRes = await readActionResult(callGasApi({
                 action: 'create_template_doc',
                 organizationId: currentOrg.id,
                 clientId,
                 folderId: folderRes.folderId,
                 clientName: clientName,
                 schema: readableSchema 
-            });
+            }));
 
             if (createRes.status === 'success') {
                 setTemplateId(createRes.docId);
@@ -351,7 +351,7 @@ export default function ClientSettingsPage() {
                 setMessage({ type: 'success', text: 'テンプレートを作成し、連携しました！別タブで開きます。' });
                 window.open(createRes.docUrl, '_blank');
             } else {
-                throw new Error(createRes.message);
+                throw new Error('テンプレート作成に失敗しました');
             }
 
         } catch (e) {

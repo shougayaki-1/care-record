@@ -10,9 +10,8 @@ import type { ActionErrorCode, ActionResult } from '@/types/actionResult';
 // サーバーログにのみ詳細を残し、利用者には汎用メッセージを返す。
 
 /**
- * サーバー内で利用者向けの想定済みエラーを識別するためのクラス。
- * withSafeError は既存のサーバー内契約として rethrow するが、クライアントへ
- * メッセージが届く保証はない。UI が判定する状態は ActionResult 等で返すこと。
+ * 旧コード・型との互換性のための基底クラス。単独では公開可能な状態とみなさない。
+ * 明示したcodeを持つExpectedActionErrorだけをwithActionResultで結果データへ変換する。
  */
 export class UserFacingError extends Error {
   constructor(message: string) {
@@ -43,7 +42,7 @@ export async function withActionResult<T>(
   opts: LogOptions = {},
 ): Promise<ActionResult<T>> {
   try {
-    const data = await withSafeError(context, fn, { ...opts, strict: true });
+    const data = await withSafeError(context, fn, opts);
     return { ok: true, data };
   } catch (error) {
     if (error instanceof ExpectedActionError) {
@@ -54,12 +53,6 @@ export async function withActionResult<T>(
 }
 
 const GENERIC_MESSAGE = '処理に失敗しました。時間をおいて再度お試しください。';
-
-// Legacy server-only compatibility until the remaining write actions are migrated.
-// Typed result conversion always opts into strict handling and never uses this list.
-const SAFE_MESSAGE_PATTERNS = [
-  '認証が必要です', '権限', 'アクセス権', '不正', '見つかりません', '入力してください', '文字で',
-];
 
 /**
  * Server Action 本体を包み、想定外エラーを汎用メッセージへ置き換える。
@@ -117,14 +110,13 @@ export function sanitizeExternalError(error: unknown, context: string, opts: Log
   return new Error(GENERIC_MESSAGE);
 }
 
-export async function withSafeError<T>(context: string, fn: () => Promise<T>, opts: LogOptions & { strict?: boolean } = {}): Promise<T> {
+export async function withSafeError<T>(context: string, fn: () => Promise<T>, opts: LogOptions = {}): Promise<T> {
   try {
     return await fn();
   } catch (err) {
-    if (err instanceof ExpectedActionError || (!opts.strict && err instanceof UserFacingError)) {
+    if (err instanceof ExpectedActionError) {
       throw err;
     }
-    if (!opts.strict && err instanceof Error && SAFE_MESSAGE_PATTERNS.some(pattern => err.message.includes(pattern))) throw err;
     // 想定外: 内部詳細はサーバーログにのみ残し、利用者には汎用メッセージを返す。
     logError(`[action:${context}]`, { organizationId: opts.organizationId, error: serializeError(err) });
     throw new Error(GENERIC_MESSAGE);
