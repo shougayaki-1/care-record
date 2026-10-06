@@ -7,6 +7,7 @@ vi.mock('@/app/actions/auth', () => ({ recordLogout: mocks.recordLogout }));
 vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth: { signOut: mocks.signOut } }) }));
 
 import { GET, POST } from './route';
+import { recoveryHtml } from './recoveryHtml';
 
 beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://care.supabase.co');
@@ -26,6 +27,37 @@ const request = (origin: string | null = 'https://app.example') => new NextReque
 });
 
 describe('independent recovery route', () => {
+  it.each([false, true])('completed=%s の HTML は独立した同じカードと厳格な nonce CSP を使う', async completed => {
+    const response = completed ? await POST(request()) : GET();
+    const html = await response.text();
+    const nonce = html.match(/<style nonce="([^"]+)">/)![1];
+    expect(response.headers.get('content-security-policy')).toBe(
+      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+    );
+    expect(response.headers.get('referrer-policy')).toBe('same-origin');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(html).toContain('<p class="brand">CareRecord</p>');
+    expect(html).toContain('<main aria-labelledby="recovery-title">');
+    expect(html).toContain(`<h1 id="recovery-title">${completed ? 'ログアウトしました' : 'CareRecordの復旧'}</h1>`);
+    expect(html).not.toMatch(/<link\b|<img\b|\bsrc=|@import|url\(|\bstyle=|\bon\w+=|\/_next\//i);
+    // The browser stories render this exact presentation, with only cleanup JS omitted.
+    expect(html.replace(/<script[\s\S]*?<\/script>/, '')).toBe(recoveryHtml(completed, nonce));
+    if (completed) {
+      expect(html).toContain('<a class="primary-action" href="/">ログイン画面へ戻る</a>');
+      expect(html).toContain(`<script nonce="${nonce}">`);
+      expect(html).not.toContain('<form');
+    } else {
+      expect(html).toContain('<form action="/api/auth/recover" method="post">');
+      expect(html).toContain('<button class="primary-action" type="submit">ログアウトしてやり直す</button>');
+    }
+  });
+
+  it('応答ごとに style nonce を更新する', async () => {
+    const first = GET().headers.get('content-security-policy');
+    expect(GET().headers.get('content-security-policy')).not.toBe(first);
+  });
+
   it('GET は HTML フォームのみ表示し、ログアウトや Cookie 書き換えを行わない', async () => {
     const response = GET();
     expect(response.headers.get('content-type')).toContain('text/html');

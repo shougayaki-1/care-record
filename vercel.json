@@ -37,6 +37,7 @@
       "codex/issue-39-expected-errors-review": false,
       "codex/issue-47-idempotency-review": false,
       "codex/issue-55-bug-db-0": false,
+      "codex/issue-58-ui-carerecord": false,
       "codex/issue-74-codex-worker-issue-reasoning-effort": false
     }
   }
