@@ -10,7 +10,7 @@ export type {
 
 export {
     createShift,
-    deleteShiftCompletely,
+    deleteShift,
     deleteShiftsBatch,
     deleteShiftsDbOnly,
     getShifts,

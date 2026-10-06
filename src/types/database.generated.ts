@@ -2861,6 +2861,14 @@ export type Database = {
         }
         Returns: undefined
       }
+      add_organization_owner_atomic: {
+        Args: {
+          p_org_id: string
+          p_reauth_token: string
+          p_target_user_id: string
+        }
+        Returns: undefined
+      }
       add_report_shift_link: {
         Args: { p_org_id: string; p_report_id: string; p_shift_id: string }
         Returns: undefined
@@ -2973,6 +2981,10 @@ export type Database = {
         }[]
       }
       get_database_capacity_status: { Args: never; Returns: Json }
+      get_deleted_shift_sync_targets: {
+        Args: { p_limit: number; p_org_id: string }
+        Returns: Json
+      }
       get_google_oauth_context: { Args: { p_org_id: string }; Returns: Json }
       get_google_sync_target: {
         Args: { p_org_id: string; p_shift_id: string }
