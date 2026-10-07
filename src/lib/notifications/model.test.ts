@@ -22,8 +22,15 @@ describe('notification display contract', () => {
       expect(notificationEvents[event].linkUrl).toBe('/app/shifts/my');
     }
   });
+  it('keeps account changes actionable without destinations into a removed organization', () => {
+    for (const event of ['account.permissions_changed', 'account.removed_from_organization'] as const) {
+      expect(notificationEvents[event].category).toBe('action_required');
+      expect(notificationEvents[event].linkUrl).toBeNull();
+      expect(notificationEvents[event].resourceType).toBe('account');
+    }
+  });
   it('uses the same fixed templates in the DB and application', () => {
-    const sql = readFileSync('supabase/migrations/20261007000002_shift_business_notifications.sql', 'utf8');
+    const sql = readFileSync('supabase/migrations/20261007000003_account_notifications.sql', 'utf8');
     const template = sql.split('$notification_templates$')[1];
     expect(JSON.parse(template)).toEqual(notificationEvents);
     expect(Object.keys(notificationEvents)).toHaveLength(15);

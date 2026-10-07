@@ -72,3 +72,13 @@ it('retains a readable notification but refuses navigation after membership loss
   mount(); await selectNotification(); await screen.findByRole('alert');
   expect(state.push).not.toHaveBeenCalled(); expect(state.workspace).not.toHaveBeenCalled();
 });
+
+it('reads a removal notice without switching into the removed organization', async () => {
+  state.fetch.mockResolvedValue({ data: [{ ...notification, type: 'account.removed_from_organization', organization_id: 'removed-org' }], error: null });
+  mount(); await selectNotification();
+  await screen.findByText('要対応 · 既読');
+  expect(state.read).toHaveBeenCalledOnce();
+  expect(state.organization).not.toHaveBeenCalled();
+  expect(state.workspace).not.toHaveBeenCalled();
+  expect(state.push).not.toHaveBeenCalled();
+});
