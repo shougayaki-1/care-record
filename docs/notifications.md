@@ -1,6 +1,6 @@
 # 通知の共通契約
 
-Issue #59 の通知基盤に、Issue #60 の記録・記録削除申請、Issue #61 のシフト本人影響変更、Issue #62 のシステム障害イベントを接続する。
+Issue #59 の通知基盤に、Issue #60 の記録・記録削除申請、Issue #61 のシフト本人影響変更、Issue #62 のシステム障害、Issue #63 のアカウント変更イベントを接続する。
 通知対象は本人の要対応、本人が行った提出・申請の結果、放置すると業務に支障がある異常に限る。
 保存・通常 CRUD・同期の成功は Toast、操作証跡は audit log の責務とする。
 
@@ -271,3 +271,44 @@ Supabase CLI 2.108.0。Next.js 16.3.6同梱のuse-serverガイドも確認した
 public schemaの再生成型との差分は新規RPCの追加だけで、チェックイン型と一致する。
 2つの実トランザクションで同じ日時変更を競合させ、両方のcommit後に通知が1件だけであることも確認した。
 E2E・クラウドmigration・実Google連携は実行していない。
+
+## アカウント変更通知（Issue #63）
+
+`account.permissions_changed` と `account.removed_from_organization` は `action_required` に分類する。
+通知は対象ユーザー本人だけへ送り、固定本文と参照 UUID を保存する。リンクは null とし、
+除外済み事業所へ切り替えたり、内部ページへ遷移したりしない。本人限定・有効セッションの
+既存通知 RLS は所属を要求しないため、所属解除後も本人は閲覧・既読化できる。
+RLS と `permissions.ts` の権限定義は変更せず、DB の既存 scope / management helper と
+アプリの権限キー（records、shifts、internalWork、management）を照合した。
+
+新規 migration `20261007000003_account_notifications.sql` は membership、業務ロール割当、
+ロール定義変更を trigger で検出する。private の比較状態に変更前の実効権限・owner 区分を保持し、
+遅延 trigger で同一トランザクションの最終状態と比較する。割当 RPC の削除・再登録途中の
+状態では通知しない。同一権限の再保存、同等・重複ロールの割当、ロール名・色の変更では通知しない。
+共有ロールの権限変更・削除は実効権限が変わったメンバーへ通知する。owner の暗黙権限は既存 helper を使う。
+オーナー追加・移管は他人の owner 区分変更を通知し、本人による明示的な自己変更・脱退は抑制する。
+招待作成・編集・削除、初回所属・招待受諾、事業所削除、退会・無効アカウントは対象外。
+
+通知生成は required とし、業務 mutation と同一トランザクションで commit / rollback する。
+既存 RPC の認可、危険権限・最後の管理者・owner 保護、再認証、監査を維持する。
+ロール割当・定義編集は既存の組織行ロックを共有し、owner 変更・除外と直列化する。
+受信者ごとの状態行ロックと発生 UUID、既存通知 unique index で重複を防ぐ。
+retry は最終状態が変わらないため通知せず、除外 retry の member_not_found も通知を追加しない。
+private 比較状態は RLS 有効・API role の DML / helper EXECUTE grant なし。
+比較用の権限 JSON は通知本文・キーへ転記しない。既存 migration は変更しない。
+
+Context7 確認: 2026-10-07、Supabase（導入 SDK 2.91 系）の Postgres trigger、
+SECURITY DEFINER の空 search_path と明示的な EXECUTE revoke を確認した。
+DB 検証は Supabase CLI 2.108.0 の専用一時ローカル project を使用する。
+
+ローカル検証（2026-10-07）: typecheck、lint（warning 0）、unit 116ファイル / 795件、
+本番 build、service-role 台帳、diff-check が成功。CLI 2.108.0 の一時 project で
+旧schemaからの追加適用と空DB再構築を確認し、最終の pgTAP 13ファイル / 435件
+（security_hardening を含む）が成功。DB lint のエラー・警告なし、public schema の再生成型は変更なし。
+既存所属の追加適用時に過去通知が生成されないことと、空DB再構築後・追加適用後の両方で
+同時の2件の権限保存が commit し、通知が1件になることを実トランザクションで確認した。
+E2E とホスト済み migration は実行していない。
+
+検証時に既存の招待編集 RPC `account_update_role(..., 'invited', 'member')` が
+`invitations_role_check` に拒否される不整合も確認した。#63 では修正せず、失敗時に通知が残らない
+ことを回帰テストに記録した。招待の本文・配送・権限編集の修正は本Issueの対象外。
