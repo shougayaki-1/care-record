@@ -6,6 +6,14 @@ output "replica_bucket" {
   value = google_storage_bucket.replica.name
 }
 
+output "tier_backup_buckets" {
+  value = { for tier, days in local.backup_tiers : tier => google_storage_bucket.tier["${tier}-tokyo"].name if var.enable_tiered_backups }
+}
+
+output "tier_replica_buckets" {
+  value = { for tier, days in local.backup_tiers : tier => google_storage_bucket.tier["${tier}-osaka"].name if var.enable_tiered_backups }
+}
+
 output "audit_bucket" {
   value = google_storage_bucket.audit.name
 }

@@ -30,6 +30,9 @@ jobs:
       APP_ENV: ${{ github.event.inputs.environment || 'production' }}
       GCS_BACKUP_BUCKET: ${{ vars.GCS_BACKUP_BUCKET }}
       GCS_REPLICA_BUCKET: ${{ vars.GCS_REPLICA_BUCKET }}
+      GCS_TIERED_BACKUP_ENABLED: ${{ vars.GCS_TIERED_BACKUP_ENABLED || 'false' }}
+      GCS_RECENT_BACKUP_BUCKET: ${{ vars.GCS_RECENT_BACKUP_BUCKET }}
+      GCS_RECENT_REPLICA_BUCKET: ${{ vars.GCS_RECENT_REPLICA_BUCKET }}
       DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
       EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 

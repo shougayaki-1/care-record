@@ -26,6 +26,13 @@ if [[ "$archive" == gs://* ]]; then
   command -v gcloud >/dev/null || { echo "gcloud is required for gs:// input" >&2; exit 2; }
   local_archive="$work_root/$(basename "$archive")"
   gcloud storage cp --quiet "$archive" "$local_archive"
+  gcloud storage cp --quiet "${archive}.sha256" "$work_root/archive.sha256"
+  # Legacy checksums contain the uploader's absolute temporary path; only the
+  # validated hash is portable. Never execute or follow its embedded filename.
+  expected_hash="$(awk 'NR == 1 { print $1 }' "$work_root/archive.sha256")"
+  [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid archive checksum" >&2; exit 1; }
+  actual_hash="$(sha256sum "$local_archive" | cut -d' ' -f1)"
+  [[ "$expected_hash" == "$actual_hash" ]] || { echo "Archive checksum mismatch" >&2; exit 1; }
 else
   local_archive="$archive"
 fi

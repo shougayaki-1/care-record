@@ -31,12 +31,21 @@ jobs:
       APP_ENV: ${{ github.event.inputs.environment || 'production' }}
       DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
       GCS_BACKUP_BUCKET: ${{ vars.GCS_BACKUP_BUCKET }}
+      GCS_TIERED_BACKUP_ENABLED: ${{ vars.GCS_TIERED_BACKUP_ENABLED || 'false' }}
+      GCS_RECENT_BACKUP_BUCKET: ${{ vars.GCS_RECENT_BACKUP_BUCKET }}
+      GCS_DAILY_BACKUP_BUCKET: ${{ vars.GCS_DAILY_BACKUP_BUCKET }}
+      GCS_WEEKLY_BACKUP_BUCKET: ${{ vars.GCS_WEEKLY_BACKUP_BUCKET }}
+      GCS_MONTHLY_BACKUP_BUCKET: ${{ vars.GCS_MONTHLY_BACKUP_BUCKET }}
       BACKUP_CONFIG_VERSION: ${{ vars.BACKUP_CONFIG_VERSION }}
       BACKUP_KEY_ID: ${{ vars.BACKUP_KEY_ID }}
       DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
 
     steps:
       - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
 
       - name: Authenticate to Google Cloud using GitHub OIDC
         uses: google-github-actions/auth@v3
@@ -65,6 +74,8 @@ jobs:
         shell: bash
         run: |
           started_at=$(date +%s)
+          # Keep the representative business date fixed across midnight retries.
+          export BACKUP_RETENTION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           attempt_offsets=(0 1800 7200)
           for offset in "${attempt_offsets[@]}"; do
             remaining=$((started_at + offset - $(date +%s)))

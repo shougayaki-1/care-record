@@ -18,6 +18,7 @@ resource "google_project_service" "required" {
 }
 
 resource "google_storage_bucket" "primary" {
+  lifecycle { prevent_destroy = true }
   name                        = "${local.name_prefix}-backup-tokyo"
   project                     = var.project_id
   location                    = var.primary_region
@@ -56,6 +57,7 @@ resource "google_storage_bucket" "primary" {
 }
 
 resource "google_storage_bucket" "replica" {
+  lifecycle { prevent_destroy = true }
   name                        = "${local.name_prefix}-backup-osaka"
   project                     = var.project_id
   location                    = var.replica_region
