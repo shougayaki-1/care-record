@@ -1,6 +1,5 @@
 'use server';
 
-import { saveShiftSegments } from '../shiftSegments';
 import { ExpectedActionError, requireActionResult, sanitizeDbError, withActionResult } from '@/utils/errors';
 import { emptyGoogleSyncStats, type SyncErrorKind } from '@/utils/googleSync';
 import { logError, serializeError } from '@/utils/log';
@@ -103,9 +102,6 @@ export async function updateShift(shiftId: string, payload: Partial<ShiftPayload
           if (!client) {
               throw new ExpectedActionError('VALIDATION_ERROR', '指定された利用者はこの事業所に所属していません');
           }
-      }
-      if (payload.segments !== undefined) {
-          await requireActionResult(saveShiftSegments(organizationId, shiftId, payload.segments));
       }
       const title = await getCurrentShiftTitle(shiftId, payload.title, payload.clientId);
       const result = await updateShiftInternal(shiftId, { ...payload, organizationId, title }, awaitSync);

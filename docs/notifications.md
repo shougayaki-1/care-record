@@ -1,6 +1,6 @@
 # 通知の共通契約
 
-Issue #59 の通知基盤に、Issue #60 の記録・記録削除申請と Issue #62 のシステム障害イベントを接続する。
+Issue #59 の通知基盤に、Issue #60 の記録・記録削除申請、Issue #61 のシフト本人影響変更、Issue #62 のシステム障害イベントを接続する。
 通知対象は本人の要対応、本人が行った提出・申請の結果、放置すると業務に支障がある異常に限る。
 保存・通常 CRUD・同期の成功は Toast、操作証跡は audit log の責務とする。
 
@@ -214,3 +214,60 @@ unitは116ファイル789件、Storybookは29ファイル87件成功。typecheck
 本番相当build、service-role台帳検査、CI分類17件、diff-checkも成功。
 E2Eは実行していない。Staging / Productionへのmigration適用・配備は実施していない。
 検証用DBは終了後に停止・破棄した。
+
+## シフトの本人影響通知（Issue #61）
+
+`shift.assigned` は情報（`info`）、`shift.unassigned` / `shift.time_changed` /
+`shift.cancelled` / `shift.reopened` は要対応（`action_required`）。このIssueの
+「priority」の情報・要対応は、共通契約では `category` に対応する。
+本文・タイトルは共通定義の固定文言だけを使い、利用者名、支援内容、シフトタイトル、
+備考、キャンセル理由を含めない。遷移先は既存の `/app/shifts/my`。
+
+親シフトの `start_at` / `end_at`、`status` の cancelled 境界、
+`shift_staffs` の staff ID 集合、および担当者別の区分 `start_at` / `end_at` を比較する。
+区分のID・並び順・職種・サービス種別、備考、タイトル、内部属性、Google同期状態だけの
+変更は通知しない。日時はepoch値で比較し、同じ時刻の別timezone表記も再通知しない。
+新規作成・自動生成は追加担当者だけへ割当通知を送り、再生成・再送・同一内容の再保存はno-op。
+親日時変更は更新後の担当者へ、区分日時変更はその区分で勤務時間が変わった継続担当者へ送る。
+担当解除は更新前だけに存在するスタッフへ送り、取消・再開は更新後の担当者へ送る。
+
+private の比較状態テーブルは1シフト1行で組織ID・スタッフID・日時・状態を保持する。
+RLS有効・API全ロールへのアクセスREVOKEとし、通常の業務履歴や監査として使わない。
+導入時は既存シフトの状態を初期化し、過去の割当を通知しない。
+認可済みの既存RPC / RLS更新から比較をキューし、同一トランザクションの終了時に
+最終状態を比較する。区分保存に伴うスタッフ一覧のdelete/reinsertから
+一時的な解除・再割当を通知しない。同じスタッフが複数区分にいても通知は重複しない。
+状態行ロックと発生ごとのUUID、共通unique indexで再送・同時更新の重複を防ぎ、
+別の時刻への再変更・実際の再割当は新しい通知になる。
+
+通常編集の区分保存と親シフト更新は `update_shift_with_segments_atomic` へまとめる。
+セッション・edit all scope・同一事業所・対象アクセス・利用者アクセスをDBでも検証し、
+区分保存は既存RPCの検証を使う。実更新行を返した後だけ、既存の監査・Google同期に進む。
+区分付き記録の編集制限、同期キュー、タイトル再構築を維持する。
+通知は `required` として業務更新と同じトランザクションに含め、生成失敗時は
+親シフト・区分・担当・通知をすべてロールバックする。ログは固定文言だけを残す。
+
+受信者は同じ事業所の有効なstaff→user紐付けを持つ所属ユーザーだけ。
+共通の有効所属判定 `private.report_workflow_recipients` を利用し、退会・Auth削除・ban・
+super admin・削除済み事業所・削除済みstaffを除外する。未紐付けや他組織ユーザーは
+通知不能としてスキップし、シフト保存を失敗させない。
+actorとreceiverが同一なら自己通知を抑制し、別スタッフへの変更は必ず対象者へ送る。
+通知の本人限定RLS、シフトの既存認可、`permissions.ts` のscopeと整合を確認し、
+既存の権限・RLS policyは変更しない。新しい管理権限やservice role用途は追加しない。
+
+Context7確認: 2026-10-07、Supabase公式のPostgreSQL trigger、security definer、
+固定search_pathと明示的EXECUTE権限。対象はSupabase JS 2.108.2、PostgreSQL 17、
+Supabase CLI 2.108.0。Next.js 16.3.6同梱のuse-serverガイドも確認した。
+依存バージョンを移行せず、新規migrationだけを追加する。
+
+### Issue #61 の検証（2026-10-07）
+
+`npm run typecheck`、`npm run lint -- --max-warnings=0`、`npm run test:unit`
+（116ファイル・793件）、`npm run build`、`npm run security:service-role`、
+`npm run test:ci-scope`（17件）、`git diff --check` が成功した。
+専用の一時ローカルSupabaseで、既存migrationからの更新と空DBからの再構築を実施。
+既存の合成シフトを含む更新確認4件、全pgTAP（12ファイル・401件、
+うち本Issueの43件）、DB lint（warning 0件）が成功した。
+public schemaの再生成型との差分は新規RPCの追加だけで、チェックイン型と一致する。
+2つの実トランザクションで同じ日時変更を競合させ、両方のcommit後に通知が1件だけであることも確認した。
+E2E・クラウドmigration・実Google連携は実行していない。

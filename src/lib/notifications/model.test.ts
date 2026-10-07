@@ -15,8 +15,15 @@ describe('notification display contract', () => {
     expect(getNotificationLink('/app/reports?id=example')).toBe('/app/reports?id=example');
     expect(getNotificationLink(null)).toBeNull();
   });
+  it('classifies new shift assignments as info and schedule disruption as action required', () => {
+    expect(notificationEvents['shift.assigned'].category).toBe('info');
+    for (const event of ['shift.unassigned', 'shift.time_changed', 'shift.cancelled', 'shift.reopened'] as const) {
+      expect(notificationEvents[event].category).toBe('action_required');
+      expect(notificationEvents[event].linkUrl).toBe('/app/shifts/my');
+    }
+  });
   it('uses the same fixed templates in the DB and application', () => {
-    const sql = readFileSync('supabase/migrations/20261007000001_report_workflow_notifications.sql', 'utf8');
+    const sql = readFileSync('supabase/migrations/20261007000002_shift_business_notifications.sql', 'utf8');
     const template = sql.split('$notification_templates$')[1];
     expect(JSON.parse(template)).toEqual(notificationEvents);
     expect(Object.keys(notificationEvents)).toHaveLength(15);
