@@ -128,12 +128,23 @@ export async function updateShiftInternal(
       updateData.google_sync_status = 'pending_upsert';
       updateData.google_sync_error = null;
       updateData.google_synced_at = null;
-      let query = supabase.from('shifts').update(updateData).eq('id', shiftId).is('deleted_at', null);
-      if (payload.organizationId) query = query.eq('organization_id', payload.organizationId);
-      const { data, error } = await query.select('id, organization_id').maybeSingle();
-      if (error) throw sanitizeDbError(error, 'updateShiftInternal');
-      if (!data) throw new ExpectedActionError('VALIDATION_ERROR', 'シフトを更新できませんでした。再読み込みしてお試しください。');
-      targetOrgId = data.organization_id;
+      if (payload.segments !== undefined) {
+        if (!payload.organizationId) throw new ExpectedActionError('VALIDATION_ERROR', 'シフトの事業所を指定してください');
+        const { data, error } = await supabase.rpc('update_shift_with_segments_atomic', {
+          p_org_id: payload.organizationId, p_shift_id: shiftId,
+          p_update: asJson(updateData), p_segments: asJson(payload.segments),
+        });
+        if (error) throw sanitizeDbError(error, 'updateShiftInternal');
+        if (!data?.[0]) throw new ExpectedActionError('VALIDATION_ERROR', 'シフトを更新できませんでした。再読み込みしてお試しください。');
+        targetOrgId = data[0].organization_id;
+      } else {
+        let query = supabase.from('shifts').update(updateData).eq('id', shiftId).is('deleted_at', null);
+        if (payload.organizationId) query = query.eq('organization_id', payload.organizationId);
+        const { data, error } = await query.select('id, organization_id').maybeSingle();
+        if (error) throw sanitizeDbError(error, 'updateShiftInternal');
+        if (!data) throw new ExpectedActionError('VALIDATION_ERROR', 'シフトを更新できませんでした。再読み込みしてお試しください。');
+        targetOrgId = data.organization_id;
+      }
     }
 
     if (targetOrgId) {

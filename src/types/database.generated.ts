@@ -3257,6 +3257,18 @@ export type Database = {
         Args: { p_org_id: string; p_setting: string; p_value: string }
         Returns: undefined
       }
+      update_shift_with_segments_atomic: {
+        Args: {
+          p_org_id: string
+          p_segments: Json
+          p_shift_id: string
+          p_update: Json
+        }
+        Returns: {
+          id: string
+          organization_id: string
+        }[]
+      }
       upsert_client_form_authorized: {
         Args: { p_client_id: string; p_organization_id: string; p_schema: Json }
         Returns: undefined

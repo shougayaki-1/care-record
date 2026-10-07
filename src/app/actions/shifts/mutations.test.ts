@@ -40,14 +40,12 @@ vi.mock('@/utils/supabase/retentionPolicy', () => ({
   getRetentionPolicy: async () => ({ years: 10, legalBasis: 'test-policy' }),
   retentionDeadline: () => '2036-01-01T00:00:00Z',
 }));
-vi.mock('../shiftSegments', () => ({ saveShiftSegments: vi.fn().mockResolvedValue({ ok: true, data: undefined }) }));
 vi.mock('./googleSyncInternal', () => ({
   trySyncSilently: mocks.sync, processShiftsSequential: mocks.process,
 }));
 
 import { deleteShift as deleteShiftResult, deleteShiftsBatch as deleteShiftsBatchResult, deleteShiftsDbOnly as deleteShiftsDbOnlyResult, toggleCancelShift as toggleCancelShiftResult, updateShift as updateShiftResult, updateShiftTimeOnly as updateShiftTimeOnlyResult } from './crud';
 import { softDeleteShiftIds, updateShiftInternal } from './internal';
-import { saveShiftSegments } from '../shiftSegments';
 
 const existing = { organization_id: 'org-1' };
 const success = { data: { id: 'shift-1', ...existing }, error: null };
@@ -63,18 +61,38 @@ beforeEach(() => {
   mocks.rpc.mockResolvedValue({ data: 1, error: null });
   mocks.sync.mockResolvedValue(undefined);
   mocks.process.mockResolvedValue({ failed: 0, stats: {} });
-  vi.mocked(saveShiftSegments).mockResolvedValue({ ok: true, data: undefined });
 });
 
-it('propagates a failed segment save without updating or auditing the parent shift', async () => {
-  mocks.results.push({ data: existing, error: null });
-  vi.mocked(saveShiftSegments).mockResolvedValue({ ok: false, error: { code: 'FORBIDDEN', message: 'この操作を行う権限がありません' } });
-  await expect(updateShiftResult('shift-1', { segments: [] })).resolves.toEqual({
-    ok: false, error: { code: 'FORBIDDEN', message: 'この操作を行う権限がありません' },
+describe('atomic parent and segment editing', () => {
+  it.each([['DB / required notification failure', dbError], ['zero rows', { data: [], error: null }]])(
+    'rejects %s without Google sync or success audit', async (_, result) => {
+      mocks.results.push({ data: existing, error: null }, inaccessible);
+      mocks.rpc.mockResolvedValue(result);
+      await expect(updateShiftResult('shift-1', { segments: [], startAt: 'start' })).resolves.toMatchObject({ ok: false });
+      expect(mocks.rpc).toHaveBeenCalledWith('update_shift_with_segments_atomic', expect.objectContaining({
+        p_org_id: 'org-1', p_shift_id: 'shift-1', p_segments: [],
+        p_update: expect.objectContaining({ start_at: 'start' }),
+      }));
+      expect(mocks.queries.some(query => query.update)).toBe(false);
+      expect(mocks.sync).not.toHaveBeenCalled();
+      expect(mocks.audit).not.toHaveBeenCalled();
+    },
+  );
+  it('syncs and audits the combined edit only after the atomic RPC succeeds', async () => {
+    mocks.results.push({ data: existing, error: null }, inaccessible);
+    mocks.rpc.mockResolvedValue({ data: [success.data], error: null });
+    await expect(updateShiftResult('shift-1', { segments: [] })).resolves.toEqual({ ok: true, data: { success: true } });
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.sync).toHaveBeenCalledWith('org-1', 'shift-1', 'sync');
+    expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'shift.update', details: { fields: ['segments'] } }));
+    expect(mocks.rpc.mock.invocationCallOrder[0]).toBeLessThan(mocks.sync.mock.invocationCallOrder[0]!);
   });
-  expect(mocks.queries.some(query => query.update)).toBe(false);
-  expect(mocks.sync).not.toHaveBeenCalled();
-  expect(mocks.audit).not.toHaveBeenCalled();
+  it('rejects a tenant change before any segment mutation', async () => {
+    mocks.results.push({ data: existing, error: null });
+    await expect(updateShiftResult('shift-1', { organizationId: 'org-2', segments: [] })).resolves.toMatchObject({ ok: false });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.audit).not.toHaveBeenCalled();
+  });
 });
 
 const updates = [
