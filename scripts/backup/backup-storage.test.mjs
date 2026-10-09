@@ -22,6 +22,10 @@ const args = process.argv.slice(2);
 fs.appendFileSync(path.join(process.env.MOCK_ROOT, 'calls'), JSON.stringify(args) + '\\n');
 if (process.env.MOCK_DENY === 'true') process.exit(1);
 if (args[1] === 'ls') {
+  if (process.env.MOCK_LIST_ERROR) {
+    process.stderr.write(process.env.MOCK_LIST_ERROR);
+    process.exit(1);
+  }
   process.stdout.write(process.env.MOCK_LISTING || '');
   process.exit(0);
 }
@@ -119,7 +123,7 @@ function freshnessFixture(run) {
 const arg = process.argv.find(arg => arg.startsWith('--date='));
 console.log(arg ? Date.parse(arg.slice(7)) / 1000 : process.env.MOCK_NOW);
 `);
-    const base = { ...env, APP_ENV: 'production', GCS_BACKUP_BUCKET: 'fixture-legacy', GCS_REPLICA_BUCKET: 'fixture-replica', GCS_TIERED_BACKUP_ENABLED: 'true', GCS_RECENT_BACKUP_BUCKET: 'fixture-recent', GCS_RECENT_REPLICA_BUCKET: 'fixture-recent-osaka', DISCORD_ALERT_WEBHOOK_URL: '' };
+    const base = { ...env, APP_ENV: 'production', GCS_BACKUP_BUCKET: 'fixture-legacy', GCS_REPLICA_BUCKET: 'fixture-replica', GCS_TIERED_BACKUP_ENABLED: 'true', GCS_RECENT_BACKUP_BUCKET: 'fixture-recent', GCS_RECENT_REPLICA_BUCKET: 'fixture-recent-osaka', DISCORD_ALERT_WEBHOOK_URL: '', EVIDENCE_URL: 'https://github.com/fixture/repo/actions/runs/42' };
     const uri = 'gs://fixture-recent/full/production/recent/2026/10/07/care-record-production-20261007T001700Z.tar.gz';
     const listing = `123 2026-10-07T23:59:00Z ${uri}\n65 2026-10-07T23:59:01Z ${uri}.sha256\n`;
     const check = (hours, extra = {}) => spawnSync('bash', ['scripts/backup/check-backup-freshness.sh'], {
@@ -127,6 +131,11 @@ console.log(arg ? Date.parse(arg.slice(7)) / 1000 : process.env.MOCK_NOW);
     });
     return run({ dir, check, listing, uri });
   });
+}
+
+function executableNotificationMocks(dir) {
+  writeFileSync(join(dir, 'jq'), `#!${process.execPath}\nconst fs = require('node:fs');\nfs.appendFileSync(process.env.MOCK_ROOT + '/notification-jq-args', JSON.stringify(process.argv.slice(2)) + '\\n');\nconsole.log('fixture-payload');\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'curl'), `#!${process.execPath}\nconst fs = require('node:fs');\nfs.appendFileSync(process.env.MOCK_ROOT + '/notification-curl-args', JSON.stringify(process.argv.slice(2)) + '\\n');\n`, { mode: 0o755 });
 }
 
 test('freshness requires a pair and uses dump start rather than copy time, at the 14h boundary', () => freshnessFixture(({ dir, check, uri }) => {
@@ -155,4 +164,36 @@ console.log(args.at(-1).includes('osaka') ? stale : fresh);
 `, { mode: 0o755 });
   assert.equal(check(26).status, 0);
   assert.equal(check(26 + 1 / 3600).status, 1);
+}));
+
+test('freshness reports permission failures and missing complete pairs with safe cause categories', () => freshnessFixture(({ check, uri }) => {
+  const denied = check(1, { MOCK_LIST_ERROR: 'ERROR 403: storage.objects.list permission denied' });
+  assert.equal(denied.status, 1);
+  assert.match(denied.stdout, /target=tokyo cause=listing_permission_denied latest_generation_utc=none age_seconds=unknown threshold_seconds=50400/);
+  assert.match(denied.stdout, /target=osaka cause=listing_permission_denied latest_generation_utc=none age_seconds=unknown threshold_seconds=93600/);
+  assert.doesNotMatch(denied.stdout + denied.stderr, /storage\.objects\.list permission denied/i);
+
+  const listingFailed = check(1, { MOCK_LIST_ERROR: 'temporary network failure' });
+  assert.equal(listingFailed.status, 1);
+  assert.match(listingFailed.stdout, /cause=listing_failed latest_generation_utc=none age_seconds=unknown/);
+
+  const missingPair = check(1, { MOCK_LISTING: `123 2026-10-07T23:59:00Z ${uri}\n` });
+  assert.equal(missingPair.status, 1);
+  assert.match(missingPair.stdout, /cause=no_valid_pair latest_generation_utc=none age_seconds=unknown/);
+}));
+
+test('stale generation logs include its timestamp, computed age, threshold, and alert diagnostics', () => freshnessFixture(({ dir, check, listing }) => {
+  executableNotificationMocks(dir);
+  writeFileSync(join(dir, 'gcloud'), `#!${process.execPath}\nconst args = process.argv.slice(2);\nconst listing = ${JSON.stringify(listing)};\nconst fresh = listing.replaceAll('20261007T001700Z', '20261008T001700Z');\nprocess.stdout.write(args.at(-1).includes('osaka') ? listing : fresh);\n`, { mode: 0o755 });
+  const stale = check(27, { MOCK_LISTING: listing, DISCORD_ALERT_WEBHOOK_URL: 'https://discord.invalid/webhook' });
+  assert.equal(stale.status, 1);
+  assert.match(stale.stdout, /environment=production target=tokyo cause=within_threshold latest_generation_utc=2026-10-08T00:17:00Z age_seconds=10800 threshold_seconds=50400/);
+  assert.match(stale.stdout, /environment=production target=osaka cause=age_over_threshold latest_generation_utc=2026-10-07T00:17:00Z age_seconds=97200 threshold_seconds=93600/);
+
+  const notificationArgs = readFileSync(join(dir, 'notification-jq-args'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(notificationArgs.length, 1);
+  assert.ok(notificationArgs[0].includes('replica_freshness_over_26h_age_over_threshold'));
+  assert.ok(notificationArgs[0].includes('cause=age_over_threshold latest_generation_utc=2026-10-07T00:17:00Z age_seconds=97200 threshold_seconds=93600'));
+  assert.ok(notificationArgs[0].includes('https://github.com/fixture/repo/actions/runs/42'));
+  assert.equal(readFileSync(join(dir, 'notification-curl-args'), 'utf8').trim().split('\n').length, 1);
 }));
