@@ -49,7 +49,7 @@
 
 ### Productionのread-only照合
 
-本番の原因をスケジュール遅延または転送障害と確定する前に、Productionの正しいGCP projectとbucketを明示し、read-only権限で以下を照合します。バックアップ本体・DB dump・checksum本文・secretを読まず、`cat`、ダウンロード、復元、apply、転送の手動起動は行いません。
+本番の原因をスケジュール遅延または転送障害と確定する前に、Productionの正しいGCP projectとbucketを明示し、read-only権限で以下を照合します。バックアップ本体（`.tar.gz`）・DB dump・secretは読みません。`.sha256`の値を照合する場合はローカルのメモリ内だけで扱い、保存・表示・公開ログへの出力をせず、`cat`はそのsidecarに限ります。ダウンロード、復元、apply、転送の手動起動は行いません。
 
 ```sh
 export BACKUP_PROJECT_ID='care-record-482716'
