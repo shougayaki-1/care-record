@@ -5,6 +5,12 @@ locals {
     weekly  = 32
     monthly = var.backup_retention_days
   }
+  tier_transfer_intervals = {
+    recent  = "21600s"
+    daily   = "86400s"
+    weekly  = "86400s"
+    monthly = "86400s"
+  }
   tier_buckets = var.enable_tiered_backups ? merge([
     for tier, days in local.backup_tiers : {
       for region in ["tokyo", "osaka"] : "${tier}-${region}" => {
@@ -122,7 +128,10 @@ resource "google_storage_transfer_job" "tier_tokyo_to_osaka" {
       seconds = 0
       nanos   = 0
     }
-    repeat_interval = "86400s"
+    # Storage Transfer's schedule is an interval between scheduled starts;
+    # start_time_of_day does not guarantee the operation's actual start time.
+    # Run recent every six hours to absorb backup and transfer start delays.
+    repeat_interval = local.tier_transfer_intervals[each.key]
   }
 
   depends_on = [

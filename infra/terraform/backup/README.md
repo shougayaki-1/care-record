@@ -1,6 +1,6 @@
 # バックアップ基盤
 
-このモジュールは、東京（`asia-northeast1`）と大阪（`asia-northeast2`）にそれぞれバックアップ用バケット、10年間保管する監査ログ用WORMバケット、Storage Transferによる日次複製、GitHub ActionsのWorkload Identity Federationを構成します。サービスアカウント鍵は作成しません。
+このモジュールは、東京（`asia-northeast1`）と大阪（`asia-northeast2`）にそれぞれバックアップ用バケット、10年間保管する監査ログ用WORMバケット、Storage Transferによる世代別の定期複製、GitHub ActionsのWorkload Identity Federationを構成します。サービスアカウント鍵は作成しません。
 
 `staging`と`production`では、Terraformのstateとバックアップ用リソースを分けて管理してください。`staging`環境はバックアップワークフローが使うGitHub Environmentであり、`staging`ブランチを常設する必要はありません。
 
@@ -18,7 +18,7 @@
 5. `workload_identity_provider`、`backup_service_account`、`backup_bucket`の各出力値を、対応するGitHub Environmentの変数に設定します。バックアップワークフローはこれらの値をGitHubから読み込み、アプリケーションの`.env.local`やVercelの実行時認証情報は使いません。
 6. 保持設定と保存済みplanについて別途承認を得るまで、`enable_bucket_lock = false`のままにしてください。GCSで一度`true`にすると元に戻せません。
 
-転送ジョブは新しい不変オブジェクトを毎日コピーし、削除は複製先へ反映しません。26時間の複製データ鮮度アラートでは、削除が同期されることを期待せず、両バケットの最新オブジェクトを比較してください。
+転送ジョブは新しい不変オブジェクトを東京から大阪へコピーし、削除は複製先へ反映しません。`recent`は6時間間隔、`daily` / `weekly` / `monthly`は24時間間隔です。26時間の複製データ鮮度アラートでは、削除が同期されることを期待せず、両バケットの最新オブジェクトを比較してください。
 
 ## 世代管理（Issue #64）
 
@@ -31,13 +31,43 @@
 | weekly | 日曜の最初の定期成功 | 32日 | Standard |
 | monthly | 1日の最初の定期成功 | `backup_retention_days`、最低2555日 | 90日後にArchive |
 
+東京から大阪への転送間隔は`recent`が6時間、ほかの区分が24時間です。転送間隔はジョブの開始間隔であり、`start_time_of_day`は予定時刻です。Storage Transfer Serviceの実開始時刻は予定より遅れる場合があるため、この間隔だけで鮮度を保証しません。
+
 各区分を別バケットにすることで、短期の削減と月次の7年保持をbucket-level retentionで両立します。例: `full/production/weekly/2026/11/01/care-record-production-2026-11-01.tar.gz`。recentのファイル名だけは取得開始時のUTC timestampを使います。同一アーカイブを選択された区分へ作成時に保存し、後から昇格しません。日曜と1日が重なれば同じ内容をdaily / weekly / monthlyへ保存します。1つ目の定期成功が代表となり、同日の2つ目の実行や再実行では`--if-generation-match=0`により既存代表を維持します。再試行の日付は最初の試行開始時に固定します。手動実行はrecentだけに保存し、代表を増やしません。代表日に全定期試行が失敗した場合は復元点が欠落するため、既存の失敗通知から再発防止・隔離環境での復元確認を行ってください。
 
 新規バケットはversioningを無効、soft deleteを0にします。期限後の非現行世代・soft deleteによる長期残存を避けるためです。保存者にはobjectCreator / objectViewerのみを与え、上書き・削除を許可しません。`enable_tier_bucket_lock`は既存の`enable_bucket_lock`とは分離し、初期値falseです。新規区分のretentionを不可逆にロックする前に別途saved planを承認してください。falseの状態は管理者による変更不能を保証するものではありません。
 
 本体と`.sha256`には同じbucket retention / lifecycleが適用されます。checksumはそのURIの本体から作り、本体だけ保存された試行は次回に補完します。不整合があれば上書きせず失敗します。GCSのオブジェクト作成・Lifecycle処理・複製は2ファイルの原子操作ではないため、一時的な片方だけの状態は発生し得ます。鮮度監視はペアが揃った世代だけを成功とみなし、復元も外部checksumと内部manifestを検証します。期限付近の両ファイルの消去時刻が完全同時であることは保証しません。
 
-各区分を日次で大阪へ独立複製し、source削除・sink固有オブジェクト削除・上書きをすべて無効にします。大阪も同じ保持日数で独立してLifecycleを実行するため、東京での削除を同期しません。複製遅延分だけ大阪の期限は後になります。recentの2日保持は日次転送を待てるように設定しています。freshnessはrecentだけを検索し、完全なペアの**取得開始timestamp**を判定します。転送時刻や古い月次世代のコピーで鮮度を更新しません。
+各区分を独立して大阪へ複製し、source削除・sink固有オブジェクト削除・上書きをすべて無効にします。`recent`は6時間間隔、`daily` / `weekly` / `monthly`は24時間間隔です。大阪も同じ保持日数で独立してLifecycleを実行するため、東京での削除を同期しません。複製遅延分だけ大阪の期限は後になります。recentの2日保持には通常時で最大8回の予定転送機会がありますが、48時間を超えて転送が停止すれば、期限後のオブジェクトを複製できません。freshnessはrecentだけを検索し、完全なペアの**取得開始timestamp**を判定します。転送時刻や古い月次世代のコピーで鮮度を更新しません。
+
+## 26時間鮮度監視と転送診断（Issue #103）
+
+`recent`の転送を24時間から6時間間隔へ変更すると、通常時の予定実行回数は1日あたり1回から4回になります。保存先にない新しい不変オブジェクトだけをコピーする設定は維持するため、正常時の転送データ量は新規バックアップ世代で決まり、転送ジョブの実行・一覧要求・ログの回数は増えます。実際の課金は転送メトリクスとGCP請求情報で確認してください。
+
+鮮度監視は東京14時間、大阪26時間の閾値を維持します。各対象について、最新の完全な`.tar.gz` / `.sha256`ペアの取得開始UTC時刻、監視時点の経過秒数、閾値、原因分類をActionsログに記録します。通知は環境、実行URL、原因分類、最新世代時刻、経過秒数、閾値を表示します。原因は`listing_permission_denied`、`listing_failed`、`no_valid_pair`、`age_over_threshold`、`generation_in_future`などに分かれ、生のGCPエラー本文は出力しません。古い世代の再転送は、ファイル名に記録された取得開始時刻で判定するため鮮度をリセットしません。
+
+### Productionのread-only照合
+
+本番の原因をスケジュール遅延または転送障害と確定する前に、Productionの正しいGCP projectとbucketを明示し、read-only権限で以下を照合します。バックアップ本体（`.tar.gz`）・DB dump・secretは読みません。`.sha256`の値を照合する場合はローカルのメモリ内だけで扱い、保存・表示・公開ログへの出力をせず、`cat`はそのsidecarに限ります。ダウンロード、復元、apply、転送の手動起動は行いません。
+
+```sh
+export BACKUP_PROJECT_ID='care-record-482716'
+export RECENT_TOKYO_BUCKET='replace-with-production-recent-tokyo-bucket'
+export RECENT_OSAKA_BUCKET='replace-with-production-recent-osaka-bucket'
+
+gcloud storage ls --long --recursive "gs://${RECENT_TOKYO_BUCKET}/full/production/recent/**"
+gcloud storage ls --long --recursive "gs://${RECENT_OSAKA_BUCKET}/full/production/recent/**"
+gcloud transfer jobs list --project="${BACKUP_PROJECT_ID}" --format='table(name,status,latestOperationName)'
+gcloud transfer jobs describe 'transferJobs/JOB_ID' --project="${BACKUP_PROJECT_ID}" --format='yaml(status,schedule,transferSpec)'
+gcloud transfer operations list --project="${BACKUP_PROJECT_ID}" --job-names='transferJobs/JOB_ID' --format=json | jq '[.[] | {name, status: .metadata.status, startTime: .metadata.startTime, endTime: .metadata.endTime, counters: .metadata.counters, errorCodes: [.metadata.errorBreakdowns[]?.errorCode?]}]'
+```
+
+最新の候補世代については、両側の`.tar.gz`と`.sha256`それぞれに`gcloud storage objects describe gs://BUCKET/OBJECT --format='yaml(generation,updateTime,size,crc32c)'`を実行し、メタデータを比較します。必要なら`.sha256`オブジェクトだけを`gcloud storage cat`で読み、出力を保存・表示せず、東京と大阪のchecksum文字列が一致するか確認します。`.tar.gz`本文は読まず、各バケットの`.tar.gz`のCRC32Cメタデータを比較します。Storage Transfer operationの結果から開始・終了時刻、status、転送件数、sanitizedなエラー分類を記録し、`daily` / `weekly` / `monthly`の代表世代やlegacy bucket、監査WORMの設定は変更されていないことを確認します。
+
+調査記録には、実環境のsecret、オブジェクト本文、DB情報を含めません。対象project、jobの有効状態、転送開始・完了時刻、成功/失敗、コピー件数、sanitizedなエラー分類、両バケットの最新完全ペア時刻とgeneration/updateTimeだけを残します。read-only認証または権限がない場合は仮説を確定せず、結果を`needs-human`として報告し、本番applyやjob変更を行いません。
+
+適用前に各環境の正しいstateを読み込んだsaved planを作り、recentのジョブ更新のみで既存bucket、legacy job、daily/weekly/monthly job、audit WORMにdestroy/replaceや保持短縮がないことを確認してください。対象planに含まれる変更は6時間間隔への更新、通常時の予定実行回数は4倍です。実行開始遅延と失敗は26時間監視で検知し続けます。ProductionへのTerraform applyやStorage Transfer jobの更新・手動起動は、このissue実装の自動操作範囲外です。
 
 ## 安全な移行
 
@@ -78,7 +108,7 @@ terraform validate
 terraform test
 ```
 
-Terraformのmock providerによるplanテストは既存バケット属性の維持・区分別保持・転送・無効時を検査します。実stateに対するdestroy不在の証跡には、別途各環境のsaved planが必要です。Context7で2026-10-07にGoogle providerのbucket retention / Bucket Lock / lifecycle / versioning / soft delete仕様を確認（本モジュールの固定providerは7.40.0）しました。
+Terraformのmock providerによるplanテストは既存バケット属性の維持・区分別保持・転送・無効時を検査します。実stateに対するdestroy不在の証跡には、別途各環境のsaved planが必要です。Context7で2026-10-07にGoogle providerのbucket retention / Bucket Lock / lifecycle / versioning / soft delete仕様、2026-10-09にStorage Transfer Serviceの`repeat_interval`（開始間隔、最小1時間）と予定開始時刻から実開始が遅れる挙動を確認しました。本モジュールの固定providerは7.40.0です。
 
 ### 読み取りplanの確認記録（2026-10-07）
 

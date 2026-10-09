@@ -13,10 +13,19 @@ if [[ "${GCS_TIERED_BACKUP_ENABLED:-false}" == "true" ]]; then
   prefix="full/${APP_ENV}/recent"
 fi
 
-latest_epoch() {
+latest_generation() {
   local bucket="$1"
-  local latest listing
-  listing="$(gcloud storage ls --long --recursive "gs://${bucket}/${prefix}/**")" || return 1
+  local latest listing listing_error timestamp epoch
+  if ! listing="$(gcloud storage ls --long --recursive "gs://${bucket}/${prefix}/**" 2>&1)"; then
+    listing_error="$(tr '[:upper:]' '[:lower:]' <<< "$listing")"
+    if [[ "$listing_error" == *403* || "$listing_error" == *permission* || "$listing_error" == *denied* || "$listing_error" == *forbidden* || "$listing_error" == *storage.objects.list* ]]; then
+      printf 'listing_permission_denied\tnone\tunknown\n'
+    else
+      printf 'listing_failed\tnone\tunknown\n'
+    fi
+    return 0
+  fi
+
   # Require both objects, and measure dump start from the immutable generation
   # name. Copying an old archive to Osaka must not reset its freshness clock.
   latest="$(awk '$1 ~ /^[0-9]+$/ { objects[$3]=1 }
@@ -25,23 +34,53 @@ latest_epoch() {
         sub(/^.*-/, "", uri); sub(/\.tar\.gz$/, "", uri); print uri
       }
     }}' <<< "$listing" | sort | tail -n 1)"
-  [[ -n "$latest" ]] || return 1
-  date --date="${latest:0:4}-${latest:4:2}-${latest:6:2}T${latest:9:2}:${latest:11:2}:${latest:13:2}Z" +%s
+  if [[ -z "$latest" ]]; then
+    printf 'no_valid_pair\tnone\tunknown\n'
+    return 0
+  fi
+
+  timestamp="${latest:0:4}-${latest:4:2}-${latest:6:2}T${latest:9:2}:${latest:11:2}:${latest:13:2}Z"
+  if ! epoch="$(date --date="$timestamp" +%s 2>/dev/null)"; then
+    printf 'invalid_generation_timestamp\t%s\tunknown\n' "$timestamp"
+    return 0
+  fi
+  printf 'ok\t%s\t%s\n' "$timestamp" "$epoch"
 }
 
-now="$(date +%s)"
-primary="$(latest_epoch "$GCS_BACKUP_BUCKET" || true)"
-replica="$(latest_epoch "$GCS_REPLICA_BUCKET" || true)"
+check_target() {
+  local target="$1" bucket="$2" threshold="$3" alert_name="$4"
+  local result cause latest_utc latest_epoch age now detail
+  result="$(latest_generation "$bucket")"
+  IFS=$'\t' read -r cause latest_utc latest_epoch <<< "$result"
+
+  if [[ "$cause" == "ok" ]]; then
+    now="$(date +%s)"
+    age=$((now - latest_epoch))
+    if (( age < 0 )); then
+      cause="generation_in_future"
+    elif (( age > threshold )); then
+      cause="age_over_threshold"
+    else
+      cause="within_threshold"
+    fi
+  else
+    age="unknown"
+  fi
+
+  printf 'backup_freshness environment=%s target=%s cause=%s latest_generation_utc=%s age_seconds=%s threshold_seconds=%s\n' \
+    "$APP_ENV" "$target" "$cause" "$latest_utc" "$age" "$threshold"
+
+  if [[ "$cause" != "within_threshold" ]]; then
+    detail="cause=${cause} latest_generation_utc=${latest_utc} age_seconds=${age} threshold_seconds=${threshold}"
+    "$(dirname "$0")/notify-discord.sh" Critical "${alert_name}_${cause}" "${EVIDENCE_URL:-unavailable}" "$detail" || true
+    return 1
+  fi
+  return 0
+}
+
 status=0
 
-if [[ -z "$primary" || $((now - primary)) -gt 50400 ]]; then
-  "$(dirname "$0")/notify-discord.sh" Critical backup_freshness_over_14h "${EVIDENCE_URL:-unavailable}" || true
-  status=1
-fi
-
-if [[ -z "$replica" || $((now - replica)) -gt 93600 ]]; then
-  "$(dirname "$0")/notify-discord.sh" Critical replica_freshness_over_26h "${EVIDENCE_URL:-unavailable}" || true
-  status=1
-fi
+check_target tokyo "$GCS_BACKUP_BUCKET" 50400 backup_freshness_over_14h || status=1
+check_target osaka "$GCS_REPLICA_BUCKET" 93600 replica_freshness_over_26h || status=1
 
 exit "$status"
