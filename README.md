@@ -22,7 +22,7 @@ npm run dev
 
 ## リリース手順
 
-通常は `feature/*` から PR を作成し、`main` に統合します。常設の `staging` ブランチは必須ではありません。一人の担当メンテナーが PR を作成し、差分と検査結果を確認したうえで、PR に短いリリースノートを記録します。リリース記録には候補 SHA、関連する CI 結果、該当する場合はデータベースマイグレーションの結果、デプロイ URL とスモークテストの結果を含めます。
+CodexのIssue自動実装は `codex/issue-<番号>-<説明>`、手動機能開発は `feature/<説明>`、Issueを伴わない保守は目的が分かる `docs/*`、`chore/*` などからPRを作成し、`main` に統合します。基点・worktree・整理の方針は[AGENTS.md](AGENTS.md)を参照してください。常設の `staging` ブランチは必須ではありません。一人の担当メンテナーが PR を作成し、差分と検査結果を確認したうえで、PR に短いリリースノートを記録します。リリース記録には候補 SHA、関連する CI 結果、該当する場合はデータベースマイグレーションの結果、デプロイ URL とスモークテストの結果を含めます。
 
 アプリは Vercel の Git 連携でデプロイする方針です。既存の `care-record` Production 用プロジェクトと `care-record-staging` Preview 用プロジェクトを維持し、Supabase プロジェクトと環境変数はそれぞれ分けます。想定構成では、`care-record` が `main` のコミットを Production にデプロイし、`care-record-staging` が feature ブランチの Preview をデプロイします。両プロジェクトの存在とブランチ設定は確認済みです。残るセットアップ確認事項は[デプロイ手順](docs/deployment-runbook.md)に記載しています。このデプロイ経路を運用可能とみなす前に、設定を確認してください。
 

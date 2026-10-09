@@ -42,8 +42,10 @@ E2E のデータ準備とテスト手順は[テスト手順](testing.md)を参�
 
 ## ブランチとデプロイ
 
-日常の変更は `feature/*` ブランチから PR を作成し、確認後に `main` へ
-マージします。常設の `staging` ブランチは必須ではありません。既存の Staging 用 Supabase と
+CodexのIssue自動実装は `codex/issue-<番号>-<説明>`、手動機能開発は `feature/<説明>`、
+Issueを伴わない保守は目的が分かる `docs/*`、`chore/*` などからPRを作成し、確認後に `main` へ
+マージします。作業開始時点の最新 `origin/main` を基点とし、原則1 Issue = 1 branch = 1 PR、
+作業中のbranch/worktreeの無断再利用禁止、マージ後の不要branch整理は[AGENTS.md](../AGENTS.md)に従います。常設の `staging` ブランチは必須ではありません。既存の Staging 用 Supabase と
 Vercel Preview プロジェクトは、ホスト済み Auth・Storage・外部連携の動作確認に使います。Production と Staging の値は共有しません。
 
 アプリは Vercel Git 連携でデプロイする方針です。データベースのマイグレーションは手動で

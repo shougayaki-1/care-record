@@ -26,7 +26,7 @@
 
 ## 開発・リリースフロー
 
-- 通常の変更は`main`から作った`feature/*` branchで実装し、PRを自己レビューしてから`main`に統合する。常設`staging` branchは必須ではない。
+- CodexのIssue自動実装は`codex/issue-<番号>-<説明>`、手動機能開発は`feature/<説明>`、Issueを伴わない保守は目的が分かる`docs/*`、`chore/*`などを使う。原則1 Issue = 1 branch = 1 PRとし、作業開始時点の最新`origin/main`を基点にする。作業中のbranch/worktreeを無断で再利用せず、マージ後の不要branchは参照確認と必要な承認を経て削除する。詳細は[AGENTS.md](AGENTS.md)。PRを自己レビューしてから`main`に統合し、常設`staging` branchは必須ではない。
 - アプリ配備はVercel Git連携を使う。既存のProductionとPreview用Vercel projectは分離して使い、実際のbranch filterと必須CI設定は[デプロイ手順](docs/deployment-runbook.md)で確認する。
 - DB変更は新規・後方互換migrationをStaging、Productionの順に手動適用する。Production適用前にProject ref、migration history、dry-run、backup freshnessを確認し、動作中のアプリと互換性を保つ。
 - CIの変更パスごとの実行条件、E2Eガードと検査コマンドは[テスト手順](docs/testing.md)を参照する。
