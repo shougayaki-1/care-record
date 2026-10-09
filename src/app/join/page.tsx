@@ -1,11 +1,12 @@
 'use client';
 
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { getInvitationPreview, type InvitationPreview } from '@/app/actions/accounts';
 import {
-    Box, Typography, Paper, Stack, CircularProgress, Chip, Divider,
+    Box, Typography, Paper, Stack, CircularProgress, Chip, Divider, Alert,
 } from '@/components/ui/mui';
 import BusinessIcon from '@mui/icons-material/Business';
 import GroupAddIcon from '@mui/icons-material/GroupAdd';
@@ -15,7 +16,7 @@ import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import PersonIcon from '@mui/icons-material/Person';
 import { AppButton } from '@/components/ui';
 
-type State = 'loading' | 'preview' | 'invalid' | 'redirecting';
+type State = 'loading' | 'preview' | 'invalid' | 'redirecting' | 'error';
 
 export default function JoinPage() {
     const router = useRouter();
@@ -23,6 +24,8 @@ export default function JoinPage() {
     const code = searchParams.get('code') ?? '';
 
     const [state, setState] = useState<State>('loading');
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [attempt, setAttempt] = useState(0);
     const [preview, setPreview] = useState<InvitationPreview | null>(null);
 
     useEffect(() => {
@@ -34,7 +37,7 @@ export default function JoinPage() {
         const init = async () => {
             // 招待プレビューとセッションチェックを並行実行
             const [previewResult, { data: { session } }] = await Promise.all([
-                getInvitationPreview(code),
+                readActionResult(getInvitationPreview(code)),
                 supabase.auth.getSession(),
             ]);
 
@@ -49,8 +52,8 @@ export default function JoinPage() {
             setState(previewResult.valid ? 'preview' : 'invalid');
         };
 
-        init();
-    }, [code, router]);
+        void init().catch(error => { setErrorMessage(getActionErrorMessage(error)); setState('error'); });
+    }, [code, router, attempt]);
 
     const loginUrl = `/?next=${encodeURIComponent(`/setup?inviteCode=${code}`)}`;
     const registerUrl = `/?register=1&next=${encodeURIComponent(`/setup?inviteCode=${code}`)}`;
@@ -78,7 +81,7 @@ export default function JoinPage() {
                 variant="outlined"
                 sx={{ p: { xs: 3, sm: 4 }, width: '100%', maxWidth: 440, borderRadius: 3 }}
             >
-                {state === 'invalid' ? (
+                {state === 'error' ? <Stack spacing={2}><Alert severity="error">{errorMessage}</Alert><AppButton onClick={() => { setState('loading'); setAttempt(value => value + 1); }}>再試行</AppButton></Stack> : state === 'invalid' ? (
                     <Stack spacing={2} alignItems="center" textAlign="center">
                         <Box sx={{ p: 1.5, bgcolor: 'error.light', borderRadius: '50%', color: 'error.contrastText' }}>
                             <ErrorOutlineIcon fontSize="large" />

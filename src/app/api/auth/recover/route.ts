@@ -5,6 +5,7 @@ import { getLogoutStorageKeys, isLogoutStorageKey } from '@/utils/logoutState';
 import { runLogoutStep } from '@/utils/logoutStep';
 import { STEPUP_GRANT_COOKIE, STEPUP_NONCE_COOKIE } from '@/utils/authConstants';
 import { isSameOriginPost } from '@/utils/sameOrigin';
+import { recoveryHtml } from './recoveryHtml';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,15 +42,7 @@ function recoveryResponse(completed: boolean): NextResponse {
       .catch(() => {}).finally(() => window.location.replace('/'));
   </script>` : '';
 
-  return new NextResponse(`<!doctype html>
-<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CareRecordの復旧</title>
-<style nonce="${nonce}">body{font-family:sans-serif;line-height:1.7;margin:4rem auto;padding:1.5rem;max-width:36rem;color:CanvasText;background:Canvas}button{font:inherit;padding:.7rem 1rem;cursor:pointer}a{color:LinkText}</style>
-</head><body><main>
-<h1>${completed ? 'ログアウトしました' : 'CareRecordの復旧'}</h1>
-${completed ? '<p>ログイン画面へ戻ります。</p><p><a href="/">ログイン画面へ戻る</a></p>' :
-  '<p>画面が表示されない場合や別のアカウントで入り直す場合は、ログアウトしてやり直してください。</p><form action="/api/auth/recover" method="post"><button type="submit">ログアウトしてやり直す</button></form>'}
-</main>${script}</body></html>`, {
+  return new NextResponse(recoveryHtml(completed, nonce, script), {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',

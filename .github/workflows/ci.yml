@@ -62,6 +62,8 @@ jobs:
       - run: npm run lint -- --max-warnings=0
       - run: npm run security:service-role
       - run: npm run test:ci-scope
+      - run: node --test scripts/backup/*.test.mjs
+      - run: npm run test:codex-worker
 
   typecheck:
     name: Typecheck

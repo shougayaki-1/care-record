@@ -1,5 +1,6 @@
 'use server';
-import { sanitizeDbError, withSafeError } from '@/utils/errors';
+import type { ActionResult } from '@/types/actionResult';
+import { ExpectedActionError, sanitizeDbError, withActionResult } from '@/utils/errors';
 import { createSessionClient, assertShiftPermission, assertOrgRole } from '@/utils/supabase/auth';
 
 export type ShiftSegmentStaff = {
@@ -31,8 +32,8 @@ export type SaveSegmentInput = {
   staffs: { staff_id: string; staff_role_id?: string | null }[];
 };
 
-export async function getShiftSegments(orgId: string, shiftId: string): Promise<ShiftSegment[]> {
-  return withSafeError('getShiftSegments', async () => {
+export async function getShiftSegments(orgId: string, shiftId: string): Promise<ActionResult<ShiftSegment[]>> {
+  return withActionResult('getShiftSegments', async () => {
     await assertOrgRole(orgId);
     const supabase = await createSessionClient();
     const { data: shift, error: shiftError } = await supabase
@@ -42,7 +43,8 @@ export async function getShiftSegments(orgId: string, shiftId: string): Promise<
       .eq('organization_id', orgId)
       .is('deleted_at', null)
       .maybeSingle();
-    if (shiftError || !shift) throw new Error('シフトにアクセスできません');
+    if (shiftError) throw sanitizeDbError(shiftError, 'getShiftSegments:shift');
+    if (!shift) throw new ExpectedActionError('NOT_FOUND', 'シフトにアクセスできません');
     const { data, error } = await supabase
       .from('shift_segments')
       .select(`
@@ -65,8 +67,8 @@ export async function saveShiftSegments(
   orgId: string,
   shiftId: string,
   segments: SaveSegmentInput[]
-): Promise<void> {
-  return withSafeError('saveShiftSegments', async () => {
+): Promise<ActionResult<void>> {
+  return withActionResult('saveShiftSegments', async () => {
     await assertShiftPermission(orgId, 'edit', { shiftId });
     const supabase = await createSessionClient();
     const { error } = await supabase.rpc('replace_shift_segments', {

@@ -17,5 +17,28 @@
       "path": "/api/cron/backup-monthly",
       "schedule": "0 2 1 * *"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "codex/issue-56-continuous-worker": false,
+      "codex/issue-56-keyring-follow-up": false,
+      "codex/worker-worktree-verification": false,
+      "codex/issue-51-dx-npm-run-test": false,
+      "codex/issue-50-a11y-input": false,
+      "codex/issue-70-worker-self-repair": false,
+      "codex/enable-worker-status": false,
+      "codex/controller-idle-heartbeat": false,
+      "codex/status-fixed-script-download": false,
+      "codex/issue-59-notifications": false,
+      "codex/issue-59-notifications-review": false,
+      "codex/issue-57-account-email-review": false,
+      "codex/issue-48-auth-e2e-review": false,
+      "codex/issue-39-bug-server-action-react-441": false,
+      "codex/issue-39-expected-errors-review": false,
+      "codex/issue-47-idempotency-review": false,
+      "codex/issue-55-bug-db-0": false,
+      "codex/issue-58-ui-carerecord": false,
+      "codex/issue-74-codex-worker-issue-reasoning-effort": false
+    }
+  }
 }

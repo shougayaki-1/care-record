@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { ExpectedActionError, sanitizeDbError } from '@/utils/errors';
 import { createSessionClient } from './auth';
 
 export type RetainedResource = 'report' | 'client' | 'staff' | 'shift' | 'organization';
@@ -11,7 +12,10 @@ export async function getRetentionPolicy(organizationId: string, resourceType: R
     .eq('organization_id', organizationId)
     .eq('resource_type', resourceType)
     .maybeSingle();
-  if (error || !data) throw new Error(`${resourceType}の保持方針が承認されていません`);
+  if (error) throw sanitizeDbError(error, 'retention.policy', { organizationId });
+  if (!data) throw new ExpectedActionError('VALIDATION_ERROR', resourceType === 'shift'
+    ? 'シフトの保持方針が未承認のため削除できません。事業所のオーナーに保持方針の承認を依頼してください。'
+    : `${resourceType}の保持方針が承認されていません`);
   return { years: data.retention_years, legalBasis: data.legal_basis };
 }
 

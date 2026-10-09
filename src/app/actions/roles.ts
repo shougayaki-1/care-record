@@ -1,6 +1,7 @@
 'use server';
+import type { ActionResult } from '@/types/actionResult';
 
-import { sanitizeDbError, withSafeError } from '@/utils/errors';
+import { ExpectedActionError, sanitizeDbError, withActionResult } from '@/utils/errors';
 import { PRESET_MANAGER_PERMISSIONS, PRESET_STAFF_PERMISSIONS, type RolePermissions } from '@/utils/permissions';
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
@@ -27,7 +28,7 @@ function permissionDiff(before: RolePermissions | null, after: RolePermissions |
 }
 
 export async function getOrgRolesFull(orgId: string) {
-  return withSafeError('getOrgRolesFull', async () => {
+  return withActionResult('getOrgRolesFull', async () => {
     await assertOrgPermission(orgId, 'roles');
     const supabase = await createSessionClient();
     const { data, error } = await supabase.from('organization_roles').select('*').eq('organization_id', orgId).order('is_preset', { ascending: false });
@@ -36,8 +37,8 @@ export async function getOrgRolesFull(orgId: string) {
   });
 }
 
-export async function createOrgRole(orgId: string, name: string, color: string | null, permissions: RolePermissions): Promise<{ id: string }> {
-  return withSafeError('createOrgRole', async () => {
+export async function createOrgRole(orgId: string, name: string, color: string | null, permissions: RolePermissions): Promise<ActionResult<{ id: string }>> {
+  return withActionResult('createOrgRole', async () => {
     const { userId, isOwner } = await assertOrgPermission(orgId, 'roles');
     assertOwnerForDangerousPermissions(permissions, isOwner);
     const supabase = await createSessionClient();
@@ -55,14 +56,14 @@ export async function createOrgRole(orgId: string, name: string, color: string |
   });
 }
 
-export async function updateOrgRole(orgId: string, roleId: string, patch: RolePatch): Promise<void> {
-  return withSafeError('updateOrgRole', async () => {
+export async function updateOrgRole(orgId: string, roleId: string, patch: RolePatch): Promise<ActionResult<void>> {
+  return withActionResult('updateOrgRole', async () => {
     const { userId, isOwner } = await assertOrgPermission(orgId, 'roles');
     const supabase = await createSessionClient();
     const { data: existing, error: readError } = await supabase
       .from('organization_roles').select('name, color, permissions').eq('id', roleId).eq('organization_id', orgId).maybeSingle();
     if (readError) throw sanitizeDbError(readError, 'action.roles.update.read');
-    if (!existing) throw new Error('対象のロールが見つかりません');
+    if (!existing) throw new ExpectedActionError('NOT_FOUND', '対象のロールが見つかりません');
     const beforePermissions = existing.permissions as RolePermissions;
     const effectivePermissions = patch.permissions ?? beforePermissions;
     assertOwnerForDangerousPermissions(effectivePermissions, isOwner);
@@ -86,14 +87,16 @@ export async function updateOrgRole(orgId: string, roleId: string, patch: RolePa
   });
 }
 
-export async function deleteOrgRole(orgId: string, roleId: string): Promise<void> {
-  return withSafeError('deleteOrgRole', async () => {
-    const { userId } = await assertOrgPermission(orgId, 'roles');
+export async function deleteOrgRole(orgId: string, roleId: string): Promise<ActionResult<void>> {
+  return withActionResult('deleteOrgRole', async () => {
+    const { userId, isOwner } = await assertOrgPermission(orgId, 'roles');
     const supabase = await createSessionClient();
     const { data: existing, error: readError } = await supabase
-      .from('organization_roles').select('name, color, permissions').eq('id', roleId).eq('organization_id', orgId).maybeSingle();
+      .from('organization_roles').select('name, color, permissions, is_preset').eq('id', roleId).eq('organization_id', orgId).maybeSingle();
     if (readError) throw sanitizeDbError(readError, 'action.roles.delete.read');
-    if (!existing) throw new Error('対象のロールが見つかりません');
+    if (!existing) throw new ExpectedActionError('NOT_FOUND', '対象のロールが見つかりません');
+    if (existing.is_preset) throw new ExpectedActionError('VALIDATION_ERROR', 'プリセットロールは削除できません');
+    assertOwnerForDangerousPermissions(existing.permissions as RolePermissions, isOwner);
     await assertRoleManagerRemains(orgId, { deletedRoleId: roleId });
     const { error } = await supabase.rpc('mutate_organization_role_authorized', {
       p_organization_id: orgId, p_role_id: roleId, p_action: 'delete',
@@ -107,8 +110,8 @@ export async function deleteOrgRole(orgId: string, roleId: string): Promise<void
   });
 }
 
-export async function resetPresetRole(orgId: string, roleId: string, preset: 'manager' | 'staff'): Promise<void> {
-  return withSafeError('resetPresetRole', async () => {
+export async function resetPresetRole(orgId: string, roleId: string, preset: 'manager' | 'staff'): Promise<ActionResult<void>> {
+  return withActionResult('resetPresetRole', async () => {
     const { userId, isOwner } = await assertOrgPermission(orgId, 'roles');
     const permissions = preset === 'manager' ? PRESET_MANAGER_PERMISSIONS : PRESET_STAFF_PERMISSIONS;
     assertOwnerForDangerousPermissions(permissions, isOwner);
@@ -116,7 +119,7 @@ export async function resetPresetRole(orgId: string, roleId: string, preset: 'ma
     const { data: existing, error: readError } = await supabase
       .from('organization_roles').select('permissions').eq('id', roleId).eq('organization_id', orgId).eq('is_preset', true).maybeSingle();
     if (readError) throw sanitizeDbError(readError, 'action.roles.reset.read');
-    if (!existing) throw new Error('対象のプリセットロールが見つかりません');
+    if (!existing) throw new ExpectedActionError('NOT_FOUND', '対象のプリセットロールが見つかりません');
     await assertRoleManagerRemains(orgId, { updatedRole: { roleId, permissions } });
     const { error } = await supabase.rpc('mutate_organization_role_authorized', {
       p_organization_id: orgId, p_role_id: roleId, p_action: 'reset',

@@ -18,10 +18,10 @@ it('revokes only the verified user’s other application sessions and Auth refre
 });
 it('fails closed when application session revocation fails', async () => {
   mocks.is.mockResolvedValue({ error: new Error('private database details') });
-  await expect(prepareAccountSecurityChange()).rejects.toThrow('セッションを失効できません');
+  await expect(prepareAccountSecurityChange()).rejects.toThrow('処理に失敗しました');
   expect(mocks.signOut).not.toHaveBeenCalled();
 });
 it('fails closed when Auth revocation fails', async () => {
   mocks.signOut.mockResolvedValue({ error: new Error('private auth details') });
-  await expect(prepareAccountSecurityChange()).rejects.toThrow('セッションを失効できません');
+  await expect(prepareAccountSecurityChange()).rejects.toThrow('処理に失敗しました');
 });

@@ -79,3 +79,23 @@ describe('useFetchData', () => {
     expect(result.current.data).toEqual(['organization-b']);
   });
 });
+
+it('retains a classified failure for recovery, clears it on retry, and distinguishes empty success', async () => {
+  const { ActionResultError } = await import('@/utils/actionResult');
+  const error = new ActionResultError('SESSION_EXPIRED', '再度ログインしてください');
+  const onError = vi.fn();
+  const fetcher = vi.fn().mockRejectedValueOnce(error).mockResolvedValueOnce([]);
+  const { result } = renderHook(() => useFetchData(fetcher, [] as string[], true, onError));
+  await waitFor(() => expect(result.current.error).toBe(error));
+  expect(onError).toHaveBeenCalledWith('再度ログインしてください');
+  await act(() => result.current.refetch());
+  expect(result.current.data).toEqual([]);
+  expect(result.current.error).toBeNull();
+});
+
+it('does not expose arbitrary thrown messages through the error callback', async () => {
+  const onError = vi.fn();
+  const fetcher = vi.fn().mockRejectedValue(new Error('private DB detail'));
+  renderHook(() => useFetchData(fetcher, [] as string[], true, onError));
+  await waitFor(() => expect(onError).toHaveBeenCalledWith('データの取得に失敗しました'));
+});

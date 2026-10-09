@@ -1,10 +1,12 @@
 'use client';
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
 
 import { useCallback, useEffect, useState } from 'react';
 import {
   Box, Stack, CircularProgress, Alert, Chip,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from '@/components/ui/mui';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { AppButton, AppDialog, AppTextField, SwitchField } from '@/components/ui';
 import {
   getStaffRoles, createStaffRole, updateStaffRole, deleteStaffRole,
@@ -20,7 +22,7 @@ export default function StaffRoleSettings({
 }) {
   const [rows, setRows] = useState<StaffRole[]>(initialStaffRoles ?? []);
   const [loading, setLoading] = useState(initialStaffRoles === undefined);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
 
   const [editTarget, setEditTarget] = useState<StaffRole | null>(null);
@@ -39,9 +41,9 @@ export default function StaffRoleSettings({
     setLoading(true);
     setError(null);
     try {
-      setRows(await getStaffRoles(orgId));
+      setRows(await readActionResult(getStaffRoles(orgId)));
     } catch (e) {
-      setError(e instanceof Error ? e.message : '取得に失敗しました');
+      setError(e);
     } finally {
       setLoading(false);
     }
@@ -54,10 +56,10 @@ export default function StaffRoleSettings({
 
   const handleToggleActive = async (row: StaffRole) => {
     try {
-      await updateStaffRole(orgId, row.id, { is_active: !row.is_active });
+      await readActionResult(updateStaffRole(orgId, row.id, { is_active: !row.is_active }));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '更新に失敗しました');
+      setError(e);
     }
   };
 
@@ -72,11 +74,11 @@ export default function StaffRoleSettings({
     if (!editTarget || !editName.trim()) return;
     setSaving(true);
     try {
-      await updateStaffRole(orgId, editTarget.id, { name: editName.trim(), is_unpaid: editUnpaid });
+      await readActionResult(updateStaffRole(orgId, editTarget.id, { name: editName.trim(), is_unpaid: editUnpaid }));
       setEditOpen(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '更新に失敗しました');
+      setError(e);
     } finally {
       setSaving(false);
     }
@@ -86,13 +88,13 @@ export default function StaffRoleSettings({
     if (!addName.trim()) return;
     setSaving(true);
     try {
-      await createStaffRole(orgId, addName.trim(), addUnpaid);
+      await readActionResult(createStaffRole(orgId, addName.trim(), addUnpaid));
       setAddOpen(false);
       setAddName('');
       setAddUnpaid(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '追加に失敗しました');
+      setError(e);
     } finally {
       setSaving(false);
     }
@@ -102,11 +104,11 @@ export default function StaffRoleSettings({
     if (!deleteTarget) return;
     setSaving(true);
     try {
-      await deleteStaffRole(orgId, deleteTarget.id);
+      await readActionResult(deleteStaffRole(orgId, deleteTarget.id));
       setDeleteOpen(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '削除に失敗しました');
+      setError(e);
     } finally {
       setSaving(false);
     }
@@ -116,7 +118,13 @@ export default function StaffRoleSettings({
 
   return (
     <Box>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
+      {Boolean(error) && <Alert severity="error" sx={{ mb: 2 }}>
+        {getActionErrorMessage(error)}
+        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+          <AppButton size="small" variant="outlined" intent="secondary" onClick={() => void load()}>再試行</AppButton>
+          {needsActionRecovery(error) && <RecoveryLogoutButton attemptClientLogout={false} />}
+        </Stack>
+      </Alert>}
 
       <Box sx={{ display: { xs: 'none', sm: 'block' }, overflowX: 'auto' }}>
         <Table size="small" sx={{ minWidth: 420 }}>
@@ -125,12 +133,12 @@ export default function StaffRoleSettings({
               <TableCell>役割名</TableCell>
               <TableCell>無給（ボランティア等）</TableCell>
               <TableCell>有効</TableCell>
-              <TableCell />
+              <TableCell>操作</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow><TableCell colSpan={4} align="center">設定なし</TableCell></TableRow>
+              !error && <TableRow><TableCell colSpan={4} align="center">設定なし</TableCell></TableRow>
             ) : (
               rows.map((row) => (
                 <TableRow key={row.id}>
@@ -156,7 +164,7 @@ export default function StaffRoleSettings({
 
       <Stack spacing={1.5} sx={{ display: { xs: 'flex', sm: 'none' } }}>
         {rows.length === 0 ? (
-          <Box sx={{ py: 3, textAlign: 'center', color: 'text.secondary' }}>設定なし</Box>
+          !error && <Box sx={{ py: 3, textAlign: 'center', color: 'text.secondary' }}>設定なし</Box>
         ) : (
           rows.map((row) => (
             <Box

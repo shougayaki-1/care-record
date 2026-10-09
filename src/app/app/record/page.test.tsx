@@ -1,39 +1,30 @@
 // @vitest-environment jsdom
 //
-// Regression test: getMyShiftsWithStatus (a withSafeError Server Action) can
-// throw for a legitimate, common state — an org owner with no linked `staffs`
-// row (e.g. a brand-new organization where nobody has registered themselves
-// as staff yet). Before the fix, this fetch lived inside the same Promise.all
-// as the independent clients fetch, so its rejection rejected the whole batch
-// and setClients() never ran, leaving the client list permanently empty even
-// though the clients query itself succeeded. Mirrors d7aff24 / ccd1837.
+// Optional shifts must never discard the independent clients list.
 
-import { render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({ load: vi.fn(), workspace: {
+  currentOrg: {
+    id: 'org-1', role: 'owner', effectivePermissions: {
+      records: { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
+      shifts: { view: 'all', create: 'all', edit: 'all', delete: 'all' },
+    },
+  }, userId: 'user-1', loading: false,
+} }));
+afterEach(cleanup);
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 
 vi.mock('@/context/WorkspaceContext', () => ({
-  useWorkspace: () => ({
-    currentOrg: {
-      id: 'org-1',
-      role: 'owner',
-      effectivePermissions: {
-        records: { view: 'all', create: 'all', edit: 'all', delete: 'all', approve: 'all' },
-        shifts: { view: 'all', create: 'all', edit: 'all', delete: 'all' },
-      },
-    },
-    userId: 'user-1',
-    loading: false,
-  }),
+  useWorkspace: () => mocks.workspace,
 }));
 
-// A staff account is not linked to this organization for this user, which is
-// the normal, expected case getMyShiftsWithStatus rejects with.
 vi.mock('@/app/actions/shift', () => ({
-  getMyShiftsWithStatus: vi.fn().mockRejectedValue(new Error('スタッフアカウントが紐付いていません。事業所設定を確認してください。')),
+  getMyShiftsWithStatus: mocks.load,
 }));
 
 vi.mock('@/lib/supabase', () => {
@@ -55,7 +46,11 @@ vi.mock('@/lib/supabase', () => {
 import RecordSelectPage from './page';
 
 describe('RecordSelectPage', () => {
-  it('still renders the client list when the shifts fetch fails', async () => {
+  it.each(['staff missing', 'unexpected failure', 'empty shifts'])('still renders the client list: %s', async state => {
+    if (state === 'unexpected failure') mocks.load.mockRejectedValue(new Error('synthetic failure'));
+    else mocks.load.mockResolvedValue(state === 'empty shifts' ? { ok: true, data: [] } : {
+      ok: false, error: { code: 'STAFF_NOT_LINKED', message: 'スタッフアカウントが紐付いていません。事業所設定を確認してください。' },
+    });
     render(<RecordSelectPage />);
     await waitFor(() => {
       expect(screen.getByText(/テスト太郎/)).toBeTruthy();

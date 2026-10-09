@@ -1,5 +1,6 @@
 'use server';
-import { sanitizeDbError, withSafeError } from '@/utils/errors';
+import type { ActionResult } from '@/types/actionResult';
+import { sanitizeDbError, withActionResult } from '@/utils/errors';
 import { assertOrgPermission, assertOrgRole, createSessionClient } from '@/utils/supabase/auth';
 
 export type StaffRole = {
@@ -12,8 +13,8 @@ export type StaffRole = {
   created_at: string;
 };
 
-export async function getStaffRoles(orgId: string): Promise<StaffRole[]> {
-  return withSafeError('getStaffRoles', async () => {
+export async function getStaffRoles(orgId: string): Promise<ActionResult<StaffRole[]>> {
+  return withActionResult('getStaffRoles', async () => {
     await assertOrgRole(orgId);
     const supabase = await createSessionClient();
     const { data, error } = await supabase
@@ -31,8 +32,8 @@ export async function createStaffRole(
   orgId: string,
   name: string,
   isUnpaid: boolean = false
-): Promise<void> {
-  return withSafeError('createStaffRole', async () => {
+): Promise<ActionResult<void>> {
+  return withActionResult('createStaffRole', async () => {
     await assertOrgPermission(orgId, 'organization');
     const supabase = await createSessionClient();
     const { error } = await supabase.rpc('create_staff_role_atomic', {
@@ -40,7 +41,7 @@ export async function createStaffRole(
       p_name: name,
       p_is_unpaid: isUnpaid,
     });
-    if (error) throw new Error('スタッフ役割の追加に失敗しました');
+    if (error) throw sanitizeDbError(error, 'action.master-data');
   });
 }
 
@@ -48,8 +49,8 @@ export async function updateStaffRole(
   orgId: string,
   id: string,
   patch: { name?: string; is_unpaid?: boolean; is_active?: boolean; sort_order?: number }
-): Promise<void> {
-  return withSafeError('updateStaffRole', async () => {
+): Promise<ActionResult<void>> {
+  return withActionResult('updateStaffRole', async () => {
     await assertOrgPermission(orgId, 'organization');
     const supabase = await createSessionClient();
     const { error } = await supabase
@@ -57,12 +58,12 @@ export async function updateStaffRole(
       .update(patch)
       .eq('id', id)
       .eq('organization_id', orgId);
-    if (error) throw new Error('スタッフ役割の更新に失敗しました');
+    if (error) throw sanitizeDbError(error, 'action.master-data');
   });
 }
 
-export async function deleteStaffRole(orgId: string, id: string): Promise<void> {
-  return withSafeError('deleteStaffRole', async () => {
+export async function deleteStaffRole(orgId: string, id: string): Promise<ActionResult<void>> {
+  return withActionResult('deleteStaffRole', async () => {
     await assertOrgPermission(orgId, 'organization');
     const supabase = await createSessionClient();
     const { error } = await supabase
@@ -70,6 +71,6 @@ export async function deleteStaffRole(orgId: string, id: string): Promise<void> 
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)
       .eq('organization_id', orgId);
-    if (error) throw new Error('スタッフ役割の削除に失敗しました');
+    if (error) throw sanitizeDbError(error, 'action.master-data');
   });
 }

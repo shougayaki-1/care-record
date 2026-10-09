@@ -61,7 +61,7 @@ variable "replica_region" {
 }
 
 variable "backup_retention_days" {
-  description = "Minimum retention for full backup objects."
+  description = "Minimum retention for legacy and monthly full backup objects."
   type        = number
   default     = 2555
 
@@ -69,6 +69,18 @@ variable "backup_retention_days" {
     condition     = var.backup_retention_days >= 2555
     error_message = "backup_retention_days cannot be shorter than seven years (2555 days)."
   }
+}
+
+variable "enable_tiered_backups" {
+  description = "Add new recent/daily/weekly/monthly Tokyo and Osaka buckets. Never repurpose legacy buckets."
+  type        = bool
+  default     = false
+}
+
+variable "enable_tier_bucket_lock" {
+  description = "IRREVERSIBLE: lock the new tier buckets only after a separate reviewed migration plan."
+  type        = bool
+  default     = false
 }
 
 variable "audit_retention_days" {

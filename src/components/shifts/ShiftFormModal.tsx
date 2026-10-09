@@ -1,8 +1,10 @@
 'use client';
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 
 import React, { useState, useEffect } from 'react';
 import {
-    Button, Stack,
+    Alert, Button, Stack,
     Box, Typography,
     IconButton, Tooltip, Divider,
     FormControlLabel, Checkbox
@@ -10,7 +12,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import ShiftSegmentEditor from './ShiftSegmentEditor';
-import { ShiftPayload } from '@/app/actions/shift';
+import type { ShiftPayload } from '@/app/actions/shift';
 import { getShiftSegments } from '@/app/actions/shiftSegments';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
@@ -58,6 +60,8 @@ export const ShiftFormModal = ({
     const confirm = useConfirm();
     const [loading, setLoading] = useState(false);
     const [segmentsLoading, setSegmentsLoading] = useState(false);
+    const [segmentsLoadError, setSegmentsLoadError] = useState<unknown>(null);
+    const [loadAttempt, setLoadAttempt] = useState(0);
 
     const [clientId, setClientId] = useState('');
     const [startAt, setStartAt] = useState('');
@@ -73,6 +77,8 @@ export const ShiftFormModal = ({
         let active = true;
 
         queueMicrotask(() => {
+            if (!active) return;
+            setSegmentsLoadError(null);
             const formatDatetime = (isoStr: string) => {
                 if (!isoStr) return '';
                 const d = new Date(isoStr);
@@ -85,7 +91,7 @@ export const ShiftFormModal = ({
                 setEndAt(formatDatetime(initialData.end_at));
                 setCancelReason(initialData.cancel_reason || '');
                 setSegmentsLoading(true);
-                getShiftSegments(organizationId, initialData.id)
+                readActionResult(getShiftSegments(organizationId, initialData.id))
                     .then((loadedSegments) => {
                         if (!active) return;
                         const drafts = loadedSegments.map((segment) => ({
@@ -103,8 +109,7 @@ export const ShiftFormModal = ({
                         setInitialSegments(drafts);
                     })
                     .catch((error) => {
-                        console.error('Failed to load shift segments:', error);
-                        if (active) showToast('サービス区間の読み込みに失敗しました', 'error');
+                        if (active) setSegmentsLoadError(error);
                     })
                     .finally(() => {
                         if (active) setSegmentsLoading(false);
@@ -123,7 +128,7 @@ export const ShiftFormModal = ({
         return () => {
             active = false;
         };
-    }, [open, initialData, organizationId, showToast]);
+    }, [open, initialData, organizationId, showToast, loadAttempt]);
 
     // Seed one blank segment when start/end time are set (CREATE mode only)
     useEffect(() => {
@@ -169,7 +174,7 @@ export const ShiftFormModal = ({
             onClose();
         } catch (error) {
             console.error(error);
-            showToast('保存に失敗しました', 'error');
+            showToast(getActionErrorMessage(error, '保存に失敗しました'), 'error');
         } finally {
             setLoading(false);
         }
@@ -190,7 +195,7 @@ export const ShiftFormModal = ({
             onClose();
         } catch (error) {
             console.error(error);
-            showToast('処理に失敗しました', 'error');
+            showToast(getActionErrorMessage(error, '処理に失敗しました'), 'error');
         } finally {
             setLoading(false);
         }
@@ -200,7 +205,7 @@ export const ShiftFormModal = ({
         if (!initialData || !onDelete) return;
         if (!(await confirm({
             title: 'シフトの削除',
-            message: 'このシフトをカレンダーから完全に削除しますか？\n※この操作は取り消せません。Googleカレンダーからも完全に消去されます。',
+            message: 'このシフトを削除しますか？\n一覧・カレンダーから非表示になり、データは保持方針に従って保存されます。Googleカレンダーにも削除を反映しますが、連携エラー時は同期修復が必要です。',
             confirmText: '削除する', confirmColor: 'error',
         }))) return;
 
@@ -210,7 +215,7 @@ export const ShiftFormModal = ({
             onClose();
         } catch (error) {
             console.error(error);
-            showToast('削除に失敗しました', 'error');
+            showToast(getActionErrorMessage(error, '削除に失敗しました'), 'error');
         } finally {
             setLoading(false);
         }
@@ -224,8 +229,8 @@ export const ShiftFormModal = ({
             loading={loading}
             title={initialData ? '単発シフトの編集・詳細' : '新規シフトの追加'}
             titleAction={initialData && (
-                    <Tooltip title="この予定を完全に削除（消去）">
-                        <IconButton color="error" onClick={handleDelete} disabled={loading} size="small">
+                    <Tooltip title="この予定を削除">
+                        <IconButton aria-label="この予定を削除" color="error" onClick={handleDelete} disabled={loading} size="small">
                             <DeleteIcon />
                         </IconButton>
                     </Tooltip>
@@ -238,7 +243,7 @@ export const ShiftFormModal = ({
                         intent="secondary"
                         startIcon={<EditNoteIcon />}
                         onClick={() => onCreateRecord(initialData, segments[0]?.id)}
-                        disabled={loading || segmentsLoading || initialData.status === 'cancelled'}
+                        disabled={loading || segmentsLoading || Boolean(segmentsLoadError) || initialData.status === 'cancelled'}
                     >
                         記録作成
                     </AppButton>
@@ -266,7 +271,7 @@ export const ShiftFormModal = ({
                 <Box sx={{ flexGrow: 1 }} />
                 <AppButton variant="text" intent="secondary" onClick={onClose} disabled={loading}>閉じる</AppButton>
                 {canSave && (
-                    <AppButton onClick={handleSave} loading={loading} disabled={segmentsLoading}>
+                    <AppButton onClick={handleSave} loading={loading} disabled={segmentsLoading || Boolean(segmentsLoadError)}>
                         変更を保存
                     </AppButton>
                 )}
@@ -274,9 +279,16 @@ export const ShiftFormModal = ({
             actionsSx={{ flexWrap: 'wrap', gap: 1 }}
         >
                 <Stack spacing={3}>
+                    {Boolean(segmentsLoadError) && <Alert severity="error">
+                        {getActionErrorMessage(segmentsLoadError, 'サービス区間の読み込みに失敗しました')}
+                        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                            <AppButton size="small" variant="outlined" intent="secondary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>再試行</AppButton>
+                            {needsActionRecovery(segmentsLoadError) && <RecoveryLogoutButton attemptClientLogout={false} />}
+                        </Stack>
+                    </Alert>}
                     {initialData?.status === 'cancelled' && (
                         <Box p={2} bgcolor="error.light" borderRadius={2} border="1px solid" borderColor="error.light" display="flex" flexDirection="column" gap={0.5}>
-                            <Typography color="error" fontWeight="bold" variant="subtitle2">
+                            <Typography component="h3" color="error" fontWeight="bold" variant="subtitle2">
                                 ⚠ この予定はキャンセル（お休み）に設定されています
                             </Typography>
                             {initialData.cancel_reason && (
@@ -315,7 +327,7 @@ export const ShiftFormModal = ({
                     </Stack>
 
                     <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
-                        <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                        <Typography component="h3" variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
                             サービス区間（必須）
                         </Typography>
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
@@ -353,11 +365,11 @@ export const ShiftFormModal = ({
                         <>
                             <Divider sx={{ my: 1 }} />
                             <Box p={2.5} border="1px solid" borderColor="divider" borderRadius={2} bgcolor="background.subtle">
-                                <Typography variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
+                                <Typography component="h3" variant="subtitle2" fontWeight="bold" color="text.primary" gutterBottom>
                                     お休み（キャンセル）の管理
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                                    利用者の急な入院や都合によるキャンセル時は、完全に削除するのではなく「お休み」に設定することを推奨します。実績管理に履歴を残すことができます。
+                                    利用者の急な入院や都合によるキャンセル時は、削除するのではなく「お休み」に設定することを推奨します。実績管理に履歴を残すことができます。
                                 </Typography>
                                 {initialData.status === 'cancelled' ? (
                                     <Button

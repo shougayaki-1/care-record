@@ -1,8 +1,10 @@
 'use client';
 
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
+
 import { useCallback, useState } from 'react';
 import {
-    Box, Typography, Paper, Stack, TextField, Tabs, Tab, Divider,
+    Alert, Box, Typography, Paper, Stack, TextField, Tabs, Tab, Divider,
     Grid, IconButton, Tooltip
 } from '@/components/ui/mui';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
@@ -12,8 +14,9 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { CalendarPageSkeleton, InnerPageHeader, PageLayout } from '@/components/ui';
+import { AppButton, CalendarPageSkeleton, InnerPageHeader, PageLayout } from '@/components/ui';
 import { getMyRecordFeed } from '@/app/actions/recordFeed';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useRecordQuery } from '@/hooks/useRecordQuery';
 import type { RecordFeedItem } from '@/utils/recordFeed';
 import { RecordFeedCard } from '@/components/record/RecordFeedCard';
@@ -89,8 +92,8 @@ export default function HistoryPage() {
     const startAt = viewMode === 0 ? (filterDate ? `${filterDate}T00:00:00+09:00` : undefined) : new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
     const endAt = viewMode === 0 ? (filterDate ? new Date(Date.parse(`${filterDate}T00:00:00+09:00`) + 86400000).toISOString() : undefined) : new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1).toISOString();
     const organizationId = currentOrg?.id;
-    const load = useCallback(() => getMyRecordFeed(organizationId!, { startAt, endAt }), [organizationId, startAt, endAt]);
-    const { data: records } = useRecordQuery({ organizationId: wsLoading ? undefined : organizationId, queryKey: `${startAt ?? ''}/${endAt ?? ''}`, load, empty: EMPTY_FEED, onError: logFeedError, refreshInterval: 30000 });
+    const load = useCallback(() => readActionResult(getMyRecordFeed(organizationId!, { startAt, endAt })), [organizationId, startAt, endAt]);
+    const { data: records, loading, error: loadError, refresh } = useRecordQuery({ organizationId: wsLoading ? undefined : organizationId, queryKey: `${startAt ?? ''}/${endAt ?? ''}`, load, empty: EMPTY_FEED, onError: logFeedError, refreshInterval: 30000 });
     const handleEdit = (record: RecordFeedItem) => { if (record.href) router.push(record.href); };
 
     const handleMonthChange = (diff: number) => {
@@ -113,7 +116,9 @@ export default function HistoryPage() {
             />
 
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, sm: 3 } }}>
-                {viewMode === 0 && (
+                {loading && <Typography>読み込み中...</Typography>}
+                {loadError != null && <Alert severity="error" action={needsActionRecovery(loadError) ? <RecoveryLogoutButton /> : <AppButton variant="text" intent="secondary" onClick={() => void refresh()}>再試行</AppButton>}>{getActionErrorMessage(loadError)}</Alert>}
+                {viewMode === 0 && !loading && loadError == null && (
                     <>
                         <Paper sx={{ p: 2, mb: 2 }}>
                             <TextField 
@@ -133,7 +138,7 @@ export default function HistoryPage() {
                     </>
                 )}
 
-                {viewMode === 1 && (
+                {viewMode === 1 && !loading && loadError == null && (
                     <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
                         <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
                             <IconButton onClick={() => handleMonthChange(-1)}><ChevronLeftIcon /></IconButton>

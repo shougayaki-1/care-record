@@ -1,8 +1,9 @@
 'use client';
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
-  Alert, Box, Button, Chip, FormControl, IconButton, InputLabel, MenuItem,
+  Alert, Box, Chip, FormControl, IconButton, InputLabel, MenuItem,
   Select, Stack, Typography, Tooltip,
 } from '@/components/ui/mui';
 import AddIcon from '@mui/icons-material/Add';
@@ -10,7 +11,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 
 import { getServiceTypes, type ServiceType } from '@/app/actions/serviceTypes';
 import { getStaffRoles, type StaffRole } from '@/app/actions/staffRoles';
-import { DateTimeField } from '@/components/ui';
+import { AppButton, DateTimeField } from '@/components/ui';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import type { SegmentDraft } from '@/utils/shiftSegments';
 
 type StaffData = { id: string; name: string };
@@ -34,25 +36,36 @@ export default function ShiftSegmentEditor({
   defaultEnd,
   disabled = false,
 }: Props) {
+  const fieldId = useId();
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [staffRoles, setStaffRoles] = useState<StaffRole[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
-    Promise.all([getServiceTypes(orgId), getStaffRoles(orgId)])
+    queueMicrotask(() => {
+      if (!active) return;
+      setLoading(true);
+      setError(null);
+      setServiceTypes([]);
+      setStaffRoles([]);
+    });
+    Promise.all([readActionResult(getServiceTypes(orgId)), readActionResult(getStaffRoles(orgId))])
       .then(([types, roles]) => {
         if (!active) return;
         setServiceTypes(types.filter((type) => type.is_active));
         setStaffRoles(roles.filter((role) => role.is_active));
       })
       .catch((reason) => {
-        if (active) setError(reason instanceof Error ? reason.message : 'マスタの読み込みに失敗しました');
-      });
+        if (active) setError(reason);
+      })
+      .finally(() => { if (active) setLoading(false); });
     return () => {
       active = false;
     };
-  }, [orgId]);
+  }, [orgId, loadAttempt]);
 
   const updateSegment = (index: number, patch: Partial<SegmentDraft>) => {
     onChange(value.map((segment, current) => current === index ? { ...segment, ...patch } : segment));
@@ -72,8 +85,14 @@ export default function ShiftSegmentEditor({
 
   return (
     <Box>
-      {error && <Alert severity="error" sx={{ mb: 1.5 }} onClose={() => setError(null)}>{error}</Alert>}
-      {serviceTypes.length === 0 && (
+      {Boolean(error) && <Alert severity="error" sx={{ mb: 1.5 }}>
+        {getActionErrorMessage(error, 'マスタの読み込みに失敗しました')}
+        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+          <AppButton size="small" variant="outlined" intent="secondary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>再試行</AppButton>
+          {needsActionRecovery(error) && <RecoveryLogoutButton attemptClientLogout={false} />}
+        </Stack>
+      </Alert>}
+      {!loading && !error && serviceTypes.length === 0 && (
         <Alert severity="info" sx={{ mb: 1.5 }}>
           サービス種別が未設定です。事業所設定から追加してください。
         </Alert>
@@ -92,12 +111,13 @@ export default function ShiftSegmentEditor({
             }}
           >
             <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1.5}>
-              <Typography variant="subtitle2" fontWeight="bold">区間 {index + 1}</Typography>
-              <Tooltip title="この区間を削除">
+              <Typography component="div" variant="subtitle2" fontWeight="bold">区間 {index + 1}</Typography>
+              <Tooltip title="この区間を削除" describeChild>
                 <span>
                   <IconButton
                     size="small"
                     color="error"
+                    aria-label="この区間を削除"
                     disabled={disabled}
                     onClick={() => onChange(value.filter((_, current) => current !== index))}
                   >
@@ -109,8 +129,9 @@ export default function ShiftSegmentEditor({
 
             <Stack spacing={1.5}>
               <FormControl fullWidth size="small" disabled={disabled}>
-                <InputLabel>サービス種別</InputLabel>
+                <InputLabel id={`${fieldId}-service-${index}`}>サービス種別</InputLabel>
                 <Select
+                  labelId={`${fieldId}-service-${index}`}
                   label="サービス種別"
                   value={segment.service_type_id}
                   onChange={(event) => updateSegment(index, {
@@ -150,8 +171,9 @@ export default function ShiftSegmentEditor({
                   {segment.staffs.map((staff, staffIndex) => (
                     <Stack key={staffIndex} direction="row" spacing={1} alignItems="center">
                       <FormControl size="small" sx={{ minWidth: 140, flex: 1 }} disabled={disabled}>
-                        <InputLabel>スタッフ</InputLabel>
+                        <InputLabel id={`${fieldId}-staff-${index}-${staffIndex}`}>スタッフ</InputLabel>
                         <Select
+                          labelId={`${fieldId}-staff-${index}-${staffIndex}`}
                           label="スタッフ"
                           value={staff.staff_id}
                           onChange={(event) => {
@@ -164,8 +186,9 @@ export default function ShiftSegmentEditor({
                         </Select>
                       </FormControl>
                       <FormControl size="small" sx={{ minWidth: 120, flex: 1 }} disabled={disabled}>
-                        <InputLabel>役割</InputLabel>
+                        <InputLabel id={`${fieldId}-role-${index}-${staffIndex}`}>役割</InputLabel>
                         <Select
+                          labelId={`${fieldId}-role-${index}-${staffIndex}`}
                           label="役割"
                           value={staff.staff_role_id}
                           onChange={(event) => {
@@ -187,6 +210,7 @@ export default function ShiftSegmentEditor({
                       </FormControl>
                       <IconButton
                         size="small"
+                        aria-label="この区間の担当スタッフを外す"
                         disabled={disabled}
                         onClick={() => updateSegment(index, {
                           staffs: segment.staffs.filter((_, current) => current !== staffIndex),
@@ -196,7 +220,9 @@ export default function ShiftSegmentEditor({
                       </IconButton>
                     </Stack>
                   ))}
-                  <Button
+                  <AppButton
+                    variant="text"
+                    intent="secondary"
                     size="small"
                     startIcon={<AddIcon />}
                     disabled={disabled}
@@ -206,23 +232,24 @@ export default function ShiftSegmentEditor({
                     sx={{ alignSelf: 'flex-start' }}
                   >
                     スタッフを追加
-                  </Button>
+                  </AppButton>
                 </Stack>
               </Box>
             </Stack>
           </Box>
         ))}
 
-        <Button
+        <AppButton
+          intent="secondary"
           variant="outlined"
           size="small"
           startIcon={<AddIcon />}
           disabled={disabled}
           onClick={addSegment}
-          sx={{ alignSelf: 'flex-start' }}
+          sx={{ alignSelf: 'flex-start', color: 'primary.dark' }}
         >
           区間を追加
-        </Button>
+        </AppButton>
       </Stack>
     </Box>
   );

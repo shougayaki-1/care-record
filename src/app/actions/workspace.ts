@@ -1,5 +1,6 @@
 'use server';
 
+import { ExpectedActionError } from '@/utils/errors';
 import { createClient } from '@supabase/supabase-js';
 import { createSessionClient, getAuthedUser, getAuthedUserFromAccessToken, type OrgRole } from '@/utils/supabase/auth';
 import type { Database } from '@/types/database.generated';
@@ -31,7 +32,7 @@ export async function getMyWorkspaces(accessToken?: string): Promise<WorkspaceRe
       userId = (await getAuthedUser()).id;
       sessionClient = await createSessionClient();
     } catch (cookieError) {
-      if (!accessToken) throw cookieError;
+      if (!accessToken || !(cookieError instanceof ExpectedActionError) || !['UNAUTHENTICATED', 'SESSION_EXPIRED'].includes(cookieError.code)) throw cookieError;
       userId = (await getAuthedUserFromAccessToken(accessToken)).id;
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -43,7 +44,8 @@ export async function getMyWorkspaces(accessToken?: string): Promise<WorkspaceRe
     }
   } catch (error) {
     console.warn('workspace session validation failed', error);
-    return { status: 'session_expired', message: 'セッションの有効期限が切れています。再度ログインしてください。' };
+    if (error instanceof ExpectedActionError && ['UNAUTHENTICATED', 'SESSION_EXPIRED'].includes(error.code)) return { status: 'session_expired', message: 'セッションの有効期限が切れています。再度ログインしてください。' };
+    return { status: 'error', message: '所属情報を取得できませんでした。時間をおいて再試行してください。' };
   }
 
   try {

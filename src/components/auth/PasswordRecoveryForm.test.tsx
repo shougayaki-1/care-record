@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ request: vi.fn(), finish: vi.fn(), logout: vi.
 vi.mock('@/app/actions/authSecurity', () => ({ requestPasswordReset: mocks.request, finishPasswordReset: mocks.finish }));
 vi.mock('@/utils/clientLogout', () => ({ logoutCurrentUser: mocks.logout }));
 import { PasswordRecoveryForm } from './PasswordRecoveryForm';
-beforeEach(() => { vi.resetAllMocks(); mocks.request.mockResolvedValue({ ok: true }); mocks.finish.mockResolvedValue({ ok: true }); });
+beforeEach(() => { vi.resetAllMocks(); mocks.request.mockResolvedValue({ ok: true, data: { ok: true } }); mocks.finish.mockResolvedValue({ ok: true, data: { ok: true } }); });
 afterEach(cleanup);
 describe('password recovery UI', () => {
   it('shows the same account-independent completion and prevents immediate resending', async () => {

@@ -1,3 +1,4 @@
+import { readActionResult } from '@/utils/actionResult';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -20,7 +21,7 @@ vi.mock('@/utils/supabase/roleSafety', async (importOriginal) => {
 });
 
 import { FULL_PERMISSIONS, PRESET_MANAGER_PERMISSIONS } from '@/utils/permissions';
-import { createOrgRole, updateOrgRole } from './roles';
+import { createOrgRole as createOrgRoleResult, updateOrgRole as updateOrgRoleResult, deleteOrgRole as deleteOrgRoleResult } from './roles';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -65,3 +66,36 @@ describe('role action security', () => {
     await expect(createOrgRole('org-1', '通常管理者', null, PRESET_MANAGER_PERMISSIONS)).resolves.toEqual({ id: 'role-safe' });
   });
 });
+
+
+describe('role deletion security', () => {
+  it.each([
+    { isOwner: false, isPreset: true, permissions: PRESET_MANAGER_PERMISSIONS, message: 'プリセット' },
+    { isOwner: true, isPreset: true, permissions: FULL_PERMISSIONS, message: 'プリセット' },
+    { isOwner: false, isPreset: false, permissions: FULL_PERMISSIONS, message: 'オーナーのみ' },
+  ])('rejects protected deletion before RPC ($isOwner / $isPreset)', async ({ isOwner, isPreset, permissions, message }) => {
+    mocks.assertOrgPermission.mockResolvedValue({ userId: 'actor', isOwner });
+    const query = { eq: vi.fn(), maybeSingle: vi.fn().mockResolvedValue({ data: { name: 'Protected', color: null, permissions, is_preset: isPreset }, error: null }) };
+    query.eq.mockReturnValue(query);
+    mocks.from.mockReturnValue({ select: vi.fn(() => query) });
+    await expect(deleteOrgRole('org', 'role')).rejects.toThrow(message);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.recordAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('allows permitted deletion and checks remaining managers (owner: %s)', async isOwner => {
+    mocks.assertOrgPermission.mockResolvedValue({ userId: 'actor', isOwner });
+    const query = { eq: vi.fn(), maybeSingle: vi.fn().mockResolvedValue({ data: { name: 'Safe', color: null, permissions: isOwner ? FULL_PERMISSIONS : PRESET_MANAGER_PERMISSIONS, is_preset: false }, error: null }) };
+    query.eq.mockReturnValue(query);
+    mocks.from.mockReturnValue({ select: vi.fn(() => query) });
+    mocks.rpc.mockResolvedValue({ error: null });
+    await deleteOrgRole('org', 'role');
+    expect(mocks.assertRoleManagerRemains).toHaveBeenCalledWith('org', { deletedRoleId: 'role' });
+    expect(mocks.rpc).toHaveBeenCalledWith('mutate_organization_role_authorized', expect.objectContaining({ p_action: 'delete' }));
+    expect(mocks.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'role.delete' }));
+  });
+});
+
+function createOrgRole(...args: Parameters<typeof createOrgRoleResult>) { return readActionResult(createOrgRoleResult(...args)); }
+function updateOrgRole(...args: Parameters<typeof updateOrgRoleResult>) { return readActionResult(updateOrgRoleResult(...args)); }
+function deleteOrgRole(...args: Parameters<typeof deleteOrgRoleResult>) { return readActionResult(deleteOrgRoleResult(...args)); }

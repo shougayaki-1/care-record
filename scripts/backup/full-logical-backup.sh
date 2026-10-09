@@ -10,6 +10,7 @@ umask 077
 
 case "$APP_ENV" in production|staging) ;; *) echo "APP_ENV must be production or staging" >&2; exit 2 ;; esac
 case "$GCS_BACKUP_BUCKET" in *'replace-'*|*'example'*|'') echo "GCS_BACKUP_BUCKET contains a placeholder" >&2; exit 2 ;; esac
+case "${GCS_TIERED_BACKUP_ENABLED:-false}" in true|false) ;; *) echo "Invalid GCS_TIERED_BACKUP_ENABLED" >&2; exit 2 ;; esac
 case "$DATABASE_URL" in postgresql://*|postgres://*) ;; *) echo "DATABASE_URL must be a PostgreSQL URL" >&2; exit 2 ;; esac
 
 for command in pg_dump pg_dumpall psql gzip jq sha256sum tar gcloud; do
@@ -21,6 +22,17 @@ generation="$(date -u +%Y%m%dT%H%M%SZ)"
 year="${generation:0:4}"
 month="${generation:4:2}"
 day="${generation:6:2}"
+if [[ "${GCS_TIERED_BACKUP_ENABLED:-false}" == "true" ]]; then
+  # Validate all destinations before reading the database. A partial rollout
+  # must fail rather than silently leave long-term representatives unprotected.
+  for tier in RECENT DAILY WEEKLY MONTHLY; do
+    variable="GCS_${tier}_BACKUP_BUCKET"
+    [[ -n "${!variable:-}" ]] || { echo "$variable is required" >&2; exit 2; }
+  done
+  export BACKUP_GENERATION="$generation"
+  export BACKUP_RETENTION_AT="${BACKUP_RETENTION_AT:-$started_at}"
+  retention_plan="$(node "$(dirname "$0")/retention-plan.mjs")"
+fi
 work_root="$(mktemp -d)"
 trap 'rm -rf "$work_root"' EXIT
 backup_dir="$work_root/care-record-${APP_ENV}-${generation}"
@@ -70,17 +82,28 @@ jq -n \
 archive="$work_root/$(basename "$backup_dir").tar.gz"
 tar --create --gzip --file "$archive" --directory "$work_root" "$(basename "$backup_dir")"
 sha256sum "$archive" > "$archive.sha256"
+archive_sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
 
 object_prefix="full/${APP_ENV}/${year}/${month}/${day}"
 object_uri="gs://${GCS_BACKUP_BUCKET}/${object_prefix}/$(basename "$archive")"
-gcloud storage cp --quiet "$archive" "$object_uri"
-gcloud storage cp --quiet "$archive.sha256" "${object_uri}.sha256"
+if [[ "${GCS_TIERED_BACKUP_ENABLED:-false}" == "true" ]]; then
+  while IFS=$'\t' read -r tier uri; do
+    published_hash="$(bash "$(dirname "$0")/publish-backup-pair.sh" "$archive" "$uri")"
+    if [[ "$tier" == "recent" ]]; then
+      object_uri="$uri"
+      archive_sha256="$published_hash"
+    fi
+  done <<< "$retention_plan"
+else
+  gcloud storage cp --quiet "$archive" "$object_uri"
+  gcloud storage cp --quiet "$archive.sha256" "${object_uri}.sha256"
+fi
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     echo "backup_uri=$object_uri"
     echo "backup_generation=$generation"
-    echo "backup_sha256=$(sha256sum "$archive" | cut -d' ' -f1)"
+    echo "backup_sha256=$archive_sha256"
   } >> "$GITHUB_OUTPUT"
 fi
 

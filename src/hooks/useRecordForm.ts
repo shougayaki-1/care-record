@@ -1,5 +1,7 @@
 'use client';
 
+import { ActionResultError, readActionResult } from '@/utils/actionResult';
+
 import { useAsyncRecordAction } from '@/hooks/useAsyncRecordAction';
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
@@ -246,8 +248,13 @@ export function useRecordForm() {
     [incomingDraftKey, recordIdentityKey],
   );
   const draftKey = draftScope.key;
-  const { pending: actionPending, error: actionError, run, isRunning, attemptKey, finishAttempt } = useAsyncRecordAction(`${recordIdentityKey}:${draftKey}`);
+  const { pending: actionPending, error: actionError, errorCause: actionErrorCause, run, isRunning, attemptKey, finishAttempt } = useAsyncRecordAction(`${recordIdentityKey}:${draftKey}`);
   const recordScopeKey = `${recordIdentityKey}:${draftKey}`;
+  const [linksFailure, setLinksFailure] = useState<{ scope: string; cause: unknown } | null>(null);
+  const [linksReload, setLinksReload] = useState(0);
+  const linkedLoadError = linksFailure?.scope === recordScopeKey ? linksFailure.cause : null;
+  const retryLinkedShifts = () => { setLinksFailure(null); setLinksReload(value => value + 1); };
+
   const autosaveRestoredRef = useRef(false);
   const autosaveRevisionRef = useRef(0);
   const contentVersionRef = useRef(0);
@@ -546,8 +553,8 @@ export function useRecordForm() {
         currentOrg
           ? (async () => {
               try {
-                await auditReportView(currentOrg.id, targetId);
-                const nextImages = await getReportImages(currentOrg.id, targetId);
+                await readActionResult(auditReportView(currentOrg.id, targetId));
+                const nextImages = await readActionResult(getReportImages(currentOrg.id, targetId));
                 if (isCurrent()) setImages(nextImages);
               } catch (auditImageError) {
                 console.error('audit/image load error:', auditImageError);
@@ -780,7 +787,7 @@ export function useRecordForm() {
     if (loading || !currentOrg || autosaveRestoredRef.current || currentStatus === 'approved') return;
     let cancelled = false;
     autosaveRestoredRef.current = true;
-    void loadReportAutosave(currentOrg.id, draftKey).then((saved) => {
+    void readActionResult(loadReportAutosave(currentOrg.id, draftKey)).then((saved) => {
       if (cancelled) return;
       if (!saved?.payload) return;
       const payload = saved.payload as Partial<{
@@ -822,7 +829,7 @@ export function useRecordForm() {
     const timer = window.setTimeout(() => {
       const revision = autosaveRevisionRef.current + 1;
       setAutosaveState('saving');
-      void saveReportAutosave({
+      void readActionResult(saveReportAutosave({
         organizationId: currentOrg.id,
         clientId: clientId as string,
         reportId: currentReportId,
@@ -839,7 +846,7 @@ export function useRecordForm() {
           travelTime,
           travelExpenses,
         },
-      }).then((result) => {
+      })).then((result) => {
         if (cancelled) return;
         if (result.saved) autosaveRevisionRef.current = revision;
         setAutosaveState('saved');
@@ -859,19 +866,23 @@ export function useRecordForm() {
     if (!currentReportId || !currentOrg) return;
     let cancelled = false;
     void Promise.all([
-      getLinkedShifts(currentReportId),
-      getShiftSuggestions(currentOrg.id, currentReportId),
+      readActionResult(getLinkedShifts(currentReportId)),
+      readActionResult(getShiftSuggestions(currentOrg.id, currentReportId)),
     ]).then(([linked, suggestions]) => {
       if (cancelled) return;
+      setLinksFailure(previous => previous?.scope === recordScopeKey ? null : previous);
       setLinkedShifts(linked as LinkedShift[]);
       setShiftSuggestions(suggestions);
     }).catch((error) => {
-      if (!cancelled) console.error('Failed to load linked shifts or suggestions', error);
+      if (!cancelled) {
+        console.error('Failed to load linked shifts or suggestions', error);
+        setLinksFailure({ scope: recordScopeKey, cause: error });
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [currentReportId, currentOrg, setLinkedShifts, setShiftSuggestions]);
+  }, [currentReportId, currentOrg, linksReload, recordScopeKey, setLinkedShifts, setShiftSuggestions]);
 
   const handleChange = useCallback((setter: (val: string) => void, val: string) => {
     setter(val);
@@ -885,31 +896,25 @@ export function useRecordForm() {
   }, []);
 
   const handleImageUpload = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
-    if (!currentReportId || !e.target.files || e.target.files.length === 0) return;
-    setSubmitting(true);
-    try {
-        if (!currentOrg) throw new Error('事業所が選択されていません');
-        const formData = new FormData();
-        formData.set('organizationId', currentOrg.id);
-        formData.set('reportId', currentReportId);
-        formData.set('file', e.target.files[0]);
-        await uploadReportImage(formData);
-        await loadExistingData(currentReportId);
-        showToast('画像をアップロードしました');
-    } catch(e) {
-        console.error(e);
-        showToast('アップロード失敗', 'error');
-    } finally {
-        setSubmitting(false);
-    }
-  }, [currentOrg, currentReportId, loadExistingData, setSubmitting, showToast]);
+    if (!currentReportId || !e.target.files?.length || isRunning() || externalPending.current) return;
+    const file = e.target.files[0];
+    await run(async () => {
+      if (!currentOrg) throw new Error('事業所が選択されていません');
+      const formData = new FormData();
+      formData.set('organizationId', currentOrg.id);
+      formData.set('reportId', currentReportId);
+      formData.set('file', file);
+      await readActionResult(uploadReportImage(formData));
+      await loadExistingData(currentReportId);
+    }, { successMessage: '画像をアップロードしました', errorMessage: 'アップロード失敗' });
+  }, [currentOrg, currentReportId, isRunning, loadExistingData, run]);
 
   const handleDeleteReport = useCallback(async () => {
     if (externalPending.current) return;
     if (currentStatus === 'approved') { showToast('承認済みの記録は削除できません', 'error'); return; }
     const outcome = await run(async () => {
       if (!currentReportId || !currentOrg) throw new Error('削除対象が不正です');
-      await commitRecordChange(currentOrg.id, () => softDeleteReports(currentOrg.id, [currentReportId], '記録編集画面から削除'));
+      await commitRecordChange(currentOrg.id, () => readActionResult(softDeleteReports(currentOrg.id, [currentReportId], '記録編集画面から削除')));
     }, {
       confirm: () => confirm({ title: '記録の削除', message: '本当に削除しますか？', confirmText: '削除する', confirmColor: 'error' }),
       successMessage: '削除しました', errorMessage: '削除に失敗しました。もう一度操作してください。',
@@ -988,7 +993,7 @@ export function useRecordForm() {
           ? { auditSource: 'ai_import' as const, auditFileCount: 1 }
           : {}),
       } satisfies Omit<Parameters<typeof saveReportAction>[0], 'idempotencyKey'>;
-      const result = await commitRecordChange(currentOrg.id, () => saveReportAction({ ...payload, idempotencyKey: attemptKey('report', payload) }));
+      const result = await commitRecordChange(currentOrg.id, () => readActionResult(saveReportAction({ ...payload, idempotencyKey: attemptKey('report', payload) })));
       finishAttempt('report');
       if (!isCurrent()) return false;
       const targetReportId = result.reportId;
@@ -997,7 +1002,7 @@ export function useRecordForm() {
       if (!currentReportId) setCurrentReportId(targetReportId);
       if (status === 'draft') setHasAiDraftSource(false);
       setIsDirty(false);
-      void discardReportAutosave(currentOrg.id, draftKey).catch((error) => {
+      void readActionResult(discardReportAutosave(currentOrg.id, draftKey)).catch((error) => {
         console.error('Failed to discard committed autosave', error);
       });
       setAutosaveState('idle');
@@ -1011,7 +1016,7 @@ export function useRecordForm() {
     }, {
       confirm: feedback.confirm,
       successMessage: (saved) => saved ? feedback.message : null,
-      errorMessage: (error) => error instanceof Error && error.message.startsWith('REPORT_VERSION_CONFLICT:')
+      errorMessage: (error) => error instanceof ActionResultError && error.code === 'VERSION_CONFLICT'
         ? '他の利用者がこの記録を更新しました。入力内容は保持しています。再読み込みして差分を確認してください。'
         : '保存に失敗しました。入力内容は保持しています。もう一度操作してください。',
     });
@@ -1030,7 +1035,7 @@ export function useRecordForm() {
   const handleApprove = useCallback(async () => {
     if (externalPending.current) return;
     if (!currentOrg || !currentReportId) return;
-    const outcome = await run(() => commitRecordChange(currentOrg.id, () => transitionReports(currentOrg.id, [currentReportId], 'approve')), {
+    const outcome = await run(() => commitRecordChange(currentOrg.id, () => readActionResult(transitionReports(currentOrg.id, [currentReportId], 'approve'))), {
       confirm: () => confirm({ title: '承認の確認', message: 'この記録を承認しますか？', confirmText: '承認する', confirmColor: 'primary' }),
       successMessage: '承認しました', errorMessage: '承認に失敗しました。もう一度操作してください。',
     });
@@ -1039,7 +1044,7 @@ export function useRecordForm() {
   const handleRemand = useCallback(async () => {
     if (externalPending.current) return;
     if (!currentOrg || !currentReportId) return;
-    const outcome = await run(() => commitRecordChange(currentOrg.id, () => transitionReports(currentOrg.id, [currentReportId], 'remand')), {
+    const outcome = await run(() => commitRecordChange(currentOrg.id, () => readActionResult(transitionReports(currentOrg.id, [currentReportId], 'remand'))), {
       confirm: () => confirm({ title: '承認取消の確認', message: '承認を取り消し、差し戻しますか？', confirmText: '差し戻す', confirmColor: 'warning' }),
       successMessage: '記録を差し戻しました', successSeverity: 'info', errorMessage: '差し戻しに失敗しました。もう一度操作してください。',
     });
@@ -1139,8 +1144,8 @@ export function useRecordForm() {
     selectedHelpers, actualStaffs, actualServiceTypeId, startDateTime, endDateTime,
     serviceTime, travelTime, travelExpenses, images,
     aiFilledFields, isSpanningMonth, selectedPart, originalShiftTimes,
-    currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting, actionError,
-    shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId,
+    currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting, actionError, actionErrorCause,
+    shiftSuggestions, linkedShifts, linkedLoadError, retryLinkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId,
     setShiftSuggestions, setLinkedShifts, setSelectedSegmentId, dismissShiftSuggestion,
     setActualServiceTypeId, setActualStaffs, setStartDateTime, setEndDateTime,
     setServiceTime, setTravelTime, setTravelExpenses,

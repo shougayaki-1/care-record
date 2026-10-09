@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { serializeError } from './log';
-import { getSafeExternalErrorDetails, logExternalError, sanitizeDbError, UserFacingError, withSafeError } from './errors';
+import { getSafeExternalErrorDetails, logExternalError, sanitizeDbError, ExpectedActionError, UserFacingError, withSafeError } from './errors';
 
 vi.mock('./log', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./log')>();
@@ -40,12 +40,17 @@ describe('withSafeError', () => {
     await expect(withSafeError('success', async () => ({ ok: true }))).resolves.toEqual({ ok: true });
   });
 
-  it('passes UserFacingError through unchanged', async () => {
+  it('hides an unclassified UserFacingError', async () => {
     const error = new UserFacingError('操作を完了できませんでした');
 
     await expect(withSafeError('userFacing', async () => {
       throw error;
-    })).rejects.toBe(error);
+    })).rejects.toThrow(GENERIC_MESSAGE);
+  });
+
+  it('passes explicitly classified state through unchanged', async () => {
+    const error = new ExpectedActionError('FORBIDDEN', '操作を完了できませんでした');
+    await expect(withSafeError('classified', async () => { throw error; })).rejects.toBe(error);
   });
 
   it.each([
@@ -56,12 +61,12 @@ describe('withSafeError', () => {
     '対象が見つかりません',
     '氏名を入力してください',
     '100文字以内で入力してください',
-  ])('passes a safe existing message through: %s', async (message) => {
+  ])('hides bare errors even when their message contains a former safe pattern: %s', async (message) => {
     const error = new Error(message);
 
     await expect(withSafeError('safeMessage', async () => {
       throw error;
-    })).rejects.toBe(error);
+    })).rejects.toThrow(GENERIC_MESSAGE);
   });
 
   it('hides an unexpected Error and logs the original value', async () => {

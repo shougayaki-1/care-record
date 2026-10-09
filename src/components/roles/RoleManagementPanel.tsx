@@ -1,9 +1,10 @@
 'use client';
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Box, Typography, Button, Paper, IconButton,
-  Stack, CircularProgress, TextField,
+  Box, Typography, IconButton,
+  Stack, CircularProgress, Alert,
 } from '@/components/ui/mui';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -11,7 +12,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
-import { AppButton, AppDialog } from '@/components/ui';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
+import { AppButton, AppDialog, AppTextField, SectionCard, EmptyState } from '@/components/ui';
 import {
   getOrgRolesFull, createOrgRole, updateOrgRole, deleteOrgRole,
 } from '@/app/actions/roles';
@@ -19,6 +21,11 @@ import RolePermissionsMatrix from '@/components/roles/RolePermissionsMatrix';
 import ColorPresetPicker from '@/components/roles/ColorPresetPicker';
 import type { RolePermissions } from '@/utils/permissions';
 import { checkManagementPermission, EMPTY_PERMISSIONS, normalizePermissions } from '@/utils/permissions';
+
+function isDangerousPermissions(permissions: RolePermissions) {
+  const { accounts, roles, organizationDelete, ownerTransfer } = permissions.management;
+  return accounts || roles || organizationDelete || ownerTransfer;
+}
 
 type OrgRole = {
   id: string;
@@ -38,6 +45,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
   const { showToast } = useToast();
   const [roles, setRoles] = useState<OrgRole[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [editRole, setEditRole] = useState<OrgRole | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [formName, setFormName] = useState('');
@@ -49,15 +57,16 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
   const fetchRoles = useCallback(async () => {
     if (!currentOrg) return;
     setLoading(true);
+    setLoadError(null);
     try {
-      const data = await getOrgRolesFull(currentOrg.id);
+      const data = await readActionResult(getOrgRolesFull(currentOrg.id));
       setRoles((data as unknown as OrgRole[]).map((role) => ({ ...role, permissions: normalizePermissions(role.permissions) })));
-    } catch {
-      showToast('ロール一覧の取得に失敗しました', 'error');
+    } catch (error) {
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
-  }, [currentOrg, showToast]);
+  }, [currentOrg]);
 
   const refreshAfterChange = async () => {
     await fetchRoles();
@@ -71,7 +80,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
   if (!currentOrg || !checkManagementPermission(currentOrg.effectivePermissions, 'roles')) {
     return (
       <Box sx={{ p: embedded ? 0 : { xs: 2, sm: 3 } }}>
-        <Typography>この機能はオーナーのみ利用できます。</Typography>
+        <Typography>この機能にはロール管理権限が必要です。</Typography>
       </Box>
     );
   }
@@ -97,17 +106,17 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
     setSaving(true);
     try {
       if (isNew) {
-        await createOrgRole(currentOrg.id, formName.trim(), formColor, formPerms);
+        await readActionResult(createOrgRole(currentOrg.id, formName.trim(), formColor, formPerms));
         showToast('ロールを作成しました', 'success');
       } else if (editRole) {
-        await updateOrgRole(currentOrg.id, editRole.id, { name: formName.trim(), color: formColor, permissions: formPerms });
+        await readActionResult(updateOrgRole(currentOrg.id, editRole.id, { name: formName.trim(), color: formColor, permissions: formPerms }));
         showToast('ロールを更新しました', 'success');
       }
       setEditRole(null);
       setIsNew(false);
       await refreshAfterChange();
     } catch (e) {
-      showToast((e as Error).message, 'error');
+      showToast(getActionErrorMessage(e), 'error');
     } finally {
       setSaving(false);
     }
@@ -116,12 +125,12 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
   const handleDelete = async () => {
     if (!currentOrg || !deleteTarget) return;
     try {
-      await deleteOrgRole(currentOrg.id, deleteTarget.id);
+      await readActionResult(deleteOrgRole(currentOrg.id, deleteTarget.id));
       showToast('ロールを削除しました', 'success');
       setDeleteTarget(null);
       await refreshAfterChange();
     } catch (e) {
-      showToast((e as Error).message, 'error');
+      showToast(getActionErrorMessage(e), 'error');
     }
   };
 
@@ -136,30 +145,39 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
             </Typography>
           )}
         </Box>
-        <Button startIcon={<AddIcon />} variant="contained" onClick={openCreate}>
+        <AppButton startIcon={<AddIcon />} variant="contained" onClick={openCreate}>
           ロールを作成
-        </Button>
+        </AppButton>
       </Stack>
 
+      {Boolean(loadError) && <Alert severity="error" sx={{ mb: 2 }}>
+        {getActionErrorMessage(loadError)}
+        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+          <AppButton size="small" variant="outlined" intent="secondary" onClick={() => void fetchRoles()}>再試行</AppButton>
+          {needsActionRecovery(loadError) && <RecoveryLogoutButton attemptClientLogout={false} />}
+        </Stack>
+      </Alert>}
+      {currentOrg.role !== 'owner'  && <Typography variant="caption" color="text.secondary">危険な権限を含むロールの編集・削除はオーナーのみ実行できます。</Typography>}
       {loading ? (
         <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box>
       ) : (
         <Stack spacing={2}>
+          {!loadError && roles.length === 0 && <EmptyState title="ロールがありません" />}
           {roles.map(role => (
-            <Paper key={role.id} sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+            <SectionCard key={role.id} sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
               <Box width={16} height={16} borderRadius="50%" bgcolor={role.color ?? 'grey.400'} flexShrink={0} />
               <Typography fontWeight="medium" flex={1}>{role.name}</Typography>
               <Stack direction="row" spacing={0.5}>
-                <IconButton size="small" onClick={() => openEdit(role)}>
+                <IconButton aria-label={`${role.name}を編集`} disabled={currentOrg.role !== 'owner' && isDangerousPermissions(role.permissions)} size="small" onClick={() => openEdit(role)}>
                   <EditIcon fontSize="small" />
                 </IconButton>
                 {!role.is_preset && (
-                  <IconButton size="small" color="error" onClick={() => setDeleteTarget(role)}>
+                  <IconButton aria-label={`${role.name}を削除`} disabled={currentOrg.role !== 'owner' && isDangerousPermissions(role.permissions)} size="small" color="error" onClick={() => setDeleteTarget(role)}>
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 )}
               </Stack>
-            </Paper>
+            </SectionCard>
           ))}
         </Stack>
       )}
@@ -173,7 +191,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
         contentSx={{ overflowX: 'auto' }}
         actions={(
           <>
-            <Button onClick={() => { setIsNew(false); setEditRole(null); }}>キャンセル</Button>
+            <AppButton intent="secondary" variant="text" onClick={() => { setIsNew(false); setEditRole(null); }}>キャンセル</AppButton>
             <AppButton loading={saving} variant="contained" onClick={() => void handleSave()}>
               {isNew ? '作成' : '保存'}
             </AppButton>
@@ -189,7 +207,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
         }}
       >
         <Stack spacing={2} sx={{ p: { xs: 0, sm: 1 }, minWidth: 0 }}>
-          <TextField
+          <AppTextField
             label="ロール名"
             value={formName}
             onChange={e => setFormName(e.target.value)}
@@ -201,7 +219,7 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
             <Typography variant="caption" display="block" mb={0.5}>カラー</Typography>
             <ColorPresetPicker value={formColor} onChange={setFormColor} />
           </Box>
-          <RolePermissionsMatrix value={formPerms} onChange={setFormPerms} />
+          <RolePermissionsMatrix isOwner={currentOrg.role === 'owner'} disabled={saving} value={formPerms} onChange={setFormPerms} />
         </Stack>
       </AppDialog>
 
@@ -211,8 +229,8 @@ export default function RoleManagementPanel({ embedded = false, onRolesChanged }
         title="ロールを削除"
         actions={(
           <>
-            <Button onClick={() => setDeleteTarget(null)}>キャンセル</Button>
-            <Button color="error" variant="contained" onClick={() => void handleDelete()}>削除</Button>
+            <AppButton intent="secondary" variant="text" onClick={() => setDeleteTarget(null)}>キャンセル</AppButton>
+            <AppButton intent="danger" variant="contained" onClick={() => void handleDelete()}>削除</AppButton>
           </>
         )}
         actionsSx={{

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ getUser: vi.fn(), insert: vi.fn(), grant: vi.fn(), challenge: vi.fn() }));
-vi.mock('./auth', () => ({ createSessionClient: async () => ({ auth: { getUser: mocks.getUser } }) }));
+vi.mock('./auth', async importOriginal => ({ ...(await importOriginal<typeof import('./auth')>()), createSessionClient: async () => ({ auth: { getUser: mocks.getUser } }) }));
 vi.mock('./serviceRole', () => ({ serviceRoleForStepupReauth: () => ({ from: () => ({ insert: mocks.insert, update: () => mocks.challenge() }) }) }));
 vi.mock('./reauth', async () => ({ ...(await import('@/utils/reauthTypes')), issueGrantToken: mocks.grant }));
 import { beginStepUpReauth, completeStepUpReauth } from './stepupReauth';

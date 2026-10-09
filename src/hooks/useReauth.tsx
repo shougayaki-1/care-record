@@ -1,5 +1,6 @@
 'use client';
 
+import { ActionResultError, getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getReauthMethods, startProviderReauth, verifyReauthPassword } from '@/app/actions/authSecurity';
@@ -47,7 +48,7 @@ export function useReauth() {
           setLoading(false); setError('再認証方法の確認がタイムアウトしました。キャンセルして再度お試しください');
         }
       }, 30_000);
-      void getReauthMethods().then(available => {
+      void readActionResult(getReauthMethods()).then(available => {
         if (pending.current !== request || loadFinished) return;
         setMethods(available);
         setMethod(available.includes(options.preferredMethod || 'password') ? options.preferredMethod || 'password' : available[0] || 'password');
@@ -70,7 +71,7 @@ export function useReauth() {
       await Promise.race([
         (async () => {
           if (method === 'password') {
-            const grant = await verifyReauthPassword(request.purpose, password);
+            const grant = await readActionResult(verifyReauthPassword(request.purpose, password));
             if (isActive()) finish(grant);
             return;
           }
@@ -79,7 +80,7 @@ export function useReauth() {
             if (isActive()) { finish(null); window.location.assign(url); }
             return;
           }
-          const { nonce, provider } = await startProviderReauth(request.purpose, method);
+          const { nonce, provider } = await readActionResult(startProviderReauth(request.purpose, method));
           if (!isActive()) return;
           const next = safeReauthNext(request.options.next);
           const redirectTo = `${window.location.origin}/auth/reauth-callback?nonce=${encodeURIComponent(nonce)}&next=${encodeURIComponent(next)}`;
@@ -88,17 +89,17 @@ export function useReauth() {
             ...(provider === 'azure' ? { scopes: 'email' } : {}),
             queryParams: provider === 'azure' ? { prompt: 'login' } : { prompt: 'select_account', max_age: '0' },
           } });
-          if (oauthError || !data.url) throw new Error('再認証を開始できません');
+          if (oauthError || !data.url) throw new ActionResultError('UNEXPECTED_ERROR', '再認証を開始できません');
           if (isActive()) { finish(null); window.location.assign(data.url); }
         })(),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('再認証がタイムアウトしました。もう一度お試しください')), 30_000); }),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ActionResultError('UNEXPECTED_ERROR', '再認証がタイムアウトしました。もう一度お試しください')), 30_000); }),
       ]);
     } catch (cause) {
       if (isActive()) {
         // Invalidate late responses after timeout/cancel before they can resume
         // an operation. A retry creates a new request identity.
         activeAttempt.current = null;
-        setError(cause instanceof Error ? cause.message : '再認証に失敗しました');
+        setError(getActionErrorMessage(cause, '再認証に失敗しました'));
       }
     } finally { clearTimeout(timer); if (pending.current === request) setLoading(false); }
   };

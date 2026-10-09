@@ -1,5 +1,6 @@
 'use client';
 
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 import { useState, useEffect } from 'react';
 import {
     Box, Typography, Paper, TextField, Button, Stack, CircularProgress, Card, CardActionArea, Alert, Chip,
@@ -14,7 +15,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import { useToast } from '@/components/ui/ToastProvider';
 import { createOrganization, updateOwnProfile } from '@/app/actions/user';
 import { AppButton } from '@/components/ui';
-import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
+import { AccountSwitchRecovery } from '@/components/auth/AccountSwitchRecovery';
 
 type Step = 'profile' | 'choice' | 'create' | 'join';
 
@@ -28,6 +29,7 @@ export default function SetupPage() {
     const [submitting, setSubmitting] = useState(false);
     const [step, setStep] = useState<Step>('profile');
     const [hasMembership, setHasMembership] = useState(false);
+    const [email, setEmail] = useState<string | undefined>();
 
     // 入力値
     const [userName, setUserName] = useState('');
@@ -36,18 +38,23 @@ export default function SetupPage() {
 
     // 招待プレビュー（コードが URL から来た場合に取得）
     const [invitePreview, setInvitePreview] = useState<InvitationPreview | null>(null);
+    const [previewError, setPreviewError] = useState<string | null>(null);
+    const [previewAttempt, setPreviewAttempt] = useState(0);
 
     useEffect(() => {
         if (paramInviteCode) {
             queueMicrotask(() => {
                 setInviteCode(paramInviteCode);
-                void getInvitationPreview(paramInviteCode).then(setInvitePreview).catch(() => {});
+                setPreviewError(null);
+                void readActionResult(getInvitationPreview(paramInviteCode)).then(setInvitePreview).catch(error => setPreviewError(getActionErrorMessage(error)));
             });
         }
-    }, [paramInviteCode]);
+    }, [paramInviteCode, previewAttempt]);
 
     useEffect(() => {
         let mounted = true;
+        let initializedUserId: string | null = null;
+        let initializationTimer: ReturnType<typeof setTimeout> | undefined;
 
         const processUser = async (user: User) => {
             if (!mounted) return;
@@ -65,7 +72,7 @@ export default function SetupPage() {
 
                 let inviteName: string | undefined;
                 if (paramInviteCode) {
-                    const preview = await getInvitationPreview(paramInviteCode).catch(() => null);
+                    const preview = await readActionResult(getInvitationPreview(paramInviteCode)).catch(error => { setPreviewError(getActionErrorMessage(error)); return null; });
                     if (preview?.valid) {
                         setInvitePreview(preview);
                         inviteName = preview.targetName;
@@ -89,38 +96,41 @@ export default function SetupPage() {
             }
         };
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            if (mounted) setEmail(session?.user.email);
             if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
                 if (session) {
-                    await processUser(session.user);
+                    // SIGNED_IN can repeat for the same session. Reinitializing would
+                    // overwrite the wizard step and discard the user's progress.
+                    if (initializedUserId === session.user.id) return;
+                    initializedUserId = session.user.id;
+                    clearTimeout(initializationTimer);
+                    // Keep Supabase queries outside the auth callback's execution.
+                    initializationTimer = setTimeout(() => { void processUser(session.user); }, 0);
                 } else if (event === 'INITIAL_SESSION') {
                     console.warn('[SetupPage] INITIAL_SESSION received but no session found. Redirecting to login.');
                     if (mounted) router.replace('/?error=session_missing');
                 }
             } else if (event === 'SIGNED_OUT') {
+                clearTimeout(initializationTimer);
                 if (mounted) router.replace('/');
             }
         });
 
         return () => {
             mounted = false;
+            clearTimeout(initializationTimer);
             subscription.unsubscribe();
         };
     }, [router, paramInviteCode]);
 
-    const getErrorMessage = (error: unknown): string => {
-        if (error instanceof Error) return error.message;
-        if (typeof error === 'object' && error !== null && 'message' in error) {
-            return String((error as { message: unknown }).message);
-        }
-        return JSON.stringify(error);
-    };
+    const getErrorMessage = getActionErrorMessage;
 
     const handleSaveProfile = async () => {
         if (!userName.trim()) return;
         setSubmitting(true);
         try {
-            await updateOwnProfile(userName, true);
+            await readActionResult(updateOwnProfile(userName, true));
             setStep(inviteCode ? 'join' : 'choice');
         } catch (e) {
             showToast(`プロフィールの保存に失敗しました: ${getErrorMessage(e)}`, 'error');
@@ -133,7 +143,7 @@ export default function SetupPage() {
         if (!orgName.trim()) return;
         setSubmitting(true);
         try {
-            await createOrganization(orgName);
+            await readActionResult(createOrganization(orgName));
             window.location.href = '/app';
         } catch (e) {
             showToast(`事業所の作成に失敗しました: ${getErrorMessage(e)}`, 'error');
@@ -145,7 +155,7 @@ export default function SetupPage() {
         if (!inviteCode.trim()) return;
         setSubmitting(true);
         try {
-            const res = await acceptInvitation(inviteCode.trim());
+            const res = await readActionResult(acceptInvitation(inviteCode.trim()));
             if (res.alreadyMember) {
                 showToast('すでにこの事業所に参加しています。移動します。', 'info');
             }
@@ -161,7 +171,7 @@ export default function SetupPage() {
             <Box p={5} textAlign="center">
                 <CircularProgress />
                 <Typography mt={2}>セットアップ情報を取得中...</Typography>
-                <RecoveryLogoutButton label="別のアカウントでログインする" />
+                <AccountSwitchRecovery email={email} />
             </Box>
         );
     }
@@ -277,7 +287,7 @@ export default function SetupPage() {
                         </Box>
 
                         {/* 招待コードが URL から来た場合は事業所詳細を表示 */}
-                        {paramInviteCode && invitePreview?.valid ? (
+                        {previewError ? <Alert severity="error" action={<AppButton variant="text" intent="secondary" onClick={() => setPreviewAttempt(value => value + 1)}>再試行</AppButton>}>{previewError}</Alert> : paramInviteCode && invitePreview?.valid ? (
                             <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.tint', borderRadius: 2 }}>
                                 <Stack spacing={1}>
                                     <Stack direction="row" spacing={1} alignItems="center">
@@ -350,7 +360,7 @@ export default function SetupPage() {
                                 fullWidth size="large"
                                 onClick={handleJoinOrg}
                                 loading={submitting}
-                                disabled={!inviteCode.trim() || (paramInviteCode != null && invitePreview != null && !invitePreview.valid)}
+                                disabled={Boolean(previewError) || !inviteCode.trim() || (paramInviteCode != null && invitePreview != null && !invitePreview.valid)}
                             >
                                 {submitting ? '参加中...' : '参加する'}
                             </AppButton>
@@ -359,7 +369,7 @@ export default function SetupPage() {
                 )}
 
                 <Box mt={3} textAlign="center">
-                    <RecoveryLogoutButton label="別のアカウントでログインする" />
+                    <AccountSwitchRecovery email={email} />
                 </Box>
             </Paper>
         </Box>

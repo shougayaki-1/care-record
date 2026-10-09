@@ -1,0 +1,36 @@
+name: Backup infrastructure
+
+on:
+  pull_request:
+    paths:
+      - infra/terraform/backup/**
+      - .github/workflows/backup-infrastructure.yml
+  push:
+    branches: [main]
+    paths:
+      - infra/terraform/backup/**
+      - .github/workflows/backup-infrastructure.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+        working-directory: infra/terraform/backup
+      - name: Initialize without the live backend
+        run: terraform init -backend=false -input=false
+        working-directory: infra/terraform/backup
+      - name: Validate and test plans with mock Google provider
+        run: |
+          terraform validate
+          terraform test
+        working-directory: infra/terraform/backup

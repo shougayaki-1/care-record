@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useCallback, useTransition } from 'react';
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
+import { useId, useState, useCallback, useTransition, useEffect, useRef } from 'react';
 import type { SyntheticEvent } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, Button, TextField, Stack,
-  IconButton, Select, MenuItem, FormControl, InputLabel, Menu, Alert, ListItemIcon,
+  Chip, Stack, Alert,
+  IconButton, MenuItem, Menu, ListItemIcon,
   CircularProgress, Divider, LinearProgress, Tabs, Tab,
 } from '@/components/ui/mui';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
@@ -21,11 +22,16 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
-import { createInvitation, getAccountOverview, getInviteStaffCandidates, getOrgRoles, updateAccountRole, updateMemberRoles, removeAccount, type InviteStaffCandidate } from '@/app/actions/accounts';
-import { AppButton, AppDialog, InnerPageHeader, PageBody, PageLayout, PageToolbar } from '@/components/ui';
+import { createInvitation, getAccountOverview, getInviteStaffCandidates, getOrgRoles, updateMemberRoles, removeAccount, type InviteStaffCandidate } from '@/app/actions/accounts';
+import { AppButton, AppDialog, AppTextField, SelectField, StatusChip, EmptyState, InnerPageHeader, PageBody, PageLayout, PageToolbar } from '@/components/ui';
 import { checkManagementPermission } from '@/utils/permissions';
 import RoleManagementPanel from '@/components/roles/RoleManagementPanel';
 import { useFetchData } from '@/hooks/useFetchData';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
+import { useReauth } from '@/hooks/useReauth';
+import { takeProviderReauthGrant } from '@/app/actions/authSecurity';
+import { addOrganizationOwner } from '@/app/actions/organizationOwners';
+import { readOwnerAddResume, OWNER_ADD_RESUME_KEY } from '@/utils/ownerAddResume';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -55,7 +61,8 @@ const initialAccountsData: AccountsData = {
 };
 
 export default function AccountsPage() {
-  const { currentOrg, loading: wsLoading } = useWorkspace();
+  const roleRestrictionId = useId();
+  const { currentOrg, loading: wsLoading, refreshWorkspace } = useWorkspace();
   const { showToast } = useToast();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -77,18 +84,24 @@ export default function AccountsPage() {
 
   // ダイアログ用
   const [openRoleDialog, setOpenRoleDialog] = useState(false);
-  const [editRole, setEditRole] = useState('staff');
   const [editOrgRoleIds, setEditOrgRoleIds] = useState<string[]>([]);
   
   // ★追加：削除（取り消し）確認ダイアログ用
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+  const { requestReauth, reauthDialog } = useReauth();
+  const [ownerTarget, setOwnerTarget] = useState<{ orgId: string; id: string; name: string; token?: string } | null>(null);
+  const [ownerAdding, setOwnerAdding] = useState(false);
+  const ownerBusy = useRef(false);
+  const resumeHandled = useRef(false);
+  const orgRef = useRef(currentOrg);
+  useEffect(() => { orgRef.current = currentOrg; }, [currentOrg]);
 
   const fetchAccountsData = useCallback(async (): Promise<AccountsData> => {
     if (!currentOrg) return initialAccountsData;
       const [overview, orgRoles, staffCandidates] = await Promise.all([
-        getAccountOverview(currentOrg.id),
-        getOrgRoles(currentOrg.id).catch(() => []),
-        getInviteStaffCandidates(currentOrg.id).catch(() => []),
+        readActionResult(getAccountOverview(currentOrg.id)),
+        readActionResult(getOrgRoles(currentOrg.id)),
+        readActionResult(getInviteStaffCandidates(currentOrg.id)),
       ]);
       // fetchedUserId をローカル変数で保持し sort に使うことで
       // currentUserId state への依存を断ち、二重フェッチループを防ぐ
@@ -115,12 +128,63 @@ export default function AccountsPage() {
 
   const {
     data: accountsData,
+    error: fetchError,
     loading: isFetching,
     refetch: fetchData,
   } = useFetchData(fetchAccountsData, initialAccountsData, !wsLoading && Boolean(currentOrg), () => {
     showToast('データの取得に失敗しました', 'error');
   }, currentOrg?.id);
   const { accountList, currentUserId, availableRoles, inviteStaffCandidates } = accountsData;
+
+  useEffect(() => {
+    if (!currentOrg || isFetching || !currentUserId || resumeHandled.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('action') !== 'owner_add') return;
+    resumeHandled.current = true;
+    const pending = readOwnerAddResume(params, sessionStorage.getItem(OWNER_ADD_RESUME_KEY), currentOrg.id, currentUserId);
+    const target = pending && accountList.find(account => account.id === pending.targetId && account.status === 'active' && account.role === 'member');
+    window.history.replaceState(null, '', '/app/accounts');
+    sessionStorage.removeItem(OWNER_ADD_RESUME_KEY);
+    void (async () => {
+      const grant = await readActionResult(takeProviderReauthGrant('owner_add'));
+      if (!pending || !target || currentOrg.role !== 'owner' || !grant || params.has('stepupError')) {
+        showToast('再認証または追加対象を確認できません。もう一度オーナー追加を開始してください。', 'error');
+        return;
+      }
+      // SSO復帰だけで昇格しない。再検証した対象を確認画面へ戻す。
+      setOwnerTarget({ orgId: pending.orgId, id: target.id, name: target.name, token: grant.token });
+    })().catch(() => showToast('再認証を確認できません。もう一度お試しください。', 'error'));
+  }, [currentOrg, currentUserId, accountList, isFetching, showToast]);
+
+  const executeOwnerAdd = async () => {
+    if (!ownerTarget || !currentOrg || currentOrg.role !== 'owner' || currentOrg.id !== ownerTarget.orgId || ownerBusy.current) return;
+    const target = ownerTarget;
+    ownerBusy.current = true;
+    setOwnerAdding(true);
+    try {
+      sessionStorage.setItem(OWNER_ADD_RESUME_KEY, JSON.stringify({ orgId: target.orgId, targetId: target.id, actorId: currentUserId }));
+      const grant = target.token ? { token: target.token } : await requestReauth('owner_add', {
+        next: `/app/accounts?stepup=1&action=owner_add&reauthOrg=${target.orgId}&target=${target.id}`,
+      });
+      if (!grant) return;
+      if (orgRef.current?.id !== target.orgId || orgRef.current.role !== 'owner') {
+        throw new Error('事業所が変更されています。もう一度追加対象を選んでください。');
+      }
+      await readActionResult(addOrganizationOwner(target.orgId, target.id, grant.token));
+      sessionStorage.removeItem(OWNER_ADD_RESUME_KEY);
+      setOwnerTarget(null);
+      showToast('オーナーを追加しました。現在のオーナーも引き続きオーナーです。');
+      await fetchData();
+      await refreshWorkspace();
+    } catch (error) {
+      // 使用済み・期限切れのSSO証明を次の試行に持ち越さない。
+      setOwnerTarget({ orgId: target.orgId, id: target.id, name: target.name });
+      showToast(getActionErrorMessage(error, 'オーナーの追加に失敗しました'), 'error');
+    } finally {
+      ownerBusy.current = false;
+      setOwnerAdding(false);
+    }
+  };
 
 
   const handleTabChange = useCallback((_: SyntheticEvent, value: 'accounts' | 'roles') => {
@@ -130,17 +194,17 @@ export default function AccountsPage() {
   const handleGenerateLink = async () => {
     if (!currentOrg) return;
     try {
-        const { code } = await createInvitation(currentOrg.id, {
+        const { code } = await readActionResult(createInvitation(currentOrg.id, {
           targetName: newInviteName,
           email: newInviteEmail,
           roleIds: selectedRoleIds,
           staffId: selectedInviteStaffId === 'none' ? null : selectedInviteStaffId,
-        });
+        }));
         setGeneratedLink(`${BASE_URL}/join?code=${code}`);
         fetchData();
     } catch (e) {
         console.error(e);
-        showToast(e instanceof Error ? e.message : '招待の発行に失敗しました', 'error');
+        showToast(getActionErrorMessage(e, '招待の発行に失敗しました'), 'error');
     }
   };
 
@@ -170,7 +234,6 @@ export default function AccountsPage() {
 
   const openRoleEditDialog = () => {
     if (!selectedAccount) return;
-    setEditRole(selectedAccount.role === 'owner' ? 'owner' : 'member');
     setEditOrgRoleIds(selectedAccount.roles?.map(r => r.id) ?? []);
     setOpenRoleDialog(true);
     handleMenuClose();
@@ -179,23 +242,8 @@ export default function AccountsPage() {
   const executeRoleChange = async () => {
     if (!currentOrg || !selectedAccount) return;
     try {
-      if (selectedAccount.id === currentUserId && selectedAccount.role === 'owner' && editRole !== 'owner') {
-        const ownerCount = accountList.filter(a => a.role === 'owner' && a.status === 'active').length;
-        if (ownerCount <= 1) {
-          showToast('あなたは最後のオーナーです。他の人にオーナー権限を付与してから変更してください。', 'error');
-          setOpenRoleDialog(false);
-          return;
-        }
-      }
-
-      await updateAccountRole(currentOrg.id, {
-        targetId: selectedAccount.id,
-        status: selectedAccount.status === 'active' ? 'active' : 'invited',
-        newRole: editRole,
-      });
-
       if (selectedAccount.status === 'active') {
-        await updateMemberRoles(currentOrg.id, selectedAccount.id, editOrgRoleIds);
+        await readActionResult(updateMemberRoles(currentOrg.id, selectedAccount.id, editOrgRoleIds));
       }
 
       showToast('権限を変更しました');
@@ -234,16 +282,16 @@ export default function AccountsPage() {
       if (!currentOrg || !selectedAccount) return;
 
       try {
-          await removeAccount(currentOrg.id, {
+          await readActionResult(removeAccount(currentOrg.id, {
               targetId: selectedAccount.id,
               status: selectedAccount.status === 'active' ? 'active' : 'invited',
-          });
+          }));
           showToast(selectedAccount.status === 'active' ? 'アカウントを事業所から削除しました' : '招待を取り消しました');
           setOpenDeleteDialog(false);
           fetchData(); // 一覧を再取得して表示を更新
       } catch (e) {
           console.error(e);
-          showToast(e instanceof Error ? e.message : 'エラーが発生しました', 'error');
+          showToast(getActionErrorMessage(e, 'エラーが発生しました'), 'error');
           setOpenDeleteDialog(false);
       }
   };
@@ -258,6 +306,7 @@ export default function AccountsPage() {
       <InnerPageHeader icon={<KeyIcon />} title="アカウント・権限管理" />
 
       <PageBody>
+          {fetchError != null && <Alert severity="error" action={needsActionRecovery(fetchError) ? <RecoveryLogoutButton /> : <AppButton variant="text" intent="secondary" onClick={() => void fetchData()}>再試行</AppButton>}>{getActionErrorMessage(fetchError)}</Alert>}
           {canManageRoles && (
             <Box sx={{ mb: 2, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 0, sm: 1 }, pt: 1 }}>
               {isPending && <LinearProgress />}
@@ -268,7 +317,7 @@ export default function AccountsPage() {
             </Box>
           )}
 
-          {activeTab === 'accounts' && (
+          {activeTab === 'accounts' && fetchError == null && (
             <>
             <PageToolbar>
                 <Box sx={{ minWidth: 0 }}>
@@ -287,7 +336,7 @@ export default function AccountsPage() {
                     {isFetching ? (
                         <Box sx={{ py: 4, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box>
                     ) : accountList.length === 0 ? (
-                        <Box sx={{ py: 4, px: 2, textAlign: 'center', color: 'text.secondary' }}>アカウントがありません</Box>
+                        <EmptyState title="アカウントがありません" />
                     ) : accountList.map((account) => (
                         <Box key={account.id} sx={{ py: 1.5 }}>
                             <Stack spacing={1.25}>
@@ -306,7 +355,7 @@ export default function AccountsPage() {
                                         )}
                                     </Box>
                                     {(canManageAccounts || account.id === currentUserId) && (
-                                        <IconButton size="small" onClick={(e) => handleMenuOpen(e, account)} sx={{ flexShrink: 0 }}>
+                                        <IconButton size="small" aria-label={`${account.name}の操作`} onClick={(e) => handleMenuOpen(e, account)} sx={{ flexShrink: 0 }}>
                                             <MoreVertIcon fontSize="small" />
                                         </IconButton>
                                     )}
@@ -321,7 +370,7 @@ export default function AccountsPage() {
                                     ) : (
                                         <Chip label="一般" size="small" color="default" variant="outlined" />
                                     )}
-                                    <Chip label={account.status === 'active' ? '有効' : '招待中'} color={account.status === 'active' ? 'success' : 'warning'} size="small" variant="filled" />
+                                    <StatusChip label={account.status === 'active' ? '有効' : '招待中'} tone={account.status === 'active' ? 'success' : 'warning'} size="small" variant="filled" />
                                 </Box>
                             </Stack>
                         </Box>
@@ -343,7 +392,7 @@ export default function AccountsPage() {
                         {isFetching ? (
                             <TableRow><TableCell colSpan={4} align="center" sx={{ py: 4 }}><CircularProgress size={24} /></TableCell></TableRow>
                         ) : accountList.length === 0 ? (
-                            <TableRow><TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}>アカウントがありません</TableCell></TableRow>
+                            <TableRow><TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}><EmptyState title="アカウントがありません" /></TableCell></TableRow>
                         ) : (
                             accountList.map((account) => (
                             <TableRow key={account.id} hover sx={{ height: 60 }}>
@@ -393,16 +442,16 @@ export default function AccountsPage() {
                                     )}
                                 </TableCell>
                                 <TableCell>
-                                    <Chip 
+                                    <StatusChip
                                         label={account.status === 'active' ? '有効' : '招待中'} 
-                                        color={account.status === 'active' ? 'success' : 'warning'} 
+                                        tone={account.status === 'active' ? 'success' : 'warning'}
                                         size="small" 
                                         variant="filled" 
                                     />
                                 </TableCell>
                                 <TableCell align="center">
                                     {(canManageAccounts || account.id === currentUserId) && (
-                                        <IconButton size="small" onClick={(e) => handleMenuOpen(e, account)}>
+                                        <IconButton size="small" aria-label={`${account.name}の操作`} onClick={(e) => handleMenuOpen(e, account)}>
                                             <MoreVertIcon fontSize="small" />
                                         </IconButton>
                                     )}
@@ -437,8 +486,18 @@ export default function AccountsPage() {
               </MenuItem>
           )}
 
+          {isOwner && selectedAccount?.status === 'active' && selectedAccount.role === 'member' && selectedAccount.id !== currentUserId && (
+              <MenuItem onClick={() => {
+                  setOwnerTarget({ orgId: currentOrg.id, id: selectedAccount.id, name: selectedAccount.name });
+                  handleMenuClose();
+              }} sx={{ py: 1.5 }}>
+                  <ListItemIcon><PersonAddIcon fontSize="small" color="primary" /></ListItemIcon>
+                  オーナーに追加
+              </MenuItem>
+          )}
+
           {/* ★修正: onClick を openDeleteConfirmDialog に変更 */}
-          <MenuItem onClick={openDeleteConfirmDialog} sx={{ color: 'error.main', py: 1.5 }}>
+          <MenuItem disabled={selectedAccount?.role === 'owner' && !isOwner} onClick={openDeleteConfirmDialog} sx={{ color: 'error.main', py: 1.5 }}>
               <ListItemIcon><DeleteIcon fontSize="small" color="error" /></ListItemIcon> 
               {selectedAccount?.status === 'active' ? 'アカウントを削除' : '招待を取り消す'}
           </MenuItem>
@@ -456,23 +515,13 @@ export default function AccountsPage() {
       {/* --- 権限・ロール変更ダイアログ --- */}
       <AppDialog open={openRoleDialog} onClose={() => setOpenRoleDialog(false)} maxWidth="xs" title="権限・ロールの変更" dividers={false} actions={<><AppButton variant="text" intent="secondary" onClick={() => setOpenRoleDialog(false)}>キャンセル</AppButton><AppButton onClick={executeRoleChange}>変更を保存</AppButton></>}>
         <Box pt={1}>
+          {!isOwner && <Typography id={roleRestrictionId} variant="caption" color="text.secondary">危険な権限を含むロールはオーナーのみ付与できます。</Typography>}
           <Typography variant="body2" mb={2}>
             <b>{selectedAccount?.name}</b> さんの権限を変更します。
           </Typography>
-          <FormControl fullWidth size="small">
-            <InputLabel id="edit-system-role-label">システム権限</InputLabel>
-            <Select labelId="edit-system-role-label" value={editRole} onChange={(e) => setEditRole(e.target.value)} label="システム権限">
-              <MenuItem value="member">メンバー - 権限はロールで管理</MenuItem>
-              {selectedAccount?.status === 'active' && (
-                <MenuItem value="owner">オーナー - 所有者</MenuItem>
-              )}
-            </Select>
-          </FormControl>
-          {selectedAccount?.id === currentUserId && editRole !== 'owner' && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              自分の所有者区分を変更すると、再度オーナーに戻るには別のオーナーによる移譲が必要です。
-            </Alert>
-          )}
+          <Typography variant="body2" color="text.secondary">
+            システム権限: {selectedAccount?.role === 'owner' ? 'オーナー' : 'メンバー'}。オーナーの追加は、現在のオーナーが操作メニューの「オーナーに追加」から再認証して行います。
+          </Typography>
           {availableRoles.length > 0 && selectedAccount?.status === 'active' && (
             <>
               <Divider sx={{ my: 2 }} />
@@ -485,6 +534,8 @@ export default function AccountsPage() {
                     <Chip
                       key={role.id}
                       label={role.name}
+                      disabled={locked}
+                      aria-describedby={locked ? roleRestrictionId : undefined}
                       onClick={() => {
                         if (locked) return;
                         if (selected) setEditOrgRoleIds(prev => prev.filter(id => id !== role.id));
@@ -492,10 +543,8 @@ export default function AccountsPage() {
                       }}
                       variant={selected ? 'filled' : 'outlined'}
                       sx={{
-                        cursor: locked ? 'not-allowed' : 'pointer',
-                        opacity: locked ? 0.4 : 1,
                         borderColor: role.color ?? undefined,
-                        color: selected ? '#fff' : (role.color ?? undefined),
+                        color: selected ? theme.palette.getContrastText(role.color ?? theme.palette.primary.main) : (role.color ?? undefined),
                         bgcolor: selected ? (role.color ?? undefined) : undefined,
                       }}
                     />
@@ -507,9 +556,22 @@ export default function AccountsPage() {
         </Box>
       </AppDialog>
 
+      <AppDialog open={Boolean(ownerTarget)} title="オーナーに追加" maxWidth="xs"
+        onClose={() => { if (!ownerAdding) { setOwnerTarget(null); sessionStorage.removeItem(OWNER_ADD_RESUME_KEY); } }}
+        actions={<><AppButton intent="secondary" variant="text" disabled={ownerAdding} onClick={() => { setOwnerTarget(null); sessionStorage.removeItem(OWNER_ADD_RESUME_KEY); }}>キャンセル</AppButton>
+          <AppButton loading={ownerAdding} disabled={currentOrg.id !== ownerTarget?.orgId || !isOwner} onClick={executeOwnerAdd}>オーナーに追加</AppButton></>}>
+        <Stack spacing={2}>
+          <Typography>「{ownerTarget?.name}」さんに、記録の閲覧・出力、権限管理、事業所削除を含むすべての権限を付与します。</Typography>
+          <Typography>現在のオーナーは引き続きオーナーです。業務ロールとスタッフの紐付けは維持されます。</Typography>
+          <Typography variant="body2" color="text.secondary">追加には本人の再認証が必要です。</Typography>
+        </Stack>
+      </AppDialog>
+      {reauthDialog}
+
       {/* --- 新規招待ダイアログ --- */}
       <AppDialog open={openInvite} onClose={() => setOpenInvite(false)} maxWidth="xs" title="新しいアカウントの招待" actions={<AppButton variant="text" intent="secondary" onClick={() => setOpenInvite(false)}>閉じる</AppButton>}>
           <Stack spacing={3} alignItems="center" py={1}>
+             {!isOwner && <Typography id={roleRestrictionId} variant="caption" color="text.secondary">危険な権限を含むロールはオーナーのみ付与できます。</Typography>}
              {!generatedLink ? (
                  <>
                     {availableRoles.length > 0 && (
@@ -523,6 +585,8 @@ export default function AccountsPage() {
                                 <Chip
                                   key={role.id}
                                   label={role.name}
+                                  disabled={locked}
+                                  aria-describedby={locked ? roleRestrictionId : undefined}
                                   onClick={() => {
                                     if (locked) return;
                                     if (selected) setSelectedRoleIds(prev => prev.filter(id => id !== role.id));
@@ -530,10 +594,8 @@ export default function AccountsPage() {
                                   }}
                                   variant={selected ? 'filled' : 'outlined'}
                                   sx={{
-                                    cursor: locked ? 'not-allowed' : 'pointer',
-                                    opacity: locked ? 0.4 : 1,
                                     borderColor: role.color ?? undefined,
-                                    color: selected ? '#fff' : (role.color ?? undefined),
+                                    color: selected ? theme.palette.getContrastText(role.color ?? theme.palette.primary.main) : (role.color ?? undefined),
                                     bgcolor: selected ? (role.color ?? undefined) : undefined,
                                   }}
                                 />
@@ -542,26 +604,17 @@ export default function AccountsPage() {
                           </Box>
                         </Box>
                     )}
-                    <TextField label="招待する人の名前" placeholder="例: 山田 太郎" size="small" fullWidth required value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} helperText="招待された人の表示名として使われます" />
-                    <TextField label="招待先メールアドレス" type="email" size="small" fullWidth required value={newInviteEmail} onChange={(e) => setNewInviteEmail(e.target.value)} helperText="このメールアドレスでログインした人だけが72時間以内に利用できます" />
-                    <FormControl fullWidth size="small">
-                      <InputLabel id="invite-staff-link-label">スタッフ名簿との紐付け</InputLabel>
-                      <Select labelId="invite-staff-link-label" value={selectedInviteStaffId} onChange={(e) => setSelectedInviteStaffId(e.target.value)} label="スタッフ名簿との紐付け">
-                        <MenuItem value="none">紐付けない</MenuItem>
-                        {inviteStaffCandidates.map((staff) => (
-                          <MenuItem key={staff.id} value={staff.id}>
-                            {staff.name}{staff.positions && staff.positions.length > 0 ? `（${staff.positions.join('・')}）` : ''}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <Button variant="contained" onClick={handleGenerateLink} disabled={!newInviteName.trim() || !newInviteEmail.trim()} fullWidth sx={{ py: 1, boxShadow: 'none' }}>招待リンクを発行</Button>
+                    <AppTextField label="招待する人の名前" placeholder="例: 山田 太郎" size="small" fullWidth required value={newInviteName} onChange={(e) => setNewInviteName(e.target.value)} helperText="招待された人の表示名として使われます" />
+                    <AppTextField label="招待先メールアドレス" type="email" size="small" fullWidth required value={newInviteEmail} onChange={(e) => setNewInviteEmail(e.target.value)} helperText="このメールアドレスでログインした人だけが72時間以内に利用できます" />
+                    <SelectField label="スタッフ名簿との紐付け" size="small" value={selectedInviteStaffId} onChange={setSelectedInviteStaffId}
+                      options={[{ value: 'none', label: '紐付けない' }, ...inviteStaffCandidates.map(staff => ({ value: staff.id, label: `${staff.name}${staff.positions?.length ? `（${staff.positions.join('・')}）` : ''}` }))]} />
+                    <AppButton variant="contained" onClick={handleGenerateLink} disabled={!newInviteName.trim() || !newInviteEmail.trim()} fullWidth sx={{ py: 1, boxShadow: 'none' }}>招待リンクを発行</AppButton>
                  </>
              ) : (
                  <>
                     <Typography variant="body2" textAlign="center">以下のリンクを相手に共有してください。</Typography>
-                    <TextField value={generatedLink} fullWidth size="small" slotProps={{ input: { readOnly: true, endAdornment: (<IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}><ContentCopyIcon /></IconButton>) } }} />
-                    <Button variant="outlined" startIcon={<ShareIcon />} fullWidth onClick={handleShare}>共有メニューを開く</Button>
+                    <AppTextField label="招待リンク" value={generatedLink} fullWidth size="small" slotProps={{ input: { readOnly: true, endAdornment: (<IconButton onClick={() => { navigator.clipboard.writeText(generatedLink); showToast('コピーしました'); }}><ContentCopyIcon /></IconButton>) } }} />
+                    <AppButton intent="secondary" variant="outlined" startIcon={<ShareIcon />} fullWidth onClick={handleShare}>共有メニューを開く</AppButton>
                  </>
              )}
           </Stack>

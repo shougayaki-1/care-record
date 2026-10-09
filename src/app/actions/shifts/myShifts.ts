@@ -1,6 +1,7 @@
 'use server';
 
-import { UserFacingError, withSafeError } from '@/utils/errors';
+import { ExpectedActionError, sanitizeDbError, withActionResult } from '@/utils/errors';
+import type { ActionResult } from '@/types/actionResult';
 import { createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
 
 import type { MyShiftItem } from './types';
@@ -9,19 +10,20 @@ export async function getMyShiftsWithStatus(
     organizationId: string,
     startDate: string,
     endDate: string
-): Promise<MyShiftItem[]> {
-  return withSafeError('getMyShiftsWithStatus', async () => {
+): Promise<ActionResult<MyShiftItem[]>> {
+  return withActionResult('getMyShiftsWithStatus', async () => {
       const user = await getAuthedUser();
       const supabase = await createSessionClient();
 
-      const { data: staffRow } = await supabase
+      const { data: staffRow, error: staffError } = await supabase
           .from('staffs')
           .select('id')
           .eq('organization_id', organizationId)
           .eq('user_id', user.id)
           .maybeSingle();
 
-      if (!staffRow) throw new UserFacingError('スタッフアカウントが紐付いていません。事業所設定を確認してください。');
+      if (staffError) throw sanitizeDbError(staffError, 'getMyShiftsWithStatus:staff', { organizationId });
+      if (!staffRow) throw new ExpectedActionError('STAFF_NOT_LINKED', 'スタッフアカウントが紐付いていません。事業所設定を確認してください。');
 
       const { data: shifts, error } = await supabase
           .from('shifts')
@@ -44,15 +46,17 @@ export async function getMyShiftsWithStatus(
           .gt('end_at', startDate)
           .order('start_at', { ascending: true });
 
-      if (error) throw error;
+      if (error) throw sanitizeDbError(error, 'getMyShiftsWithStatus:shifts', { organizationId });
       if (!shifts || shifts.length === 0) return [];
 
       const shiftIds = shifts.map(s => s.id);
-      const { data: reports } = await supabase
+      const { data: reports, error: reportsError } = await supabase
           .from('reports')
           .select('id, shift_id, status')
           .in('shift_id', shiftIds)
           .is('deleted_at', null);
+
+      if (reportsError) throw sanitizeDbError(reportsError, 'getMyShiftsWithStatus:reports', { organizationId });
 
       const reportByShiftId = new Map(
           (reports ?? []).map(r => [r.shift_id, { id: r.id, status: r.status ?? 'draft' }])

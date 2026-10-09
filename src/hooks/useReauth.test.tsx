@@ -17,36 +17,36 @@ function Example() {
   const { requestReauth, reauthDialog } = useReauth();
   return <><button onClick={() => void requestReauth('account_delete', { next: '/app/profile' }).then(grant => { if (grant) mocks.done(grant.token); })}>Begin</button>{reauthDialog}</>;
 }
-beforeEach(() => { vi.resetAllMocks(); mocks.methods.mockResolvedValue(['password', 'azure']); });
+beforeEach(() => { vi.resetAllMocks(); mocks.methods.mockResolvedValue({ ok: true, data: ['password', 'azure'] }); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 async function begin() { render(<Example />); fireEvent.click(screen.getByText('Begin')); await waitFor(() => expect((screen.getByText('Verify') as HTMLButtonElement).disabled).toBe(false)); }
 describe('reauth completion and cancellation', () => {
   it('resumes the operation only after verification returns a grant', async () => {
-    let resolve!: (value: { token: string }) => void;
+    let resolve!: (value: { ok: true; data: { token: string } }) => void;
     mocks.password.mockReturnValue(new Promise(value => { resolve = value; }));
     await begin(); fireEvent.click(screen.getByText('Verify')); expect(mocks.done).not.toHaveBeenCalled();
-    await act(async () => resolve({ token: 'proof' }));
+    await act(async () => resolve({ ok: true, data: { token: 'proof' } }));
     expect(mocks.done).toHaveBeenCalledWith('proof');
   });
   it('cancel discards an in-flight grant and never resumes a sensitive operation', async () => {
-    let resolve!: (value: { token: string }) => void;
+    let resolve!: (value: { ok: true; data: { token: string } }) => void;
     mocks.password.mockReturnValue(new Promise(value => { resolve = value; }));
     await begin(); fireEvent.click(screen.getByText('Verify')); fireEvent.click(screen.getByText('Cancel'));
-    await act(async () => resolve({ token: 'late-proof' })); expect(mocks.done).not.toHaveBeenCalled();
+    await act(async () => resolve({ ok: true, data: { token: 'late-proof' } })); expect(mocks.done).not.toHaveBeenCalled();
   });
   it('a timeout discards late proof and permits a new verification attempt', async () => {
-    let resolve!: (value: { token: string }) => void;
+    let resolve!: (value: { ok: true; data: { token: string } }) => void;
     mocks.password.mockReturnValueOnce(new Promise(value => { resolve = value; }));
     await begin(); vi.useFakeTimers(); fireEvent.click(screen.getByText('Verify'));
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(screen.getByText(/タイムアウト/)).toBeTruthy();
-    await act(async () => resolve({ token: 'late-proof' })); expect(mocks.done).not.toHaveBeenCalled();
-    mocks.password.mockResolvedValue({ token: 'fresh-proof' });
+    await act(async () => resolve({ ok: true, data: { token: 'late-proof' } })); expect(mocks.done).not.toHaveBeenCalled();
+    mocks.password.mockResolvedValue({ ok: true, data: { token: 'fresh-proof' } });
     await act(async () => { fireEvent.click(screen.getByText('Verify')); });
     expect(mocks.done).toHaveBeenCalledWith('fresh-proof');
   });
   it('provider errors do not execute the operation and Azure forces a login interaction', async () => {
-    mocks.provider.mockResolvedValue({ nonce: 'nonce', provider: 'azure' });
+    mocks.provider.mockResolvedValue({ ok: true, data: { nonce: 'nonce', provider: 'azure' } });
     mocks.oauth.mockResolvedValue({ data: { url: null }, error: {} });
     await begin(); fireEvent.click(screen.getByText('Microsoft')); fireEvent.click(screen.getByText('Verify'));
     await waitFor(() => expect(screen.getByText('再認証を開始できません')).toBeTruthy());

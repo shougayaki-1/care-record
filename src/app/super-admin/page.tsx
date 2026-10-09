@@ -1,6 +1,9 @@
 // app/super-admin/page.tsx
 'use client';
 
+import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/utils/actionResult';
+
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useCallback, useEffect, useState } from 'react';
 import {
     Box, Typography, Paper, Table, TableBody, TableCell,
@@ -22,16 +25,18 @@ export default function SuperAdminDashboard() {
     const [orgs, setOrgs] = useState<Organization[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [errorCause, setErrorCause] = useState<unknown>(null);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
         setError('');
         try {
-            const data = await getAllOrganizations();
+            const data = await readActionResult(getAllOrganizations());
             setOrgs(data);
         } catch (error: unknown) {
             console.error(error);
-            setError('データの取得に失敗しました。管理者権限や環境変数を確認してください。');
+            setErrorCause(error);
+            setError(getActionErrorMessage(error, 'データの取得に失敗しました。管理者権限や環境変数を確認してください。'));
         } finally {
             setLoading(false);
         }
@@ -52,11 +57,11 @@ export default function SuperAdminDashboard() {
                 </Button>
             </Box>
 
-            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+            {error && <Alert severity="error" sx={{ mb: 2 }} action={needsActionRecovery(errorCause) ? <RecoveryLogoutButton /> : undefined}>{error}</Alert>}
 
             {loading ? (
                 <Box display="flex" justifyContent="center" p={5}><CircularProgress /></Box>
-            ) : (
+            ) : !error && (
                 <Paper sx={{ width: '100%', overflow: 'hidden', borderRadius: 2 }}>
                     <TableContainer>
                         <Table>
@@ -77,7 +82,7 @@ export default function SuperAdminDashboard() {
                                             登録されている事業所はありません
                                         </TableCell>
                                     </TableRow>
-                                ) : (
+                                ) : !error && (
                                     orgs.map((org) => (
                                         <TableRow key={org.id} hover>
                                             <TableCell sx={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{org.name}</TableCell>

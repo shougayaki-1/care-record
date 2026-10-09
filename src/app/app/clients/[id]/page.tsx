@@ -1,4 +1,5 @@
 'use client';
+import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { useEffect, useState, useCallback } from 'react';
 import {
@@ -137,12 +138,12 @@ export default function ClientSettingsPage() {
         }
 
         // Permission hints are advisory UI. getClientAssignmentPermissionHints is
-        // a withSafeError Server Action that CAN throw (unlike the supabase queries
+        // a typed-result Server Action unwrapped by readActionResult (unlike the supabase queries
         // above), so it is fetched separately: a hints failure must not discard the
         // core client data. Mirrors d7aff24 for record/[clientId].
         if (currentOrg) {
             try {
-                const hints = await getClientAssignmentPermissionHints(currentOrg.id, clientId);
+                const hints = await readActionResult(getClientAssignmentPermissionHints(currentOrg.id, clientId));
                 if (hints) setPermissionHints(hints);
             } catch (error) {
                 console.error('permission hints load failed:', error);
@@ -228,12 +229,12 @@ export default function ClientSettingsPage() {
         setMessage(null);
         try {
             if (!currentOrg) throw new Error('事業所が選択されていません');
-            await saveClientForm(currentOrg.id, clientId, formItems);
+            await readActionResult(saveClientForm(currentOrg.id, clientId, formItems));
             setMessage({ type: 'success', text: 'フォーム設定を保存しました！' });
             setTimeout(() => setMessage(null), 3000);
         } catch (error) {
             console.error(error);
-            setMessage({ type: 'error', text: '保存に失敗しました' });
+            setMessage({ type: 'error', text: getActionErrorMessage(error, '保存に失敗しました') });
         } finally {
             setIsSaving(false);
         }
@@ -247,14 +248,14 @@ export default function ClientSettingsPage() {
             const costPayload = Object.fromEntries(
                 assignedStaffIds.filter((staffId) => defaultTravelCosts[staffId] !== undefined && defaultTravelCosts[staffId] !== '').map((staffId) => [staffId, Number(defaultTravelCosts[staffId])])
             );
-            await saveClientAssignments(currentOrg.id, clientId, assignedStaffIds, costPayload);
+            await readActionResult(saveClientAssignments(currentOrg.id, clientId, assignedStaffIds, costPayload));
 
             setMessage({ type: 'success', text: '担当スタッフを更新しました！' });
             setTimeout(() => setMessage(null), 3000);
             fetchClientData();
         } catch (error) {
             console.error('Assignment save error:', error);
-            setMessage({ type: 'error', text: '更新に失敗しました' });
+            setMessage({ type: 'error', text: getActionErrorMessage(error, '更新に失敗しました') });
         } finally {
             setIsSaving(false);
         }
@@ -265,12 +266,12 @@ export default function ClientSettingsPage() {
         setMessage(null);
         try {
             if (!currentOrg) throw new Error('事業所が選択されていません');
-            await updateClientGoogleLink(currentOrg.id, clientId, { templateId });
+            await readActionResult(updateClientGoogleLink(currentOrg.id, clientId, { templateId }));
             setMessage({ type: 'success', text: 'テンプレートIDを保存しました' });
             setTimeout(() => setMessage(null), 3000);
         } catch (e) {
             console.error(e);
-            setMessage({ type: 'error', text: '保存失敗' });
+            setMessage({ type: 'error', text: getActionErrorMessage(e, '保存失敗') });
         } finally {
             setIsSaving(false);
         }
@@ -318,39 +319,39 @@ export default function ClientSettingsPage() {
                 throw new Error('事業所のGoogleドライブ連携が設定されていません。「事業所設定」から連携を行ってください。');
             }
 
-            const folderRes = await callGasApi({
+            const folderRes = await readActionResult(callGasApi({
                 action: 'manage_client_folder',
                 organizationId: currentOrg.id,
                 clientId,
                 orgFolderId: orgData.google_folder_id,
                 clientName: clientName,
                 currentFolderId: clientData?.google_folder_id
-            });
+            }));
             
-            if (folderRes.status !== 'success') throw new Error('フォルダ作成エラー: ' + folderRes.message);
             
-            if (folderRes.folderId !== clientData?.google_folder_id) {
-                await updateClientGoogleLink(currentOrg.id, clientId, { folderId: folderRes.folderId });
+
+            if (folderRes.folderId && folderRes.folderId !== clientData?.google_folder_id) {
+                await readActionResult(updateClientGoogleLink(currentOrg.id, clientId, { folderId: folderRes.folderId }));
             }
 
             const readableSchema = convertSchemaToReadable(formItems);
 
-            const createRes = await callGasApi({
+            const createRes = await readActionResult(callGasApi({
                 action: 'create_template_doc',
                 organizationId: currentOrg.id,
                 clientId,
                 folderId: folderRes.folderId,
                 clientName: clientName,
                 schema: readableSchema 
-            });
+            }));
 
             if (createRes.status === 'success') {
                 setTemplateId(createRes.docId);
-                await updateClientGoogleLink(currentOrg.id, clientId, { templateId: createRes.docId });
+                await readActionResult(updateClientGoogleLink(currentOrg.id, clientId, { templateId: createRes.docId }));
                 setMessage({ type: 'success', text: 'テンプレートを作成し、連携しました！別タブで開きます。' });
                 window.open(createRes.docUrl, '_blank');
             } else {
-                throw new Error(createRes.message);
+                throw new Error('テンプレート作成に失敗しました');
             }
 
         } catch (e) {

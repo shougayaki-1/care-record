@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Box, Avatar, Tooltip, IconButton, Divider, List, ListItem, ListItemButton,
-  ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge, Popover, CircularProgress,
+  ListItemIcon, ListItemText, Typography, Drawer, useMediaQuery, Collapse, Badge,
   Alert, AppBar, Toolbar, Button, Menu, MenuItem
 } from '@/components/ui/mui';
 import { useTheme, alpha, Theme } from '@mui/material/styles';
@@ -26,8 +26,6 @@ import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import LogoutIcon from '@mui/icons-material/Logout';
 import BusinessIcon from '@mui/icons-material/Business';
 import NotificationsIcon from '@mui/icons-material/Notifications';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import KeyIcon from '@mui/icons-material/Key';
 import BackupIcon from '@mui/icons-material/Backup';
@@ -39,7 +37,7 @@ import MenuBookIcon from '@mui/icons-material/MenuBook';
 import { useWorkspace, Workspace } from '@/context/WorkspaceContext';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { markNotificationRead } from '@/app/actions/user';
+import { NotificationsController } from './NotificationsController';
 import { logoutAndRedirect } from '@/utils/clientLogout';
 import IdleTimeout from '@/components/auth/IdleTimeout';
 import { checkManagementPermission, type ManagementArea } from '@/utils/permissions';
@@ -59,80 +57,6 @@ const PROTECTED_MANAGEMENT_ROUTES: Array<{ prefix: string; area: ManagementArea 
   { prefix: '/app/backup', area: 'backupStatus' },
 ];
 
-type Notification = {
-  id: string;
-  content: string;
-  is_read: boolean;
-  created_at: string;
-  type: string;
-  link_url?: string;
-};
-
-const NotificationsPopover = React.memo(function NotificationsPopover({ anchorEl, onClose }: { anchorEl: HTMLElement | null, onClose: () => void }) {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
-  const router = useRouter();
-
-  useEffect(() => {
-    const fetchNotifications = async () => {
-      setLoading(true);
-      const { data } = await supabase.from('notifications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(20);
-      setNotifications((data as Notification[]) || []);
-      setLoading(false);
-    };
-
-    if (anchorEl) fetchNotifications();
-  }, [anchorEl]);
-
-  const handleRead = useCallback(async (n: Notification) => {
-    if (!n.is_read) {
-      await markNotificationRead(n.id);
-    }
-    if (n.link_url) {
-      router.push(n.link_url);
-      onClose();
-    }
-  }, [onClose, router]);
-
-  const open = Boolean(anchorEl);
-
-  return (
-    <Popover
-      open={open}
-      anchorEl={anchorEl}
-      onClose={onClose}
-      anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-      transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-      slotProps={{ paper: { sx: { width: { xs: 'calc(100vw - 32px)', sm: 320 }, maxWidth: 320, maxHeight: 400 } } }}
-    >
-      <Box p={2} borderBottom="1px solid" borderColor="divider">
-        <Typography fontWeight="bold">通知</Typography>
-      </Box>
-      {loading ? <Box p={2} textAlign="center"><CircularProgress size={20} /></Box> : (
-        <List sx={{ p: 0 }}>
-          {notifications.length === 0 && <Box p={2} textAlign="center" color="text.secondary">通知はありません</Box>}
-          {notifications.map(n => (
-            <ListItemButton key={n.id} onClick={() => handleRead(n)} sx={{ bgcolor: n.is_read ? 'background.paper' : 'background.tint', borderBottom: '1px solid', borderColor: 'divider' }}>
-              <ListItemIcon sx={{ minWidth: 32 }}>
-                {n.type === 'approve' ? <CheckCircleIcon color="success" fontSize="small" /> : <ErrorOutlineIcon color="error" fontSize="small" />}
-              </ListItemIcon>
-              <ListItemText
-                primary={n.content}
-                secondary={new Date(n.created_at).toLocaleString()}
-                primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: n.is_read ? 'normal' : 'bold' }}
-                secondaryTypographyProps={{ fontSize: '0.75rem' }}
-              />
-            </ListItemButton>
-          ))}
-        </List>
-      )}
-    </Popover>
-  );
-});
-
 // 上部 AppBar：組織切替ドロップダウン・通知・アカウントメニューを集約（Google Workspace 風）
 const TopAppBar = React.memo(function TopAppBar({
   orgList, currentOrg, switchOrg, onMenuClick, showMenuButton, userId
@@ -148,6 +72,7 @@ const TopAppBar = React.memo(function TopAppBar({
   const [userName, setUserName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationRevision, setNotificationRevision] = useState(0);
 
   const [orgAnchor, setOrgAnchor] = useState<null | HTMLElement>(null);
   const [accountAnchor, setAccountAnchor] = useState<null | HTMLElement>(null);
@@ -182,8 +107,8 @@ const TopAppBar = React.memo(function TopAppBar({
       // A channel topic is reused by Supabase while removal is still pending.
       // Give each mounted subscription its own topic before adding callbacks.
       channel = supabase.channel(`notifications:${resolvedUserId}:${crypto.randomUUID()}`)
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${resolvedUserId}` }, () => {
-          setUnreadCount(prev => prev + 1);
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${resolvedUserId}` }, () => {
+          if (!cancelled) setNotificationRevision(previous => previous + 1);
         })
         .subscribe();
 
@@ -194,6 +119,20 @@ const TopAppBar = React.memo(function TopAppBar({
       if (channel) void supabase.removeChannel(channel);
     };
   }, [userId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshUnread = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const receiverId = userId ?? session?.user.id;
+      if (!receiverId) return;
+      const { count, error } = await supabase.from('notifications')
+        .select('id', { count: 'exact', head: true }).eq('user_id', receiverId).eq('is_read', false);
+      if (!cancelled && !error) setUnreadCount(count ?? 0);
+    };
+    void refreshUnread();
+    return () => { cancelled = true; };
+  }, [userId, notificationRevision]);
 
   const handleSwitchOrg = useCallback((id: string) => {
     switchOrg(id);
@@ -276,13 +215,14 @@ const TopAppBar = React.memo(function TopAppBar({
 
         {/* 通知 */}
         <Tooltip title="通知">
-          <IconButton onClick={(e) => setNotifAnchor(e.currentTarget)}>
+          <IconButton aria-label={unreadCount ? `通知（未読${unreadCount}件）` : '通知'} onClick={(e) => setNotifAnchor(e.currentTarget)}>
             <Badge badgeContent={unreadCount} color="error" variant="dot">
               <NotificationsIcon />
             </Badge>
           </IconButton>
         </Tooltip>
-        <NotificationsPopover anchorEl={notifAnchor} onClose={handleNotificationsClose} />
+        <NotificationsController anchorEl={notifAnchor} onClose={handleNotificationsClose}
+          refreshKey={notificationRevision} onRead={() => setNotificationRevision(previous => previous + 1)} />
 
         {userName && (
           <Typography
