@@ -142,7 +142,7 @@ Vercel CLI 54.18.6のGET APIで両projectの設定を読み戻しました。外
 | `care-record` | `main` | `if [ "$VERCEL_ENV" = "preview" ]; then exit 0; else exit 1; fi` | Production `main`: READY、Preview `feature/issue-63-account-notifications`: CANCELED |
 | `care-record-staging` | `main` | `if [ "$VERCEL_ENV" == "preview" ]; then exit 1; else exit 0; fi` | Production `main`: CANCELED、Preview `feature/issue-63-account-notifications`: READY |
 
-フィルターはbranch接頭辞ではなく環境で判定するため、`codex/issue-*` をProductionへ振り分けません。worker公開前の個別配備抑止は `scripts/codex/lib/publication.mjs` と `vercel.json` で確認しました。`staging` は両projectのProduction Branchではありません。両projectの環境変数一覧も値を表示せず確認し、branch限定の `gitBranch` 参照はありませんでした。custom environment専用一覧とその他外部サービスからの全参照は未確認であり、削除可能とは判断しません。
+フィルターはbranch接頭辞ではなく環境で判定するため、`codex/issue-*` をProductionへ振り分けません。worker公開前の個別配備抑止は `scripts/codex/lib/publication.mjs` と `vercel.json` で確認しました。`staging` は両projectのProduction Branchではありません。両projectの環境変数一覧も値を表示せず確認し、branch限定の `gitBranch` 参照はありませんでした。両projectのcustom environment専用一覧も空でした。確認したVercel設定に `staging` branchの参照はありませんが、その他外部サービスからの全参照は未確認であり、削除可能とは判断しません。
 
 GitHub API（GraphQL）で `deleteBranchOnMerge`（RESTの `delete_branch_on_merge` 相当）はtrue、remote branchは全ページ取得で16本と確認しました。過去25本の削除については旧PR本文の報告以外に操作日時・対象全件の証跡がなく、実績未確認です。
 
