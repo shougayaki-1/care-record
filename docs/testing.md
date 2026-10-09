@@ -103,3 +103,17 @@ gh run view RUN_ID --json startedAt,jobs > /tmp/ci-RUN_ID.json
 ```
 
 runner 利用時間・`npm ci` 回数は増えます。短縮の実測値は変更後の GitHub Actions run 完了後に記録します。
+
+## Branch / worktree運用の検証
+
+命名と作業基点は[AGENTS.md](../AGENTS.md)と[system-decisions.md §15](system-decisions.md#15-変更ci監視)に従います。Codex自動実装の `codex/issue-<番号>-<説明>`、手動機能開発の `feature/<説明>`、保守の `docs/*` / `chore/*` などに同じCI分類を適用します。
+
+運用文書の整合やworkerの命名・worktree方針を変更した場合は、次を実行し、文書間の整合と参照リンクも確認します。
+
+```sh
+git diff --check
+npm run test:codex-worker
+npm run test:ci-scope
+```
+
+文書だけのPRではSelect checks、Secret scan、最終CIの成功と、対象外jobのskipを区別して記録します。skipされたlint、型、unit、build、UI、DB、E2E等を実行成功とは扱いません。アプリコードを変更した場合は変更領域の必須検証を追加します。

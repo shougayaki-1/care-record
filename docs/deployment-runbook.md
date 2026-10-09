@@ -4,13 +4,13 @@
 
 ## 目標とする構成
 
-- `feature/*` ブランチは `main` から作成し、レビューしたPRを `main` にマージします。常設の `staging` ブランチは任意です。
+- CodexのIssue自動実装は `codex/issue-<番号>-<説明>`、手動機能開発は `feature/<説明>`、Issueを伴わない保守は目的が分かる `docs/*`、`chore/*` などを使います。原則1 Issue = 1 branch = 1 PRとし、作業開始時点の最新 `origin/main` を基点にします。作業中のbranch/worktreeを無断で再利用せず、マージ後の不要branchは参照確認と必要な承認を経て削除します。詳細は[AGENTS.md](../AGENTS.md)。常設の `staging` ブランチは任意ですが、配備参照を確認できるまで削除しません。
 - 既存のVercelプロジェクト `care-record`（Production）と `care-record-staging`（Preview）を維持します。目標は、`care-record` では `main` からProductionへ配備し、`care-record-staging` ではfeatureブランチからPreviewへ配備する構成です。
 - StagingとProductionのSupabaseプロジェクトを分けます。ローカルE2Eで確認できないホスト済みAuth、Storage、外部連携の確認にはStagingプロジェクトを使い、合成データまたは匿名化データを使用します。
 - アプリケーションの配備はVercel Git連携で行います。通常のリリースに手動のアプリ配備workflowは使いません。
 - `full-backup.yml` と `backup-freshness.yml` は、バックアップと鮮度確認の別々の運用として維持します。`/api/health` のエンドポイントと通知経路が正常になった後も、外形監視を1系統維持します。バックアップとhealth確認は互いの代わりにはなりません。
 
-Vercelでは、設定されたProduction BranchからProductionへ配備され、その他のブランチはPreviewへ配備できます。Productionプロジェクトのブランチを `main` に設定し、PreviewのビルドフィルターでfeatureブランチがStagingプロジェクトだけに配備されるようにします。[Vercel Git配備のドキュメント](https://vercel.com/docs/deployments/git)を参照してください。
+Vercelでは、設定されたProduction BranchからProductionへ配備され、その他のブランチはPreviewへ配備できます。Productionプロジェクトのブランチを `main` に設定し、Production projectではすべてのPreviewを省略し、Staging projectではPreviewを許可します。`feature/*` と `codex/issue-*` はこの環境フィルターの対象ですが、自動workerは公開前に現在branchの `vercel.json` の `git.deploymentEnabled` を `false` とすることを必須にしており、Previewも抑止します。この安全条件は維持し、Previewが必要な場合は[workerの公開条件](codex-continuous-worker.md)と照合して別途判断します。[Vercel Git配備のドキュメント](https://vercel.com/docs/deployments/git)を参照してください。
 
 ## 初回設定と切替
 
@@ -45,7 +45,7 @@ Vercelでは、設定されたProduction BranchからProductionへ配備され�
 
 ## 通常のアプリケーションリリース
 
-1. 最新の `main` からfeatureブランチを作り、変更を加えてPRを作成します。
+1. 作業開始時点の最新 `origin/main` から、上記の用途別命名に従うbranchと専用worktreeを作り、変更を加えてPRを作成します。
 2. 差分全体を自己レビューします。CIの結論と対象Previewを確認します。ホスト済みAuthや外部連携の確認が必要な場合はStaging Supabaseプロジェクトを使い、Preview URLを記録します。
 3. データベース変更がなければ、チェック成功後にPRをマージします。Vercel Git連携により、結果の `main` commitがProductionへ配備されます。今回の切替に関するPR #17とProduction配備は、上記の個別承認を得てから進めます。
 4. `/api/health` を確認し、サインインして最小限のテスト記録を1件保存します。候補SHA、CI結果、配備URL、スモークチェック結果をPRに記録します。
@@ -58,7 +58,7 @@ Vercelでは、設定されたProduction BranchからProductionへ配備され�
 各migrationは、明示したSupabaseプロジェクトに対して手動で適用します。適用ごとに候補SHA、migrationファイル、対象プロジェクトを確認してください。以下のSupabase CLIバージョンはCIで固定しているバージョンと一致します。
 
 1. 新しいmigrationファイルを追加します。共有データベースに適用済みのmigrationを編集または削除しないでください。現在のアプリと候補アプリの両方で動作する追加的な変更を優先します。
-2. featureブランチから開始します。CLIをStagingプロジェクトに接続し、migration履歴を確認します。次のコマンドを実行する前に、Supabase Dashboardで `$STAGING_PROJECT_REF` がStagingプロジェクトのrefと一致することを確認します。
+2. 上記の用途別命名に従う作業branchから開始します。CLIをStagingプロジェクトに接続し、migration履歴を確認します。次のコマンドを実行する前に、Supabase Dashboardで `$STAGING_PROJECT_REF` がStagingプロジェクトのrefと一致することを確認します。
 
    ```sh
    npx --yes supabase@2.108.0 link --project-ref "$STAGING_PROJECT_REF"
@@ -132,3 +132,18 @@ GitHubの既存 `Production` Environmentに `DISCORD_ALERT_WEBHOOK_URL`、`care-
 - [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys): 本番プロジェクトのservice role keyの確認場所と権限。
 - [Supabase CLI reference](https://supabase.com/docs/reference/cli/introduction): local status、start/reset/stop、linked migration listing、`db push --dry-run` のsyntax。ProjectとCIはSupabase CLI 2.108.0を使用します。
 - [GitHub Actions job conditions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions): 条件付きjobの省略と、固定名の最終status checkについて。
+
+## 読み取り専用のbranch設定確認（2026-10-09、PR #53）
+
+Vercel CLI 54.18.6のGET APIで両projectの設定を読み戻しました。外部設定は変更していません。
+
+| Project | Production Branch | Ignored Build Step | 読み戻した配備例 |
+| --- | --- | --- | --- |
+| `care-record` | `main` | `if [ "$VERCEL_ENV" = "preview" ]; then exit 0; else exit 1; fi` | Production `main`: READY、Preview `feature/issue-63-account-notifications`: CANCELED |
+| `care-record-staging` | `main` | `if [ "$VERCEL_ENV" == "preview" ]; then exit 1; else exit 0; fi` | Production `main`: CANCELED、Preview `feature/issue-63-account-notifications`: READY |
+
+フィルターはbranch接頭辞ではなく環境で判定するため、`codex/issue-*` をProductionへ振り分けません。worker公開前の個別配備抑止は `scripts/codex/lib/publication.mjs` と `vercel.json` で確認しました。`staging` は両projectのProduction Branchではありません。両projectの環境変数一覧も値を表示せず確認し、branch限定の `gitBranch` 参照はありませんでした。両projectのcustom environment専用一覧も空でした。確認したVercel設定に `staging` branchの参照はありませんが、その他外部サービスからの全参照は未確認であり、削除可能とは判断しません。
+
+GitHub API（GraphQL）で `deleteBranchOnMerge`（RESTの `delete_branch_on_merge` 相当）はtrue、remote branchは全ページ取得で16本と確認しました。過去25本の削除については旧PR本文の報告以外に操作日時・対象全件の証跡がなく、実績未確認です。
+
+2026-10-09にContext7 `/vercel/vercel` でProduction Branch、Preview、Ignored Build Step、`git.deploymentEnabled` の現行仕様を確認しました。未指定branchは自動配備が有効になる仕様のため、workerの現在branchに対するfalse確認を省略しません。

@@ -188,7 +188,7 @@ GCS正本化・マルウェア検査・PDF/HEIC対応は初期提供の必須要
 
 ## 15. 変更、CI、監視
 
-- 変更は`feature/*` branchで作業し、PR上で差分と結果を自己レビューしてから`main`へ統合する。個人保守の通常変更に2人目のレビュー担当者は要求しない。
+- CodexのIssue自動実装は`codex/issue-<番号>-<説明>`、手動機能開発は`feature/<説明>`、Issueを伴わない保守は目的が分かる`docs/*`、`chore/*`などで作業する（2026-10-09、PR #53の方針統一）。原則1 Issue = 1 branch = 1 PRとし、各Issueの作業開始時点の最新`origin/main`を基点にする。作業中の既存branch/worktreeを無断で再利用しない。マージ後の不要branchは参照確認と必要な承認を経て削除する。既存の保守用PR #53は現在branchを継続利用し、新たなIssueは不要。運用詳細は[AGENTS.md](../AGENTS.md)。PR上で差分と結果を自己レビューしてから`main`へ統合する。個人保守の通常変更に2人目のレビュー担当者は要求しない。
 - PRの基本CIはlint、型、単体テスト、本番build、service role利用検査を含む。DB・認可・UI・E2E等の重い検査は関連変更で実行し、条件付きjobの省略がmergeを妨げない固定名の最終判定を使う。依存監査とSBOM、秘密情報検査はPRまたは定期実行で維持する。現在のコマンドと選択条件は[testing.md](testing.md)に記載する。
 - DB migrationはStaging、Productionの順に手動適用する。Productionではmigration history、dry-run、直近のbackup freshnessを確認し、動作中アプリと互換なschemaだけを先行適用してからPRをmergeする。
 - 日常リリースの記録は候補SHA、関連check、migration適用結果、配備URL、最小の稼働確認をPRに残す。初回提供・重要変更は[release-readiness-checklist.md](release-readiness-checklist.md)の証跡を使う。
