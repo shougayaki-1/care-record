@@ -17,6 +17,9 @@ function deferred<T>(): Deferred<T> {
 }
 
 const testState = vi.hoisted(() => ({
+  base: null as Deferred<{ data: { id: string; name: string }; error: null }> | null,
+  valuesError: null as { message: string } | null,
+  clientId: 'client-1',
   search: 'reportId=report-a&draftKey=test-draft',
   reports: new Map<string, Deferred<{ data: Record<string, unknown> | null; error: null }>>(),
   requestedReports: [] as string[],
@@ -27,7 +30,7 @@ const testState = vi.hoisted(() => ({
 }));
 
 vi.mock('next/navigation', () => ({
-  useParams: () => ({ clientId: 'client-1' }),
+  useParams: () => ({ clientId: testState.clientId }),
   useRouter: () => testState.router,
   useSearchParams: () => new URLSearchParams(testState.search),
 }));
@@ -65,8 +68,9 @@ vi.mock('@/lib/supabase', () => {
       testState.requestedReports.push(reportId);
       return testState.reports.get(reportId)?.promise;
     }
-    if (table === 'report_values') return Promise.resolve({ data: { data: {} }, error: null });
+    if (table === 'report_values') return Promise.resolve({ data: { data: { note: String(filters.report_id) } }, error: testState.valuesError });
     if (table === 'report_actual_staffs') return Promise.resolve({ data: [], error: null });
+    if (table === 'clients' && testState.base) return testState.base.promise;
     if (table === 'clients') return Promise.resolve({ data: { id: 'client-1', name: 'Client' }, error: null });
     if (table === 'form_templates') return Promise.resolve({ data: null, error: null });
     if (table === 'staffs') return Promise.resolve({ data: [], error: null });
@@ -97,7 +101,7 @@ vi.mock('@/lib/supabase', () => {
 });
 
 import { useRecordForm } from './useRecordForm';
-import { saveReport, discardReportAutosave } from '@/app/actions/reports';
+import { auditReportView, getReportImages, uploadReportImage, saveReport, discardReportAutosave } from '@/app/actions/reports';
 afterEach(cleanup);
 
 const report = (id: string, startAt: string) => ({
@@ -117,6 +121,12 @@ const report = (id: string, startAt: string) => ({
 describe('useRecordForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(auditReportView).mockReset().mockResolvedValue({ ok: true, data: undefined });
+    vi.mocked(getReportImages).mockReset().mockResolvedValue({ ok: true, data: [] });
+    testState.base = null;
+    testState.valuesError = null;
+    testState.clientId = 'client-1';
+    testState.workspace = { currentOrg: { id: 'organization-1', role: 'owner', effectivePermissions: {} }, loading: false, userId: 'user-1' };
     vi.mocked(discardReportAutosave).mockResolvedValue({ ok: true, data: { success: true } });
     testState.search = 'reportId=report-a&draftKey=test-draft';
     testState.reports = new Map([
@@ -124,6 +134,140 @@ describe('useRecordForm', () => {
       ['report-b', deferred()],
     ]);
     testState.requestedReports = [];
+  });
+
+  it('starts report loading while base data is still pending', async () => {
+    testState.base = deferred();
+    const { result } = renderHook(() => useRecordForm());
+    await waitFor(() => expect(testState.requestedReports).toContain('report-a'));
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(auditReportView).toHaveBeenCalledWith('organization-1', 'report-a'));
+    expect(result.current.loading).toBe(true);
+    await act(async () => { testState.base!.resolve({ data: { id: 'client-1', name: 'Client' }, error: null }); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.answers.note).toBe('report-a');
+  });
+
+  it('requires the body audit but does not wait for slow images', async () => {
+    const audit = deferred<{ ok: true; data: undefined }>();
+    const images = deferred<{ ok: true; data: { id: string; url: string }[] }>();
+    vi.mocked(auditReportView).mockReturnValue(audit.promise);
+    vi.mocked(getReportImages).mockReturnValue(images.promise);
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(auditReportView).toHaveBeenCalled());
+    expect(result.current.loading).toBe(true);
+    expect(result.current.answers).toEqual({});
+    expect(getReportImages).not.toHaveBeenCalled();
+    await act(async () => { audit.resolve({ ok: true, data: undefined }); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.answers.note).toBe('report-a');
+    expect(result.current.imagesLoading).toBe(true);
+    await act(async () => { images.resolve({ ok: true, data: [{ id: 'image-a', url: 'https://example.invalid/a' }] }); });
+    await waitFor(() => expect(result.current.imagesLoading).toBe(false));
+    expect(result.current.images).toHaveLength(1);
+  });
+
+  it('fails closed on audit failure and permits a complete retry', async () => {
+    vi.mocked(auditReportView).mockRejectedValueOnce(new Error('audit unavailable'));
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loadError).not.toBeNull());
+    expect(result.current.loading).toBe(true);
+    expect(result.current.answers).toEqual({});
+    expect(getReportImages).not.toHaveBeenCalled();
+    await act(async () => { result.current.retryLoad(); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.loadError).toBeNull();
+    expect(auditReportView).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries images independently without reloading or overwriting edited body data', async () => {
+    vi.mocked(getReportImages).mockRejectedValueOnce(new Error('image unavailable'));
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.imagesError).not.toBeNull());
+    expect(result.current.loading).toBe(false);
+    await act(async () => { result.current.handleAnswerChange('note', 'edited'); result.current.retryImages(); });
+    await waitFor(() => expect(result.current.imagesError).toBeNull());
+    expect(getReportImages).toHaveBeenCalledTimes(2);
+    expect(auditReportView).toHaveBeenCalledTimes(1);
+    expect(result.current.answers.note).toBe('edited');
+    expect(testState.requestedReports).toEqual(['report-a']);
+  });
+
+  it('refreshes only images after upload and keeps unsaved answers', async () => {
+    vi.mocked(uploadReportImage).mockResolvedValue({ ok: true, data: { success: true, imageId: 'new-image' } });
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(getReportImages).toHaveBeenCalledTimes(1));
+    await act(async () => { result.current.handleAnswerChange('note', 'unsaved'); });
+    const input = document.createElement('input');
+    Object.defineProperty(input, 'files', { value: [new File(['image'], 'test.png', { type: 'image/png' })] });
+    await act(async () => { await result.current.handleImageUpload({ target: input } as React.ChangeEvent<HTMLInputElement>); });
+    await waitFor(() => expect(getReportImages).toHaveBeenCalledTimes(2));
+    expect(result.current.answers.note).toBe('unsaved');
+    expect(result.current.isDirty).toBe(true);
+    expect(testState.requestedReports).toEqual(['report-a']);
+  });
+
+  it('discards a pending image response across organization changes', async () => {
+    const images = deferred<{ ok: true; data: { id: string; url: string }[] }>();
+    vi.mocked(getReportImages).mockReturnValueOnce(images.promise);
+    const { result, rerender } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(getReportImages).toHaveBeenCalledTimes(1));
+    testState.workspace = { ...testState.workspace, currentOrg: { ...testState.workspace.currentOrg, id: 'organization-2' } };
+    testState.search = 'reportId=report-b&draftKey=test-draft';
+    rerender();
+    await act(async () => { testState.reports.get('report-b')!.resolve(report('report-b', '2026-07-21T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { images.resolve({ ok: true, data: [{ id: 'old', url: 'https://example.invalid/old' }] }); });
+    expect(result.current.images).toEqual([]);
+    expect(auditReportView).toHaveBeenLastCalledWith('organization-2', 'report-b');
+    expect(getReportImages).toHaveBeenLastCalledWith('organization-2', 'report-b');
+  });
+
+  it('ignores old images after changing the client and report', async () => {
+    const images = deferred<{ ok: true; data: { id: string; url: string }[] }>();
+    vi.mocked(getReportImages).mockReturnValueOnce(images.promise);
+    const { result, rerender } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.imagesLoading).toBe(true));
+    testState.clientId = 'client-2';
+    testState.search = 'reportId=report-b&draftKey=test-draft';
+    rerender();
+    expect(result.current.loading).toBe(true);
+    await act(async () => { testState.reports.get('report-b')!.resolve(report('report-b', '2026-07-21T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { images.resolve({ ok: true, data: [{ id: 'old-image', url: 'https://example.invalid/old' }] }); });
+    expect(result.current.answers.note).toBe('report-b');
+    expect(result.current.images).toEqual([]);
+  });
+
+  it.each(['pending', 'approved', 'remanded'] as const)('loads %s records without waiting for attachments', async status => {
+    vi.mocked(getReportImages).mockReturnValue(new Promise(() => {}));
+    const { result } = renderHook(() => useRecordForm());
+    const response = report('report-a', '2026-07-20T12:00:00Z');
+    response.data.status = status;
+    await act(async () => { testState.reports.get('report-a')!.resolve(response); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.currentStatus).toBe(status);
+    expect(result.current.isReadOnly).toBe(status === 'approved');
+  });
+
+  it('does not expose an editable partial record on values failure or a missing report', async () => {
+    testState.valuesError = { message: 'failed' };
+    const { result, rerender } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loadError).not.toBeNull());
+    expect(result.current.loading).toBe(true);
+    testState.search = 'reportId=report-b&draftKey=test-draft';
+    rerender();
+    await act(async () => { testState.reports.get('report-b')!.resolve({ data: null, error: null }); });
+    await waitFor(() => expect(result.current.loadError).not.toBeNull());
+    expect(result.current.answers).toEqual({});
+    expect(result.current.loading).toBe(true);
   });
 
   it('does not let a stale report load overwrite the record selected later', async () => {
