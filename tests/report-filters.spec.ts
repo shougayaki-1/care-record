@@ -24,8 +24,18 @@ test.describe('実績一覧の絞り込み保存', () => {
     // and assert the resulting filter UI instead.
     const openReports = async () => {
       const menu = page.getByRole('button', { name: 'メニューを開く' });
-      if (await menu.isVisible()) await menu.click();
-      await page.getByRole('link', { name: '全件表示', exact: true }).click();
+      if (await menu.isVisible()) {
+        // Wait for the previous drawer's exit before opening it again, then
+        // target the visible mobile dialog instead of a hidden desktop link.
+        await expect(page.locator('.MuiDrawer-modal')).toBeHidden();
+        await menu.click();
+        const drawer = page.getByRole('dialog');
+        await expect(drawer).toBeVisible();
+        await drawer.getByRole('link', { name: '全件表示', exact: true }).click();
+        await expect(drawer).toBeHidden();
+      } else {
+        await page.getByRole('link', { name: '全件表示', exact: true }).click();
+      }
       await expect(page.getByRole('button', { name: '絞り込みをリセット' })).toBeVisible();
     };
     await openReports();
@@ -45,6 +55,7 @@ test.describe('実績一覧の絞り込み保存', () => {
     await assertFilters(page);
     await expect(page).toHaveURL(/recordStatus=pending/);
     await clickMenu(page, '記録を作成');
+    await expect(page.getByRole('heading', { name: '利用者を選択', exact: true })).toBeVisible();
     await openReports();
     await assertFilters(page);
     await page.getByRole('button', { name: '詳細', exact: true }).first().click();
