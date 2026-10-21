@@ -4,7 +4,7 @@ import { getActionErrorMessage, needsActionRecovery, readActionResult } from '@/
 import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useRecordQuery } from '@/hooks/useRecordQuery';
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import type { ReactElement } from 'react';
 import type { DocumentProps } from '@react-pdf/renderer';
 import {
@@ -84,17 +84,27 @@ async function loadReportValues(reports: Report[]): Promise<ExportReport[]> {
   });
 }
 
+const EMPTY_CLIENTS: ClientData[] = [];
 const EMPTY_REPORTS: { reports: Report[]; aiSentCount: number } = { reports: [], aiSentCount: 0 };
 const logReportError = (error: unknown) => console.error(error);
 
 export default function ReportsClientPage() {
   const router = useRouter();
-  const { currentOrg, loading: wsLoading } = useWorkspace();
+  const { currentOrg, userId, loading: wsLoading } = useWorkspace();
   const { showToast } = useToast();
   const confirm = useConfirm();
   
   const [page, setPage] = useState(0);
-  const [clients, setClients] = useState<ClientData[]>([]);
+  const loadClients = useCallback(async () => {
+    if (!currentOrg) return EMPTY_CLIENTS;
+    const { data, error } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id).is('deleted_at', null);
+    if (error) throw error;
+    return (data as ClientData[]) || EMPTY_CLIENTS;
+  }, [currentOrg]);
+  const { data: clients, loading: clientsLoading, error: clientsError, refresh: fetchClients } = useRecordQuery({
+    organizationId: wsLoading ? undefined : currentOrg?.id,
+    queryKey: `report-clients/${userId}`, load: loadClients, empty: EMPTY_CLIENTS, onError: logReportError,
+  });
 
   const {
     filterClientId,
@@ -114,17 +124,13 @@ export default function ReportsClientPage() {
     setOrderBy,
     isCurrentMonth,
     isExportView,
-  } = useReportFilters();
+    ready: filtersReady,
+    resetFilters,
+  } = useReportFilters({ userId, organizationId: wsLoading ? undefined : currentOrg?.id, clients: clientsError != null || (clientsLoading && clients === EMPTY_CLIENTS) ? undefined : clients });
   const [selected, setSelected] = useState<readonly string[]>([]);
   
   const [processing, setProcessing] = useState(false);
   const [gasProgress, setGasProgress] = useState<{ total: number, current: number, currentName: string } | null>(null);
-
-  const fetchClients = useCallback(async () => {
-    if (!currentOrg) return;
-    const { data } = await supabase.from('clients').select('id, name').eq('organization_id', currentOrg.id);
-    setClients((data as ClientData[]) || []);
-  }, [currentOrg]);
 
   const loadReports = useCallback(async () => {
     if (!currentOrg) return EMPTY_REPORTS;
@@ -173,14 +179,7 @@ export default function ReportsClientPage() {
     } catch (e) { throw e; }
   }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order, filterShiftId]);
 
-  const { data: { reports, aiSentCount }, loading, error: loadError, refresh: fetchReports } = useRecordQuery({ organizationId: wsLoading ? undefined : currentOrg?.id, queryKey: `${filterClientId}/${filterStatus}/${startDate}/${endDate}/${onlyPending}/${orderBy}/${order}/${filterShiftId}`, load: loadReports, empty: EMPTY_REPORTS, onError: logReportError });
-
-  useEffect(() => {
-    if (!wsLoading && currentOrg) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Workspace/filter changes are the external data source for this page.
-      fetchClients();
-    }
-  }, [wsLoading, currentOrg, fetchClients]);
+  const { data: { reports, aiSentCount }, loading, error: loadError, refresh: fetchReports } = useRecordQuery({ organizationId: wsLoading || !filtersReady ? undefined : currentOrg?.id, queryKey: `${filterClientId}/${filterStatus}/${startDate}/${endDate}/${onlyPending}/${orderBy}/${order}/${filterShiftId}`, load: loadReports, empty: EMPTY_REPORTS, onError: logReportError });
 
   const pageCount = Math.max(1, Math.ceil(reports.length / REPORT_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
@@ -548,8 +547,9 @@ export default function ReportsClientPage() {
   if (filterShiftId) headerTitle = "シフト内の記録";
   if (isExportView) headerTitle = "帳票・出力";
 
+  if (clientsError != null) return <PageLayout><PageBody><Alert severity="error" action={needsActionRecovery(clientsError) ? <RecoveryLogoutButton /> : <AppButton intent="secondary" onClick={() => void fetchClients()}>再試行</AppButton>}>{getActionErrorMessage(clientsError, '利用者の読み込みに失敗しました')}</Alert></PageBody></PageLayout>;
   if (loadError != null) return <PageLayout><PageBody><Alert severity="error" action={needsActionRecovery(loadError) ? <RecoveryLogoutButton /> : <Button onClick={() => void fetchReports()}>再試行</Button>}>{getActionErrorMessage(loadError, '記録の読み込みに失敗しました')}</Alert></PageBody></PageLayout>;
-  if (wsLoading || !currentOrg) return <TablePageSkeleton />;
+  if (wsLoading || !currentOrg || !filtersReady) return <TablePageSkeleton />;
   const canApproveRecords = checkRecordPermission(currentOrg.effectivePermissions, 'approve', true);
   const canDeleteRecords = checkRecordPermission(currentOrg.effectivePermissions, 'delete', true);
 
@@ -576,7 +576,7 @@ export default function ReportsClientPage() {
                         {clients.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                     </TextField>
                     <TextField select label="ステータス" size="small" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: { xs: 0, md: 120 }, bgcolor: 'background.paper', width: { xs: '100%', md: 'auto' } }}>
-                        <MenuItem value="all">全て</MenuItem><MenuItem value="pending">{getReportStatusLabel('pending')}</MenuItem><MenuItem value="approved">{getReportStatusLabel('approved')}</MenuItem>
+                        <MenuItem value="all">全て</MenuItem><MenuItem value="pending">{getReportStatusLabel('pending')}</MenuItem><MenuItem value="approved">{getReportStatusLabel('approved')}</MenuItem><MenuItem value="remanded">{getReportStatusLabel('remanded')}</MenuItem>
                     </TextField>
                     <Box display="flex" alignItems="center" gap={1} sx={{ flexDirection: { xs: 'column', sm: 'row' }, width: { xs: '100%', md: 'auto' } }}>
                         <TextField type="date" label="開始日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ bgcolor: 'background.paper', width: { xs: '100%', sm: 'auto' } }} />
@@ -585,6 +585,7 @@ export default function ReportsClientPage() {
                     </Box>
                     {!isExportView && <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />}
                     <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none', width: { xs: '100%', md: 'auto' } }}>検索</Button>
+                    <AppButton intent="secondary" variant="text" onClick={resetFilters}>絞り込みをリセット</AppButton>
            </RecordListFilterBar>
            
            <Box sx={{ p: 2, mb: 2, bgcolor: selected.length > 0 ? 'background.tint' : 'background.paper', display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, borderTop: '1px solid', borderBottom: '1px solid', borderColor: 'divider' }}>

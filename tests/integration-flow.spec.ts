@@ -109,8 +109,15 @@ test.describe('統合フロー', () => {
     await page.getByRole('button', { name: '承認する' }).click();
     await expect(page.getByText('承認しました')).toBeVisible({ timeout: 20000 });
 
-    // 9. 記録一覧で承認済になっている
+    // 9. 未承認フィルターを維持して一覧に戻る。承認済へ切り替えて結果を確認する。
     await page.waitForURL('**/app/reports**', { timeout: 20000 });
-    await expect(page.getByText('承認済', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 20000 });
+    const pendingOnly = page.getByRole('switch', { name: '未承認・差戻しのみ' });
+    await expect(pendingOnly).toBeChecked();
+    await expect(page.getByText('検索結果: 0 件', { exact: true })).toBeVisible();
+    await pendingOnly.uncheck();
+    await page.getByRole('combobox', { name: /^ステータス / }).click();
+    await page.getByRole('option', { name: '承認済', exact: true }).click();
+    await expect(page.getByText('検索結果: 1 件', { exact: true })).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText(staffName, { exact: true }).filter({ visible: true }).first()).toBeVisible();
   });
 });
