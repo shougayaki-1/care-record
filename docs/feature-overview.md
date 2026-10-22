@@ -6,7 +6,7 @@
 |---|---|---|
 | `record/` | 記録を作成 | 訪問介護の記録作成（`[clientId]` で利用者別）。AI取込結果の反映先でもある |
 | `shifts/` | シフト管理 | シフトの作成・編集、Googleカレンダー同期（docs/architecture.md参照） |
-| `reports/` | 帳票・レポート | 記録・シフトを束ねた帳票生成（`reportShifts.ts`でシフト紐付け） |
+| `reports/` | 帳票・レポート | 記録・シフトを束ねた帳票生成（`reportShifts.ts`でシフト紐付け）。[フィルターの保存・復元](report-filters.md) |
 | `clients/` | 利用者管理 | 利用者（`[id]`で個別）の登録・編集 |
 | `staff/` | スタッフ(名簿)管理 | 職員名簿の管理 |
 | `statistics/` | 統計 | 労務・稼働等の集計表示 |
