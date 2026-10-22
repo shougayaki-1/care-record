@@ -19,6 +19,8 @@ function deferred<T>(): Deferred<T> {
 const testState = vi.hoisted(() => ({
   base: null as Deferred<{ data: { id: string; name: string }; error: null }> | null,
   valuesError: null as { message: string } | null,
+  tableResults: new Map<string, Promise<{ data: unknown; error: { message: string } | null }>>(),
+  existingShiftReportId: null as string | null,
   clientId: 'client-1',
   search: 'reportId=report-a&draftKey=test-draft',
   reports: new Map<string, Deferred<{ data: Record<string, unknown> | null; error: null }>>(),
@@ -63,7 +65,10 @@ vi.mock('@/app/actions/reportShifts', () => ({
 
 vi.mock('@/lib/supabase', () => {
   const responseFor = (table: string, filters: Record<string, unknown>) => {
+    const override = testState.tableResults.get(table);
+    if (override) return override;
     if (table === 'reports') {
+      if (!filters.id) return Promise.resolve({ data: testState.existingShiftReportId ? { id: testState.existingShiftReportId } : null, error: null });
       const reportId = String(filters.id);
       testState.requestedReports.push(reportId);
       return testState.reports.get(reportId)?.promise;
@@ -101,7 +106,7 @@ vi.mock('@/lib/supabase', () => {
 });
 
 import { useRecordForm } from './useRecordForm';
-import { auditReportView, getReportImages, uploadReportImage, saveReport, discardReportAutosave } from '@/app/actions/reports';
+import { auditReportView, getReportImages, uploadReportImage, saveReport, discardReportAutosave, loadReportAutosave } from '@/app/actions/reports';
 afterEach(cleanup);
 
 const report = (id: string, startAt: string) => ({
@@ -123,8 +128,11 @@ describe('useRecordForm', () => {
     vi.clearAllMocks();
     vi.mocked(auditReportView).mockReset().mockResolvedValue({ ok: true, data: undefined });
     vi.mocked(getReportImages).mockReset().mockResolvedValue({ ok: true, data: [] });
+    vi.mocked(loadReportAutosave).mockReset().mockResolvedValue({ ok: true, data: null });
     testState.base = null;
     testState.valuesError = null;
+    testState.tableResults = new Map();
+    testState.existingShiftReportId = null;
     testState.clientId = 'client-1';
     testState.workspace = { currentOrg: { id: 'organization-1', role: 'owner', effectivePermissions: {} }, loading: false, userId: 'user-1' };
     vi.mocked(discardReportAutosave).mockResolvedValue({ ok: true, data: { success: true } });
@@ -148,6 +156,115 @@ describe('useRecordForm', () => {
     expect(result.current.answers.note).toBe('report-a');
   });
 
+  it.each(['clients', 'form_templates', 'staffs', 'assignments', 'service_types', 'staff_roles'])('keeps the form closed on a %s read failure and allows retry', async table => {
+    testState.tableResults.set(table, Promise.resolve({ data: null, error: { message: 'private query failure' } }));
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loadError).not.toBeNull());
+    expect(result.current.loading).toBe(true);
+    expect(getReportImages).not.toHaveBeenCalled();
+    testState.tableResults.delete(table);
+    await act(async () => { result.current.retryLoad(); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.loadError).toBeNull();
+    expect(result.current.answers.note).toBe('report-a');
+  });
+
+  it('starts an unlinked new record with the current staff and configured travel cost', async () => {
+    testState.search = 'draftKey=test-draft';
+    testState.tableResults.set('staffs', Promise.resolve({ data: [{ id: 'staff', name: 'Staff', user_id: 'user-1' }], error: null }));
+    testState.tableResults.set('assignments', Promise.resolve({ data: [{ staff_id: 'staff', default_travel_cost_yen: 250 }], error: null }));
+    const { result } = renderHook(() => useRecordForm());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.currentReportId).toBeNull();
+    expect(result.current.currentStatus).toBe('draft');
+    expect(result.current.actualStaffs).toEqual([{ staff_id: 'staff', staff_role_id: null }]);
+    expect(result.current.travelExpenses).toEqual({ staff: { method: 'car', amountYen: '250' } });
+    expect(new Date(result.current.endDateTime).getTime() - new Date(result.current.startDateTime).getTime()).toBe(3600000);
+    expect(auditReportView).not.toHaveBeenCalled();
+    expect(getReportImages).not.toHaveBeenCalled();
+  });
+
+  it('selects the sole shift segment and keeps its staff, service and draft identity', async () => {
+    testState.search = 'shiftId=shift-1&draftKey=test-draft';
+    testState.tableResults.set('shifts', Promise.resolve({ data: {
+      start_at: '2026-10-22T01:00:00Z', end_at: '2026-10-22T02:00:00Z', shift_staffs: [],
+      shift_segments: [{ id: 'segment-1', start_at: '2026-10-22T01:00:00Z', end_at: '2026-10-22T02:00:00Z', service_type_id: 'service', shift_segment_staffs: [{ staff_id: 'staff', staff_role_id: 'role', staff: { name: 'Staff' } }] }],
+    }, error: null }));
+    const { result } = renderHook(() => useRecordForm());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.selectedSegmentId).toBe('segment-1');
+    expect(result.current.actualServiceTypeId).toBe('service');
+    expect(result.current.actualStaffs).toEqual([{ staff_id: 'staff', staff_role_id: 'role' }]);
+    expect(result.current.selectedHelpers).toEqual(['Staff']);
+    expect(result.current.serviceTime).toBe('1');
+    expect(testState.router.replace).toHaveBeenCalledWith('/app/record/client-1?shiftId=shift-1&segmentId=segment-1&draftKey=test-draft');
+    expect(auditReportView).not.toHaveBeenCalled();
+  });
+
+  it('loads the existing report for a shift segment and preserves its content version on save', async () => {
+    testState.search = 'shiftId=shift-1&segmentId=segment-1&draftKey=test-draft';
+    testState.existingShiftReportId = 'report-a';
+    testState.tableResults.set('shifts', Promise.resolve({ data: {
+      start_at: '2026-10-22T01:00:00Z', end_at: '2026-10-22T02:00:00Z', shift_staffs: [], shift_segments: [],
+    }, error: null }));
+    const response = report('report-a', '2026-07-20T12:00:00Z');
+    response.data.current_version = 7;
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(response); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.currentReportId).toBe('report-a');
+    expect(auditReportView).toHaveBeenCalledWith('organization-1', 'report-a');
+    expect(testState.router.replace).toHaveBeenCalledWith('/app/record/client-1?reportId=report-a&shiftId=shift-1&segmentId=segment-1&draftKey=test-draft');
+    vi.mocked(saveReport).mockResolvedValue({ ok: true, data: { success: true, reportId: 'report-a', revisionId: 'revision-8', version: 8, replayed: false } });
+    await act(async () => { await result.current.handleDraftSave(); });
+    expect(saveReport).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 7 }));
+  });
+
+  it('requires choosing a segment when a new shift has several segments', async () => {
+    testState.search = 'shiftId=shift-1&draftKey=test-draft';
+    testState.tableResults.set('shifts', Promise.resolve({ data: {
+      start_at: '2026-10-22T01:00:00Z', end_at: '2026-10-22T03:00:00Z', shift_staffs: [],
+      shift_segments: ['segment-2', 'segment-1'].map((id, index) => ({ id, start_at: `2026-10-22T0${2-index}:00:00Z`, end_at: '2026-10-22T03:00:00Z' })),
+    }, error: null }));
+    const { result } = renderHook(() => useRecordForm());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.requiresSegmentSelection).toBe(true);
+    expect(result.current.shiftSegments.map(segment => segment.id)).toEqual(['segment-1', 'segment-2']);
+    expect(result.current.currentStatus).toBe('draft');
+    expect(testState.router.replace).not.toHaveBeenCalled();
+  });
+
+  it('keeps the first month portion for a shift spanning a month boundary', async () => {
+    testState.search = 'shiftId=shift-1&draftKey=test-draft';
+    testState.tableResults.set('shifts', Promise.resolve({ data: {
+      start_at: new Date(2026, 9, 31, 23).toISOString(), end_at: new Date(2026, 10, 1, 1).toISOString(),
+      shift_staffs: [{ staff_id: 'staff', staffs: { name: 'Staff' } }], shift_segments: [],
+    }, error: null }));
+    const { result } = renderHook(() => useRecordForm());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.isSpanningMonth).toBe(true);
+    expect(result.current.selectedPart).toBe('part1');
+    expect(result.current.endDateTime).toBe('2026-11-01T00:00');
+    expect(result.current.serviceTime).toBe('1');
+    expect(result.current.selectedHelpers).toEqual(['Staff']);
+  });
+
+  it('ignores a pending shift response after navigating to another report', async () => {
+    testState.search = 'shiftId=shift-1&draftKey=test-draft';
+    const shift = deferred<{ data: unknown; error: null }>();
+    testState.tableResults.set('shifts', shift.promise);
+    const { result, rerender } = renderHook(() => useRecordForm());
+    testState.search = 'reportId=report-b&draftKey=test-draft';
+    rerender();
+    await act(async () => { testState.reports.get('report-b')!.resolve(report('report-b', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { shift.resolve({ data: { shift_segments: [{ id: 'old-segment' }] }, error: null }); });
+    expect(result.current.currentReportId).toBe('report-b');
+    expect(result.current.shiftSegments).toEqual([]);
+    expect(testState.router.replace).not.toHaveBeenCalled();
+  });
+
   it('requires the body audit but does not wait for slow images', async () => {
     const audit = deferred<{ ok: true; data: undefined }>();
     const images = deferred<{ ok: true; data: { id: string; url: string }[] }>();
@@ -166,6 +283,44 @@ describe('useRecordForm', () => {
     await act(async () => { images.resolve({ ok: true, data: [{ id: 'image-a', url: 'https://example.invalid/a' }] }); });
     await waitFor(() => expect(result.current.imagesLoading).toBe(false));
     expect(result.current.images).toHaveLength(1);
+  });
+
+  it.each([{ staff: { name: 'Staff' } }, { staff: [{ name: 'Staff' }] }])('preserves legacy staff names and a single staff travel cost for relation $staff', async ({ staff }) => {
+    testState.tableResults.set('report_actual_staffs', Promise.resolve({ data: [{ staff_id: 'staff', staff_role_id: 'role', staff }], error: null }));
+    testState.tableResults.set('report_values', Promise.resolve({ data: { data: { note: 'legacy', service_time: '2', travel_time: '0.5', travel_cost_yen: 500 } }, error: null }));
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.selectedHelpers).toEqual(['Staff']);
+    expect(result.current.actualStaffs).toEqual([{ staff_id: 'staff', staff_role_id: 'role' }]);
+    expect(result.current.travelExpenses).toEqual({ staff: { method: 'car', amountYen: '500' } });
+    expect(result.current.serviceTime).toBe('2');
+    expect(result.current.travelTime).toBe('0.5');
+    expect(result.current.answers.note).toBe('legacy');
+  });
+
+  it('preserves per-staff travel expenses and helper fallback from stored values', async () => {
+    testState.tableResults.set('report_values', Promise.resolve({ data: { data: {
+      _helpers: ['Legacy Staff'], travel_cost_yen: 999,
+      travel_expenses: [{ staff_id: 'staff-a', method: 'public_transport', amount_yen: 0 }, { staff_id: 'staff-b', method: 'none', amount_yen: null }],
+    } }, error: null }));
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.selectedHelpers).toEqual(['Legacy Staff']);
+    expect(result.current.travelExpenses).toEqual({
+      'staff-a': { method: 'public_transport', amountYen: '0' }, 'staff-b': { method: 'none', amountYen: '' },
+    });
+  });
+
+  it('keeps a missing values row distinct from a query failure', async () => {
+    testState.tableResults.set('report_values', Promise.resolve({ data: null, error: null }));
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.answers).toEqual({});
+    expect(result.current.loadError).toBeNull();
+    expect(auditReportView).toHaveBeenCalledWith('organization-1', 'report-a');
   });
 
   it('fails closed on audit failure and permits a complete retry', async () => {
@@ -209,6 +364,40 @@ describe('useRecordForm', () => {
     expect(result.current.answers.note).toBe('unsaved');
     expect(result.current.isDirty).toBe(true);
     expect(testState.requestedReports).toEqual(['report-a']);
+  });
+
+  it('restores the complete autosaved form and clears its state only after a successful commit', async () => {
+    const payload = {
+      answers: { note: 'restored input' }, selectedHelpers: ['Staff'],
+      actualStaffs: [{ staff_id: 'staff', staff_role_id: null }], actualServiceTypeId: 'service',
+      startDateTime: '2026-10-22T10:00', endDateTime: '2026-10-22T11:00',
+      serviceTime: '1', travelTime: '0.5', travelExpenses: { staff: { method: 'car' as const, amountYen: '100' } },
+    };
+    vi.mocked(loadReportAutosave).mockResolvedValue({ ok: true, data: { payload, autosave_revision: 3 } });
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.autosaveState).toBe('saved'));
+    expect(result.current).toMatchObject({ ...payload, isDirty: true });
+    vi.mocked(saveReport).mockResolvedValue({ ok: true, data: { success: true, reportId: 'report-a', revisionId: 'revision-2', version: 2, replayed: false } });
+    await act(async () => { await result.current.handleDraftSave(); });
+    expect(discardReportAutosave).toHaveBeenCalledWith('organization-1', 'test-draft');
+    expect(result.current.autosaveState).toBe('idle');
+    expect(result.current.isDirty).toBe(false);
+    expect(result.current.answers.note).toBe('restored input');
+  });
+
+  it('ignores images from an earlier body load even when the record scope is unchanged', async () => {
+    const oldImages = deferred<{ ok: true; data: { id: string; url: string }[] }>();
+    vi.mocked(getReportImages).mockReturnValueOnce(oldImages.promise)
+      .mockResolvedValueOnce({ ok: true, data: [{ id: 'new-image', url: 'https://example.invalid/new' }] });
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(getReportImages).toHaveBeenCalledTimes(1));
+    await act(async () => { result.current.retryLoad(); });
+    await waitFor(() => expect(result.current.images).toEqual([{ id: 'new-image', url: 'https://example.invalid/new' }]));
+    await act(async () => { oldImages.resolve({ ok: true, data: [{ id: 'old-image', url: 'https://example.invalid/old' }] }); });
+    expect(result.current.images).toEqual([{ id: 'new-image', url: 'https://example.invalid/new' }]);
+    expect(auditReportView).toHaveBeenCalledTimes(2);
   });
 
   it('discards a pending image response across organization changes', async () => {

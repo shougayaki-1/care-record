@@ -27,3 +27,17 @@ Issue #33。#32 のフォーム・アクション配置を維持し、#34 の `c
 - Playwright: 専用ローカルSupabaseで通常・内勤・受信AI承認の保存→フィード、既存の狭幅レイアウト。外部AI呼び出しは行わない。
 
 React 19.2.3 / MUI 7.3.7 / Next.js 16.3.6。2026-10-02〜03 にContext7でReactのref・非同期state・effect cleanup、Testing Libraryのact/renderHook、MUIのSnackbar更新・clickawayを確認。Issue #47では内勤保存APIの冪等性契約を追加し、認証・フォーム構造・フィード経路は維持する。
+
+## 通常記録フォームの責務分担
+
+`useRecordForm` はフォームの入力状態、初期読込、保存・提出を組み立てる。以下は `src/hooks/recordForm/` に分離している。
+
+- `useRecordAutosave`: サーバー下書きの復元、3秒の自動保存、revision管理、手動保存成功後の下書き破棄。復元内容のフォームへの反映は、呼出し元の安定したcallbackへ委ねる。手動操作・AI処理中、承認済み、読込中は自動保存しない。
+- `useRecordImages`: 本文準備後の画像取得、画像だけの再試行、取得結果と失敗・待機状態の管理。本文読込の世代とscopeに一致する画像だけを公開し、古い応答をcleanupで破棄する。認可・署名URL発行・監査は既存の`getReportImages` Actionを使う。
+- `useRecordInitialization`: scopeに応じた初期化・読込世代・失敗・再試行と、シフト区間／既存記録への誘導を管理する。workspaceオブジェクトの更新も再読込対象とし、古い応答による入力・URLの上書きを防ぐ。
+- `loadRecordData`: 基礎データと記録本文の取得・フォーム用データへの変換。基礎データと記録本文の並列開始、本文・実績スタッフ・シフト・閲覧監査の並列実行を維持し、監査成功前の本文を返さない。DBエラーと本文行の欠落を区別し、旧形式の担当者・交通費も維持する。
+- `types.ts`: フォームで共有する型。既存利用箇所との互換性のため、公開型は引き続き`useRecordForm.ts`からもexportする。
+
+2026-10-22: Context7でReact 19.2.3のEffect依存関係と非同期応答のcleanup、Next.js 16.3.6同梱の`use client`資料を確認した。公開hookの返却項目、Server Action、RLS・permissions・監査契約は変更していない。自動保存の復元・debounce・処理中停止・scope切替・失敗後の再試行・unmountと、フォームを通した復元・保存・画像世代の回帰テストを追加した。
+
+Issue #109の初期読込整理では、上記の資料を再確認し、マスタ取得失敗後の再試行、新規記録の本人スタッフ・交通費、シフトの単一区間・複数区間・月跨ぎ・既存記録、旧交通費形式・本文欠落、切替後の古いシフト応答破棄を回帰テストへ追加した。保存・提出処理の分離は後続作業とする。
