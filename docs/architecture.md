@@ -9,7 +9,8 @@ Supabase Auth（パスワード + Google OAuth）。`src/proxy.ts`（Next.js 16 
 旧middleware相当）が全リクエストで CSP nonce 生成と Supabase セッション更新
 （`src/utils/supabase/middleware.ts`）を行う。
 
-- ログインは Server Action `loginWithPassword` 経由。IP単位で15分5回失敗すると429
+- ログインは Server Action `loginWithPassword` 経由。IP・メールのハッシュで失敗を集計し、
+  15分5回で試行を制限する。失敗回数に応じた遅延も適用する
   （`src/utils/supabase/loginAttempts.ts`）。
 - 無操作タイムアウト24時間、絶対セッション期限30日。クライアント、middleware、
   Server Actionで同じ値を使用する。正式な決定は`docs/system-decisions.md`に従う。
@@ -31,7 +32,9 @@ Supabase Auth（パスワード + Google OAuth）。`src/proxy.ts`（Next.js 16 
 
 チャンク方式のサーバーバッチに統一。
 
-- 真実の源: `shifts.google_event_id IS NULL` = 未同期。専用ステータステーブルは持たない。
+- 同期状態は `shifts.google_event_id` と `google_sync_status` で管理する。未同期件数は
+  未削除シフトの event ID欠落、`pending_upsert`、`failed` を対象にする。
+  論理削除後の `pending_delete` は修復経路で再同期する。
 - コア: `src/app/actions/shifts/googleSyncInternal.ts` の `syncToGoogleCalendarDirect` はエラーを握りつぶさず
   `SyncError`（kind: auth / rate_limit / transient / permanent / skipped）を投げる。
   `withRetry` が rate_limit / transient のみ指数バックオフで再試行。
@@ -41,7 +44,8 @@ Supabase Auth（パスワード + Google OAuth）。`src/proxy.ts`（Next.js 16 
 - 一括同期はクライアントが `remaining=0` になるまでループする設計
   （`getSyncStatus` / `syncUnsyncedBatch(limit)` / `forceSyncBatch(cursor, limit)`）。
   Vercelの実行時間制限を避けるため1呼び出し上限は約20件。force は id 昇順の cursor ページング。
-- 削除は Google 側の削除に成功した分だけ DB 側も削除する（孤児イベントを残さない）。
+- 削除は `src/app/actions/shifts/crud.ts` で保持方針・権限を検証し、DBの論理削除を確定してから
+  Google側の削除を試みる。失敗時も論理削除を戻さず、修復経路でGoogle側を再同期する。
 
 ## AI 記録インポート
 
@@ -61,7 +65,7 @@ Supabase Auth（パスワード + Google OAuth）。`src/proxy.ts`（Next.js 16 
 - GCS へのエクスポートは `src/utils/gcs/`（export / html / upload）。
 - 保持期間ポリシーは `src/utils/supabase/retention.ts` / `retentionPolicy.ts`。
 - 削除承認ワークフロー（申請→owner承認→論理削除）は `src/app/actions/deletionRequests.ts`。
-  現状バックエンドのみで、UIはreport限定（要確認: 全面配線の要否）。
+  対象はreportで、申請の一覧・承認・却下画面は `src/app/app/reports/deletion-requests/`。
 
 ## 通知基盤
 
