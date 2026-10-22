@@ -106,7 +106,7 @@ vi.mock('@/lib/supabase', () => {
 });
 
 import { useRecordForm } from './useRecordForm';
-import { auditReportView, getReportImages, uploadReportImage, saveReport, discardReportAutosave, loadReportAutosave } from '@/app/actions/reports';
+import { auditReportView, getReportImages, uploadReportImage, saveReport, discardReportAutosave, loadReportAutosave, transitionReports } from '@/app/actions/reports';
 afterEach(cleanup);
 
 const report = (id: string, startAt: string) => ({
@@ -555,6 +555,60 @@ describe('useRecordForm', () => {
     await act(async () => { result.current.handleAiProcessingChange(true); await result.current.handleDraftSave(); result.current.handleClose(); });
     expect(saveReport).not.toHaveBeenCalled(); expect(testState.router.back).not.toHaveBeenCalled(); expect(result.current.submitting).toBe(true);
     act(() => result.current.handleAiProcessingChange(false)); expect(result.current.submitting).toBe(false);
+  });
+
+  it('keeps validation failures local and never writes an invalid submission', async () => {
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    testState.confirm.mockResolvedValueOnce(true);
+    const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    try {
+      await act(async () => { await result.current.handleSubmit(); });
+      expect(result.current.errors).toMatchObject({ serviceTime: '必須項目です', helpers: '担当スタッフを選択してください' });
+      expect(saveReport).not.toHaveBeenCalled();
+      expect(testState.router.push).not.toHaveBeenCalled();
+    } finally { scroll.mockRestore(); }
+  });
+
+  it('preserves a submitted payload and retry key on refusal, then navigates after success', async () => {
+    testState.tableResults.set('staffs', Promise.resolve({ data: [{ id: 'staff', name: 'Staff', user_id: 'user-1' }], error: null }));
+    testState.tableResults.set('form_templates', Promise.resolve({ data: { schema: [] }, error: null }));
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => {
+      result.current.handleStaffChange(['Staff']);
+      result.current.setServiceTime('1');
+      result.current.setTravelExpenses({ staff: { method: 'car', amountYen: '0' } });
+      result.current.handleAnswerChange('note', 'keep this submission');
+    });
+    testState.confirm.mockResolvedValue(true);
+    vi.mocked(saveReport).mockResolvedValueOnce({ ok: false, error: { code: 'FORBIDDEN', message: '送信できません' } })
+      .mockResolvedValueOnce({ ok: true, data: { success: true, reportId: 'report-a', revisionId: 'v2', version: 2, replayed: false } });
+    await act(async () => { await result.current.handleSubmit(); });
+    expect(result.current.answers.note).toBe('keep this submission');
+    expect(result.current.isDirty).toBe(true);
+    expect(testState.router.push).not.toHaveBeenCalled();
+    const key = vi.mocked(saveReport).mock.calls[0][0].idempotencyKey;
+    await act(async () => { await result.current.handleSubmit(); });
+    expect(vi.mocked(saveReport).mock.calls[1][0]).toMatchObject({ status: 'pending', idempotencyKey: key, expectedVersion: 1 });
+    expect(testState.router.push).toHaveBeenCalledExactlyOnceWith('/app/record');
+  });
+
+  it.each(['handleApprove', 'handleRemand'] as const)('only leaves the record after a successful %s', async handler => {
+    const { result } = renderHook(() => useRecordForm());
+    await act(async () => { testState.reports.get('report-a')!.resolve(report('report-a', '2026-07-20T12:00:00Z')); });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    testState.confirm.mockResolvedValue(true);
+    vi.mocked(transitionReports).mockResolvedValueOnce({ ok: false, error: { code: 'FORBIDDEN', message: '操作できません' } })
+      .mockResolvedValueOnce({ ok: true, data: { success: true, updated: 1 } });
+    await act(async () => { await result.current[handler](); });
+    expect(testState.router.push).not.toHaveBeenCalled();
+    expect(result.current.actionError).toBe('操作できません');
+    await act(async () => { await result.current[handler](); });
+    expect(transitionReports).toHaveBeenLastCalledWith('organization-1', ['report-a'], handler === 'handleApprove' ? 'approve' : 'remand');
+    expect(testState.router.push).toHaveBeenCalledExactlyOnceWith('/app/reports');
   });
 
 });
