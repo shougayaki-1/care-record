@@ -138,7 +138,7 @@ export function useRecordActions({
       if (status === 'draft') applyForm({ hasAiDraftSource: false });
       applyUi({ isDirty: false });
       discardCommittedAutosave();
-      
+
       if (!currentReportId && targetReportId) {
           const newUrl = `/app/record/${clientId}?reportId=${targetReportId}&draftKey=${encodeURIComponent(draftKey)}`;
           savedUrl = newUrl;
