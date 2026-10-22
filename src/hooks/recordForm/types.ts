@@ -72,4 +72,3 @@ export type RecordShiftState = {
   shiftSegments: ShiftSegmentData[];
   selectedSegmentId: string | null;
 };
-
