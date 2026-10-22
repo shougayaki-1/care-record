@@ -3,6 +3,7 @@
 import { getActionErrorMessage, needsActionRecovery } from '@/utils/actionResult';
 import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useEffect, useState } from 'react';
+import { markRecordBodyVisible } from '@/utils/recordLoadTiming';
 import { supabase } from '@/lib/supabase';
 
 import { Alert, Box, Button, CircularProgress, IconButton, Stack, Typography } from '@/components/ui/mui';
@@ -26,7 +27,7 @@ export default function RecordPage() {
     router, showToast, currentOrg, clientId, shiftId, segmentId,
     autosaveState, clientName, template, answers, selectableStaffs, staffRoles, serviceTypes,
     selectedHelpers, actualStaffs, actualServiceTypeId, startDateTime, endDateTime,
-    serviceTime, travelTime, travelExpenses, images,
+    serviceTime, travelTime, travelExpenses, images, imagesLoading, imagesError, retryImages, loadError, retryLoad,
     aiFilledFields, isSpanningMonth, selectedPart, originalShiftTimes,
     currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting, actionError, actionErrorCause,
     shiftSuggestions, linkedShifts, linkedLoadError, retryLinkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId,
@@ -51,6 +52,12 @@ export default function RecordPage() {
       });
     return () => { active = false; };
   }, [currentReportId]);
+  useEffect(() => {
+    if (loading || loadError != null) return;
+    const frame = requestAnimationFrame(markRecordBodyVisible);
+    return () => cancelAnimationFrame(frame);
+  }, [loading, loadError, currentReportId]);
+  if (loadError != null) return <Alert severity="error" action={needsActionRecovery(loadError) ? <RecoveryLogoutButton /> : <AppButton variant="text" intent="secondary" onClick={retryLoad}>再試行</AppButton>}>記録の読み込みに失敗しました。通信とアクセス権限を確認してください。</Alert>;
   if (loading) return <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}><CircularProgress /></Box>;
 
   return (
@@ -206,12 +213,14 @@ export default function RecordPage() {
 
             <Box sx={{ p: { xs: 2, sm: 3 }, mt: 3, borderRadius: 1 }}>
                 <Typography variant="subtitle2" fontWeight="bold" gutterBottom>画像添付</Typography>
+                {imagesLoading && <Typography role="status" variant="body2">画像を読み込み中です…</Typography>}
+                {imagesError != null && <Alert severity="error" action={needsActionRecovery(imagesError) ? <RecoveryLogoutButton /> : <AppButton variant="text" intent="secondary" onClick={retryImages}>再試行</AppButton>}>画像を読み込めませんでした。</Alert>}
                 <Stack direction="row" gap={2} flexWrap="wrap">
                     {images.map(img => (
                         <Box key={img.id} component="img" src={img.url} sx={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 1 }} />
                     ))}
-                    <IconButton color="primary" component="label" disabled={!currentReportId || isReadOnly || submitting} sx={{ width: 100, height: 100, border: '1px dashed', borderColor: 'divider', borderRadius: 1, flexDirection: 'column' }}>
-                        <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!currentReportId || isReadOnly || submitting} />
+                    <IconButton color="primary" component="label" disabled={!currentReportId || isReadOnly || submitting || imagesLoading} sx={{ width: 100, height: 100, border: '1px dashed', borderColor: 'divider', borderRadius: 1, flexDirection: 'column' }}>
+                        <input hidden accept="image/*" type="file" onChange={handleImageUpload} disabled={!currentReportId || isReadOnly || submitting || imagesLoading} />
                         <PhotoCamera />
                         {!currentReportId && <Typography variant="caption" sx={{ fontSize: 9 }}>未保存</Typography>}
                     </IconButton>
