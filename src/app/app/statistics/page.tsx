@@ -19,84 +19,20 @@ import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useToast } from '@/components/ui/ToastProvider';
 import { MonthField, TablePageSkeleton } from '@/components/ui';
-import { type LaborPremiumType } from '@/utils/laborPremium';
-import { type InternalWorkRecord } from '@/app/actions/internalWork';
 import { getStatisticsData } from '@/app/actions/statistics';
+import { initialStatisticsSourceData, toStatisticsSource, type StatisticsSourceData } from '@/utils/statisticsSource';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 import {
     aggregateByTab,
     buildShiftVarianceRows,
     buildStatisticsCsv,
     type PremiumComparison,
-    type ReportValuesData,
     type StaffDetailItem,
     type ShiftVarianceRow,
 } from '@/utils/statisticsAggregation';
 import { useFetchData } from '@/hooks/useFetchData';
 import { StaffReportTable } from '@/components/statistics/StaffReportTable';
 import { ShiftVarianceTable } from '@/components/statistics/ShiftVarianceTable';
-
-type ShiftStaffData = { staff_id: string; staffs: { name: string } | null; };
-type ShiftData = { 
-    id: string; start_at: string; end_at: string; status: string; client_id: string; 
-    clients: { name: string } | null; shift_staffs: ShiftStaffData[]; 
-};
-
-type ReportData = { 
-    id: string; start_at: string; end_at: string; status: string; client_id: string; segment_id?: string | null; actual_service_type_id?: string | null;
-    clients: { name: string } | null; 
-    helper?: { name: string } | null;
-    report_values: { data: ReportValuesData }[] | null; 
-    actual_service_type?: { name: string } | null;
-    report_actual_staffs?: Array<{ staff?: { name: string } | null }>;
-    report_shifts?: { shift_id: string }[] | null;
-};
-
-type ShiftWithLinks = {
-    id: string; start_at: string; end_at: string; client_id: string;
-    clients: { name: string } | null;
-    shift_staffs: Array<{ staffs: { name: string } | null }>;
-    report_shifts: Array<{ is_primary: boolean; reports: ReportForStats | null }>;
-    shift_segments?: ShiftSegmentForStats[];
-};
-
-type ReportForStats = {
-    id: string;
-    start_at: string;
-    end_at: string;
-    status: string;
-    segment_id?: string | null;
-    actual_service_type_id?: string | null;
-    deleted_at?: string | null;
-    report_values?: { data: ReportValuesData }[] | null;
-    actual_service_type?: { name: string } | null;
-    report_actual_staffs?: Array<{ staff?: { name: string } | null }>;
-};
-
-type ShiftSegmentForStats = {
-    id: string;
-    start_at: string;
-    end_at: string;
-    sort_order: number;
-    service_type?: { name: string } | null;
-    shift_segment_staffs?: Array<{ staff_id: string; staff?: { name: string } | null }>;
-    reports?: ReportForStats[];
-};
-
-type StatisticsSourceData = {
-    rawShifts: ShiftData[];
-    rawReports: ReportData[];
-    premiumTypes: LaborPremiumType[];
-    rawShiftsWithLinks: ShiftWithLinks[];
-    internalWorkRecords: InternalWorkRecord[];
-};
-const initialStatisticsSourceData: StatisticsSourceData = {
-    rawShifts: [],
-    rawReports: [],
-    premiumTypes: [],
-    rawShiftsWithLinks: [],
-    internalWorkRecords: [],
-};
 
 function formatDetailDateTime(value: string): string {
     return new Date(value).toLocaleString('ja-JP', {
@@ -134,13 +70,7 @@ export default function StatisticsPage() {
             const shiftEndRange = new Date(monthEnd.getTime() + (24 * 60 * 60 * 1000)).toISOString();
 
             const data = await readActionResult(getStatisticsData(currentOrg.id, shiftStartRange, shiftEndRange));
-            return {
-                rawShifts: data.shifts as ShiftData[],
-                rawReports: data.reports as ReportData[],
-                internalWorkRecords: data.internalWorkRecords as InternalWorkRecord[],
-                premiumTypes: data.premiumTypes as LaborPremiumType[],
-                rawShiftsWithLinks: data.shiftsWithLinks as ShiftWithLinks[],
-            };
+            return toStatisticsSource(data);
     }, [currentOrg, targetMonth]);
 
     const {
