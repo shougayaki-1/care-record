@@ -80,7 +80,8 @@ async function loadReportValues(reports: Report[]): Promise<ExportReport[]> {
   }
   return reports.map((report) => {
     const value = valuesById.get(report.id);
-    return { ...report, report_values: value ? { data: value } : [] };
+    if (value == null) throw new Error('Export report body is missing');
+    return { ...report, report_values: { data: value } };
   });
 }
 
@@ -264,7 +265,8 @@ export default function ReportsClientPage() {
       try {
         await readActionResult(auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'csv'));
         const clientIds = Array.from(new Set(targetReports.map(r => r.clients.id)));
-        const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
+        const { data: templates, error: templatesError } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
+        if (templatesError) throw templatesError;
 
         const exportReports = await loadReportValues(targetReports);
         const csvContent = buildReportsCsv(
@@ -323,8 +325,9 @@ export default function ReportsClientPage() {
         const exportReports = await loadReportValues(targetReports);
         const pdfReports = await Promise.all(exportReports.map(async (report) => {
           const data = getReportData(report);
-          if (!data) return null;
-          const { data: tmplData } = await supabase.from('form_templates').select('schema').eq('client_id', report.clients.id).maybeSingle();
+          if (!data) throw new Error('Export report body is missing');
+          const { data: tmplData, error: templateError } = await supabase.from('form_templates').select('schema').eq('client_id', report.clients.id).maybeSingle();
+          if (templateError) throw templateError;
           
           const pdfData: PdfReportData = {
             id: report.id, 
@@ -334,24 +337,21 @@ export default function ReportsClientPage() {
             data: data, 
             template: (tmplData?.schema as HelperFormItem[]) || []
           };
-          return pdfData;
+          return { reportId: report.id, report, pdfData };
         }));
         
-        const validReports = pdfReports.filter((r): r is PdfReportData => r !== null);
+        const validReports = pdfReports.map(({ pdfData }) => pdfData);
 
         if (filterShiftId) {
           const { downloadReportZip, buildReportFileName } = await import('@/utils/reportZipExport');
-          const entries = targetReports
-            .map((report, i) => {
-              const pdfData = validReports[i];
-              if (!pdfData) return null;
+          const entries = pdfReports
+            .map(({ report, pdfData }) => {
               const serviceTypeName = report.segment?.service_type?.name ?? null;
               return {
                 data: pdfData,
                 fileName: buildReportFileName(report.clients.name, serviceTypeName, report.start_at, report.end_at),
               };
-            })
-            .filter((e): e is NonNullable<typeof e> => e !== null);
+            });
           const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
           await downloadReportZip(entries, `サービス提供記録_${dateStr}`);
         } else {
@@ -409,30 +409,38 @@ export default function ReportsClientPage() {
   const handleCreateGasPdf = async () => {
       const targetReports = getTargetReports();
       if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
-      const clientIds = Array.from(new Set(targetReports.map((report) => report.clients.id)));
-      const { data: clientsInfo } = await supabase.from('clients').select('id, name, google_template_id, google_folder_id').in('id', clientIds);
-      
-      const { data: templates } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
-
-      const schemaMap: Record<string, HelperFormItem[]> = {};
-      const keyMaps: Record<string, Record<string, string>> = {};
-
-      templates?.forEach(t => { 
-          const s = t.schema as HelperFormItem[];
-          schemaMap[t.client_id] = s;
-          keyMaps[t.client_id] = generateKeyMap(s);
-      });
-
-      const { data: orgInfo } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg!.id).single();
-      if (!orgInfo?.google_folder_id) { showToast('事業所のGoogleドライブ連携が設定されていません。設定画面から連携を行ってください。', 'warning'); return; }
-
-      if (!(await confirm({ message: `${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）` }))) return;
-      setGasProgress({ total: targetReports.length, current: 0, currentName: '準備中...' });
-
-      let lastOpenedFolderUrl: string | null = null;
-
       try {
+          const clientIds = Array.from(new Set(targetReports.map((report) => report.clients.id)));
+          const { data: clientsInfo, error: clientsInfoError } = await supabase.from('clients').select('id, name, google_template_id, google_folder_id').in('id', clientIds);
+          if (clientsInfoError) throw clientsInfoError;
+          if (clientIds.some((id) => !clientsInfo?.some((client) => client.id === id))) {
+              throw new Error('Export client is missing');
+          }
+      
+          const { data: templates, error: templatesError } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
+          if (templatesError) throw templatesError;
+
+          const schemaMap: Record<string, HelperFormItem[]> = {};
+          const keyMaps: Record<string, Record<string, string>> = {};
+
+          templates?.forEach(t => {
+              const s = (t.schema as HelperFormItem[] | null) ?? [];
+              schemaMap[t.client_id] = s;
+              keyMaps[t.client_id] = generateKeyMap(s);
+          });
+
+          const { data: orgInfo, error: orgError } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg!.id).single();
+          if (orgError) throw orgError;
+          if (!orgInfo) throw new Error('Export organization is missing');
+          if (!orgInfo.google_folder_id) { showToast('事業所のGoogleドライブ連携が設定されていません。設定画面から連携を行ってください。', 'warning'); return; }
+
+          if (!(await confirm({ message: `${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）` }))) return;
+          setGasProgress({ total: targetReports.length, current: 0, currentName: '準備中...' });
+
+          let lastOpenedFolderUrl: string | null = null;
+
           const exportReports = await loadReportValues(targetReports);
+          await readActionResult(auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'pdf'));
           const clientGroups: Record<string, ExportReport[]> = {};
           exportReports.forEach((report) => {
               const clientId = report.clients.id;
