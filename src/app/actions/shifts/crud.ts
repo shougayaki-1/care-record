@@ -20,6 +20,8 @@ import {
   trySyncSilently,
 } from './googleSyncInternal';
 import type { ShiftPayload, ShiftQueryFilter } from './types';
+import { createShiftListQuery } from '@/features/shifts/queries';
+import { toShiftListItem } from '@/features/shifts/adapters';
 import { buildShiftTitle } from '@/utils/shiftTitle';
 
 async function getCurrentShiftTitle(
@@ -175,22 +177,7 @@ export async function getShifts(organizationId: string, startDate: string, endDa
       const actor = await assertShiftPermission(organizationId, 'view', { requireAllScope: false, clientId: filter.clientId || undefined });
       const supabase = await createSessionClient();
       try {
-          const staffRelation = filter.staffId
-              ? 'shift_staffs!inner (staff_id, staffs (name))'
-              : 'shift_staffs (staff_id, staffs (name))';
-          let query = supabase.from('shifts').select(`
-              id,
-              organization_id,
-              client_id,
-              title,
-              start_at,
-              end_at,
-              status,
-              cancel_reason,
-              clients (id, name),
-              ${staffRelation},
-              report_shifts (shift_id, is_primary, reports (id, status, deleted_at))
-          `).eq('organization_id', organizationId)
+          let query = createShiftListQuery(supabase, Boolean(filter.staffId)).eq('organization_id', organizationId)
               .is('deleted_at', null)
               .lt('start_at', endDate)
               .gt('end_at', startDate)
@@ -200,25 +187,15 @@ export async function getShifts(organizationId: string, startDate: string, endDa
 
           const { data, error } = await query;
           if (error) throw sanitizeDbError(error, 'action.shifts');
-          const withReportStatuses = (data ?? []).map(shift => {
-              const reportShifts = Array.isArray(shift.report_shifts) ? shift.report_shifts : [];
-              return {
-                  ...shift,
-                  report_statuses: reportShifts.flatMap((rs: { shift_id: string; is_primary: boolean; reports: { id: string; status: string | null; deleted_at: string | null } | { id: string; status: string | null; deleted_at: string | null }[] | null }) => {
-                      const r = Array.isArray(rs.reports) ? rs.reports[0] : rs.reports;
-                      if (!r || r.deleted_at) return [];
-                      return [{ id: r.id, status: r.status, is_primary: rs.is_primary }];
-                  }),
-              };
-          });
+          const withReportStatuses = (data ?? []).map(toShiftListItem);
           if (actor.isOwner) return withReportStatuses;
           const { permissions } = await getEffectivePermissions(organizationId, actor.userId);
           if (permissions.shifts.view === 'all') return withReportStatuses;
           const staffId = actor.staffId;
           const assignedClientIds = new Set(actor.clientIds);
           return (withReportStatuses || []).filter((shift) => {
-              const clientId = shift.client_id as string;
-              const shiftStaffs = (shift.shift_staffs || []) as Array<{ staff_id: string | null }>;
+              const clientId = shift.client_id;
+              const shiftStaffs = shift.shift_staffs;
               return assignedClientIds.has(clientId) || Boolean(staffId && shiftStaffs.some((staff) => staff.staff_id === staffId));
           });
       } catch (error) { logError('getShifts failed', { organizationId, error: serializeError(error) }); throw error; }

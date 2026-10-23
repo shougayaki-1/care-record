@@ -32,7 +32,7 @@ import {
 } from '@/app/actions/shift';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
-import type { ShiftData } from '@/components/shifts/ShiftFormModal';
+import type { ShiftData, ShiftPatternData } from '@/features/shifts/types';
 import { useShiftData, type ShiftDateRange } from '@/hooks/useShiftData';
 import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
@@ -41,7 +41,6 @@ import { checkManagementPermission, checkShiftPermission } from '@/utils/permiss
 import { buildRecordPath } from '@/utils/recordNavigation';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import type { FetchedPatternData } from '@/hooks/useShiftData';
 
 type TabId = 'patterns' | 'fullCalendar' | 'myShift' | 'byStaff' | 'byClient';
 
@@ -95,7 +94,7 @@ export default function ShiftManagePage() {
     const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
 
     const [selectedShift, setSelectedShift] = useState<ShiftData | null>(null);
-    const [selectedPattern, setSelectedPattern] = useState<FetchedPatternData | null>(null);
+    const [selectedPattern, setSelectedPattern] = useState<ShiftPatternData | null>(null);
     const [clearMode, setClearMode] = useState<'unmodified' | 'all'>('unmodified');
     const [previewDetails, setPreviewDetails] = useState<{ total: number; details: { title: string; count: number; isOvernight: boolean }[] } | null>(null);
 
