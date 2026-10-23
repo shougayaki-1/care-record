@@ -34,6 +34,7 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import type { ShiftData, ShiftPatternData } from '@/features/shifts/types';
 import { useShiftData, type ShiftDateRange } from '@/hooks/useShiftData';
+import { ShiftFetchStatus } from '@/components/shifts/ShiftFetchStatus';
 import { useSyncProgress } from '@/hooks/useSyncProgress';
 import { downloadShiftPdf, downloadShiftMatrixPdf } from '@/utils/shiftPdfExport';
 import type { DatesSetArg } from '@fullcalendar/core';
@@ -101,9 +102,11 @@ export default function ShiftManagePage() {
     const {
         rawShifts, patterns, events, clients, staffs,
         currentStaffId, initialLoading, isFetching,
-        unsyncedCount, setUnsyncedCount,
-        fetchData, fetchMasterData,
+        unsyncedCount, unsyncedCountStatus, masterDataStatus, setUnsyncedCount,
+        fetchData, fetchMasterData, fetchUnsyncedCount,
     } = useShiftData({ currentOrg, userId, showToast, calendarRef, activeTab, selectedStaffId, selectedClientId });
+
+    const mastersReady = masterDataStatus === 'success';
 
     useEffect(() => {
         const shiftIdParam = searchParams.get('shiftId');
@@ -156,7 +159,7 @@ export default function ShiftManagePage() {
         const canUseOrgWideTabs = currentOrg.effectivePermissions.shifts.view === 'all';
         if (!canUseOrgWideTabs && (activeTab === 'fullCalendar' || activeTab === 'patterns')) return;
         fetchData(!initialLoading);
-    }, [wsLoading, currentOrg, activeTab, selectedStaffId, selectedClientId, currentStaffId, fetchData, initialLoading]);
+    }, [wsLoading, currentOrg, activeTab, selectedStaffId, selectedClientId, currentStaffId, masterDataStatus, fetchData, initialLoading]);
 
     const handleCalendarDatesSet = useCallback((info: DatesSetArg) => {
         if (activeTab === 'patterns') return;
@@ -169,6 +172,7 @@ export default function ShiftManagePage() {
     }, [activeTab, fetchData]);
 
     const handleSaveShift = async (payload: ShiftPayload, shiftId?: string) => {
+        if (!mastersReady) throw new Error('利用者・スタッフ情報を再取得してください。');
         setSyncProgress({ total: 1, current: 0, currentName: shiftId ? 'Googleカレンダーの予定を更新中...' : 'Googleカレンダーへ新規登録中...' });
         try {
             if (shiftId) await readActionResult(updateShift(shiftId, payload));
@@ -209,6 +213,11 @@ export default function ShiftManagePage() {
     };
 
     const handleEventChange = async (info: EventDropArg | EventResizeDoneArg) => {
+        if (!mastersReady) {
+            info.revert();
+            showToast('利用者・スタッフ情報を再取得してください。', 'error');
+            return;
+        }
         const shiftId = info.event.extendedProps.shiftId;
         const start = info.event.start?.toISOString() || '';
         const end = info.event.end ? info.event.end.toISOString() : new Date(info.event.start!.getTime() + 3600000).toISOString();
@@ -237,6 +246,7 @@ export default function ShiftManagePage() {
     };
 
     const handleSavePattern = async (payload: ShiftPatternPayload, patternId?: string) => {
+        if (!mastersReady) throw new Error('利用者・スタッフ情報を再取得してください。');
         if (patternId) {
             await readActionResult(updateShiftPattern(patternId, payload));
             showToast('ひな形情報を更新しました');
@@ -275,7 +285,7 @@ export default function ShiftManagePage() {
     };
 
     const executeGenerate = async () => {
-        if (!currentOrg) return;
+        if (!currentOrg || !mastersReady) return;
         setPreviewDialogOpen(false);
         setGenerating(true);
         try {
@@ -446,10 +456,10 @@ export default function ShiftManagePage() {
                     <Typography variant="h6" fontWeight="bold">全体シフト管理</Typography>
                     {checkManagementPermission(currentOrg.effectivePermissions, 'organization') && <Button size="small" variant="text" startIcon={<SettingsIcon />} onClick={() => router.push('/app/settings?tab=rules')}>勤務・記録ルール</Button>}
                     {canCreateShift && activeTab === 'fullCalendar' && (
-                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setShiftModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>単発シフトを追加</Button>
+                        <Button disabled={!mastersReady} variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedShift(null); setShiftModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>単発シフトを追加</Button>
                     )}
                     {canCreateShift && activeTab === 'patterns' && (
-                        <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>ひな形を追加</Button>
+                        <Button disabled={!mastersReady} variant="contained" startIcon={<AddIcon />} onClick={() => { setSelectedPattern(null); setPatternModalOpen(true); }} sx={{ boxShadow: 'none', alignSelf: { xs: 'stretch', sm: 'center' } }}>ひな形を追加</Button>
                     )}
                 </Box>
                 <Tabs value={activeTab} onChange={handleTabChange} variant="scrollable" allowScrollButtonsMobile>
@@ -468,11 +478,18 @@ export default function ShiftManagePage() {
                     </Box>
                 )}
 
+                <ShiftFetchStatus
+                    masterStatus={masterDataStatus}
+                    countStatus={unsyncedCountStatus}
+                    showCount={canEditShift && currentOrg.effectivePermissions.shifts.edit === 'all'}
+                    onRetryMaster={() => void fetchMasterData()}
+                    onRetryCount={() => void fetchUnsyncedCount()}
+                />
                 {initialLoading ? (
                     <Box display="flex" justifyContent="center" alignItems="center" height="100%"><CircularProgress /></Box>
                 ) : (
                     <>
-                        {unsyncedCount > 0 && canEditShift && currentOrg.effectivePermissions.shifts.edit === 'all' && (
+                        {unsyncedCountStatus === 'success' && unsyncedCount !== null && unsyncedCount > 0 && canEditShift && currentOrg.effectivePermissions.shifts.edit === 'all' && (
                             <Alert
                                 severity="warning"
                                 action={
@@ -539,7 +556,7 @@ export default function ShiftManagePage() {
                                     <Typography variant="body2" sx={{ fontWeight: '500' }}>登録したひな形をベースに、指定月のカレンダーへシフトを一括展開・同期します。</Typography>
                                     <Stack direction="row" spacing={1.5} alignItems="center">
                                         <MonthField size="small" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} />
-                                        <Button variant="contained" color="secondary" startIcon={<PlayArrowIcon />} onClick={handleCalculatePreview} disabled={!canCreateShift || currentOrg.effectivePermissions.shifts.create !== 'all' || generating || patterns.length === 0} sx={{ boxShadow: 'none' }}>
+                                        <Button variant="contained" color="secondary" startIcon={<PlayArrowIcon />} onClick={handleCalculatePreview} disabled={!mastersReady || !canCreateShift || currentOrg.effectivePermissions.shifts.create !== 'all' || generating || patterns.length === 0} sx={{ boxShadow: 'none' }}>
                                             一括自動展開する
                                         </Button>
                                         <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => { setClearMode('unmodified'); setClearDialogOpen(true); }} disabled={!canDeleteShift || currentOrg.effectivePermissions.shifts.delete !== 'all' || generating || patterns.length === 0}>
@@ -571,7 +588,7 @@ export default function ShiftManagePage() {
                                                         <TableCell>{p.start_time.slice(0, 5)} 〜 {p.end_time.slice(0, 5)}</TableCell>
                                                         <TableCell><Chip label={formatRule(p.rrule)} size="small" color="primary" variant="outlined" /></TableCell>
                                                         <TableCell align="center">
-                                                            {canEditShift && <Tooltip title="ひな形を編集"><IconButton size="small" color="primary" onClick={() => { setSelectedPattern(p); setPatternModalOpen(true); }} sx={{ mr: 1 }}><EditIcon fontSize="small" /></IconButton></Tooltip>}
+                                                            {canEditShift && <Tooltip title="ひな形を編集"><IconButton disabled={!mastersReady} size="small" color="primary" onClick={() => { setSelectedPattern(p); setPatternModalOpen(true); }} sx={{ mr: 1 }}><EditIcon fontSize="small" /></IconButton></Tooltip>}
                                                             {canDeleteShift && <Tooltip title="ひな形を削除"><IconButton size="small" color="error" onClick={() => handleDeletePattern(p.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>}
                                                         </TableCell>
                                                     </TableRow>
@@ -591,13 +608,13 @@ export default function ShiftManagePage() {
                                     initialView={activeTab === 'myShift' ? 'listMonth' : 'dayGridMonth'}
                                     headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' }}
                                     buttonText={{ listMonth: 'リスト', dayGridMonth: '月間', timeGridWeek: '週間' }}
-                                    selectable={activeTab === 'fullCalendar' && canCreateShift}
-                                    editable={activeTab === 'fullCalendar' && canEditShift}
+                                    selectable={mastersReady && activeTab === 'fullCalendar' && canCreateShift}
+                                    editable={mastersReady && activeTab === 'fullCalendar' && canEditShift}
                                     onEventDrop={handleEventChange}
                                     onEventResize={handleEventChange}
                                     onDatesSet={handleCalendarDatesSet}
                                     onDateSelect={(info) => {
-                                        if (activeTab !== 'fullCalendar' || !canCreateShift) return;
+                                        if (!mastersReady || activeTab !== 'fullCalendar' || !canCreateShift) return;
                                         setSelectedShift({
                                             id: '', client_id: '', title: '', start_at: info.startStr, end_at: info.endStr,
                                             status: 'published', cancel_reason: '', shift_staffs: []
@@ -647,12 +664,12 @@ export default function ShiftManagePage() {
                 staffs={staffs}
                 organizationId={currentOrg.id}
                 initialData={selectedShift}
-                canSave={selectedShift?.id ? canEditShift : canCreateShift}
+                canSave={mastersReady && (selectedShift?.id ? canEditShift : canCreateShift)}
             />
 
             <ShiftPatternModal
                 key={selectedPattern?.id ?? 'new_pattern'}
-                open={patternModalOpen}
+                open={patternModalOpen && mastersReady}
                 onClose={() => setPatternModalOpen(false)}
                 onSave={handleSavePattern}
                 clients={clients}
@@ -691,7 +708,7 @@ export default function ShiftManagePage() {
                 </RadioGroup>
             </AppDialog>
 
-            <AppDialog open={previewDialogOpen} onClose={() => setPreviewDialogOpen(false)} maxWidth="sm" title={`${targetMonth}月 シフト展開の確認`} actions={<><AppButton variant="text" intent="secondary" onClick={() => setPreviewDialogOpen(false)}>閉じる</AppButton><AppButton onClick={executeGenerate} intent="secondary" autoFocus>確定してカレンダーに展開</AppButton></>}>
+            <AppDialog open={previewDialogOpen} onClose={() => setPreviewDialogOpen(false)} maxWidth="sm" title={`${targetMonth}月 シフト展開の確認`} actions={<><AppButton variant="text" intent="secondary" onClick={() => setPreviewDialogOpen(false)}>閉じる</AppButton><AppButton disabled={!mastersReady} onClick={executeGenerate} intent="secondary" autoFocus>確定してカレンダーに展開</AppButton></>}>
                 {previewDetails && (
                     <Stack spacing={2}>
                         <Typography variant="body2" paragraph>

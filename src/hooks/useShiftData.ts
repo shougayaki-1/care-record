@@ -12,6 +12,8 @@ import { toShiftPatternData } from '@/features/shifts/adapters';
 import { checkShiftPermission, type RolePermissions } from '@/utils/permissions';
 import { useRequestGeneration } from '@/hooks/useRequestGeneration';
 
+export type ShiftFetchStatus = 'loading' | 'success' | 'error';
+
 type TabId = 'patterns' | 'fullCalendar' | 'myShift' | 'byStaff' | 'byClient';
 
 export type ShiftDateRange = {
@@ -58,9 +60,14 @@ export const useShiftData = ({
 
     const currentUserId = userId ?? '';
     const [currentStaffId, setCurrentStaffId] = useState<string | null>(null);
-    const [unsyncedCount, setUnsyncedCount] = useState(0);
+    const [unsyncedState, setUnsyncedState] = useState<{ orgId?: string; status: ShiftFetchStatus; count: number | null }>({ status: 'loading', count: null });
+    const [masterState, setMasterState] = useState<{ orgId?: string; status: ShiftFetchStatus }>({ status: 'loading' });
+    const masterDataStatus = masterState.orgId === currentOrg?.id ? masterState.status : 'loading';
+    const unsyncedCountStatus = unsyncedState.orgId === currentOrg?.id ? unsyncedState.status : 'loading';
+    const unsyncedCount = unsyncedCountStatus === 'success' ? unsyncedState.count : null;
 
     const masterDataReadyRef = useRef(false);
+    const countScopeRef = useRef(currentOrg?.id);
     const activeTabRef = useRef(activeTab);
     const selectedStaffIdRef = useRef(selectedStaffId);
     const selectedClientIdRef = useRef(selectedClientId);
@@ -71,20 +78,32 @@ export const useShiftData = ({
     const { next: nextUnsyncedCount, invalidate: invalidateUnsyncedCount, isCurrent: isCurrentUnsyncedCount } = useRequestGeneration();
 
     useEffect(() => {
+        countScopeRef.current = currentOrg?.id;
         invalidateFetch();
         invalidateMasterData();
         invalidatePatterns();
         invalidateUnsyncedCount();
         masterDataReadyRef.current = false;
+        let active = true;
         queueMicrotask(() => {
+            if (!active) return;
             setClients([]);
             setStaffs([]);
             setCurrentStaffId(null);
             setPatterns([]);
             setRawShifts([]);
             setEvents([]);
-            setUnsyncedCount(0);
+            setUnsyncedState({ orgId: currentOrg?.id, status: 'loading', count: null });
+            setMasterState({ orgId: currentOrg?.id, status: 'loading' });
         });
+        return () => {
+            active = false;
+            countScopeRef.current = undefined;
+            invalidateFetch();
+            invalidateMasterData();
+            invalidatePatterns();
+            invalidateUnsyncedCount();
+        };
     }, [currentOrg?.id, invalidateFetch, invalidateMasterData, invalidatePatterns, invalidateUnsyncedCount]);
 
     useEffect(() => {
@@ -107,15 +126,17 @@ export const useShiftData = ({
         if (!currentOrg) return;
         const generation = nextMasterData();
         const isStale = () => !isCurrentMasterData(generation);
+        masterDataReadyRef.current = false;
+        setMasterState({ orgId: currentOrg.id, status: 'loading' });
         try {
-            const { data: c } = await supabase
+            const { data: c, error: clientsError } = await supabase
                 .from('clients')
                 .select('id, name')
                 .eq('organization_id', currentOrg.id);
             if (isStale()) return;
-            if (c) setClients(c);
+            if (clientsError || !c) throw new Error('Master data unavailable');
 
-            const { data: s } = await supabase
+            const { data: s, error: staffsError } = await supabase
                 .from('staffs')
                 .select('id, name, user_id')
                 .eq('organization_id', currentOrg.id)
@@ -123,23 +144,20 @@ export const useShiftData = ({
                 .order('sort_order', { ascending: true, nullsFirst: false })
                 .order('name', { ascending: true });
             if (isStale()) return;
-            if (s) {
-                const parsed = s.map(item => ({
-                    id: item.id,
-                    name: item.name,
-                    type: item.user_id ? 'member' as const : 'ghost' as const,
-                }));
-                setStaffs(parsed);
-
-                if (currentUserId) {
-                    const me = parsed.find(item => s.find(sd => sd.id === item.id)?.user_id === currentUserId);
-                    if (me) setCurrentStaffId(me.id);
-                }
-            }
-        } catch (error) {
-            if (!isStale()) console.error(error);
-        } finally {
-            if (!isStale()) masterDataReadyRef.current = true;
+            if (staffsError || !s) throw new Error('Master data unavailable');
+            setClients(c);
+            const parsed = s.map(item => ({
+                id: item.id,
+                name: item.name,
+                type: item.user_id ? 'member' as const : 'ghost' as const,
+            }));
+            setStaffs(parsed);
+            setCurrentStaffId(s.find(item => item.user_id === currentUserId)?.id ?? null);
+            masterDataReadyRef.current = true;
+            setMasterState({ orgId: currentOrg.id, status: 'success' });
+        } catch {
+            if (isStale()) return;
+            setMasterState({ orgId: currentOrg.id, status: 'error' });
         }
     }, [currentOrg, currentUserId, isCurrentMasterData, nextMasterData]);
 
@@ -147,15 +165,29 @@ export const useShiftData = ({
         if (!currentOrg) return;
         const generation = nextUnsyncedCount();
         const isStale = () => !isCurrentUnsyncedCount(generation);
-        const { count: unsyncedCountResult } = await supabase
-            .from('shifts')
-            .select('id', { count: 'exact', head: true })
-            .eq('organization_id', currentOrg.id)
-            .is('deleted_at', null)
-            .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)');
-        if (isStale()) return;
-        setUnsyncedCount(unsyncedCountResult || 0);
+        setUnsyncedState({ orgId: currentOrg.id, status: 'loading', count: null });
+        try {
+            const { count, error } = await supabase
+                .from('shifts')
+                .select('id', { count: 'exact', head: true })
+                .eq('organization_id', currentOrg.id)
+                .is('deleted_at', null)
+                .or('google_event_id.is.null,google_sync_status.in.(pending_upsert,failed)');
+            if (isStale()) return;
+            if (error || count === null) throw new Error('Sync count unavailable');
+            setUnsyncedState({ orgId: currentOrg.id, status: 'success', count });
+        } catch {
+            if (isStale()) return;
+            setUnsyncedState({ orgId: currentOrg.id, status: 'error', count: null });
+        }
     }, [currentOrg, isCurrentUnsyncedCount, nextUnsyncedCount]);
+
+    // A confirmed sync result supersedes an in-flight count query.
+    const setUnsyncedCount = useCallback((count: number) => {
+        if (!currentOrg?.id || countScopeRef.current !== currentOrg.id) return;
+        invalidateUnsyncedCount();
+        setUnsyncedState({ orgId: currentOrg?.id, status: 'success', count });
+    }, [currentOrg, invalidateUnsyncedCount]);
 
     const fetchPatterns = useCallback(async () => {
         if (!currentOrg) return;
@@ -224,7 +256,7 @@ export const useShiftData = ({
             ));
             if (isStale()) return;
             setRawShifts(fetchedShifts);
-            const isEditable = tab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true);
+            const isEditable = masterDataReadyRef.current && tab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true);
             setEvents(convertToCalendarEvents(fetchedShifts, !isEditable));
             void fetchUnsyncedCount().catch(console.error);
         } catch (error) {
@@ -261,10 +293,10 @@ export const useShiftData = ({
                 return true;
             });
 
-            const isEditable = Boolean(currentOrg && activeTab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true));
+            const isEditable = Boolean(masterDataStatus === 'success' && currentOrg && activeTab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true));
             setEvents(convertToCalendarEvents(filtered, !isEditable));
         });
-    }, [rawShifts, activeTab, selectedStaffId, selectedClientId, currentStaffId, currentOrg]);
+    }, [rawShifts, activeTab, selectedStaffId, selectedClientId, currentStaffId, currentOrg, masterDataStatus]);
 
     return {
         rawShifts,
@@ -277,6 +309,8 @@ export const useShiftData = ({
         initialLoading,
         isFetching,
         unsyncedCount,
+        unsyncedCountStatus,
+        masterDataStatus,
         setUnsyncedCount,
         fetchData,
         fetchMasterData,
