@@ -1,27 +1,8 @@
 import { EventInput } from '@fullcalendar/core';
 
-export type FetchedShiftData = {
-    id: string;
-    organization_id: string;
-    client_id: string;
-    title: string | null;
-    start_at: string;
-    end_at: string;
-    status: string;
-    cancel_reason: string | null;
-    clients: { id: string; name: string } | null;
-    shift_staffs: {
-        staff_id: string;
-        staffs: { name: string } | null;
-    }[];
-    report_statuses?: {
-        id: string;
-        status: string;
-        is_primary: boolean;
-    }[];
-};
+import type { ShiftListItem } from '@/features/shifts/types';
 
-export const convertToCalendarEvents = (shifts: FetchedShiftData[], isListView: boolean = false): EventInput[] => {
+export const convertToCalendarEvents = (shifts: ShiftListItem[], isListView: boolean = false): EventInput[] => {
     return shifts.map((shift) => {
         const isCancelled = shift.status === 'cancelled';
         const staffNames = shift.shift_staffs.map(ss => ss.staffs?.name || '').filter(Boolean).join(', ');

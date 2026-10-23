@@ -10,6 +10,7 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
+import type { ShiftReportStatus } from '@/features/shifts/types';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
 
 type HeaderToolbarConfig = {
@@ -35,18 +36,12 @@ type Props = {
     noEventsText?: string;
 };
 
-type ReportStatus = {
-    id: string;
-    status: string;
-    is_primary: boolean;
-};
-
 export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
     calendarRef, events, initialView, initialDate, headerToolbar, buttonText, selectable = false, editable = false,
     onEventClick, onDateSelect, onEventDrop, onEventResize, onDatesSet, noEventsText
 }, ref) => {
     const renderEventContent = (arg: EventContentArg) => {
-        const statuses = (arg.event.extendedProps.reportStatuses ?? []) as ReportStatus[];
+        const statuses = (arg.event.extendedProps.reportStatuses ?? []) as ShiftReportStatus[];
         const staffNames = (arg.event.extendedProps.staffNames ?? '') as string;
 
         if (!arg.view.type.startsWith('list')) {
@@ -76,8 +71,8 @@ export const ShiftCalendarViewer = forwardRef<FullCalendar, Props>(({
                     statuses.slice(0, 2).map((report) => (
                         <Chip
                             key={report.id}
-                            label={getReportStatusLabel(report.status, '記録あり')}
-                            color={getReportStatusChipColor(report.status)}
+                            label={getReportStatusLabel(report.status ?? '', '記録あり')}
+                            color={getReportStatusChipColor(report.status ?? '')}
                             size="small"
                             variant={report.is_primary ? 'filled' : 'outlined'}
                             sx={{ height: 20, fontSize: '0.7rem' }}
