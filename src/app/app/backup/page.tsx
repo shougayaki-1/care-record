@@ -1,9 +1,8 @@
 'use client';
-import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Alert, Box, Typography, CircularProgress, Stack, TextField, MenuItem, Select, InputAdornment,
+  Alert, Box, Typography, CircularProgress, Stack, TextField, MenuItem, InputAdornment,
 } from '@/components/ui/mui';
 import BackupIcon from '@mui/icons-material/Backup';
 import SearchIcon from '@mui/icons-material/Search';
@@ -11,11 +10,12 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter } from 'next/navigation';
 import { checkManagementPermission } from '@/utils/permissions';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
-import { listDailyBackups, getBackupRecords, triggerDailyBackup, getLastBackupRun } from '@/app/actions/backup';
-import type { BackupFileEntry, BackupRecord, ListDailyBackupsResult, LastBackupRun } from '@/app/actions/backup';
+import type { BackupRecord } from '@/app/actions/backup';
 import { useToast } from '@/components/ui/ToastProvider';
-import { AppButton, AppDialog, DataTable, InnerPageHeader, PageContainer, PageLayout, StatusChip } from '@/components/ui';
+import { AppButton, AppDialog, DataTable, InnerPageHeader, PageContainer, PageLayout, SelectField, StatusChip } from '@/components/ui';
 import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
+
+import { useBackupData } from './useBackupData';
 
 function normalizeSearchText(value: string): string {
   return value
@@ -78,24 +78,17 @@ export default function BackupPage() {
   const router = useRouter();
   const { showToast } = useToast();
 
-  const [files, setFiles] = useState<BackupFileEntry[]>([]);
-  const [triggering, setTriggering] = useState(false);
-  const [gcsNotConfigured, setGcsNotConfigured] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>('');
-  const [selectedBackupPath, setSelectedBackupPath] = useState<string>('');
-  const [records, setRecords] = useState<BackupRecord[]>([]);
-  const [loadingFiles, setLoadingFiles] = useState(false);
-  const [loadingRecords, setLoadingRecords] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    files, dateFiles, selectedDate, selectedBackupPath, selectDate, selectBackup,
+    records, selectedRecord, selectRecord: setSelectedRecord,
+    loadingFiles, loadingRecords, filesError, recordsError, retryFiles, retryRecords,
+    gcsNotConfigured, lastRun, lastRunStale, lastRunLoaded, lastRunLoading, lastRunError, retryLastRun,
+    triggering, triggerBackup,
+  } = useBackupData(wsLoading ? '' : currentOrg?.id ?? '');
   const [query, setQuery] = useState('');
   const [clientFilter, setClientFilter] = useState('');
   const [helperFilter, setHelperFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [selectedRecord, setSelectedRecord] = useState<BackupRecord | null>(null);
-  const [lastRun, setLastRun] = useState<LastBackupRun>(null);
-  const [lastRunLoaded, setLastRunLoaded] = useState(false);
-  const [lastRunStale, setLastRunStale] = useState(false);
-
   useEffect(() => {
     if (!wsLoading && currentOrg) {
       if (!checkManagementPermission(currentOrg.effectivePermissions, 'backupStatus')) {
@@ -104,104 +97,9 @@ export default function BackupPage() {
     }
   }, [wsLoading, currentOrg, router]);
 
-  useEffect(() => {
-    if (!currentOrg) return;
-    readActionResult(getLastBackupRun(currentOrg.id))
-      .then((run) => {
-        setLastRun(run);
-        setLastRunStale(!run || (Date.now() - new Date(run.createdAt).getTime()) > 30 * 60 * 60 * 1000);
-        setLastRunLoaded(true);
-      })
-      .catch(() => setLastRunLoaded(true));
-  }, [currentOrg]);
-
-  const refreshFiles = useCallback(async (orgId: string, preferredPath?: string) => {
-    setLoadingFiles(true);
-    setError(null);
-    setGcsNotConfigured(false);
-    try {
-      const result: ListDailyBackupsResult = await readActionResult(listDailyBackups(orgId));
-      if (!result.configured) {
-        setGcsNotConfigured(true);
-        return;
-      }
-      setFiles(result.files);
-      const selected = result.files.find((file) => file.path === preferredPath) ?? result.files[0];
-      if (selected) {
-        setSelectedDate(selected.date);
-        setSelectedBackupPath(selected.path);
-      }
-    } catch (error) {
-      setError(getActionErrorMessage(error, 'バックアップファイルの取得に失敗しました'));
-    } finally {
-      setLoadingFiles(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!currentOrg) return;
-    queueMicrotask(() => void refreshFiles(currentOrg.id));
-  }, [currentOrg, refreshFiles]);
-
-  const handleTriggerBackup = async () => {
-    if (!currentOrg) return;
-    setTriggering(true);
-    try {
-      const { date, path, records } = await readActionResult(triggerDailyBackup(currentOrg.id));
-      showToast(`バックアップ完了（${date}：${records} 件）`, 'success');
-      await refreshFiles(currentOrg.id, path);
-      setSelectedDate(date);
-      setSelectedBackupPath(path);
-    } catch (error) {
-      showToast(getActionErrorMessage(error, 'バックアップに失敗しました'), 'error');
-    } finally {
-      setTriggering(false);
-    }
-  };
-
-  const loadRecords = useCallback(async (orgId: string, backupPath: string) => {
-    setLoadingRecords(true);
-    setError(null);
-    setRecords([]);
-    setSelectedRecord(null);
-    try {
-      const data = await readActionResult(getBackupRecords(orgId, backupPath));
-      setRecords(data);
-    } catch (error) {
-      setError(getActionErrorMessage(error, '記録の取得に失敗しました'));
-    } finally {
-      setLoadingRecords(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      if (currentOrg && selectedBackupPath) {
-        void loadRecords(currentOrg.id, selectedBackupPath);
-      } else {
-        setRecords([]);
-        setSelectedRecord(null);
-      }
-    });
-  }, [currentOrg, selectedBackupPath, loadRecords]);
-
-  const dateFiles = useMemo(
-    () => files.filter((file) => file.date === selectedDate),
-    [files, selectedDate],
-  );
   const availableDates = uniqueOptions(files.map((file) => file.date)).sort((a, b) => b.localeCompare(a));
   const clientOptions = uniqueOptions(records.map((record) => record.clientName));
   const helperOptions = uniqueOptions(records.map((record) => record.helperName));
-
-  useEffect(() => {
-    if (!selectedDate) return;
-    const nextPath = dateFiles.some((file) => file.path === selectedBackupPath)
-      ? selectedBackupPath
-      : dateFiles[0]?.path ?? '';
-    if (nextPath !== selectedBackupPath) {
-      queueMicrotask(() => setSelectedBackupPath(nextPath));
-    }
-  }, [dateFiles, selectedBackupPath, selectedDate]);
 
   const filtered = records.filter((r) => {
     if (clientFilter && r.clientName !== clientFilter) return false;
@@ -222,7 +120,7 @@ export default function BackupPage() {
         actions={
           <AppButton
             size="small"
-            onClick={handleTriggerBackup}
+            onClick={() => void triggerBackup(showToast)}
             disabled={triggering}
             startIcon={triggering ? <CircularProgress size={14} color="inherit" /> : <BackupIcon fontSize="small" />}
           >
@@ -233,14 +131,21 @@ export default function BackupPage() {
 
       <PageContainer>
         <Box sx={{ maxWidth: 1120, mx: 'auto' }}>
+          {lastRunLoading && <Typography role="status" sx={{ mb: 2 }}>最終自動バックアップ実行情報を取得中...</Typography>}
+          {lastRunError && (
+            <Alert severity="error" sx={{ mb: 2 }} action={<AppButton intent="secondary" variant="text" onClick={() => void retryLastRun()}>再試行</AppButton>}>
+              {lastRunError}
+            </Alert>
+          )}
           {lastRunLoaded && (
-            lastRunStale || !lastRun ? (
+            !lastRun ? (
               <Alert severity="warning" sx={{ mb: 2 }}>
                 自動バックアップの実行記録がありません。Vercelの環境変数（CRON_SECRET, GCP_PROJECT_ID, GCP_SERVICE_ACCOUNT_KEY_JSON等）とcronの実行状況を確認してください。
               </Alert>
             ) : (
-              <Alert severity={lastRun.outcome === 'success' ? 'success' : 'error'} sx={{ mb: 2 }}>
+              <Alert severity={lastRun.outcome === 'failure' ? 'error' : lastRunStale ? 'warning' : 'success'} sx={{ mb: 2 }}>
                 最終自動バックアップ実行: {new Date(lastRun.createdAt).toLocaleString()}（{lastRun.outcome === 'success' ? '成功' : '失敗'}）
+                {lastRunStale && '：最終実行から30時間以上経過しています。'}
               </Alert>
             )
           )}
@@ -257,10 +162,15 @@ export default function BackupPage() {
             </Box>
           )}
 
-          {error && (
-            <Box sx={{ p: 2, mb: 2, borderTop: 1, borderBottom: 1, borderColor: 'error.main', bgcolor: 'background.danger' }}>
-              <Typography color="error">{error}</Typography>
-            </Box>
+          {filesError && (
+            <Alert severity="error" sx={{ mb: 2 }} action={<AppButton intent="secondary" variant="text" onClick={() => void retryFiles()}>再試行</AppButton>}>
+              {filesError}
+            </Alert>
+          )}
+          {recordsError && (
+            <Alert severity="error" sx={{ mb: 2 }} action={<AppButton intent="secondary" variant="text" onClick={() => void retryRecords()}>再試行</AppButton>}>
+              {recordsError}
+            </Alert>
           )}
 
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2.5} alignItems={{ md: 'flex-start' }}>
@@ -290,7 +200,7 @@ export default function BackupPage() {
                     type="date"
                     value={selectedDate}
                     onChange={(event) => {
-                      setSelectedDate(event.target.value);
+                      selectDate(event.target.value);
                       setQuery('');
                       setClientFilter('');
                       setHelperFilter('');
@@ -309,7 +219,7 @@ export default function BackupPage() {
                     label="バックアップ"
                     select
                     value={selectedBackupPath}
-                    onChange={(event) => setSelectedBackupPath(event.target.value)}
+                    onChange={(event) => selectBackup(event.target.value)}
                     fullWidth
                     disabled={dateFiles.length === 0}
                   >
@@ -368,19 +278,15 @@ export default function BackupPage() {
                   <MenuItem value="">すべて</MenuItem>
                   {helperOptions.map((helperName) => <MenuItem key={helperName} value={helperName}>{helperName}</MenuItem>)}
                 </TextField>
-                <Select
-                  size="small"
+                <SelectField
+                  label="ステータス"
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  displayEmpty
-                  sx={{ width: '100%' }}
-                >
-                  <MenuItem value="">すべて</MenuItem>
-                  <MenuItem value="approved">{getReportStatusLabel('approved')}</MenuItem>
-                  <MenuItem value="pending">{getReportStatusLabel('pending')}</MenuItem>
-                  <MenuItem value="draft">{getReportStatusLabel('draft')}</MenuItem>
-                  <MenuItem value="remanded">{getReportStatusLabel('remanded')}</MenuItem>
-                </Select>
+                  onChange={setStatusFilter}
+                  options={[
+                    { value: '', label: 'すべて' },
+                    ...['approved', 'pending', 'draft', 'remanded'].map((value) => ({ value, label: getReportStatusLabel(value) })),
+                  ]}
+                />
                 <Typography variant="body2" color="text.secondary" sx={{ textAlign: { xs: 'right', lg: 'left' }, whiteSpace: 'nowrap' }}>
                   {loadingRecords ? '読み込み中...' : `${filtered.length} 件 / 全 ${records.length} 件`}
                 </Typography>
