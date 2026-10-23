@@ -3,7 +3,7 @@
 import { ActionResultError, getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AiFilePicker, AppButton, PageLayout, RecordFormHeader, RecordFormBody, ScrollableActions } from '@/components/ui';
 import {
@@ -26,7 +26,7 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import ImageIcon from '@mui/icons-material/Image';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { supabase } from '@/lib/supabase';
+import { useAiImportCandidates } from '@/hooks/useAiImportCandidates';
 import { saveReport } from '@/app/actions/reports';
 import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
 import { AiImportReviewTable, type ReviewRow } from '@/components/ui/AiImportReviewTable';
@@ -138,16 +138,20 @@ async function streamExtract(
 
 export default function AiImportPage() {
   const { currentOrg } = useWorkspace();
+  return <AiImportWorkspace key={currentOrg?.id ?? ''} organizationId={currentOrg?.id} />;
+}
+
+function AiImportWorkspace({ organizationId }: { organizationId: string | undefined }) {
   const { showToast } = useToast();
-  const { pending, error: actionError, run, isRunning, clearError, attemptKey, finishAttempt } = useAsyncRecordAction(currentOrg?.id);
+  const { pending, error: actionError, run, isRunning, clearError, attemptKey, finishAttempt } = useAsyncRecordAction(organizationId);
   const [operationKind, setOperationKind] = useState<'extract' | 'save'>('extract');
   const processing = pending && operationKind === 'extract';
   const saving = pending && operationKind === 'save';
   const confirm = useConfirm();
   const router = useRouter();
 
-  const [clients, setClients] = useState<Candidate[]>([]);
-  const [helpers, setHelpers] = useState<Candidate[]>([]);
+  const { clients, helpers, status: candidateStatus, retry: retryCandidates } = useAiImportCandidates(organizationId);
+  const candidatesReady = candidateStatus === 'success';
 
   // ファイルリスト・グループ
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
@@ -162,30 +166,6 @@ export default function AiImportPage() {
   const [rows, setRows] = useState<ReviewRow[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // 利用者・スタッフ取得
-  useEffect(() => {
-    if (!currentOrg) return;
-    const fetchCandidates = async () => {
-      const [{ data: clientData }, { data: staffData }] = await Promise.all([
-        supabase
-          .from('clients')
-          .select('id, name')
-          .eq('organization_id', currentOrg.id)
-          .is('archived_at', null)
-          .order('name', { ascending: true }),
-        supabase
-          .from('staffs')
-          .select('id, name')
-          .eq('organization_id', currentOrg.id)
-          .is('archived_at', null)
-          .order('name', { ascending: true }),
-      ]);
-      setClients((clientData ?? []) as Candidate[]);
-      setHelpers((staffData ?? []) as Candidate[]);
-    };
-    void fetchCandidates();
-  }, [currentOrg]);
 
   // ファイル追加
   const addFiles = useCallback((files: File[]) => {
@@ -281,7 +261,7 @@ export default function AiImportPage() {
 
   // 処理開始
   const handleProcess = async () => {
-    if (!currentOrg || fileEntries.length === 0 || isRunning()) return;
+    if (!organizationId || !candidatesReady || fileEntries.length === 0 || isRunning()) return;
     setOperationKind('extract');
     await run(async (isCurrent) => {
       setProcessedCount(0);
@@ -290,7 +270,7 @@ export default function AiImportPage() {
       let extractionError: string | null = null;
       try {
         const formData = new FormData();
-        formData.set('organizationId', currentOrg.id);
+        formData.set('organizationId', organizationId);
         formData.set('formTemplate', JSON.stringify(DEFAULT_TEMPLATE));
         formData.set('clients', JSON.stringify(clients));
         formData.set('helpers', JSON.stringify(helpers));
@@ -386,7 +366,7 @@ export default function AiImportPage() {
   };
 
   const handleSaveSelected = useCallback(async (ids: string[]) => {
-    if (!currentOrg || isRunning()) return;
+    if (!organizationId || !candidatesReady || isRunning()) return;
     const selectedIds = [...new Set(ids)].filter((id) => rows.some((row) => row.id === id && row.status === 'confirmed' && row.saveStatus !== 'saved'));
     if (selectedIds.length === 0) return;
     setOperationKind('save');
@@ -397,10 +377,10 @@ export default function AiImportPage() {
       );
 
       try {
-        const results = await commitRecordChange(currentOrg.id, () => Promise.allSettled(
+        const results = await commitRecordChange(organizationId, () => Promise.allSettled(
           selectedIds.map(async (id) => {
             const row = rows.find((r) => r.id === id);
-            if (!row || !row.clientId) throw new Error('利用者が未選択です');
+            if (!row || !row.clientId || !clients.some((client) => client.id === row.clientId)) throw new Error('利用者が未選択です');
             if (!row.helperId) throw new Error('スタッフが未選択です');
             if (!row.result) throw new Error('読み取り結果がありません');
             if (!isValidDraftTime(row.date, row.startAt, row.endAt)) {
@@ -414,7 +394,7 @@ export default function AiImportPage() {
             const endAt = `${date}T${row.endAt}:00`;
 
             const payload = {
-              organizationId: currentOrg.id,
+              organizationId,
               clientId: row.clientId,
               startAt,
               endAt,
@@ -449,7 +429,7 @@ export default function AiImportPage() {
       successSeverity: ({ saved, failed }) => failed ? (saved ? 'warning' : 'error') : 'success',
       errorMessage: '保存に失敗しました。入力内容は保持しています。もう一度下書き保存してください。',
     });
-  }, [rows, currentOrg, helpers, isRunning, run, attemptKey, finishAttempt]);
+  }, [rows, organizationId, candidatesReady, clients, helpers, isRunning, run, attemptKey, finishAttempt]);
 
   const fileIcon = (file: File) => {
     if (file.type === 'application/pdf') return <PictureAsPdfIcon fontSize="small" color="error" />;
@@ -542,12 +522,15 @@ export default function AiImportPage() {
           setSelectedFileIds(new Set());
           setRows([]);
             }}>クリア</AppButton>}
-        <AppButton size="small" startIcon={<AutoFixHighIcon />} disabled={fileEntries.length === 0 || !currentOrg || saving} loading={processing} onClick={() => void handleProcess()}>
+        <AppButton size="small" startIcon={<AutoFixHighIcon />} disabled={fileEntries.length === 0 || !organizationId || !candidatesReady || saving} loading={processing} onClick={() => void handleProcess()}>
           {processing ? '処理中...' : '処理開始'}
         </AppButton>
       </>} />
       <RecordFormBody>
         <AiInfoPanel variant="page" />
+        {candidateStatus === 'loading' && <Alert severity="info">利用者・スタッフ候補を取得中です。取得完了後に処理を開始できます。</Alert>}
+        {candidateStatus === 'error' && <Alert severity="error" action={<AppButton intent="secondary" size="small" disabled={pending} onClick={() => void retryCandidates()}>候補を再取得</AppButton>}>利用者・スタッフ候補を取得できませんでした。再取得してください。選択したファイルと確認内容は保持しています。</Alert>}
+        {candidatesReady && (clients.length === 0 || helpers.length === 0) && <Alert severity="warning">{clients.length === 0 ? '利用者' : ''}{clients.length === 0 && helpers.length === 0 ? '・' : ''}{helpers.length === 0 ? 'スタッフ' : ''}候補が登録されていません。下書き保存には利用者とスタッフの登録が必要です。</Alert>}
         <Box>
           <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>原本ファイル</Typography>
           <AiFilePicker inputRef={fileInputRef} onChange={handleFileInput} onDrop={handleDrop} multiple disabled={pending} />
@@ -605,7 +588,7 @@ export default function AiImportPage() {
             formTemplate={DEFAULT_TEMPLATE}
             onRowChange={handleRowChange}
             onSaveSelected={handleSaveSelected}
-            saving={pending}
+            saving={pending || !candidatesReady}
           />
         </Box>
       )}
