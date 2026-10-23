@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import type { ShiftCalendarViewer } from '@/components/shifts/ShiftCalendarViewer';
 import type { ShiftFormModal } from '@/components/shifts/ShiftFormModal';
 
 const state = vi.hoisted(() => ({
+  masterStatus: 'success' as 'loading' | 'success' | 'error',
+  countStatus: 'success' as 'loading' | 'success' | 'error',
+  count: 0 as number | null,
+  fetchCount: vi.fn(),
   calendar: null as ComponentProps<typeof ShiftCalendarViewer> | null,
   form: null as ComponentProps<typeof ShiftFormModal> | null,
   toast: vi.fn(), fetch: vi.fn(), fetchMaster: vi.fn(), progress: vi.fn(),
@@ -42,7 +46,7 @@ vi.mock('@/app/actions/shift', () => ({
 vi.mock('@/hooks/useShiftData', () => ({
   useShiftData: () => ({
     rawShifts: [], patterns: [], events: [], clients: [], staffs: [], currentStaffId: null,
-    initialLoading: false, isFetching: false, unsyncedCount: 0, setUnsyncedCount: vi.fn(),
+    initialLoading: false, isFetching: false, unsyncedCount: state.count, masterDataStatus: state.masterStatus, unsyncedCountStatus: state.countStatus, fetchUnsyncedCount: state.fetchCount, setUnsyncedCount: vi.fn(),
     fetchData: state.fetch, fetchMasterData: state.fetchMaster,
   }),
 }));
@@ -58,6 +62,7 @@ import ShiftManagePage from './page';
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  state.masterStatus = 'success'; state.countStatus = 'success'; state.count = 0;
   vi.spyOn(console, 'error').mockImplementation(() => {});
   for (const action of [state.time, state.cancel, state.remove, state.update]) action.mockResolvedValue({ ok: true, data: { success: true } });
   state.remove.mockResolvedValue({ ok: true, data: { success: true, deleted: 1, failed: 0 } });
@@ -108,4 +113,45 @@ it('refreshes a deleted shift and warns instead of claiming Google deletion comp
   expect(state.toast).not.toHaveBeenCalledWith('シフトを削除しました', 'success');
   expect(state.fetch).toHaveBeenCalledWith(true);
   expect(state.progress).toHaveBeenLastCalledWith(null);
+});
+
+it.each(['loading', 'error'] as const)('blocks master-dependent creation and editing during %s while keeping browsing', async status => {
+  state.masterStatus = status;
+  cleanup();
+  const view = render(<ShiftManagePage />);
+  await act(async () => {});
+  expect((screen.getByRole('button', { name: '単発シフトを追加' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(state.calendar!.editable).toBe(false);
+  expect(state.calendar!.selectable).toBe(false);
+  expect(state.form!.canSave).toBe(false);
+  expect(state.calendar!.onEventClick).toBeDefined();
+  await act(async () => {
+    await expect(state.form!.onSave({ organizationId: 'org-1', clientId: 'client', title: 'title', startAt: 'start', endAt: 'end' })).rejects.toThrow('再取得');
+  });
+  expect(state.update).not.toHaveBeenCalled();
+  if (status === 'error') {
+    state.fetchMaster.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'マスタを再試行' }));
+    expect(state.fetchMaster).toHaveBeenCalledTimes(1);
+  }
+  state.masterStatus = 'success';
+  await act(async () => { view.rerender(<ShiftManagePage />); });
+  expect((screen.getByRole('button', { name: '単発シフトを追加' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(state.calendar!.editable).toBe(true);
+  expect(state.form!.canSave).toBe(true);
+  expect(screen.queryByText(/新規作成・編集は再取得後/)).toBeNull();
+});
+
+it('shows count failure and retry without presenting a previous count as current', async () => {
+  state.countStatus = 'error'; state.count = 7;
+  cleanup();
+  const view = render(<ShiftManagePage />);
+  await act(async () => {});
+  expect(screen.getByText(/同期状態は未確認/)).toBeDefined();
+  expect(screen.queryByText(/Googleカレンダーと同期されていない予定が/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '未同期件数を再試行' }));
+  expect(state.fetchCount).toHaveBeenCalledTimes(1);
+  state.countStatus = 'success'; state.count = 0;
+  await act(async () => { view.rerender(<ShiftManagePage />); });
+  expect(screen.queryByText(/同期状態は未確認/)).toBeNull();
 });
