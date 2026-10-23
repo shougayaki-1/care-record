@@ -1,7 +1,7 @@
 'use client';
 import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
-import { GOOGLE_CONNECTION_LABELS, googleConnectionMessage, googleSyncErrorMessage } from '@/utils/googleSync';
+import { GOOGLE_CONNECTION_LABELS, googleConnectionMessage } from '@/utils/googleSync';
 
 import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
@@ -19,7 +19,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { deleteOrganization, disconnectGoogleCalendar, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName } from '@/app/actions/organization';
-import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
+import { useSettingsCalendarSync } from '@/hooks/useSettingsCalendarSync';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getGoogleAuthUrlAction, getGoogleConnectionHealth, type GoogleConnectionState } from '@/app/actions/google';
@@ -78,10 +78,6 @@ function SettingsContent() {
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [connectingCal, setConnectingCal] = useState(false);
-    const [repairingCal, setRepairingCal] = useState(false);
-    const [resyncingCal, setResyncingCal] = useState(false); // ★追加: 強制全件再同期中ステート
-    const [syncStatus, setSyncStatus] = useState<{ total: number; unsynced: number } | null>(null);
-    const [syncProgress, setSyncProgress] = useState<{ total: number; current: number } | null>(null);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
@@ -334,99 +330,22 @@ function SettingsContent() {
         }
     };
 
-    // 同期ステータス（未同期件数）を取得して表示を更新
-    const refreshSyncStatus = useCallback(async () => {
-        if (!currentOrg || !canRepairCalendarSync) return;
-        try {
-            const s = await readActionResult(getSyncStatus(currentOrg.id));
-            setSyncStatus({ total: s.total, unsynced: s.unsynced });
-        } catch (e) {
-            console.error('getSyncStatus error', e);
-        }
-    }, [currentOrg, canRepairCalendarSync]);
+    const {
+        syncStatus, clearSyncStatus, refreshSyncStatus, repairingCal, resyncingCal,
+        syncProgress, handleRepairCalendar, handleForceResyncCalendar,
+    } = useSettingsCalendarSync({ organizationId: currentOrg?.id, canRepair: canRepairCalendarSync, showToast, confirm });
 
     useEffect(() => {
+        let active = true;
         queueMicrotask(() => {
+            if (!active) return;
             if (googleCalendarId && canRepairCalendarSync) void refreshSyncStatus();
-            else setSyncStatus(null);
+            else clearSyncStatus();
         });
-    }, [googleCalendarId, canRepairCalendarSync, refreshSyncStatus]);
-
-    // 同期結果のメッセージ
-    const reportSyncResult = (done: number, failed: number, errorKind?: string) => {
-        const message = googleSyncErrorMessage(errorKind);
-        if (message) {
-            showToast(message, 'warning');
-        } else if (failed > 0) {
-            showToast(`同期が一部失敗しました（成功 ${done} 件 / 失敗 ${failed} 件）。通信状況を確認し、しばらくしてから再度お試しください。`, 'warning');
-        } else {
-            showToast(`Googleカレンダーへの同期が完了しました（${done} 件）。`, 'success');
-        }
-    };
-
-    const reportRepairResult = (res: Extract<Awaited<ReturnType<typeof repairGoogleCalendarSync>>, { ok: true }>['data']) => {
-        if (!res.connected) {
-            showToast('Googleカレンダーが連携されていません。「連携する」から接続してください。', 'warning');
-        } else if (res.errorKind) {
-            showToast(googleSyncErrorMessage(res.errorKind)!, 'warning');
-        } else if (res.failed > 0) {
-            showToast(`同期修復が一部失敗しました（成功 ${res.succeeded} 件 / 失敗 ${res.failed} 件）。`, 'warning');
-        } else {
-            showToast(`同期修復が完了しました（作成 ${res.created} / 更新 ${res.updated} / 再リンク ${res.linked} / 重複削除 ${res.deduped} / Google削除 ${res.deletedRemote}）。`, 'success');
-        }
-    };
-
-    // 未同期シフトのみをチャンク単位で同期する
-    const handleRepairCalendar = async () => {
-        if (!currentOrg) return;
-        setRepairingCal(true);
-        try {
-            const status = await readActionResult(getSyncStatus(currentOrg.id));
-            const total = status.unsynced;
-            if (total === 0) { showToast('未同期の予定はありません。', 'info'); return; }
-            setSyncProgress({ total, current: 0 });
-            let done = 0, failed = 0, processed = 0;
-            let errorKind: string | undefined;
-            for (;;) {
-                // 進捗表示と実際の同期を1件単位でそろえる。
-                const res = await readActionResult(syncUnsyncedBatch(currentOrg.id, 1));
-                done += res.succeeded; failed += res.failed;
-                processed += res.processed;
-                if (res.errorKind) errorKind = res.errorKind;
-                setSyncProgress({ total, current: Math.min(total, processed) });
-                if (errorKind === 'auth' || res.remaining <= 0 || res.succeeded === 0) break;
-            }
-            reportSyncResult(done, failed, errorKind);
-        } catch (e) {
-            console.error(e);
-            showToast('同期処理中にエラーが発生しました。', 'error');
-        } finally {
-            setRepairingCal(false);
-            setSyncProgress(null);
-            refreshSyncStatus();
-        }
-    };
-
-    // 全件強制再同期をチャンク単位でループ実行する
-    const handleForceResyncCalendar = async () => {
-        if (!currentOrg) return;
-        if (!(await confirm({ message: 'Googleカレンダーの同期状態を修復します。既存予定の再リンク、重複削除、削除済みシフトのGoogle側削除を行います。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。' }))) return;
-
-        setResyncingCal(true);
-        try {
-            setSyncProgress({ total: 1, current: 0 });
-            const res = await readActionResult(repairGoogleCalendarSync(currentOrg.id));
-            setSyncProgress({ total: 1, current: 1 });
-            reportRepairResult(res);
-        } catch (e) {
-            console.error(e);
-            showToast('同期修復中にエラーが発生しました。', 'error');
-        } finally {
-            setResyncingCal(false);
-            setSyncProgress(null);
-            refreshSyncStatus();
-        }
-    };
+        return () => { active = false; };
+        // Sync status follows connection/organization changes, not adapter function identities.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [googleCalendarId, canRepairCalendarSync, currentOrg?.id]);
 
     const handleDeleteOrg = async () => {
         if (!currentOrg || confirmInput !== currentOrg.name) return;
