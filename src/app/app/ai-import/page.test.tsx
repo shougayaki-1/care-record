@@ -6,8 +6,8 @@ import theme from '@/theme';
 import type { AiExtractSseEvent } from '@/lib/ai/sseClient';
 import type { AiImportReviewTableProps } from '@/components/ui/AiImportReviewTable';
 import { subscribeRecordFeed } from '@/utils/recordFeedUpdates';
-const state = vi.hoisted(() => ({ reader: vi.fn(), save: vi.fn(), toast: vi.fn(), dismiss: vi.fn(), confirm: vi.fn(), org: { id: 'org-1' }, candidates: vi.fn(), retryCandidates: null as null | (() => Promise<void>), review: null as AiImportReviewTableProps | null }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ back: vi.fn() }) }));
+const state = vi.hoisted(() => ({ back: vi.fn(), reader: vi.fn(), save: vi.fn(), toast: vi.fn(), dismiss: vi.fn(), confirm: vi.fn(), org: { id: 'org-1' }, candidates: vi.fn(), retryCandidates: null as null | (() => Promise<void>), review: null as AiImportReviewTableProps | null }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ back: state.back }) }));
 vi.mock('@/context/WorkspaceContext', () => ({ useWorkspace: () => ({ currentOrg: state.org }) }));
 vi.mock('@/components/ui/ToastProvider', () => ({ useToast: () => ({ showToast: state.toast, dismissToast: state.dismiss }) }));
 vi.mock('@/components/ui/ConfirmProvider', () => ({ useConfirm: () => state.confirm }));
@@ -35,9 +35,10 @@ const record = (index: number): AiExtractSseEvent => ({ type: 'record', index, f
 let unsubscribe: (() => void) | undefined;
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); unsubscribe?.(); });
 beforeEach(() => { vi.clearAllMocks(); state.org = { id: 'org-1' }; state.review = null; state.candidates.mockImplementation(async (table: string) => ({ data: [{ id: table === 'clients' ? 'client-1' : 'helper-1', name: table === 'clients' ? '利用者' : '担当' }], error: null })); state.confirm.mockResolvedValue(true); vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: {} })); });
+let rendered: ReturnType<typeof render>;
 async function extract() {
   state.reader.mockImplementationOnce(async (_: unknown, emit: (event: AiExtractSseEvent) => void) => { emit(record(0)); emit(record(1)); });
-  render(<ThemeProvider theme={theme}><Page /></ThemeProvider>);
+  rendered = render(<ThemeProvider theme={theme}><Page /></ThemeProvider>);
   fireEvent.change(screen.getByLabelText('記録ファイル'), { target: { files: [new File(['a'], 'a.pdf', { type: 'application/pdf' }), new File(['b'], 'b.pdf', { type: 'application/pdf' })] } });
   // Candidate lookup finishes before starting extraction.
   await waitFor(() => expect(screen.getByRole('button', { name: '処理開始' })).toHaveProperty('disabled', false));
@@ -157,5 +158,138 @@ describe('candidate readiness', () => {
     expect(screen.getByRole('button', { name: '処理開始' })).toHaveProperty('disabled', true);
     await act(async () => slow.resolve({ data: [], error: null }));
     expect(screen.queryByTestId('retained.pdf')).toBeNull();
+  });
+});
+
+describe('split operations share one lifecycle', () => {
+  it('keeps initial completed rows when the SSE transport fails midway, with grouped fileIndex mapping and progress', async () => {
+    const stream = deferred<void>();
+    let emit!: (event: AiExtractSseEvent) => void;
+    state.reader.mockImplementationOnce(async (_: unknown, receive: typeof emit) => { emit = receive; await stream.promise; throw new Error('transport failed'); });
+    render(view());
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    fireEvent.change(screen.getByLabelText('記録ファイル'), { target: { files: [new File(['a'], 'a.png', { type: 'image/png' }), new File(['b'], 'b.png', { type: 'image/png' }), new File(['c'], 'c.pdf', { type: 'application/pdf' })] } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'b.pngを選択' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'a.pngを選択' }));
+    fireEvent.click(screen.getByRole('button', { name: '1記録としてまとめる' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '処理開始' })).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByRole('button', { name: '処理開始' }));
+    await waitFor(() => expect(state.reader).toHaveBeenCalledOnce());
+    const data = vi.mocked(fetch).mock.calls[0][1]!.body as FormData;
+    expect(JSON.parse(data.get('grouping') as string)).toEqual([[1, 0], [2]]);
+    act(() => { emit(record(1)); emit({ type: 'group_done', fileIndex: 1 }); });
+    expect(screen.getByText('1 / 2 件処理中...')).toBeTruthy();
+    await act(async () => stream.resolve());
+    await waitFor(() => expect(state.review?.rows).toHaveLength(1));
+    expect(state.review!.rows[0]).toMatchObject({ fileIndex: 1, fileName: 'b.png', fileCount: 2, previewUrl: 'blob:preview' });
+    fireEvent.click(screen.getByRole('button', { name: 'b.pngを削除' }));
+    expect(revoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'クリア' }));
+    expect(revoke).toHaveBeenCalledWith('blob:preview');
+    vi.restoreAllMocks();
+  });
+  it('blocks extraction, saving, editing and close during re-extraction confirmation and stream work', async () => {
+    const ids = await extract();
+    const confirmation = deferred<boolean>(); const stream = deferred<void>();
+    state.confirm.mockReturnValueOnce(confirmation.promise);
+    state.reader.mockImplementationOnce(async () => stream.promise);
+    fireEvent.click(screen.getByRole('button', { name: '処理開始' }));
+    expect(state.confirm).toHaveBeenCalledOnce();
+    const before = state.review!.rows;
+    await act(async () => {
+      await state.review!.onSaveSelected(ids);
+      state.review!.onRowChange(ids[0], { date: '2026-10-24' });
+    });
+    expect(state.review!.rows).toEqual(before);
+    expect(state.save).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /閉じる/ })).toHaveProperty('disabled', true);
+    await act(async () => confirmation.resolve(true));
+    await waitFor(() => expect(state.reader).toHaveBeenCalledTimes(2));
+    await act(async () => { await state.review!.onSaveSelected(ids); });
+    expect(state.save).not.toHaveBeenCalled();
+    await act(async () => stream.resolve());
+    await waitFor(() => expect(state.review!.saving).toBe(false));
+  });
+  it('locks close confirmation against processing and saving, and keeps input on cancellation', async () => {
+    const ids = await extract(); const confirmation = deferred<boolean>();
+    state.confirm.mockReturnValueOnce(confirmation.promise);
+    fireEvent.click(screen.getByRole('button', { name: /閉じる/ }));
+    await act(async () => { await state.review!.onSaveSelected(ids); });
+    fireEvent.click(screen.getByRole('button', { name: '処理開始' }));
+    expect(state.save).not.toHaveBeenCalled(); expect(fetch).toHaveBeenCalledOnce(); expect(state.back).not.toHaveBeenCalled();
+    await act(async () => confirmation.resolve(false));
+    expect(state.review!.rows).toHaveLength(2); expect(state.review!.saving).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /閉じる/ }));
+    await waitFor(() => expect(state.back).toHaveBeenCalledOnce());
+  });
+  it.each(['transport', 'group'])('preserves edited rows after a failed re-extraction (%s)', async (failure) => {
+    const ids = await extract();
+    act(() => state.review!.onRowChange(ids[0], { date: '2026-10-24' }));
+    const before = state.review!.rows;
+    state.reader.mockImplementationOnce(async (_: unknown, emit: (event: AiExtractSseEvent) => void) => {
+      emit(record(0));
+      if (failure === 'transport') throw new Error('offline');
+      emit({ type: 'error', fileIndex: 1, message: 'private' });
+    });
+    fireEvent.click(screen.getByRole('button', { name: '処理開始' }));
+    await waitFor(() => expect(state.toast).toHaveBeenLastCalledWith(expect.stringContaining('ファイルと入力内容は保持'), 'error'));
+    expect(state.review!.rows).toEqual(before);
+  });
+  it.each(['extract', 'save', 'close'])('ignores old %s results after switching organization', async (kind) => {
+    const ids = await extract();
+    // Observe the keyed workspace through a parent refresh.
+    const slow = deferred<unknown>();
+    let emit!: (event: AiExtractSseEvent) => void;
+    let operation: Promise<void> | undefined;
+    if (kind === 'extract') {
+      state.reader.mockImplementationOnce(async (_: unknown, receive: typeof emit) => { emit = receive; await slow.promise; emit(record(0)); emit({ type: 'group_done', fileIndex: 0 }); });
+      fireEvent.click(screen.getByRole('button', { name: '処理開始' }));
+      await waitFor(() => expect(state.reader).toHaveBeenCalledTimes(2));
+    } else if (kind === 'save') {
+      state.save.mockImplementation(() => slow.promise);
+      act(() => { operation = state.review!.onSaveSelected(ids); });
+    } else {
+      state.confirm.mockReturnValueOnce(slow.promise);
+      fireEvent.click(screen.getByRole('button', { name: /閉じる/ }));
+    }
+    state.org = { id: 'org-2' }; state.review = null; state.toast.mockClear();
+    rendered.rerender(view()); chooseFile();
+    await act(async () => { slow.resolve(kind === 'close' ? true : { ok: true, data: { reportId: 'saved', version: 1 } }); await operation; });
+    await waitFor(() => expect(screen.queryByText(/候補を取得中/)).toBeNull());
+    expect(state.review).toBeNull(); expect(state.toast).not.toHaveBeenCalled(); expect(state.back).not.toHaveBeenCalled();
+    expect(screen.getByText('retained.pdf')).toBeTruthy(); expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+});
+
+describe('save retry boundaries', () => {
+  it('does not refresh the feed when every row fails and changes the key only for edited payloads', async () => {
+    const ids = await extract();
+    const refresh = vi.fn().mockResolvedValue(undefined); unsubscribe = subscribeRecordFeed('org-1', refresh);
+    state.save.mockResolvedValue({ ok: false, code: 'UNEXPECTED_ERROR', message: 'private' });
+    await act(async () => { await state.review!.onSaveSelected(ids); });
+    expect(refresh).not.toHaveBeenCalled();
+    const original = state.save.mock.calls.map(([payload]) => payload.idempotencyKey);
+    act(() => state.review!.onRowChange(ids[0], { date: '2026-10-24' }));
+    await act(async () => { await state.review!.onSaveSelected(ids); });
+    expect(state.save.mock.calls[2][0].idempotencyKey).not.toBe(original[0]);
+    expect(state.save.mock.calls[3][0].idempotencyKey).toBe(original[1]);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(state.review!.rows.every((row) => row.saveStatus === 'error')).toBe(true);
+  });
+  it('blocks extraction, editing, clearing and closing while saving', async () => {
+    const ids = await extract(); const response = deferred<unknown>();
+    state.save.mockReturnValue(response.promise);
+    let saving!: Promise<void>;
+    act(() => { saving = state.review!.onSaveSelected(ids); });
+    const before = state.review!.rows;
+    act(() => state.review!.onRowChange(ids[0], { date: '2026-10-24' }));
+    for (const name of ['処理開始', 'クリア', /閉じる/]) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toHaveProperty('disabled', true); fireEvent.click(button);
+    }
+    expect(fetch).toHaveBeenCalledOnce(); expect(state.back).not.toHaveBeenCalled(); expect(state.review!.rows).toEqual(before);
+    await act(async () => { response.resolve({ ok: true, data: { reportId: 'saved', version: 1 } }); await saving; });
+    expect(state.review!.saving).toBe(false);
   });
 });
