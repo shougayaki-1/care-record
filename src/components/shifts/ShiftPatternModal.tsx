@@ -13,7 +13,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { ShiftPatternPayload, type ShiftPatternSegmentInput } from '@/app/actions/shift';
 import { getServiceTypes, type ServiceType } from '@/app/actions/serviceTypes';
 import { getStaffRoles, type StaffRole } from '@/app/actions/staffRoles';
-import { ClientData, StaffData } from './ShiftFormModal';
+import type { ClientData, StaffData, ShiftPatternFormData } from '@/features/shifts/types';
 import { useToast } from '@/components/ui/ToastProvider';
 import { AppButton, AppDialog, DateTimeField, SelectField } from '@/components/ui';
 
@@ -24,23 +24,7 @@ type Props = {
     clients: ClientData[];
     staffs: StaffData[];
     organizationId: string;
-    initialData?: {
-        id: string;
-        client_id: string;
-        title: string;
-        start_time: string;
-        end_time: string;
-        rrule: string;
-        shift_pattern_staffs: { staff_id: string }[];
-        shift_pattern_segments?: {
-            id: string;
-            service_type_id: string | null;
-            start_time: string;
-            end_time: string;
-            sort_order: number;
-            shift_pattern_segment_staffs: { staff_id: string; staff_role_id: string | null }[];
-        }[];
-    } | null;
+    initialData?: ShiftPatternFormData | null;
 };
 
 type SegmentDraft = {

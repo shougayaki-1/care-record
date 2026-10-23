@@ -6,35 +6,11 @@ import type { EventInput } from '@fullcalendar/core';
 import type FullCalendar from '@fullcalendar/react';
 import { supabase } from '@/lib/supabase';
 import { getShifts, getShiftPatterns, type ShiftQueryFilter } from '@/app/actions/shift';
-import { FetchedShiftData, convertToCalendarEvents } from '@/utils/shiftHelper';
-import { ClientData, StaffData } from '@/components/shifts/ShiftFormModal';
+import { convertToCalendarEvents } from '@/utils/shiftHelper';
+import type { ShiftListItem, ShiftPatternData, ClientData, StaffData } from '@/features/shifts/types';
+import { toShiftPatternData } from '@/features/shifts/adapters';
 import { checkShiftPermission, type RolePermissions } from '@/utils/permissions';
 import { useRequestGeneration } from '@/hooks/useRequestGeneration';
-
-export type FetchedPatternData = {
-    id: string;
-    client_id: string;
-    title: string;
-    start_time: string;
-    end_time: string;
-    rrule: string;
-    clients: { name: string } | null;
-    shift_pattern_staffs: { staff_id: string; staffs: { name: string } | null; }[];
-    shift_pattern_segments?: {
-        id: string;
-        service_type_id: string | null;
-        start_time: string;
-        end_time: string;
-        sort_order: number;
-        service_type?: { id: string; name: string } | null;
-        shift_pattern_segment_staffs: {
-            staff_id: string;
-            staff_role_id: string | null;
-            staff?: { id: string; name: string } | null;
-            staff_role?: { id: string; name: string; is_unpaid: boolean } | null;
-        }[];
-    }[];
-};
 
 export type ShiftFetchStatus = 'loading' | 'success' | 'error';
 
@@ -75,8 +51,8 @@ export const useShiftData = ({
     const [initialLoading, setInitialLoading] = useState(true);
     const [isFetching, setIsFetching] = useState(false);
 
-    const [rawShifts, setRawShifts] = useState<FetchedShiftData[]>([]);
-    const [patterns, setPatterns] = useState<FetchedPatternData[]>([]);
+    const [rawShifts, setRawShifts] = useState<ShiftListItem[]>([]);
+    const [patterns, setPatterns] = useState<ShiftPatternData[]>([]);
     const [events, setEvents] = useState<EventInput[]>([]);
 
     const [clients, setClients] = useState<ClientData[]>([]);
@@ -169,7 +145,7 @@ export const useShiftData = ({
                 .order('name', { ascending: true });
             if (isStale()) return;
             if (staffsError || !s) throw new Error('Master data unavailable');
-            setClients(c as ClientData[]);
+            setClients(c);
             const parsed = s.map(item => ({
                 id: item.id,
                 name: item.name,
@@ -219,7 +195,7 @@ export const useShiftData = ({
         const isStale = () => !isCurrentPatterns(generation);
         const fetchedPatterns = await readActionResult(getShiftPatterns(currentOrg.id));
         if (isStale()) return;
-        setPatterns((fetchedPatterns as unknown as FetchedPatternData[]) || []);
+        setPatterns(fetchedPatterns.map(toShiftPatternData));
     }, [currentOrg, isCurrentPatterns, nextPatterns]);
 
     const getShiftFilter = useCallback((): ShiftQueryFilter | null => {
@@ -279,11 +255,9 @@ export const useShiftData = ({
                 filter
             ));
             if (isStale()) return;
-            const typedShifts = (fetchedShifts as unknown as FetchedShiftData[]) || [];
-
-            setRawShifts(typedShifts);
+            setRawShifts(fetchedShifts);
             const isEditable = masterDataReadyRef.current && tab === 'fullCalendar' && checkShiftPermission(currentOrg.effectivePermissions, 'edit', true);
-            setEvents(convertToCalendarEvents(typedShifts, !isEditable));
+            setEvents(convertToCalendarEvents(fetchedShifts, !isEditable));
             void fetchUnsyncedCount().catch(console.error);
         } catch (error) {
             if (isStale()) return;

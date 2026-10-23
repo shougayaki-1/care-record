@@ -6,6 +6,7 @@ import { getServiceTypes } from '@/app/actions/serviceTypes';
 import { getStaffRoles } from '@/app/actions/staffRoles';
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider';
 import { ToastProvider } from '@/components/ui/ToastProvider';
+import { toShiftListItem } from '@/features/shifts/adapters';
 import { ShiftFormModal } from './ShiftFormModal';
 
 const meta = {
@@ -103,7 +104,7 @@ export const SaveDenied: Story = {
     await waitFor(() => expect(args.onSave).toHaveBeenCalled());
     await waitFor(() => expect(body.getByText('この操作を行う権限がありません')).toBeVisible());
     await expect(args.onClose).not.toHaveBeenCalled();
-    await expect(body.getByRole('dialog', { name: '単発シフトの編集・詳細' })).toBeVisible();
+    await waitFor(() => expect(body.getByRole('dialog', { name: '単発シフトの編集・詳細' })).toBeVisible());
   },
 };
 
@@ -120,5 +121,21 @@ export const MasterSessionExpired: Story = {
     await expect(recovery.closest('form')).toHaveAttribute('action', '/api/auth/recover');
     await expect(recovery.closest('form')).toHaveAttribute('method', 'post');
     await expect(body.queryByText(/サービス種別が未設定です/)).not.toBeInTheDocument();
+  },
+};
+
+export const NullableFetchedRelations: Story = {
+  args: {
+    initialData: toShiftListItem({
+      id: 'shift', organization_id: 'fixture-org', client_id: 'client', title: null,
+      start_at: '2026-10-06T09:00:00+09:00', end_at: '2026-10-06T10:00:00+09:00',
+      status: null, cancel_reason: null, clients: null, shift_staffs: [], report_shifts: [],
+    }),
+  },
+  play: async () => {
+    const body = within(document.body);
+    await waitFor(() => expect(body.getByRole('dialog', { name: '単発シフトの編集・詳細' })).toBeVisible());
+    await waitFor(() => expect(body.getByRole('button', { name: '変更を保存' })).toBeEnabled());
+    await expect(body.getByRole('combobox', { name: /利用者/ })).toHaveTextContent('利用者');
   },
 };
