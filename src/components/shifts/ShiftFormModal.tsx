@@ -25,19 +25,7 @@ import {
     type SegmentDraft,
 } from '@/utils/shiftSegments';
 
-export type ClientData = { id: string; name: string };
-export type StaffData = { id: string; name: string };
-
-export type ShiftData = {
-    id: string;
-    client_id: string;
-    title: string | null;
-    start_at: string;
-    end_at: string;
-    status: string;
-    cancel_reason: string | null;
-    shift_staffs: { staff_id: string; }[];
-};
+import type { ClientData, StaffData, ShiftData } from '@/features/shifts/types';
 
 type Props = {
     open: boolean;
