@@ -21,6 +21,9 @@ INSERT INTO public.audit_events(organization_id,actor_id,action_type,resource_ty
 VALUES ('c1000000-0000-4000-8000-000000000010','c1000000-0000-4000-8000-000000000001',
  'ci.upgrade_fixture','report','c1000000-0000-4000-8000-000000000031','{"synthetic":true}');
 
+INSERT INTO public.audit_events(action_type,resource_type,reason,details)
+VALUES ('ci.upgrade_global','test',E'Unicode 日本語\n|','{"synthetic":true}');
+
 CREATE SCHEMA ci_upgrade_fixture;
 REVOKE ALL ON SCHEMA ci_upgrade_fixture FROM PUBLIC, anon, authenticated;
 CREATE FUNCTION ci_upgrade_fixture.state() RETURNS jsonb LANGUAGE sql STABLE AS $fn$
@@ -33,9 +36,8 @@ CREATE FUNCTION ci_upgrade_fixture.state() RETURNS jsonb LANGUAGE sql STABLE AS 
     'snapshot',snapshot,'hash',snapshot_hash,'previous_hash',previous_hash,'actor',actor_id,
     'reason',change_reason,'session',session_id) ORDER BY id)
     FROM public.record_versions WHERE organization_id='c1000000-0000-4000-8000-000000000010'),
-  'audit', (SELECT jsonb_agg(jsonb_build_object('id',id,'event_id',event_id,'action',action_type,
-    'resource',resource_id,'details',details,'hash',event_hash,'previous_hash',previous_hash) ORDER BY id)
-    FROM public.audit_events WHERE organization_id='c1000000-0000-4000-8000-000000000010'),
+  'audit', (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id)
+    FROM public.audit_events a WHERE organization_id='c1000000-0000-4000-8000-000000000010' OR action_type='ci.upgrade_global'),
   'membership', (SELECT jsonb_agg(jsonb_build_object('user',user_id,'role',role) ORDER BY user_id)
     FROM public.organization_members WHERE organization_id='c1000000-0000-4000-8000-000000000010'));
 $fn$;
