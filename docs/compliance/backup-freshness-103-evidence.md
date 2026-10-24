@@ -1,7 +1,7 @@
 # Issue #103 大阪recent複製の確認記録
 
 確認日: 2026-10-24。対象: `care-record-482716`、PR #104。
-状態: 本番read-only照合、承認済みplanのStaging / Production適用と実設定の確認済み。適用後の定期転送・ペア・鮮度検査待ち。
+状態: 本番read-only照合、承認済みplanのStaging / Production適用、両環境の適用後定期転送成功、本番最新ペア・鮮度の照合済み。最終CI・統合・mainの監視実行はPR #104に記録する。
 
 ## 原因の照合
 
@@ -15,7 +15,7 @@ ProductionのGitHub Environmentは`GCS_TIERED_BACKUP_ENABLED=true`で、recent�
 
 以上から、少なくともこの再発期間では転送operation失敗ではなく、日次転送の終了後に完成したバックアップが翌日まで待つ時刻不整合が確認できる。期限超過自体は実在し、26時間基準を緩めて解消するものではない。過去のrecentオブジェクトは2日保持のため既に存在せず、当時の全ペア・ハッシュを再検証したとは扱わない。
 
-## 現在のペアと他区分
+## 適用前のペアと他区分
 
 対象バケットは`care-record-production-aea9b2b8-recent-{tokyo,osaka}`。
 確認時の東京の最新完全ペアは取得開始`20261024T044012Z`、大阪は`20261023T171110Z`。東京の新世代は当日の18:00 UTC転送を待っている。
@@ -59,7 +59,7 @@ saved planは機密データを含み得るためGitに保存せず、権限制�
 
 Context7で2026-10-24にGoogle provider公式ドキュメントのStorage Transfer `repeat_interval`（最小1時間）と予定開始から遅れる挙動を再確認した。実plan/testは固定7.40.0で実施し、provider更新はしていない。
 
-## クローズ前に残す証跡
+## 承認と適用
 
 2026-10-24、サービスオーナーからsaved planのStaging→Production適用、確認後のPR統合・Issueクローズ、本番メタデータ証跡のPR記載の明示承認を得た。planのhash、remote stateのlineage / serialが調査時から不変であることを確認して適用した。
 
@@ -71,9 +71,26 @@ Context7で2026-10-24にGoogle provider公式ドキュメントのStorage Transf
 両環境のrecentはENABLED / 21600秒になった。適用時のremote stateロックは有効。転送ジョブの手動起動はしていない。
 適用前commit `00c6ab8f768f081aafe4237ef73a5e0b00634126`の必須CIおよびBackup infrastructure検証は成功した。
 
-残件:
+## 適用後の定期転送と照合（12:11 UTC）
 
-1. 適用後のscheduled operation成功、東京／大阪の最新ペア・ハッシュ一致、14h/26h鮮度監視の成功を確認。手動転送・監視閾値変更で代替しない。
-2. 最終commitのCI成功とmainへの統合を確認し、上記実績とともにIssue #103をクローズする。証跡が揃うまではPRの自動close文言を使わない。
+予定18:00 UTCを待たず、新しい6時間間隔の12:00 UTC転送機会に両環境の定期operationが成功した。手動転送は行っていない。
 
-次の予定転送機会は10/24 12:00 UTC（21:00 JST）。実開始は保証されない。ユーザーの依頼により21:10 JSTに同じタスクを自動再開し、結果を確認する。
+| 環境 | operationの末尾識別子 | 開始–終了 UTC | 結果 | コピー件数 |
+| --- | --- | --- | --- | --- |
+| production | 10018813913651604564 | 12:03:40.881–12:04:02.819 | SUCCESS | 2 |
+| staging | 1712200555273338559 | 12:04:29.192–12:04:40.877 | SUCCESS | 0 |
+
+本番の東京・大阪とも最新完全ペアは`20261024T044012Z`に揃った。本体は3,679,030 bytes、sidecarは113 bytes、両側それぞれのCRC32Cが一致し、sidecar本文もメモリ内比較で一致した。アーカイブ本文は読んでいない。
+
+| 最新本体メタデータ | 東京 | 大阪 |
+| --- | --- | --- |
+| generation | 1792816880363067 | 1792843433337258 |
+| 作成時刻 UTC | 04:41:20 | 12:03:53 |
+| 取得開始からの経過秒（12:11:24 UTC） | 27,072 | 27,072 |
+| 鮮度基準 | 50,400秒（14h）以内 | 93,600秒（26h）以内 |
+
+Staging recentは両バケットとも空で、コピー対象0件での定期実行成功である。Stagingの実ペア・鮮度成功は主張しない。空バケットを`no_valid_pair`として異常検知する挙動はローカル回帰テストで検証した。本Issueの障害対象であるProductionは上表の実ペアで検証した。
+
+実ジョブ一覧も読み戻し、両環境のrecentだけ21600秒、daily/weekly/monthly・legacyは86400秒、すべてENABLEDであることを確認した。両環境の適用後refresh planがNo changesである証跡と併せ、保持期間・非削除・非上書き・監査WORMを維持している。
+
+commit `cc5eaca107e351134f112b06da73a61c022243ad`のCI・Backup infrastructure・Vercel checksはすべて成功した。最終の証跡更新commitのCI、mainへの統合、mainでのfreshness workflow成功をPR #104に追記してからIssueをクローズする。Issueの自動close指定は使用しない。
