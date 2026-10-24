@@ -1,7 +1,7 @@
 # Issue #103 大阪recent複製の確認記録
 
 確認日: 2026-10-24。対象: `care-record-482716`、PR #104。
-状態: 本番read-only照合と適用前planの検証済み。6時間間隔への適用と適用後確認は未実施。
+状態: 本番read-only照合、承認済みplanのStaging / Production適用と実設定の確認済み。適用後の定期転送・ペア・鮮度検査待ち。
 
 ## 原因の照合
 
@@ -61,7 +61,19 @@ Context7で2026-10-24にGoogle provider公式ドキュメントのStorage Transf
 
 ## クローズ前に残す証跡
 
-1. saved planへの明示承認後、正しいremote backendでStaging、Productionの順に適用。適用時のstateロックを無効にしない。
-2. 実ジョブを読み戻し、recentだけ21600秒、他区分86400秒、非削除・非上書きと保持設定が維持されたことを確認。
-3. 適用後のscheduled operation成功、東京／大阪の最新ペア・ハッシュ一致、14h/26h鮮度監視の成功を確認。手動転送・監視閾値変更で代替しない。
-4. PRのCI成功とmainへの統合を確認し、上記実績とともにIssue #103をクローズする。証跡が揃うまではPRの自動close文言を使わない。
+2026-10-24、サービスオーナーからsaved planのStaging→Production適用、確認後のPR統合・Issueクローズ、本番メタデータ証跡のPR記載の明示承認を得た。planのhash、remote stateのlineage / serialが調査時から不変であることを確認して適用した。
+
+| 環境 | 実ジョブ更新時刻 UTC | apply結果 | 適用後refresh plan |
+| --- | --- | --- | --- |
+| staging | 10/24 11:05:53 | 追加0・更新1・削除0 | No changes |
+| production | 10/24 11:06:20 | 追加0・更新1・削除0 | No changes |
+
+両環境のrecentはENABLED / 21600秒になった。適用時のremote stateロックは有効。転送ジョブの手動起動はしていない。
+適用前commit `00c6ab8f768f081aafe4237ef73a5e0b00634126`の必須CIおよびBackup infrastructure検証は成功した。
+
+残件:
+
+1. 適用後のscheduled operation成功、東京／大阪の最新ペア・ハッシュ一致、14h/26h鮮度監視の成功を確認。手動転送・監視閾値変更で代替しない。
+2. 最終commitのCI成功とmainへの統合を確認し、上記実績とともにIssue #103をクローズする。証跡が揃うまではPRの自動close文言を使わない。
+
+次の予定転送機会は10/24 12:00 UTC（21:00 JST）。実開始は保証されない。ユーザーの依頼により21:10 JSTに同じタスクを自動再開し、結果を確認する。
