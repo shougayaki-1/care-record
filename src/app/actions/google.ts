@@ -7,7 +7,7 @@ import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar
 import { assertAuthResponse, assertOrgPermission, createSessionClient } from '@/utils/supabase/auth';
 import { storeOAuthNonce } from '@/utils/supabase/oauthNonce';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
-import { google } from 'googleapis';
+import { google } from '@/lib/googleApis';
 import { googleConnectionStateFromError, type GoogleConnectionState } from '@/utils/googleSync';
 import { withRetry } from '@/utils/googleRetry';
 import { ExpectedActionError, logExternalError, sanitizeDbError, withActionResult } from '@/utils/errors';
