@@ -1,8 +1,8 @@
 # 監査 v2 切替手順（Issue #151 / G）
 
-状態: **準備文書。切替 migration・分類ツールは未実装、環境への適用・切替試験は未実施**。
+状態: **切替SQL・分類/外部control発行ツールとローカル試験を実装。Staging/Productionへの適用・外部設定・実接続試験は未実施**。
 2026-10-25時点の基点は `origin/main @ d20a3f2e1151f6369f2ea3b40d7aeb97ee6b884a`。
-#149 / PR #156（A）、#150 / PR #157（B）は未統合であり、main上に準備schemaとdual読出しがない。
+#149 / PR #156（A）と #150 / PR #157（B）の統合済みschema・dual読出し契約を使用する。実配備は別途確認が必要。
 この文書の追加は、切替・新アーカイブ有効化・Issue完了の承認を意味しない。
 
 正本: [監査設計 §3.2・7・9 R3](audit-chain-verification-design.md)、
@@ -43,7 +43,7 @@ A/BのIssueがcloseしたことや、SQLファイル・Terraformの存在だけ�
 「次のscheduleまで待った」だけではdrain成功としない。失敗・応答不明の実行は保存済みobjectのgenerationとreceiptまで照合する。
 Bを再開する条件・設定・担当者も停止前に決め、無計画な監査保全の空白を作らない。
 
-Gの追加migrationに実装するtransactionの契約:
+Gの[手動切替migration](../supabase/manual-migrations/20261025000001_audit_v2_cutover.sql)のtransaction契約:
 
 1. transaction内の `SET LOCAL lock_timeout` とstatement timeoutを設定し、`audit_events`へのINSERTと競合するtable lockを取得する。lock待機中の業務書込への影響も監視する。
 2. 既にINSERTしたtransactionの終了を待った後、承認済み切替UUIDを使い、Aのv2 trigger接続とversion defaultを同一transactionで変更する。旧triggerとの二重接続を残さない。
@@ -52,8 +52,7 @@ Gの追加migrationに実装するtransactionの契約:
 5. commit後はversion省略の旧アプリINSERTがv2になること、明示v1/任意hash・連番持込みが拒否されることを確認する。既存v1全列・hash・versionは変更しない。
 
 migrationの自動適用経路も調べ、対象環境・切替UUID・承認が確定する前に共有DBへ適用されないようにする。
-SQLの具体的な関数名・引数・固定UUIDの扱いは、A/B統合後の実装PRで確定する。
-本書には未検証の実行用SQLを置かない。
+切替SQLは通常の `supabase/migrations/` から分離する。通常の `migration up` やアプリ配備で、A/Bの実配備・運用承認より先に切り替わることを防ぐためである。通常migration履歴へ適用済みと偽装せず、SQL名/digest・切替ID・承認証跡digestを運用記録と `private.audit_cutover_state` に残す。新規環境もA/Bは自動再構築できるが、v2への切替には同じ手動ゲートを通す。
 
 ## 4. 固定v1のinventoryと異常分類
 
@@ -110,7 +109,7 @@ NULL hash等で旧exportから漏れていた行も、新baselineには保存す
 
 ## 7. 必須試験と結果の区別
 
-以下は**未実施の試験計画**。単なるSQL mockやA/Bの試験結果をGの証明へ流用しない。
+以下が必須試験。ローカル結果は§8に記録し、実Staging/Productionと区別する。単なるSQL mockやA/Bの試験結果をGの証明へ流用しない。
 
 - 空DB/upgradeで全既存v1列・hash・version不変、RLS/ACL、旧アプリversion省略と新アプリ、v1持込み拒否を実DBで確認する。
 - 2接続で、切替前にINSERT済みのtransactionによるDDL待機、切替待機中のINSERT、切替前に開始した未INSERT transactionの切替後INSERTを確認する。Read Committed/RR/Serializableで、commit成功した行はv2、拒否時は全rollbackとし、境界後のv1追加がないことを調べる。
@@ -123,4 +122,106 @@ NULL hash等で旧exportから漏れていた行も、新baselineには保存す
 RLS/permissions変更時は双方を照合する。準拠・release checklist・週次検証Cの完了を先行更新しない。
 
 Context7確認: 2026-10-25、Supabase公式資料のtransaction単位migration、`SET LOCAL lock_timeout`、migration history。
-対象はrepository固定Supabase CLI 2.108.0 / PostgreSQL 17。取得資料はmainを含み、固定版の切替実動作は未検証。
+対象はrepository固定Supabase CLI 2.108.0 / PostgreSQL 17。追加でPostgreSQL17のDDL lock・deadlock_timeout権限とGCS SDK7系のcreate-only/generation読出しを確認した。取得資料はmainを含むため、固定依存版で検証する。
+
+## 8. 実装と実行方法
+
+### 手動切替SQL
+
+`supabase/manual-migrations/20261025000001_audit_v2_cutover.sql` は **BEGIN/COMMITを含む独立transaction**。
+承認済みの環境専用PG service/資格情報を使い、sessionに次の2つを設定してから、`psql -X -v ON_ERROR_STOP=1 -f` で実行する。
+外側のtransactionに入れたり、通常migrationディレクトリへコピーしたりしない。
+
+- `care_record.audit_cutover_id`: 環境ごとに事前確定・承認したUUID。ツールが自動採番しない。
+- `care_record.audit_cutover_evidence`: 対象環境・A/B配備SHA・backup freshness・drain結果・SQL digest・承認記録を含む、非公開の適用証跡ファイルのSHA-256。
+
+SQLの上限はlock待機5秒、statement30秒。ACCESS EXCLUSIVEを待つ間、後続の読取/書込も待機し得る。
+この上限と影響を実施窓で承認し、合わない環境には無断で値を緩めて適用しない。
+A/Bの存在、v1 default/trigger、有効な証跡digest、未切替・headなしを検査し、違えば全rollbackする。
+`private.audit_cutover_state` はRLS有効、全APIロールの権限なし、UPDATE/DELETE拒否のsingleton境界記録。
+業務`permissions.ts`と既存監査閲覧RLSは変更せず、内部境界管理を業務権限へ公開しない。
+
+適用後はこのoperator接続で切替stateを読み、cutover_id、boundary_at、v1_count、evidence_digestを非公開証跡へ記録する。
+`boundary_at`はlock取得後の時刻でありcommit時刻ではない。Bの固定snapshotは切替commit後に新規作成し、run IDとDBのstarted_atも採取する。
+通常migration historyとは別に、手動SQLの名前/digest・実行時刻・成功/失敗を残す。
+
+### 分類とv1 hash再計算
+
+`node scripts/audit/cutover-inventory.mjs private-chunks.json private-report.json [private-recomputation.json]` はoffline専用。
+入力は、generation固定で取得・receipt検算済みのB chunkのJSON配列。v1以外を混ぜず、全行を渡す。
+raw inventory bytesをSHA-256化し、scope/id順のBの累積digest・件数を計算する。
+NULL/global、参照切れ、分岐、複数GENESIS、循環、重複hash・曖昧な参照を分類する。
+入力や既存イベントを変更せず、報告はcreate-only・mode0600で作る。
+
+再計算設定がない場合、全行を`unreproducible`とする。根拠のある当時のTimeZone/DateStyleを指定したoperatorのread-only DB接続で、
+保存previous_hashを使う `private.audit_canonical_v1(e)` のSHA-256を計算する。DBのtimestamp/detailsをJavaScriptで再serializeしてhashを代用しない。
+再計算JSONは次の形式で全行を含める。設定証跡digestがない場合、部分行・重複ID・不正hashは拒否する。
+一致した場合もhistoricalVerdictは`unresolved`を維持し、過去の改ざん不存在を宣言しない。
+
+```json
+{
+  "schema": "audit-v1-recomputation:1",
+  "settingsEvidenceDigest": "当時の設定を裏付ける証跡のSHA-256",
+  "timeZone": "証跡のあるTimeZone",
+  "dateStyle": "証跡のあるDateStyle",
+  "rows": [{"id": "監査行UUID", "hash": "DB再計算のSHA-256"}]
+}
+```
+
+### baseline/control発行
+
+`node scripts/audit/cutover-control.mjs publish private-plan.json private-pins.json [private-recomputation.json]` を、
+実bucket/IAM確認・環境別承認後にcontrol operatorのWIF/ADCで実行する。
+`APP_ENV`、`GCP_PROJECT_ID`、`EXPECTED_GCP_PROJECT_ID`、`GCS_AUDIT_BUCKET`は承認した環境だけを指定する。
+DB service-role keyは不要。writerの資格情報を流用しない。
+
+planの契約:
+
+| フィールド | 内容 |
+| --- | --- |
+| schema / environment / cutoverId | `audit-cutover-plan:1` / `local`・`staging`・`production` / 承認済み切替UUID |
+| evidenceDigest | 手動切替に使った適用証跡のSHA-256 |
+| evidence | `aDeployment`・`bDeployment`・`backupFreshness`・`oldJobsDrained`・`legacyExportsReviewed`・`migrationApplied`・`approval`それぞれの確認証跡のSHA-256 |
+| boundary | DBから読んだ`cutoverId`・`v1Count`（10進文字列）・`at`（boundary_at） |
+| inventoryRun / snapshotStartedAt | 切替commit後に開始したB run UUIDとDB started_at |
+| inventoryReceipts | `archive/<environment>/pre-cutover/manifests/1.json`から、当該runの最終inventoryまでの全receiptを順序どおりに列挙 |
+| previousControl | DB外に固定済みのpreparation control receipt |
+| monitoringStartedAt | 新系列の監視開始時刻。再送時に変更しない |
+
+各receiptは`name`・`generation`・`size`・`digest`。数値は10進文字列。
+ツールはgeneration指定で外部objectを読み、全receiptの連番・前digest、当該runの全chunkと累積v1 digest・件数、DB境界件数、snapshot時刻を照合する。
+証跡digestの存在は検査するが、A/Bが実配備済みか、legacyの全generationを人が確認したかを自動で保証しない。証跡本体のレビューを省略しない。
+
+異常は500行ずつの内容hash名objectに分け、分類summary、B互換`audit-baseline:1`、前controlを参照する`audit-control:1`を順にcreate-only発行する。
+全response/objectは1MiB以下。名前は`control/<environment>/<cutoverId>/`配下へ固定し、別内容の再送は拒否する。
+412/応答喪失では既存bytes・generationを読戻し、同一内容のみ再利用する。途中失敗後も同じplanで再開できる。
+`private-pins.json`はDB外設定へ固定するreceiptで、ツール自身は設定・Cron・archive modeを変更しない。
+既存の出力ファイルを上書きせず、再照合用の新規非公開ファイルへ出力する。
+
+### 復元時の照合
+
+`verifyRestoredDatabase(external, database)` はoperatorの照合コード向けの純粋関数で、DB更新やcontrol再発行をしない。
+`external`はDB外固定の最新controlと、generation/digestを検算した正式manifest系列から採るcutoverId・ordinal・v1Count/v1Digest・heads。
+`database`は復元DBからの同じ情報で、headは`scope`・`sequence`・`hash`・`cutoverId`を持つ。
+DBが外部headより先なら、外部sequence位置の保存hashを`archiveAnchorHash`として追加で照合する。
+古いhead、同連番の別hash、別切替ID、v1 digest差異は拒否する。外部系列自体の連続性の検算はBのpublisherと同じ読取り契約で先に行う。
+関数が返す`consistent`はこの入力間の一致であり、復元DBの全行再計算や週次検証Cの代わりにしない。
+
+### ローカル検証（2026-10-25）
+
+専用Supabase CLI2.108.0 / PostgreSQL17.6の合成DBで、A/Bの空DB再構築と関連pgTAPを実施。
+ローカルCLIの既存SQL分割エラーに対しては、migration実行無効の新規専用stackに未変更SQLをpsqlのtransactionで順次適用した。
+CLI `db reset` で全migration適用が成功したという意味ではない。GitHub CIの通常空DB/upgrade結果はPRを参照する。
+
+`test-audit-cutover.mjs` は同じ専用stack内にschema-onlyの空DBと、所有者・ACLを保持した論理dump/restore DBを作り、手動切替SQLそのものを実行する。
+実lock timeoutで全rollback、DDL待機中INSERT、切替前開始のRC/RR/Serializable、version省略の旧アプリ、既存v1行の不変、v1持込み拒否、RLS/ACL・境界の追記保護を検査する。
+40001はtransaction全体をrollbackし、v1へfallbackしない。開発/共有コンテナ名はDockerを呼ぶ前に拒否し、試験後は専用stackを破棄する。
+
+```sh
+node --test scripts/audit/*.test.mjs
+node scripts/db/test-audit-cutover.mjs supabase_db_care-record-audit-v2-test-151
+```
+
+offline/メモリStore試験は異常分類・精度・control途中失敗/再開・別内容再送拒否・古いsnapshot拒否を確認する。
+`auditCutoverFlow.test.ts` は実B publisherで発行したinventoryからGのbaseline/controlを発行し、Bの新系列がそのreceiptを受理することを確認する。
+実GCSのIAM拒否・create-only、Staging切替、Production適用は未実施であり、Issue完了・準拠完了として扱わない。

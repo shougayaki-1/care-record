@@ -14,7 +14,7 @@
 | GCP Project / 10年bucket / 既存7年bucket | 未確認 |
 | A/Bの統合SHA・migration名/digest・実適用履歴 | 未確認 |
 | A/Bの配備version・dual読出し互換試験 | 未実施 |
-| G migration名/digest / dry-run / 対象外差分なし | 未実装・未実施 |
+| G migration名/digest / dry-run / 対象外差分なし | 未指定・未実施 |
 | 完全backup receipt・完了/データ/確認時刻・14h判定 | 未確認 |
 | retention/lock/IAM実設定と役割分離 | 未確認 |
 | 実施窓 UTC / 許容lock待機秒 / statement timeout | 未承認 |
