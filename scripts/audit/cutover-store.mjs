@@ -39,6 +39,8 @@ export async function operatorStore(bucket,environment) {
     try {const response=await request(url,{method:'POST',headers:{'Content-Type':'application/json'},body:bytes});
       check(response.ok || response.status===412);await body(response);
     } catch { /* Ambiguous result: reconcile exact bytes. */ }
-    const saved=await read(name);check(saved && saved.bytes.equals(bytes));return saved;
+    const saved=await read(name);
+    if(!saved || !saved.bytes.equals(bytes))throw new Error('cutover_evidence_mismatch');
+    return saved;
   }};
 }

@@ -1,7 +1,7 @@
 # 監査 v2 切替手順（Issue #151 / G）
 
 状態: **切替SQL・分類/外部control発行ツールとローカル試験を実装。Staging/Productionへの適用・外部設定・実接続試験は未実施**。
-2026-10-25時点の基点は `origin/main @ d20a3f2e1151f6369f2ea3b40d7aeb97ee6b884a`。
+開始基点は `origin/main @ d20a3f2e1151f6369f2ea3b40d7aeb97ee6b884a`。依存統合後の検証基点は `origin/main @ 1311f3150a6819c7f0da964d8f56ff66bf301ac1`。
 #149 / PR #156（A）と #150 / PR #157（B）の統合済みschema・dual読出し契約を使用する。実配備は別途確認が必要。
 この文書の追加は、切替・新アーカイブ有効化・Issue完了の承認を意味しない。
 
@@ -41,7 +41,7 @@ A/BのIssueがcloseしたことや、SQLファイル・Terraformの存在だけ�
 旧日時checkpointのjobとBのpublisherについて、scheduled/manual/API再送の起動経路をすべて列挙する。
 承認範囲で旧jobの新規起動を停止し、配備をまたぐin-flight実行の完了をrun ID・開始終了時刻で確認する。
 「次のscheduleまで待った」だけではdrain成功としない。失敗・応答不明の実行は保存済みobjectのgenerationとreceiptまで照合する。
-Bを再開する条件・設定・担当者も停止前に決め、無計画な監査保全の空白を作らない。
+Bを再開する条件・設定・担当者も停止前に決め、無計画な監査保全の空白を作らない。Bの専用endpointは `/api/cron/archive-audit-v2`、旧endpointは `/api/cron/archive-audit`。依存PRの統合後も旧route/Cronは維持し、承認された切替時にだけ接続を変更する。
 
 Gの[手動切替migration](../supabase/manual-migrations/20261025000001_audit_v2_cutover.sql)のtransaction契約:
 
