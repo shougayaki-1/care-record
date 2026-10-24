@@ -180,6 +180,63 @@ test('freshness reports permission failures and missing complete pairs with safe
   const missingPair = check(1, { MOCK_LISTING: `123 2026-10-07T23:59:00Z ${uri}\n` });
   assert.equal(missingPair.status, 1);
   assert.match(missingPair.stdout, /cause=no_valid_pair latest_generation_utc=none age_seconds=unknown/);
+
+  const emptyBucket = check(1, { MOCK_LIST_ERROR: 'ERROR: (gcloud.storage.ls) One or more URLs matched no objects.' });
+  assert.equal(emptyBucket.status, 1);
+  assert.match(emptyBucket.stdout, /cause=no_valid_pair latest_generation_utc=none age_seconds=unknown/);
+
+  const missingBucket = check(1, { MOCK_LIST_ERROR: 'ERROR: HTTPError 404: The specified bucket does not exist.' });
+  assert.equal(missingBucket.status, 1);
+  assert.match(missingBucket.stdout, /cause=listing_failed/);
+}));
+
+test('six-hour replication tolerates delayed dumps, a just-missed transfer and one failed transfer; prolonged loss still alerts and recovers', () => freshnessFixture(({ dir, check }) => {
+  // Scheduled at 00:17/12:17, each dump starts six hours late and takes 15 min.
+  // Transfer at hour 18 therefore misses the dump that started at hour 18.
+  const origin = Date.parse('2026-10-07T00:17:00Z');
+  const dumps = [6, 18, 30, 42, 54, 66].map(start => ({ start, completed: start + 0.25 }));
+  const listingAt = (hour, bucket) => dumps.filter(dump => dump.completed <= hour).map(dump => {
+    const timestamp = new Date(origin + dump.start * 3600000).toISOString().replaceAll(/[-:]/g, '').replace('.000', '');
+    const uri = `gs://${bucket}/full/production/recent/2026/10/07/care-record-production-${timestamp}.tar.gz`;
+    return `123 2026-10-09T23:59:00Z ${uri}\n65 2026-10-09T23:59:01Z ${uri}.sha256\n`;
+  }).join('');
+  const inspect = (now, interval, failed = []) => {
+    const slots = Array.from({ length: Math.floor((now - 18) / interval) + 1 }, (_, index) => 18 + index * interval);
+    const lastTransfer = slots.filter(hour => !failed.includes(hour)).at(-1);
+    const tokyo = listingAt(now, 'fixture-recent');
+    const osaka = listingAt(lastTransfer, 'fixture-recent-osaka');
+    writeFileSync(join(dir, 'gcloud'), `#!${process.execPath}\nconst args = process.argv.slice(2);\nprocess.stdout.write(args.at(-1).includes('osaka') ? ${JSON.stringify(osaka)} : ${JSON.stringify(tokyo)});\n`, { mode: 0o755 });
+    return check(now);
+  };
+  const daily = inspect(35, 24);
+  assert.equal(daily.status, 1);
+  assert.match(daily.stdout, /target=osaka cause=age_over_threshold/);
+  for (const now of [23, 29, 35, 41, 47, 53, 59, 65]) {
+    assert.equal(inspect(now, 6).status, 0, `six-hour transfer at hour ${now}`);
+  }
+  assert.equal(inspect(29, 6, [24]).status, 0);
+  const stopped = inspect(35, 6, [24, 30]);
+  assert.equal(stopped.status, 1);
+  assert.match(stopped.stdout, /target=tokyo cause=within_threshold/);
+  assert.match(stopped.stdout, /target=osaka cause=age_over_threshold .*age_seconds=104400 threshold_seconds=93600/);
+  assert.equal(inspect(37, 6, [24, 30]).status, 0);
+}));
+
+test('both unhealthy targets produce independent notifications with valid diagnostic payloads', () => freshnessFixture(({ dir, check }) => {
+  // Use real jq so the test validates the Discord JSON, not just argument passing.
+  writeFileSync(join(dir, 'curl'), `#!${process.execPath}\nconst fs = require('node:fs');\nconst args = process.argv.slice(2);\nfs.appendFileSync(process.env.MOCK_ROOT + '/payloads', JSON.stringify(JSON.parse(args[args.indexOf('--data') + 1])) + '\\n');\n`, { mode: 0o755 });
+  const result = check(27, { DISCORD_ALERT_WEBHOOK_URL: 'https://discord.invalid/webhook' });
+  assert.equal(result.status, 1);
+  const payloads = readFileSync(join(dir, 'payloads'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(payloads.length, 2);
+  for (const [index, name] of ['backup_freshness_over_14h', 'replica_freshness_over_26h'].entries()) {
+    const payload = payloads[index];
+    assert.equal(payload.content, `[CareRecord] Critical / ${name}_age_over_threshold`);
+    const fields = Object.fromEntries(payload.embeds[0].fields.map(field => [field.name, field.value]));
+    assert.equal(fields.Environment, 'production');
+    assert.equal(fields.Evidence, 'https://github.com/fixture/repo/actions/runs/42');
+    assert.match(fields.Details, /^cause=age_over_threshold latest_generation_utc=2026-10-07T00:17:00Z age_seconds=97200 threshold_seconds=/);
+  }
 }));
 
 test('stale generation logs include its timestamp, computed age, threshold, and alert diagnostics', () => freshnessFixture(({ dir, check, listing }) => {

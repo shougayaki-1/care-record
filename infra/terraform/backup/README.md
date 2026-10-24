@@ -63,11 +63,13 @@ gcloud transfer jobs describe 'transferJobs/JOB_ID' --project="${BACKUP_PROJECT_
 gcloud transfer operations list --project="${BACKUP_PROJECT_ID}" --job-names='transferJobs/JOB_ID' --format=json | jq '[.[] | {name, status: .metadata.status, startTime: .metadata.startTime, endTime: .metadata.endTime, counters: .metadata.counters, errorCodes: [.metadata.errorBreakdowns[]?.errorCode?]}]'
 ```
 
-最新の候補世代については、両側の`.tar.gz`と`.sha256`それぞれに`gcloud storage objects describe gs://BUCKET/OBJECT --format='yaml(generation,updateTime,size,crc32c)'`を実行し、メタデータを比較します。必要なら`.sha256`オブジェクトだけを`gcloud storage cat`で読み、出力を保存・表示せず、東京と大阪のchecksum文字列が一致するか確認します。`.tar.gz`本文は読まず、各バケットの`.tar.gz`のCRC32Cメタデータを比較します。Storage Transfer operationの結果から開始・終了時刻、status、転送件数、sanitizedなエラー分類を記録し、`daily` / `weekly` / `monthly`の代表世代やlegacy bucket、監査WORMの設定は変更されていないことを確認します。
+最新の候補世代については、両側の`.tar.gz`と`.sha256`それぞれに`gcloud storage objects describe gs://BUCKET/OBJECT --format='yaml(generation,creation_time,update_time,size,crc32c_hash)'`を実行し、メタデータを比較します。必要なら`.sha256`オブジェクトだけを`gcloud storage cat`で読み、出力を保存・表示せず、東京と大阪のchecksum文字列が一致するか確認します。`.tar.gz`本文は読まず、各バケットの`.tar.gz`のCRC32Cメタデータを比較します。Storage Transfer operationの結果から開始・終了時刻、status、転送件数、sanitizedなエラー分類を記録し、`daily` / `weekly` / `monthly`の代表世代やlegacy bucket、監査WORMの設定は変更されていないことを確認します。
 
-調査記録には、実環境のsecret、オブジェクト本文、DB情報を含めません。対象project、jobの有効状態、転送開始・完了時刻、成功/失敗、コピー件数、sanitizedなエラー分類、両バケットの最新完全ペア時刻とgeneration/updateTimeだけを残します。read-only認証または権限がない場合は仮説を確定せず、結果を`needs-human`として報告し、本番applyやjob変更を行いません。
+調査記録には、実環境のsecret、オブジェクト本文、DB情報を含めません。対象project、jobの有効状態、転送開始・完了時刻、成功/失敗、コピー件数、sanitizedなエラー分類、両バケットの最新完全ペア時刻とgeneration/creation_time/update_timeだけを残します。read-only認証または権限がない場合は仮説を確定せず、結果を`needs-human`として報告し、本番applyやjob変更を行いません。
 
 適用前に各環境の正しいstateを読み込んだsaved planを作り、recentのジョブ更新のみで既存bucket、legacy job、daily/weekly/monthly job、audit WORMにdestroy/replaceや保持短縮がないことを確認してください。対象planに含まれる変更は6時間間隔への更新、通常時の予定実行回数は4倍です。実行開始遅延と失敗は26時間監視で検知し続けます。ProductionへのTerraform applyやStorage Transfer jobの更新・手動起動は、このissue実装の自動操作範囲外です。
+
+2026-10-24の本番照合・saved plan・検証結果は[Issue #103の確認記録](../../../docs/compliance/backup-freshness-103-evidence.md)を参照してください。適用前の検証と適用後の実績を区別して記録します。
 
 ## 安全な移行
 

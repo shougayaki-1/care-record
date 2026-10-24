@@ -20,6 +20,8 @@ latest_generation() {
     listing_error="$(tr '[:upper:]' '[:lower:]' <<< "$listing")"
     if [[ "$listing_error" == *403* || "$listing_error" == *permission* || "$listing_error" == *denied* || "$listing_error" == *forbidden* || "$listing_error" == *storage.objects.list* ]]; then
       printf 'listing_permission_denied\tnone\tunknown\n'
+    elif [[ "$listing_error" == *'one or more urls matched no objects.'* ]]; then
+      printf 'no_valid_pair\tnone\tunknown\n'
     else
       printf 'listing_failed\tnone\tunknown\n'
     fi
