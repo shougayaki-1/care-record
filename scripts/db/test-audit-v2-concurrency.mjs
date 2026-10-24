@@ -42,7 +42,9 @@ class Session {
     });
   }
   async begin(level = 'READ COMMITTED') {
-    await this.query(`SET application_name='audit149-${this.name}'; SET statement_timeout='15s'; SET deadlock_timeout='100ms'; BEGIN ISOLATION LEVEL ${level};`);
+    // Hosted/local postgres need not have SET privilege for deadlock_timeout.
+    // Keep the server default; the statement budget still allows real 40P01.
+    await this.query(`SET application_name='audit149-${this.name}'; SET statement_timeout='15s'; BEGIN ISOLATION LEVEL ${level};`);
   }
   async finish(commit = true) {
     await this.query(commit ? 'COMMIT;' : 'ROLLBACK;'); this.process.stdin.end();
