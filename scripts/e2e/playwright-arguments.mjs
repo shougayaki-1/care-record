@@ -1,4 +1,4 @@
-const criticalFiles = [
+export const criticalFiles = [
   'tests/auth.spec.ts',
   'tests/workspace-routing.spec.ts',
   'tests/staff-features.spec.ts',

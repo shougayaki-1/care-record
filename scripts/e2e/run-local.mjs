@@ -7,6 +7,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertLocalSupabaseEnvironment } from './local-environment.mjs';
 import { playwrightArguments } from './playwright-arguments.mjs';
+import { disableLocalSeed } from './local-config.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sourceSupabaseDir = resolve(repoRoot, 'supabase');
@@ -18,12 +19,15 @@ const playwrightArgs = playwrightArguments(requestedSuite, requestedFiles, proce
 assertLocalSupabaseEnvironment(process.env, { requireApi: false });
 
 function run(command, args, options = {}) {
+  const startedAt = performance.now();
   const result = spawnSync(command, args, {
     cwd: repoRoot,
     encoding: 'utf8',
     env: options.env ?? process.env,
     stdio: options.inherit ? 'inherit' : 'pipe',
   });
+  // Never print status -o env: its output contains the disposable stack's keys.
+  if (options.phase) console.log(`[e2e:${options.phase}] ${((performance.now() - startedAt) / 1000).toFixed(1)}s`);
 
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -50,7 +54,7 @@ async function freePort(usedPorts) {
 async function writeIsolatedConfig(workdir) {
   const usedPorts = new Set();
   const configPath = resolve(sourceSupabaseDir, 'config.toml');
-  let config = readFileSync(configPath, 'utf8');
+  let config = disableLocalSeed(readFileSync(configPath, 'utf8'));
   const projectId = `care-record-e2e-${randomUUID().replaceAll('-', '').slice(0, 10)}`;
   config = config.replace(/^project_id\s*=\s*"[^"]+"/m, `project_id = "${projectId}"`);
 
@@ -105,8 +109,9 @@ try {
   projectId = await writeIsolatedConfig(workdir);
 
   stackStartAttempted = true;
-  run('supabase', ['start', '--workdir', workdir]);
-  run('supabase', ['db', 'reset', '--local', '--no-seed', '--workdir', workdir]);
+  // UUID project + fresh directory means start applies all migrations exactly once.
+  // Keep Auth, Storage, Realtime and Mailpit; only developer tools are excluded.
+  run('supabase', ['start', '--exclude', 'studio,postgres-meta,edge-runtime', '--workdir', workdir], { phase: 'database-start' });
 
   const localConfig = parseSupabaseEnv(run('supabase', ['status', '-o', 'env', '--workdir', workdir]));
   const supabaseEnv = {
@@ -127,11 +132,13 @@ try {
     throw new Error('Supabase CLI did not return the local API keys and database URL required for E2E tests.');
   }
 
+  const startedAt = performance.now();
   const result = spawnSync('npx', ['--no-install', 'playwright', ...playwrightArgs], {
     cwd: repoRoot,
     env: supabaseEnv,
     stdio: 'inherit',
   });
+  console.log(`[e2e:playwright] ${((performance.now() - startedAt) / 1000).toFixed(1)}s`);
   if (result.error) throw result.error;
   exitCode = result.status ?? 1;
 } catch (error) {
@@ -140,7 +147,7 @@ try {
 } finally {
   if (stackStartAttempted && workdir && projectId) {
     try {
-      run('supabase', ['stop', '--no-backup', '--workdir', workdir]);
+      run('supabase', ['stop', '--no-backup', '--workdir', workdir], { phase: 'database-stop' });
     } catch (error) {
       process.stderr.write(`Supabase cleanup failed for ${projectId}: ${error instanceof Error ? error.message : String(error)}\n`);
       exitCode = exitCode === 0 ? 1 : exitCode;

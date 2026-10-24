@@ -16,7 +16,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.GITHUB_ACTIONS ? 1 : 0,
   workers: 1,
-  reporter: 'html',
+  reporter: process.env.GITHUB_ACTIONS
+    ? [['line'], ['html', { open: 'never' }], ['json', { outputFile: 'playwright-report/results.json' }]]
+    : 'html',
   timeout: 60 * 1000,
   expect: {
     timeout: 15 * 1000,

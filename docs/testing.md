@@ -7,11 +7,20 @@ Node.js 24、npm、Docker、Supabase CLI 2.108.0 を使用します。通常の�
 | アプリ・設定・テスト・workflow | lint、型、単体テスト、service role利用検査、本番build、CI判定範囲のテスト |
 | DB・認可・DB連携コード | 空DBからのmigration、型生成差分、pgTAP、DB lint |
 | migrationファイル | 上記に加えて既存DBからの更新試験 |
-| UI component / Storybook | Storybook browser test |
-| アプリ・DB・依存関係 | 主要E2E。E2Eテストファイル変更時は全E2E |
+| UI・theme・CSS・hook・context・共有ロジック・依存関係 | Storybook browser test |
+| アプリ・DB | 主要E2Eと変更機能に対応する回帰spec。unit/storiesだけの変更はE2Eを省略 |
+| E2E・CI実行基盤・依存関係 | desktop/mobileの全E2E。CI基盤変更はDB・UIも検査 |
+| ActionResult/helper・Next設定・依存関係 | production build/startを使ったServer Action通信試験 |
 | 依存関係 | 本番依存のHigh/Critical監査、SBOM生成。監査は週次にも実行 |
 | PR | secret scan |
 | 文書だけ | secret scanと固定名の最終判定。重い検査は省略 |
+| 週次 | core・DB・Storybook・production通信・全E2E・依存監査 |
+
+unitテストファイルだけを変更した場合はcoreを実行し、DB・UI・E2Eは起動しません。
+DB SQL試験、Storybook stories、E2E spec、runner、共通設定の変更はこの省略に含めません。
+関連E2Eの対応表は `scripts/ci/classify-changes.mjs` の `featureSuites` が正本です。
+主要5シナリオは常に維持し、認証・所属変更では復旧/招待、記録・帳票変更では
+履歴/記録遷移/帳票条件/承認、アカウント等の変更では管理/招待specを追加します。
 
 基本コマンド:
 
@@ -55,6 +64,7 @@ Supabase の起動、DB migration、E2E、実際の外部サービス連携試�
 Docker、Supabase CLI、実サービスの認証情報や環境ファイルは不要です。
 `test:ci-scope`、lint、型検査、build も標準 test には含めず、上記の個別コマンドで実行します。
 CI は引き続き変更分類に応じた個別の unit / UI job と並列 job を使用します。
+unitはファイル間を最大2ワーカーで実行します。isolation、timeout、未処理エラーの検出は維持します。
 
 DB 試験は Docker とローカル Supabase を準備し、対象と影響を確認して別途実行します。
 実際の Google Calendar / Vertex AI / GCS 等への接続試験は標準 test の対象外です。
@@ -84,7 +94,13 @@ npm run test:e2e
 特定の spec だけを再実行する場合は、たとえば
 `node scripts/e2e/run-local.mjs all tests/setup.spec.ts` を使います。
 
-Docker Desktop、Chromium、Supabase CLI 2.108.0 が必要です。E2E runner は `PATH` 上の `supabase` コマンドを実行します。CI では `supabase/setup-cli` と Playwright の browser install を使って準備します。ローカルに browser が入っていない場合は、初回に `npx playwright install chromium` を実行します。`E2E_TEST_ENV=true` は一時環境を作る runner が Playwright に渡す値なので、手動で設定して Playwright を直接実行しないでください。本番や Staging の認証情報は E2E に渡しません。
+Docker Desktop、Chromium、Supabase CLI 2.108.0 が必要です。E2E runner は `PATH` 上の `supabase` コマンドを実行します。`command -v supabase` とCLIのversionを確認し、古いHomebrew実行ファイルが優先されないようにします。CI では `supabase/setup-cli` と Playwright の browser install を使って準備します。ローカルに browser が入っていない場合は、初回に `npx playwright install chromium` を実行します。`E2E_TEST_ENV=true` は一時環境を作る runner が Playwright に渡す値なので、手動で設定して Playwright を直接実行しないでください。本番や Staging の認証情報は E2E に渡しません。
+
+UUID付き新規projectの設定ではseedを明示的に無効化します。`supabase start` が空DBに
+現行migrationを適用するため、直後の二重resetは行いません。開発者向けのStudio・
+Postgres Meta・Edge Runtimeは起動せず、Auth・Storage・Realtime・Mailpitは維持します。
+`[e2e:database-start]` / `[e2e:playwright]` / `[e2e:database-stop]` に所要秒を出力します。
+CLIの環境出力にはkeysがあるため表示しません。CIはHTMLとJSONレポートをproject別に保持します。
 
 実行していない検査を「確認済み」と記録しないでください。CI の最終判定が失敗した場合は、選択された job のログを確認します。
 
@@ -103,6 +119,42 @@ gh run view RUN_ID --json startedAt,jobs > /tmp/ci-RUN_ID.json
 ```
 
 runner 利用時間・`npm ci` 回数は増えます。短縮の実測値は変更後の GitHub Actions run 完了後に記録します。
+
+## CI準備時間と検証範囲の改善（2026-10-24）
+
+Storybookとproduction通信試験は `mcr.microsoft.com/playwright:v1.61.1-noble` を使い、
+毎回のapt installをなくします。Nodeは24を設定し、`npm ci` 後のPlaywrightとimageの
+version一致を強制します。Playwright更新時はlockfileとworkflowのimage・照合値を一緒に更新します。
+`npm run test:action-transport` はDBを使わないfixtureをbuild/startし、実ブラウザで
+10種類のAction応答と内部エラーの非露出を検証します。選択された通信試験の省略はCI失敗です。
+
+Supabase E2Eはホスト上のloopback接続を維持します。共通actionで、遅延を観測した
+Azure Ubuntu mirrorだけをupstream mirrorへ置き換え、必要なOS依存をすべて導入します。
+headless shellだけを取得し、ブラウザ/OS依存の検査は省略しません。配信元変更の速度効果は
+GitHub runnerで実測が必要です。ブラウザバイナリのcacheだけでaptの遅さが解消したとは扱いません。
+本番buildは `.next/cache` をNode・lockfile・source/configのキーで保存します。
+
+DB/upgrade jobは `supabase db start` でPostgresだけを起動します。初回migration時の
+Auth/Storage等のschema初期化はCLIに任せ、API・Studio等の常駐サービスは起動しません。
+空DBの再構築試験は `db reset` で別途維持します。
+DB jobは専用project名 `care-record-owner-add-test-<run ID>a<attempt>` を使い、
+pgTAP・lintの後で既存owner同時更新試験と内勤の3つの実DB並行試験を実行します。
+内勤試験はrepositoryのisolation specを読み、2つのpsql接続で実際のlock待機、commit後再送、
+rollback後再作成、異なるpayloadの競合を検証します。fixtureはcommitされるため、
+専用stackだけを使用し、終了時に `supabase stop --no-backup` で破棄します。
+
+upgrade jobでは専用 `care-record-upgrade-test-*` の旧schemaに、承認済み・未承認・論理削除済みの
+合成記録と版履歴・監査・所属をcommitしてから差分migrationを適用します。前後のfixture照合は
+新しい履歴の追記を許可しつつ、既存行の変更・消失を拒否します。fixtureはprivateな試験専用schemaに
+置き、一般ロールからのアクセスを拒否します。実データは使用しません。
+
+`record_version_invariants.test.sql` は実RPCで再送・版競合・承認後の訂正理由・旧版の不変性・
+hash連鎖・監査失敗時の原子的rollbackを検査します。`api/ai/extract/route.test.ts` は実handlerを
+呼び、認証・組織scope・機能フラグ・body検証・外部エラー非露出を検査します。外部Vertexはmockです。
+
+Context7確認日: 2026-10-24。Playwright1.61.1のCI/image/network、Vitest4.1.6のproject workers、
+Supabase CLIのfresh-volume migration/seed/excludeを確認。実装対象はPlaywright1.61.1、
+Vitest4.1.11、Supabase CLI2.108.0。CLI資料は現行developも含むため、固定版で実動作を検証します。
 
 ## Branch / worktree運用の検証
 
