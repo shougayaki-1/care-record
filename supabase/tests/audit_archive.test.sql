@@ -13,6 +13,10 @@ SELECT ok(NOT has_function_privilege('authenticated','public.cache_audit_archive
 SELECT ok(has_function_privilege('service_role','public.read_audit_archive(uuid,jsonb)','EXECUTE'), 'preservation wrapper may page a run');
 SELECT is((SELECT column_default FROM information_schema.columns WHERE table_schema='public' AND table_name='audit_events' AND column_name='integrity_version'), '1', 'B does not activate v2 writes');
 
+CREATE TEMP TABLE archive_fixture_baseline AS SELECT count(*)::bigint AS total,
+ count(*) FILTER (WHERE event_hash IS NULL AND organization_id IS NULL)::bigint AS null_global
+ FROM public.audit_events;
+
 -- Synthetic fixture only; disabling the v1 hash trigger here preserves a null
 -- hash as an example of a historical anomaly. This entire test rolls back.
 ALTER TABLE public.audit_events DISABLE TRIGGER audit_events_chain_insert;
@@ -21,10 +25,10 @@ INSERT INTO public.audit_events(action_type,resource_type,created_at,details)
  FROM generate_series(1,1001) n;
 ALTER TABLE public.audit_events ENABLE TRIGGER audit_events_chain_insert;
 CREATE TEMP TABLE archive_test_run AS SELECT public.begin_audit_archive()::uuid AS id;
-SELECT is((SELECT count(*)::text FROM private.audit_archive_items WHERE run_id=(SELECT id FROM archive_test_run)), '1001', 'snapshot includes 1001 equal-timestamp events');
-SELECT is((SELECT count(*)::text FROM private.audit_archive_items WHERE run_id=(SELECT id FROM archive_test_run) AND payload->>'hash' IS NULL AND scope='global'), '1001', 'NULL hash and global are preserved');
+SELECT is((SELECT count(*)::text FROM private.audit_archive_items WHERE run_id=(SELECT id FROM archive_test_run)), (SELECT (total+1001)::text FROM archive_fixture_baseline), 'snapshot includes 1001 equal-timestamp events');
+SELECT is((SELECT count(*)::text FROM private.audit_archive_items WHERE run_id=(SELECT id FROM archive_test_run) AND payload->>'hash' IS NULL AND scope='global'), (SELECT (null_global+1001)::text FROM archive_fixture_baseline), 'NULL hash and global are preserved');
 INSERT INTO public.audit_events(action_type,resource_type,created_at) VALUES('fixture.late','audit','2026-10-23');
-SELECT is((SELECT count(*)::text FROM private.audit_archive_items WHERE run_id=(SELECT id FROM archive_test_run)), '1001', 'late commit cannot extend an existing run');
+SELECT is((SELECT count(*)::text FROM private.audit_archive_items WHERE run_id=(SELECT id FROM archive_test_run)), (SELECT (total+1001)::text FROM archive_fixture_baseline), 'late commit cannot extend an existing run');
 CREATE TEMP TABLE archive_test_pages(page jsonb);
 DO $$
 DECLARE c jsonb := NULL; p jsonb; run uuid := (SELECT id FROM archive_test_run);
@@ -36,14 +40,14 @@ BEGIN
    EXIT WHEN NOT (p->>'more')::boolean;
  END LOOP;
 END $$;
-SELECT is((SELECT sum(jsonb_array_length(page->'items'))::text FROM archive_test_pages), '1001', 'all pages cover every event');
-SELECT is((SELECT count(DISTINCT e->>'id')::text FROM archive_test_pages CROSS JOIN LATERAL jsonb_array_elements(page->'items') e), '1001', 'returned cursors neither skip nor duplicate');
+SELECT is((SELECT sum(jsonb_array_length(page->'items'))::text FROM archive_test_pages), (SELECT (total+1001)::text FROM archive_fixture_baseline), 'all pages cover every event');
+SELECT is((SELECT count(DISTINCT e->>'id')::text FROM archive_test_pages CROSS JOIN LATERAL jsonb_array_elements(page->'items') e), (SELECT (total+1001)::text FROM archive_fixture_baseline), 'returned cursors neither skip nor duplicate');
 SELECT ok((SELECT bool_and(octet_length(convert_to(page::text,'UTF8')) <= 524288 AND jsonb_array_length(page->'items') <= 500) FROM archive_test_pages), 'complete response respects row and byte caps');
-SELECT ok((SELECT bool_and(convert_from(decode(e->>'inventory','base64'),'UTF8') LIKE '%2026-10-24T00:00:00.123456Z%') FROM archive_test_pages CROSS JOIN LATERAL jsonb_array_elements(page->'items') e), 'canonical inventory keeps microseconds');
+SELECT ok((SELECT bool_and(convert_from(decode(e->>'inventory','base64'),'UTF8') LIKE '%2026-10-24T00:00:00.123456Z%') FROM archive_test_pages CROSS JOIN LATERAL jsonb_array_elements(page->'items') e WHERE convert_from(decode(e->>'inventory','base64'),'UTF8')::jsonb->>5='fixture.archive'), 'canonical inventory keeps microseconds');
 SELECT ok((SELECT bool_and(payload->>'canonical' IS NULL) FROM private.audit_archive_items WHERE run_id=(SELECT id FROM archive_test_run)), 'v1 is not rehashed with guessed historical settings');
 CREATE TEMP TABLE archive_test_next AS SELECT public.begin_audit_archive()::uuid AS id;
 -- Inspect the last created run in a later statement, not the function SELECT snapshot.
-SELECT is((SELECT max(n)::text FROM (SELECT count(*) n FROM private.audit_archive_items GROUP BY run_id) x), '1002', 'the next run includes late older-dated commits');
+SELECT is((SELECT count(*)::text FROM private.audit_archive_items WHERE run_id=(SELECT id FROM archive_test_next)), (SELECT (total+1002)::text FROM archive_fixture_baseline), 'the next run includes late older-dated commits');
 SELECT throws_ok($$SELECT public.read_audit_archive('00000000-0000-0000-0000-000000000000',NULL)$$, 'P0001', 'archive_run_missing', 'unknown run does not return an empty success');
 SELECT lives_ok($$SELECT public.cache_audit_archive('fixture','9007199254740993',repeat('a',64))$$, 'large decimal cache position stays exact');
 SELECT lives_ok($$SELECT public.cache_audit_archive('fixture','1',repeat('b',64))$$, 'stale publisher cannot move cache backwards');
