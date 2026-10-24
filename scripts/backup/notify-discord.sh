@@ -7,10 +7,12 @@ set -euo pipefail
 severity="${1:-Critical}"
 check="${2:-backup_failed}"
 evidence_url="${3:-unavailable}"
+details="${4:-}"
 
 case "$severity" in Critical|High|Warning|Info) ;; *) severity="Critical" ;; esac
 case "$check" in *[!A-Za-z0-9_.:-]*|'') check="invalid_check_name" ;; esac
 case "$APP_ENV" in production|staging) ;; *) APP_ENV="unknown" ;; esac
+if [[ -n "$details" && ! "$details" =~ ^[A-Za-z0-9_.:=\ -]+$ ]]; then details="unavailable"; fi
 
 payload="$(jq -n \
   --arg environment "$APP_ENV" \
@@ -18,13 +20,14 @@ payload="$(jq -n \
   --arg check "$check" \
   --arg detected_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg evidence_url "$evidence_url" \
-  '{content: ("[CareRecord] " + $severity + " / " + $check), embeds: [{fields: [
+  --arg details "$details" \
+  '{content: ("[CareRecord] " + $severity + " / " + $check), embeds: [{fields: ([
     {name: "Environment", value: $environment, inline: true},
     {name: "Severity", value: $severity, inline: true},
     {name: "Check", value: $check, inline: false},
     {name: "Detected at", value: $detected_at, inline: false},
     {name: "Evidence", value: $evidence_url, inline: false}
-  ]}]}'
+  ] + (if $details == "" then [] else [{name: "Details", value: $details, inline: false}] end))}]}'
 )"
 
 curl --fail --silent --show-error \
