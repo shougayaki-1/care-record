@@ -48,7 +48,7 @@ export const Validation: Story = {
     const form = within(within(document.body).getByRole('dialog', { name: '内勤を記録' }));
     await userEvent.clear(form.getByRole('textbox', { name: '件名' }));
     await userEvent.click(form.getByRole('button', { name: '保存' }));
-    await expect(form.getByText('件名を1〜100文字で入力してください')).toBeVisible();
+    await waitFor(() => expect(form.getByText('件名を1〜100文字で入力してください')).toBeVisible());
     await expect(form.getByRole('textbox', { name: '件名' })).toHaveAttribute('aria-invalid', 'true');
   },
 };
