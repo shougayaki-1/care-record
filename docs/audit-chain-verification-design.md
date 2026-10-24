@@ -145,6 +145,8 @@ unitは現行withActionResult契約の`ok: false`とerror codeを検証し、旧
 
 配備順はAの準備schema→Bのdual読出し配備→Gの切替→Cの週次有効化。各schema変更をStaging→Productionへ手動適用し、migration history・dry-run・backup freshnessを確認する。GはBの配備済みversionを照合し、旧アーカイブjobの起動停止とin-flight完了を計画・承認範囲で確認してから実行する。旧checkpointをv2へ流用しない。baselineの全量保存・照合後に新アーカイブを有効にし、成功前は移行未完了を明示する。G失敗時も旧jobへ無条件に戻さず、v1/v2双方を保存できるBで保全を続ける。
 
+Gの実施準備は[切替runbook](audit-cutover-runbook.md)と[環境別証跡テンプレート](compliance/audit-cutover-evidence-template.md)に記録する。これらは準備文書であり、切替migration・環境適用・試験の完了を意味しない。
+
 初回baseline/検証はStaging合成データで試す。ProductionのGは新規migration適用と新規証跡作成を伴うため、影響・lock待機・中断条件を提示して手動適用する。通常検証は読取と新規結果作成に限定する。
 
 DB復元時は、外部の最新切替ID・ordinal・scope別headと復元DBを先に照合する。古いheadから同じ連番を再採番する再開や、新baselineへの自動リセットを禁止する。外部から監査イベント/headを整合復旧できない場合は欠落範囲を事故証跡に残し、再開方法を別途承認する。古いDBに合わせて外部receiptを削除・巻戻ししない。
