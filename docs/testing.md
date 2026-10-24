@@ -97,13 +97,17 @@ npm run test:e2e
 Docker Desktop、Chromium、Supabase CLI 2.108.0 が必要です。E2E runner は `PATH` 上の `supabase` コマンドを実行します。`command -v supabase` とCLIのversionを確認し、古いHomebrew実行ファイルが優先されないようにします。CI では `supabase/setup-cli` と Playwright の browser install を使って準備します。ローカルに browser が入っていない場合は、初回に `npx playwright install chromium` を実行します。`E2E_TEST_ENV=true` は一時環境を作る runner が Playwright に渡す値なので、手動で設定して Playwright を直接実行しないでください。本番や Staging の認証情報は E2E に渡しません。
 
 UUID付き新規projectの設定ではseedを明示的に無効化します。`supabase start` が空DBに
-現行migrationを適用するため、直後の二重resetは行いません。開発者向けのStudio・
-Postgres Meta・Edge Runtimeは起動せず、Auth・Storage・Realtime・Mailpitは維持します。
+現行migrationを適用するため、直後の二重resetは行いません。一時configのStudio・
+Edge Runtime・Analyticsを無効にし、Studio依存のPostgres Meta、Analytics依存のLogflare/Vectorも
+起動しません。CLI版ごとに名前が異なるexclude aliasには依存しません。
+Auth・Storage・Realtime・MailpitとアプリのDB監査は維持します。
 `[e2e:database-start]` / `[e2e:playwright]` / `[e2e:database-stop]` に所要秒を出力します。
 CLIの環境出力にはkeysがあるため表示しません。CIはHTMLとJSONレポートをproject別に保持します。
 E2EはDBのURL/keyを取得してから同じ環境で `npm run build` → `npm run start` を使います。
 別jobのダミーURL入りbuild成果物は流用しません。これによりproductionの認証・Action応答を
 検証し、開発サーバーのFast Refreshが試験中に画面を再読込する要因を取り除きます。
+CIはE2E project別に `.next/cache` だけを保存・復元します。完成したbuild成果物、DBデータ、
+環境ファイルは共有せず、新しい一時API URL/keyで毎回buildを行います。
 build時間は `[e2e:production-build]` へ記録します。ローカルでもbuild時のGoogle Fonts取得等に
 ネットワークが必要です。
 production CSPは別originのlocalhost APIを許可しないため、E2Eでは同一originの

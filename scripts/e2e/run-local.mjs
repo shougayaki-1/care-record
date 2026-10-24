@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertLocalSupabaseEnvironment } from './local-environment.mjs';
 import { playwrightArguments } from './playwright-arguments.mjs';
-import { disableLocalSeed } from './local-config.mjs';
+import { configureLocalE2E } from './local-config.mjs';
 import { e2eApiPath, e2eAppOrigin } from './rewrites.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -55,7 +55,7 @@ async function freePort(usedPorts) {
 async function writeIsolatedConfig(workdir) {
   const usedPorts = new Set();
   const configPath = resolve(sourceSupabaseDir, 'config.toml');
-  let config = disableLocalSeed(readFileSync(configPath, 'utf8'));
+  let config = configureLocalE2E(readFileSync(configPath, 'utf8'));
   const projectId = `care-record-e2e-${randomUUID().replaceAll('-', '').slice(0, 10)}`;
   config = config.replace(/^project_id\s*=\s*"[^"]+"/m, `project_id = "${projectId}"`);
 
@@ -111,8 +111,9 @@ try {
 
   stackStartAttempted = true;
   // UUID project + fresh directory means start applies all migrations exactly once.
-  // Keep Auth, Storage, Realtime and Mailpit; only developer tools are excluded.
-  run('supabase', ['start', '--exclude', 'studio,postgres-meta,edge-runtime', '--workdir', workdir], { phase: 'database-start' });
+  // Disable developer services in the disposable config, rather than relying on
+  // CLI-version-specific --exclude aliases. Keep Auth/Storage/Realtime/Mailpit.
+  run('supabase', ['start', '--workdir', workdir], { phase: 'database-start' });
 
   const localConfig = parseSupabaseEnv(run('supabase', ['status', '-o', 'env', '--workdir', workdir]));
   const supabaseEnv = {

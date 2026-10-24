@@ -273,6 +273,14 @@ jobs:
           version: 2.108.0
       # Keep E2E on the host: the disposable Supabase API/DB must remain loopback-only.
       - uses: ./.github/actions/install-chromium
+      - uses: actions/cache@v4
+        with:
+          # Rebuild for the new disposable API/key; reuse only compiler caches.
+          path: .next/cache
+          key: next-e2e-${{ runner.os }}-node24-${{ matrix.project }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**', 'next.config.ts', 'tsconfig.json') }}
+          restore-keys: |
+            next-e2e-${{ runner.os }}-node24-${{ matrix.project }}-${{ hashFiles('package-lock.json') }}-
+            next-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}-
       - name: Run the selected local E2E suite
         env:
           E2E_ALL: ${{ needs.scope.outputs.e2eAll }}
