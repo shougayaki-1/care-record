@@ -179,6 +179,9 @@ export type Database = {
         Row: {
           action_type: string
           actor_id: string | null
+          chain_cutover_id: string | null
+          chain_scope: string | null
+          chain_sequence: number | null
           created_at: string
           details: Json
           event_hash: string | null
@@ -199,6 +202,9 @@ export type Database = {
         Insert: {
           action_type: string
           actor_id?: string | null
+          chain_cutover_id?: string | null
+          chain_scope?: string | null
+          chain_sequence?: number | null
           created_at?: string
           details?: Json
           event_hash?: string | null
@@ -219,6 +225,9 @@ export type Database = {
         Update: {
           action_type?: string
           actor_id?: string | null
+          chain_cutover_id?: string | null
+          chain_scope?: string | null
+          chain_sequence?: number | null
           created_at?: string
           details?: Json
           event_hash?: string | null

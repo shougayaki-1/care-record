@@ -158,6 +158,8 @@ jobs:
         run: node scripts/db/test-owner-add-concurrency.mjs "supabase_db_care-record-owner-add-test-${GITHUB_RUN_ID}a${GITHUB_RUN_ATTEMPT}"
       - name: Verify internal-work concurrent retries and rollback
         run: node scripts/db/test-internal-work-concurrency.mjs "supabase_db_care-record-owner-add-test-${GITHUB_RUN_ID}a${GITHUB_RUN_ATTEMPT}"
+      - name: Verify audit v2 concurrent allocation (disposable DB only)
+        run: node scripts/db/test-audit-v2-concurrency.mjs "supabase_db_care-record-owner-add-test-${GITHUB_RUN_ID}a${GITHUB_RUN_ATTEMPT}"
       - name: Stop local Supabase
         if: ${{ always() }}
         run: supabase stop --no-backup
