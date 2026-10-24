@@ -12,30 +12,14 @@ export default defineConfig({
       '@': path.join(dirname, 'src'),
       'server-only': path.join(dirname, 'src/test/server-only.ts'),
     },
-    // 一部のテストは並行して走る非同期処理の完了を待たずに終了する。React の
-    // スケジューラがその後始末をjsdom破棄後に実行し window を参照して落ちる、
-    // タイミング依存の既知の空振りエラーのみを対象を絞ってフィルタする
-    // (テストのアサーション自体は全て成功している)。
-    onUnhandledError(error) {
-      // onUnhandledError runs on the main thread after the error is
-      // serialized back from the worker, so `instanceof ReferenceError`
-      // does not reliably hold — match on name/message/stack instead.
-      if (
-        error.name === 'ReferenceError'
-        && error.message === 'window is not defined'
-        && /react-dom|scheduler/.test(String(error.stack))
-      ) {
-        return false;
-      }
-    },
     projects: [
       {
         extends: true,
         test: {
           name: 'unit',
-          // 通知の jsdom テストを含む DOM suite の CPU 競合を避ける。
-          // timeout・isolation・アサーションは維持して順番に検証する。
-          maxWorkers: 1,
+          // CPU競合を抑えつつ独立したファイルを並列化する。
+          // isolation・timeout・未処理エラーの検出は既定値を維持する。
+          maxWorkers: 2,
           environment: 'node',
           include: ['src/**/*.test.{ts,tsx}'],
         },

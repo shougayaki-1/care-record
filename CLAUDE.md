@@ -56,12 +56,13 @@
 
 ### Server Action の標準形
 
-- 公開アクション全体を `withSafeError('アクション名', async () => { ... })` で包む。
+- 公開業務アクションは `withActionResult('アクション名', async () => { ... })` で包む。内部で `withSafeError` を適用する。
 - 内側は `assert*` → 入力検証 → DB/外部API（エラーは `sanitizeDbError`）→ `recordAuditEvent` の順にする。
 - 既存の検証文言・権限判定・監査イベントを、ラッパー導入だけを理由に変更しない。
 - クライアントが判定・表示する想定済み状態は `ActionResult` 等の型付き戻り値で返す。
-  `UserFacingError` と `SAFE_MESSAGE_PATTERNS` の rethrow は既存のサーバー内互換性用で、
-  production でクライアントに文言が届く保証はない。詳細・移行対象は [docs/server-action-errors.md](docs/server-action-errors.md)。
+  公開できる想定済み状態は `ExpectedActionError` で明示する。`SAFE_MESSAGE_PATTERNS` は撤去済みで、
+  未分類の `UserFacingError` も汎用化する。呼出し側は `readActionResult`、サーバー内の入れ子は
+  `requireActionResult` を使う。既存の例外契約と詳細は [docs/server-action-errors.md](docs/server-action-errors.md)。
 
 ## context7 の使い方
 

@@ -2,8 +2,7 @@ import React from 'react';
 import type { DocumentProps } from '@react-pdf/renderer';
 import type { CalendarApi } from '@fullcalendar/core';
 import { supabase } from '@/lib/supabase';
-import { FetchedShiftData } from './shiftHelper';
-import { ClientData, StaffData } from '@/components/shifts/ShiftFormModal';
+import type { ShiftListItem, ClientData, StaffData } from '@/features/shifts/types';
 import type { PdfShiftData } from '@/components/pdf/ShiftScheduleDocument';
 import type { PdfCalendarEvent, PdfCalendarDay } from '@/components/pdf/ShiftCalendarDocument';
 import type { MatrixStaffData } from '@/components/pdf/ShiftMatrixDocument';
@@ -181,7 +180,7 @@ export type DownloadShiftMatrixPdfOptions = {
     calendarApi: CalendarApi;
     currentOrg: { id: string; name: string };
     staffs: StaffData[];
-    rawShifts: FetchedShiftData[];
+    rawShifts: ShiftListItem[];
 };
 
 export const downloadShiftMatrixPdf = async ({

@@ -9,7 +9,7 @@ const jobs = workflow.match(/needs: \[scope, ([^\]]+)\]/)[1].split(', ').concat(
 function result(overrides = {}, outputs = {}) {
   const needs = Object.fromEntries(jobs.map(job => [job, { result: 'success' }]));
   needs.scope.outputs = { core: 'true', database: 'true', databaseUpgrade: 'true',
-    ui: 'true', e2eCritical: 'false', e2eAll: 'true', dependencies: 'true', secretScan: 'true', ...outputs };
+    ui: 'true', transport: 'true', e2eCritical: 'false', e2eAll: 'true', dependencies: 'true', secretScan: 'true', ...outputs };
   for (const [job, value] of Object.entries(overrides)) needs[job].result = value;
   const process = spawnSync('jq', ['-e', gate], { input: JSON.stringify(needs), encoding: 'utf8' });
   if (process.error) throw process.error;
@@ -28,9 +28,13 @@ test('selected jobs cannot be silently skipped', () => {
 });
 test('documentation-only runs accept unselected skipped jobs', () => {
   const overrides = Object.fromEntries(jobs.filter(job => !['scope', 'secret-scan'].includes(job)).map(job => [job, 'skipped']));
-  const outputs = Object.fromEntries(['core', 'database', 'databaseUpgrade', 'ui', 'e2eCritical', 'e2eAll', 'dependencies'].map(key => [key, 'false']));
+  const outputs = Object.fromEntries(['core', 'database', 'databaseUpgrade', 'ui', 'transport', 'e2eCritical', 'e2eAll', 'dependencies'].map(key => [key, 'false']));
   assert.equal(result(overrides, outputs), true);
 });
 test('critical E2E remains required when full E2E is not selected', () => {
   assert.equal(result({ e2e: 'skipped' }, { e2eAll: 'false', e2eCritical: 'true' }), false);
+});
+test('production action contracts cannot be skipped when Storybook is not selected', () => {
+  assert.equal(result({ ui: 'skipped' }, { ui: 'false', transport: 'true' }), false);
+  assert.equal(result({}, { ui: 'false', transport: 'true' }), true);
 });

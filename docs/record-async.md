@@ -27,3 +27,38 @@ Issue #33。#32 のフォーム・アクション配置を維持し、#34 の `c
 - Playwright: 専用ローカルSupabaseで通常・内勤・受信AI承認の保存→フィード、既存の狭幅レイアウト。外部AI呼び出しは行わない。
 
 React 19.2.3 / MUI 7.3.7 / Next.js 16.3.6。2026-10-02〜03 にContext7でReactのref・非同期state・effect cleanup、Testing Libraryのact/renderHook、MUIのSnackbar更新・clickawayを確認。Issue #47では内勤保存APIの冪等性契約を追加し、認証・フォーム構造・フィード経路は維持する。
+
+## 通常記録フォームの責務分担
+
+`useRecordForm` はフォームの入力状態、初期読込、保存・提出を組み立てる。以下は `src/hooks/recordForm/` に分離している。
+
+- `useRecordActions`: 入力検証、保存・提出・承認・差戻し・削除、閉じる前の保存を管理する。画像操作と同じ`useAsyncRecordAction`を受け取り、操作ロック・冪等性キー・成功後だけの遷移を維持する。
+- `useRecordAutosave`: サーバー下書きの復元、3秒の自動保存、revision管理、手動保存成功後の下書き破棄。復元内容のフォームへの反映は、呼出し元の安定したcallbackへ委ねる。手動操作・AI処理中、承認済み、読込中は自動保存しない。
+- `useRecordImages`: 本文準備後の画像取得、画像だけの再試行、取得結果と失敗・待機状態の管理。本文読込の世代とscopeに一致する画像だけを公開し、古い応答をcleanupで破棄する。認可・署名URL発行・監査は既存の`getReportImages` Actionを使う。
+- `useRecordInitialization`: scopeに応じた初期化・読込世代・失敗・再試行と、シフト区間／既存記録への誘導を管理する。workspaceオブジェクトの更新も再読込対象とし、古い応答による入力・URLの上書きを防ぐ。
+- `loadRecordData`: 基礎データと記録本文の取得・フォーム用データへの変換。基礎データと記録本文の並列開始、本文・実績スタッフ・シフト・閲覧監査の並列実行を維持し、監査成功前の本文を返さない。DBエラーと本文行の欠落を区別し、旧形式の担当者・交通費も維持する。
+- `types.ts`: フォームで共有する型。既存利用箇所との互換性のため、公開型は引き続き`useRecordForm.ts`からもexportする。
+
+2026-10-22: Context7でReact 19.2.3のEffect依存関係と非同期応答のcleanup、Next.js 16.3.6同梱の`use client`資料を確認した。公開hookの返却項目、Server Action、RLS・permissions・監査契約は変更していない。自動保存の復元・debounce・処理中停止・scope切替・失敗後の再試行・unmountと、フォームを通した復元・保存・画像世代の回帰テストを追加した。
+
+Issue #109の初期読込整理では、上記の資料を再確認し、マスタ取得失敗後の再試行、新規記録の本人スタッフ・交通費、シフトの単一区間・複数区間・月跨ぎ・既存記録、旧交通費形式・本文欠落、切替後の古いシフト応答破棄を回帰テストへ追加した。保存・提出処理はIssue #112で`useRecordActions`へ分離した。
+
+## AI一括取込の候補取得（Issue #127）
+
+`useAiImportCandidates` はorganization IDと取得世代に束縛し、利用者・スタッフの両クエリが成功した場合だけ候補をまとめて公開する。取得中・取得失敗・正常0件を区別し、取得中と失敗中は抽出開始と下書き保存を停止する。正常0件は取得成功として扱い、登録が必要な候補を警告する。候補再取得は同じ組織の選択ファイル・レビュー修正・保存再試行キーを保持する。組織切替時は画面の入力と候補を破棄し、旧応答・unmount後の応答を反映しない。候補ID・氏名照合、AI機能フラグ、API認可・RLS・監査・保存契約は維持する。
+
+2026-10-23: Context7のReact公式資料でReact 19のEffect cleanupによる古い応答の破棄を確認。Next.js 16の同梱`use client`資料も確認した。単体テストでは両候補の遅延・失敗・0件、再試行、応答逆転、組織変更、StrictMode、unmount、抽出・保存の停止と入力保持を検証し、実AIサービスは呼ばない。
+
+## AI一括取込の責務分担
+
+Issue #134では、組織IDで再マウントする`AiImportWorkspace`と既存の候補取得hookを維持し、`src/hooks/aiImport/`へ以下を分離した。
+
+- `useAiImportFiles`: ファイルの追加・選択・グループ化とpreview URLの所有。削除後もレビュー行が参照するURLは維持し、参照消滅・クリア・unmountで解放する。
+- `transforms`: 元ファイル順のprocessing groups、候補ID優先・氏名fallback、日時検証、レビュー行と保存payloadの純粋変換。
+- `useAiImportExtraction`: FormData構築、既存`readAiExtractSse`による結果・進捗の受信、初回部分結果と再抽出失敗時の修正内容保持。
+- `useAiImportReview`: レビュー編集、行ごとの保存結果と再試行。成功行は表示を維持して再送対象から外し、同一payloadの失敗行には同じ冪等キーを使用する。フィード更新は既存`commitRecordChange`で部分成功を含むバッチごとに一度だけ行う。
+- `src/components/ai-import/AiImportFiles`: ファイル一覧・グループ表示・進捗の描画。空・選択・グループ・進捗はStorybookで、部分保存失敗は既存レビュー表のstoryで確認する。
+
+抽出・保存・閉じる確認はページで生成した一つの`useAsyncRecordAction`を共有する。ファイル操作とレビュー編集も同じ同期ロックを参照し、旧組織の結果・通知・遷移は適用しない。モデル・プロンプト・API・有効化条件・対応形式・認可・監査契約は変更しない。
+
+2026-10-23: Context7でReact（使用版19.2.3）のcustom hook、Effect cleanupと古い非同期応答の破棄、Next.js 16.3.6同梱の`use client`資料を確認した。検証にはmockのSSE・保存ActionとローカルStorybookを用い、実AIサービスには接続しない。

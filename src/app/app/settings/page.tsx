@@ -1,32 +1,25 @@
 'use client';
 import { getActionErrorMessage, readActionResult } from '@/utils/actionResult';
 
-import { GOOGLE_CONNECTION_LABELS, googleConnectionMessage, googleSyncErrorMessage } from '@/utils/googleSync';
+import { GOOGLE_CONNECTION_LABELS, googleConnectionMessage } from '@/utils/googleSync';
 
 import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { checkManagementPermission, checkShiftPermission } from '@/utils/permissions';
 import {
-  Box, Typography, Alert, CircularProgress, LinearProgress, Stack, Divider,
-  Chip, Tabs, Tab
+  Box, Typography, Alert, CircularProgress, Stack, Tabs, Tab
 } from '@/components/ui/mui';
 import { AppButton, AppDialog, AppTextField, PageBody, PageLayout } from '@/components/ui';
 import SettingsIcon from '@mui/icons-material/Settings';
-import SaveIcon from '@mui/icons-material/Save';
-import CloudQueueIcon from '@mui/icons-material/CloudQueue';
-import LinkIcon from '@mui/icons-material/Link';
-import WarningIcon from '@mui/icons-material/Warning';
-import ExitToAppIcon from '@mui/icons-material/ExitToApp';
-import LinkOffIcon from '@mui/icons-material/LinkOff';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import BuildIcon from '@mui/icons-material/Build';
-import SyncIcon from '@mui/icons-material/Sync'; // ★追加: 同期用のアイコンを追加
+import { OrganizationBasics } from '@/components/settings/OrganizationBasics';
+import { GoogleIntegrationSettings } from '@/components/settings/GoogleIntegrationSettings';
+import { OrganizationDangerSettings } from '@/components/settings/OrganizationDangerSettings';
 
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { callGasApi } from '@/app/actions/gas';
 import { deleteOrganization, disconnectGoogleCalendar, leaveOrganization, updateOrganizationDriveFolder, updateOrganizationName } from '@/app/actions/organization';
-import { getSyncStatus, syncUnsyncedBatch, repairGoogleCalendarSync } from '@/app/actions/shift'; // 同期はチャンク方式のサーバーバッチに統一
+import { useSettingsCalendarSync } from '@/hooks/useSettingsCalendarSync';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { getGoogleAuthUrlAction, getGoogleConnectionHealth, type GoogleConnectionState } from '@/app/actions/google';
@@ -85,10 +78,6 @@ function SettingsContent() {
     const [saving, setSaving] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [connectingCal, setConnectingCal] = useState(false);
-    const [repairingCal, setRepairingCal] = useState(false);
-    const [resyncingCal, setResyncingCal] = useState(false); // ★追加: 強制全件再同期中ステート
-    const [syncStatus, setSyncStatus] = useState<{ total: number; unsynced: number } | null>(null);
-    const [syncProgress, setSyncProgress] = useState<{ total: number; current: number } | null>(null);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     
     const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
@@ -341,99 +330,22 @@ function SettingsContent() {
         }
     };
 
-    // 同期ステータス（未同期件数）を取得して表示を更新
-    const refreshSyncStatus = useCallback(async () => {
-        if (!currentOrg || !canRepairCalendarSync) return;
-        try {
-            const s = await readActionResult(getSyncStatus(currentOrg.id));
-            setSyncStatus({ total: s.total, unsynced: s.unsynced });
-        } catch (e) {
-            console.error('getSyncStatus error', e);
-        }
-    }, [currentOrg, canRepairCalendarSync]);
+    const {
+        syncStatus, clearSyncStatus, refreshSyncStatus, repairingCal, resyncingCal,
+        syncProgress, handleRepairCalendar, handleForceResyncCalendar,
+    } = useSettingsCalendarSync({ organizationId: currentOrg?.id, canRepair: canRepairCalendarSync, showToast, confirm });
 
     useEffect(() => {
+        let active = true;
         queueMicrotask(() => {
+            if (!active) return;
             if (googleCalendarId && canRepairCalendarSync) void refreshSyncStatus();
-            else setSyncStatus(null);
+            else clearSyncStatus();
         });
-    }, [googleCalendarId, canRepairCalendarSync, refreshSyncStatus]);
-
-    // 同期結果のメッセージ
-    const reportSyncResult = (done: number, failed: number, errorKind?: string) => {
-        const message = googleSyncErrorMessage(errorKind);
-        if (message) {
-            showToast(message, 'warning');
-        } else if (failed > 0) {
-            showToast(`同期が一部失敗しました（成功 ${done} 件 / 失敗 ${failed} 件）。通信状況を確認し、しばらくしてから再度お試しください。`, 'warning');
-        } else {
-            showToast(`Googleカレンダーへの同期が完了しました（${done} 件）。`, 'success');
-        }
-    };
-
-    const reportRepairResult = (res: Extract<Awaited<ReturnType<typeof repairGoogleCalendarSync>>, { ok: true }>['data']) => {
-        if (!res.connected) {
-            showToast('Googleカレンダーが連携されていません。「連携する」から接続してください。', 'warning');
-        } else if (res.errorKind) {
-            showToast(googleSyncErrorMessage(res.errorKind)!, 'warning');
-        } else if (res.failed > 0) {
-            showToast(`同期修復が一部失敗しました（成功 ${res.succeeded} 件 / 失敗 ${res.failed} 件）。`, 'warning');
-        } else {
-            showToast(`同期修復が完了しました（作成 ${res.created} / 更新 ${res.updated} / 再リンク ${res.linked} / 重複削除 ${res.deduped} / Google削除 ${res.deletedRemote}）。`, 'success');
-        }
-    };
-
-    // 未同期シフトのみをチャンク単位で同期する
-    const handleRepairCalendar = async () => {
-        if (!currentOrg) return;
-        setRepairingCal(true);
-        try {
-            const status = await readActionResult(getSyncStatus(currentOrg.id));
-            const total = status.unsynced;
-            if (total === 0) { showToast('未同期の予定はありません。', 'info'); return; }
-            setSyncProgress({ total, current: 0 });
-            let done = 0, failed = 0, processed = 0;
-            let errorKind: string | undefined;
-            for (;;) {
-                // 進捗表示と実際の同期を1件単位でそろえる。
-                const res = await readActionResult(syncUnsyncedBatch(currentOrg.id, 1));
-                done += res.succeeded; failed += res.failed;
-                processed += res.processed;
-                if (res.errorKind) errorKind = res.errorKind;
-                setSyncProgress({ total, current: Math.min(total, processed) });
-                if (errorKind === 'auth' || res.remaining <= 0 || res.succeeded === 0) break;
-            }
-            reportSyncResult(done, failed, errorKind);
-        } catch (e) {
-            console.error(e);
-            showToast('同期処理中にエラーが発生しました。', 'error');
-        } finally {
-            setRepairingCal(false);
-            setSyncProgress(null);
-            refreshSyncStatus();
-        }
-    };
-
-    // 全件強制再同期をチャンク単位でループ実行する
-    const handleForceResyncCalendar = async () => {
-        if (!currentOrg) return;
-        if (!(await confirm({ message: 'Googleカレンダーの同期状態を修復します。既存予定の再リンク、重複削除、削除済みシフトのGoogle側削除を行います。よろしいですか？\n※件数が多い場合は完了まで時間がかかります。' }))) return;
-
-        setResyncingCal(true);
-        try {
-            setSyncProgress({ total: 1, current: 0 });
-            const res = await readActionResult(repairGoogleCalendarSync(currentOrg.id));
-            setSyncProgress({ total: 1, current: 1 });
-            reportRepairResult(res);
-        } catch (e) {
-            console.error(e);
-            showToast('同期修復中にエラーが発生しました。', 'error');
-        } finally {
-            setResyncingCal(false);
-            setSyncProgress(null);
-            refreshSyncStatus();
-        }
-    };
+        return () => { active = false; };
+        // Sync status follows connection/organization changes, not adapter function identities.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [googleCalendarId, canRepairCalendarSync, currentOrg?.id]);
 
     const handleDeleteOrg = async () => {
         if (!currentOrg || confirmInput !== currentOrg.name) return;
@@ -489,194 +401,37 @@ function SettingsContent() {
                     {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
 
                     {tabIndex === 0 && (
-                        <Stack spacing={3}>
-                            {/* 基本情報 */}
-                            <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
-                                <Typography variant="h6" fontWeight="bold" gutterBottom>基本情報</Typography>
-                                <Stack spacing={4}>
-                                    <Box>
-                                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>事業所名</Typography>
-                                        <AppTextField value={orgName} onChange={(e) => setOrgName(e.target.value)} disabled={!canEditOrganization} />
-                                    </Box>
-                                    <Divider />
-                                    {canEditOrganization && (
-                                        <Box sx={{ display: 'flex', justifyContent: { xs: 'stretch', sm: 'flex-end' } }}>
-                                            <AppButton size="large" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving} sx={{ width: { xs: '100%', sm: 'auto' } }}>
-                                                {saving ? '保存中...' : '変更を保存'}
-                                            </AppButton>
-                                        </Box>
-                                    )}
-                                </Stack>
-                            </Box>
-
-                        </Stack>
+                        <OrganizationBasics
+                            orgName={orgName}
+                            setOrgName={setOrgName}
+                            canEditOrganization={canEditOrganization}
+                            saving={saving}
+                            handleSave={handleSave}
+                        />
                     )}
 
                     {tabIndex === 1 && (
-                        <Stack spacing={3}>
-                            {/* Google Drive連携 */}
-                            <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: googleFolderId ? 'primary.light' : 'divider', bgcolor: googleFolderId ? 'background.tint' : 'background.paper' }}>
-                                <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={2}>
-                                    <CloudQueueIcon color="primary" fontSize="large" />
-                                    <Box sx={{ minWidth: 0 }}>
-                                        <Typography variant="h6" fontWeight="bold">Googleドライブ連携</Typography>
-                                        <Typography variant="body2" color="text.secondary">帳票の保存先フォルダを管理します（GAS経由）</Typography>
-                                    </Box>
-                                    <Chip label={googleFolderId ? "連携済み" : "未連携"} color={googleFolderId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: { sm: 'auto' } }} />
-                                </Stack>
-                                
-                                <Box sx={{ mt: 2, p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider', minWidth: 0 }}>
-                                    {canManageIntegrations ? (
-                                        googleFolderId ? (
-                                            <Stack spacing={2}>
-                                                <Typography variant="body2">
-                                                    連携中のフォルダID:{' '}
-                                                    <Box component="code" sx={{ display: 'inline-block', maxWidth: '100%', overflowWrap: 'anywhere', wordBreak: 'break-all', verticalAlign: 'bottom' }}>
-                                                        {googleFolderId}
-                                                    </Box>
-                                                </Typography>
-                                                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" sx={{ '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
-                                                    <AppButton variant="outlined" intent="secondary" href={driveUrl} target="_blank" rel="noreferrer" startIcon={<LinkIcon />}>
-                                                        フォルダを開く
-                                                    </AppButton>
-                                                    <AppButton variant="text" intent="danger" startIcon={<LinkOffIcon />} onClick={handleDisconnectDrive}>
-                                                        連携を解除
-                                                    </AppButton>
-                                                    <AppButton variant="text" intent="warning" onClick={handleConnectDrive} disabled={connecting}>
-                                                        フォルダを再作成/修復
-                                                    </AppButton>
-                                                </Stack>
-                                            </Stack>
-                                        ) : (
-                                            <Stack spacing={2}>
-                                                <Alert severity="info">
-                                                    まだ連携フォルダがありません。ボタンを押すと、管理者のGoogleドライブ内にこの事業所用のフォルダが自動作成されます。
-                                                </Alert>
-                                                <AppButton onClick={handleConnectDrive} disabled={connecting} sx={{ width: { xs: '100%', sm: 'auto' } }}>
-                                                    {connecting ? '作成中...' : '連携フォルダを作成する'}
-                                                </AppButton>
-                                            </Stack>
-                                        )
-                                    ) : (
-                                        <Typography variant="caption" color="text.secondary">
-                                            連携設定権限を持つメンバーのみ設定を変更できます。
-                                        </Typography>
-                                    )}
-                                </Box>
-                            </Box>
-
-                            {/* Googleカレンダー連携 (OAuth方式) */}
-                            <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: googleCalendarId ? 'success.main' : 'divider', bgcolor: googleCalendarId ? 'background.success' : 'background.paper' }}>
-                                <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={2}>
-                                    <CalendarMonthIcon color="success" fontSize="large" />
-                                    <Box sx={{ minWidth: 0 }}>
-                                        <Typography variant="h6" fontWeight="bold">Googleカレンダー連携</Typography>
-                                        <Typography variant="body2" color="text.secondary">事業所ごとの専用カレンダーを自動作成し、シフトを同期します（OAuth直接連携）</Typography>
-                                    </Box>
-                                    <Chip
-                                        label={googleCalendarId ? GOOGLE_CONNECTION_LABELS[googleConnectionState] : '未連携'}
-                                        color={googleCalendarId && googleConnectionState === 'healthy' ? 'success' : googleCalendarId ? 'warning' : 'default'}
-                                        size="small"
-                                        icon={<LinkIcon />}
-                                        sx={{ ml: { sm: 'auto' } }}
-                                    />
-                                </Stack>
-                                
-                                <Box sx={{ mt: 2, p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider', minWidth: 0 }}>
-                                    {canManageIntegrations ? (
-                                        googleCalendarId ? (
-                                            <Stack spacing={2}>
-                                                <Typography variant="body2">
-                                                    連携中のカレンダーID:{' '}
-                                                    <Box component="code" sx={{ display: 'inline-block', maxWidth: '100%', overflowWrap: 'anywhere', wordBreak: 'break-all', verticalAlign: 'bottom' }}>
-                                                        {googleCalendarId}
-                                                    </Box>
-                                                </Typography>
-                                                <Typography variant="caption" color="text.secondary" display="block">
-                                                    ※Googleカレンダーアプリから「CareRecord_{orgName}」という名前のカレンダーを確認してください。
-                                                </Typography>
-
-                                                {/* 同期ステータス */}
-                                                {googleConnectionMessage(googleConnectionState) && (
-                                                    <Alert severity="warning">
-                                                        {googleConnectionMessage(googleConnectionState)}
-                                                    </Alert>
-                                                )}
-                                                {canRepairCalendarSync && syncStatus && (
-                                                    syncStatus.unsynced > 0 ? (
-                                                        <Alert severity="warning" sx={{ mt: 1 }}>
-                                                            未同期の予定が <strong>{syncStatus.unsynced} 件</strong> あります（全 {syncStatus.total} 件中）。「未同期を同期」で解消できます。
-                                                        </Alert>
-                                                    ) : googleConnectionState === 'healthy' ? (
-                                                        <Alert severity="success" sx={{ mt: 1 }}>
-                                                            すべての予定（{syncStatus.total} 件）がGoogleカレンダーと同期済みです。
-                                                        </Alert>
-                                                    ) : null
-                                                )}
-
-                                                {canRepairCalendarSync && syncProgress && (
-                                                    <Box sx={{ mt: 1 }}>
-                                                        <LinearProgress variant="determinate" value={syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0} sx={{ height: 6, borderRadius: 1 }} />
-                                                        <Typography variant="caption" color="text.secondary">{syncProgress.current} / {syncProgress.total} 件 処理中...</Typography>
-                                                    </Box>
-                                                )}
-
-                                                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mt: 1, '& > *': { width: { xs: '100%', sm: 'auto' } } }}>
-                                                    {canRepairCalendarSync && <AppButton
-                                                        intent="warning"
-                                                        startIcon={repairingCal ? <CircularProgress size={16} color="inherit" /> : <BuildIcon />}
-                                                        onClick={handleRepairCalendar}
-                                                        disabled={repairingCal || resyncingCal || (syncStatus?.unsynced === 0)}
-                                                    >
-                                                        {repairingCal ? '同期中...' : `未同期を同期${syncStatus && syncStatus.unsynced > 0 ? `（${syncStatus.unsynced}件）` : ''}`}
-                                                    </AppButton>}
-                                                    {/* 全件強制再同期（通常は未同期同期で十分。Google側で予定がずれた場合の最終手段） */}
-                                                    {canRepairCalendarSync && <AppButton
-                                                        variant="outlined"
-                                                        startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" /> : <SyncIcon />}
-                                                        onClick={handleForceResyncCalendar}
-                                                        disabled={repairingCal || resyncingCal}
-                                                        sx={{ boxShadow: 'none' }}
-                                                    >
-                                                        {resyncingCal ? '修復中...' : '同期を修復'}
-                                                    </AppButton>}
-                                                    <AppButton
-                                                        variant="outlined"
-                                                        intent="danger"
-                                                        startIcon={<LinkOffIcon />} 
-                                                        onClick={handleDisconnectCalendar} 
-                                                        disabled={repairingCal || resyncingCal}
-                                                    >
-                                                        連携を解除
-                                                    </AppButton>
-                                                    <AppButton
-                                                        variant="outlined"
-                                                        intent="warning"
-                                                        onClick={() => handleConnectCalendar('reauthorize')}
-                                                        disabled={connectingCal || repairingCal || resyncingCal}
-                                                    >
-                                                        {connectingCal ? 'Googleへ移動中...' : 'Googleを再認証'}
-                                                    </AppButton>
-                                                </Stack>
-                                            </Stack>
-                                        ) : (
-                                            <Stack spacing={2}>
-                                                <Alert severity="info">
-                                                    ボタンを押すとGoogleの認証画面へ移動します。許可すると、あなたのアカウントに事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
-                                                </Alert>
-                                                <AppButton intent="success" onClick={() => handleConnectCalendar()} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
-                                                    {connectingCal ? 'Googleへ移動中...' : 'シフト用カレンダーを作成・連携する'}
-                                                </AppButton>
-                                            </Stack>
-                                        )
-                                    ) : (
-                                        <Typography variant="caption" color="text.secondary">
-                                            連携設定権限を持つメンバーのみ設定を変更できます。
-                                        </Typography>
-                                    )}
-                                </Box>
-                            </Box>
-                        </Stack>
+                        <GoogleIntegrationSettings
+                            orgName={orgName}
+                            googleFolderId={googleFolderId}
+                            googleCalendarId={googleCalendarId}
+                            googleConnectionState={googleConnectionState}
+                            driveUrl={driveUrl}
+                            canManageIntegrations={canManageIntegrations}
+                            canRepairCalendarSync={canRepairCalendarSync}
+                            connecting={connecting}
+                            connectingCal={connectingCal}
+                            repairingCal={repairingCal}
+                            resyncingCal={resyncingCal}
+                            syncStatus={syncStatus}
+                            syncProgress={syncProgress}
+                            handleConnectDrive={handleConnectDrive}
+                            handleDisconnectDrive={handleDisconnectDrive}
+                            handleConnectCalendar={handleConnectCalendar}
+                            handleDisconnectCalendar={handleDisconnectCalendar}
+                            handleRepairCalendar={handleRepairCalendar}
+                            handleForceResyncCalendar={handleForceResyncCalendar}
+                        />
                     )}
 
                     {tabIndex === 2 && (
@@ -717,42 +472,11 @@ function SettingsContent() {
                     )}
 
                     {tabIndex === 3 && (
-                        <Stack spacing={3}>
-                            {/* 危険な設定 */}
-                            <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: 'error.light', bgcolor: 'background.danger' }}>
-                                <Stack direction="row" alignItems="center" gap={1} mb={2}>
-                                    <WarningIcon color="error" />
-                                    <Typography variant="h6" fontWeight="bold" color="error">危険な設定</Typography>
-                                </Stack>
-                                <Stack spacing={2}>
-                                    <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} flexDirection={{ xs: 'column', sm: 'row' }} gap={1.5}>
-                                        <Box sx={{ minWidth: 0 }}>
-                                            <Typography fontWeight="bold">事業所から脱退</Typography>
-                                            <Typography variant="caption" color="text.secondary">この事業所のメンバーから外れます</Typography>
-                                        </Box>
-                                        <AppButton variant="outlined" intent="warning" startIcon={<ExitToAppIcon />} onClick={() => setOpenLeaveDialog(true)}>
-                                            脱退する
-                                        </AppButton>
-                                    </Box>
-                                    {canDeleteOrganization && (
-                                        <>
-                                            <Divider />
-                                            <Box display="flex" justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} flexDirection={{ xs: 'column', sm: 'row' }} gap={1.5}>
-                                                <Box sx={{ minWidth: 0 }}>
-                                                    <Typography fontWeight="bold" color="error">事業所を削除</Typography>
-                                                    <Typography variant="caption" color="text.secondary">
-                                                        事業所を利用不能な削除保留状態にします。記録は保持方針に従い保全されます。
-                                                    </Typography>
-                                                </Box>
-                                                <AppButton intent="danger" onClick={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}>
-                                                    削除する
-                                                </AppButton>
-                                            </Box>
-                                        </>
-                                    )}
-                                </Stack>
-                            </Box>
-                        </Stack>
+                        <OrganizationDangerSettings
+                            canDeleteOrganization={canDeleteOrganization}
+                            onLeave={() => setOpenLeaveDialog(true)}
+                            onDelete={() => { setConfirmInput(''); setOpenDeleteDialog(true); }}
+                        />
                     )}
 
             </PageBody>

@@ -1,113 +1,42 @@
 'use client';
 
-import { ActionResultError, readActionResult } from '@/utils/actionResult';
+import { readActionResult } from '@/utils/actionResult';
 
 import { useAsyncRecordAction } from '@/hooks/useAsyncRecordAction';
-import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
 import {
-  auditReportView,
-  discardReportAutosave,
-  getReportImages,
-  loadReportAutosave,
-  saveReportAutosave,
-  saveReport as saveReportAction,
-  softDeleteReports,
-  transitionReports,
   uploadReportImage,
 } from '@/app/actions/reports';
 import { getLinkedShifts, getShiftSuggestions } from '@/app/actions/reportShifts';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { useToast } from '@/components/ui/ToastProvider';
-import { DEFAULT_TEMPLATE } from '@/constants/formTemplates';
 import { useWorkspace } from '@/context/WorkspaceContext';
-import { useRequestGeneration } from '@/hooks/useRequestGeneration';
 import { supabase } from '@/lib/supabase';
 import type { ExtractionResult } from '@/lib/ai/extractSchema';
 import { checkRecordPermission } from '@/utils/permissions';
 
-export type FormItem = {
-  id: string; label: string; type: 'text' | 'number' | 'checkbox' | 'time' | 'select' | 'section' | 'multicheckbox';
-  options?: string; required: boolean; hasDetail?: boolean;
-  detailMode?: 'conditional' | 'always'; detailLabel?: string;
-};
+import type {
+  ActualStaffInput, FormAnswers, FormItem, LinkedShift, ReportStatus,
+  ShiftSegmentData, ShiftSuggestion, TravelExpense,
+  RecordFormState as FormState, RecordUiState as UiState, RecordShiftState as ShiftState,
+} from './recordForm/types';
+import { useRecordAutosave, type RecordAutosaveValues } from './recordForm/useRecordAutosave';
+import { useRecordImages } from './recordForm/useRecordImages';
+import { useRecordInitialization } from './recordForm/useRecordInitialization';
+import { useRecordActions } from './recordForm/useRecordActions';
 
-export type FormAnswers = Record<string, string | number | boolean | string[]>;
-export type HelperProfile = { id: string; name: string; defaultTravelCostYen: number | null };
-export type TravelExpense = { method: 'car' | 'public_transport' | 'other' | 'none'; amountYen: string };
-export type StaffRoleOption = { id: string; name: string };
-export type ServiceTypeOption = { id: string; name: string };
-export type ActualStaffInput = { staff_id: string; staff_role_id: string | null };
-type ReportStatus = 'draft' | 'pending' | 'approved' | 'remanded';
-
-type ShiftStaffData = {
-    staff_id: string;
-    staffs: { name: string } | null;
-};
-
-export type ShiftSegmentData = {
-    id: string;
-    start_at: string;
-    end_at: string;
-    service_type_id?: string | null;
-    service_type?: { id?: string; name: string } | null;
-    shift_segment_staffs?: Array<{
-        staff_id: string;
-        staff_role_id?: string | null;
-        staff?: { name: string } | null;
-    }>;
-};
-
-export type ShiftSuggestion = { id: string; title: string | null; start_at: string; end_at: string; staffName: string | null };
-export type LinkedShift = { shift_id: string; is_primary: boolean; shifts: { id: string; title: string | null; start_at: string; end_at: string; shift_staffs: Array<{ staffs: { name: string } | null }> } | null };
-
-type FormState = {
-  clientName: string;
-  template: FormItem[];
-  answers: FormAnswers;
-  selectableStaffs: HelperProfile[];
-  staffRoles: StaffRoleOption[];
-  serviceTypes: ServiceTypeOption[];
-  selectedHelpers: string[];
-  actualStaffs: ActualStaffInput[];
-  actualServiceTypeId: string;
-  startDateTime: string;
-  endDateTime: string;
-  serviceTime: string;
-  travelTime: string;
-  travelExpenses: Record<string, TravelExpense>;
-  images: { id: string; url: string }[];
-  aiFilledFields: Set<string>;
-  hasAiDraftSource: boolean;
-  isSpanningMonth: boolean;
-  selectedPart: 'part1' | 'part2';
-  originalShiftTimes: { start_at: string; end_at: string } | null;
-};
-
-type UiState = {
-  currentReportId: string | null;
-  currentStatus: ReportStatus | null;
-  isDirty: boolean;
-  openCloseDialog: boolean;
-  loading: boolean;
-  errors: Record<string, string>;
-  submitting: boolean;
-};
-
-type ShiftState = {
-  shiftSuggestions: ShiftSuggestion[];
-  linkedShifts: LinkedShift[];
-  dismissedSuggestions: Set<string>;
-  shiftSegments: ShiftSegmentData[];
-  selectedSegmentId: string | null;
-};
+export type {
+  ActualStaffInput, FormAnswers, FormItem, HelperProfile, LinkedShift,
+  ServiceTypeOption, ShiftSegmentData, ShiftSuggestion, StaffRoleOption, TravelExpense,
+} from './recordForm/types';
 
 type SetStateValue<T> = T | ((prev: T) => T);
 
 type FormAction =
+  | { type: 'PATCH'; patch: Partial<FormState> }
   | { type: 'SET_FIELD'; field: keyof FormState; value: SetStateValue<unknown> }
   | { type: 'SET_ANSWER'; id: string; value: FormAnswers[string] }
   | { type: 'SET_ANSWERS'; value: SetStateValue<FormAnswers> }
@@ -116,6 +45,7 @@ type FormAction =
   | { type: 'AI_FILL'; answers: FormAnswers; fields: Set<string> };
 
 type UiAction =
+  | { type: 'PATCH'; patch: Partial<UiState> }
   | { type: 'SET_FIELD'; field: keyof UiState; value: SetStateValue<unknown> }
   | { type: 'RESET'; currentReportId: string | null }
   | { type: 'MARK_DIRTY'; dirty?: boolean }
@@ -123,6 +53,7 @@ type UiAction =
   | { type: 'CLEAR_ERROR'; id: string };
 
 type ShiftAction =
+  | { type: 'PATCH'; patch: Partial<ShiftState> }
   | { type: 'SET_FIELD'; field: keyof ShiftState; value: SetStateValue<unknown> }
   | { type: 'RESET'; selectedSegmentId: string | null }
   | { type: 'DISMISS_SUGGESTION'; id: string };
@@ -146,7 +77,6 @@ const formInitialState: FormState = {
   serviceTime: '',
   travelTime: '0',
   travelExpenses: {},
-  images: [],
   aiFilledFields: new Set(),
   hasAiDraftSource: false,
   isSpanningMonth: false,
@@ -174,6 +104,8 @@ const createShiftInitialState = (selectedSegmentId: string | null): ShiftState =
 
 function formReducer(state: FormState, action: FormAction): FormState {
   switch (action.type) {
+    case 'PATCH':
+      return { ...state, ...action.patch };
     case 'SET_FIELD':
       return { ...state, [action.field]: resolveStateValue(action.value, state[action.field]) };
     case 'SET_ANSWER':
@@ -198,6 +130,8 @@ function formReducer(state: FormState, action: FormAction): FormState {
 
 function uiReducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
+    case 'PATCH':
+      return { ...state, ...action.patch };
     case 'SET_FIELD':
       return { ...state, [action.field]: resolveStateValue(action.value, state[action.field]) };
     case 'RESET':
@@ -219,6 +153,8 @@ function uiReducer(state: UiState, action: UiAction): UiState {
 
 function shiftReducer(state: ShiftState, action: ShiftAction): ShiftState {
   switch (action.type) {
+    case 'PATCH':
+      return { ...state, ...action.patch };
     case 'SET_FIELD':
       return { ...state, [action.field]: resolveStateValue(action.value, state[action.field]) };
     case 'RESET':
@@ -242,24 +178,21 @@ export function useRecordForm() {
   const shiftId = searchParams.get('shiftId');
   const segmentId = searchParams.get('segmentId');
   const incomingDraftKey = searchParams.get('draftKey');
-  const recordIdentityKey = `${currentOrg?.id ?? ''}:${clientId ?? ''}:${paramReportId ?? ''}:${shiftId ?? ''}:${segmentId ?? ''}`;
+  const recordIdentityKey = `${userId ?? ''}:${currentOrg?.id ?? ''}:${clientId ?? ''}:${paramReportId ?? ''}:${shiftId ?? ''}:${segmentId ?? ''}`;
   const draftScope = useMemo(
     () => ({ identity: recordIdentityKey, key: incomingDraftKey || crypto.randomUUID() }),
     [incomingDraftKey, recordIdentityKey],
   );
   const draftKey = draftScope.key;
-  const { pending: actionPending, error: actionError, errorCause: actionErrorCause, run, isRunning, attemptKey, finishAttempt } = useAsyncRecordAction(`${recordIdentityKey}:${draftKey}`);
+  const actions = useAsyncRecordAction(`${recordIdentityKey}:${draftKey}`);
+  const { pending: actionPending, error: actionError, errorCause: actionErrorCause, run, isRunning } = actions;
   const recordScopeKey = `${recordIdentityKey}:${draftKey}`;
   const [linksFailure, setLinksFailure] = useState<{ scope: string; cause: unknown } | null>(null);
   const [linksReload, setLinksReload] = useState(0);
   const linkedLoadError = linksFailure?.scope === recordScopeKey ? linksFailure.cause : null;
   const retryLinkedShifts = () => { setLinksFailure(null); setLinksReload(value => value + 1); };
 
-  const autosaveRestoredRef = useRef(false);
-  const autosaveRevisionRef = useRef(0);
   const contentVersionRef = useRef(0);
-  const { next: nextLoadGeneration, invalidate: invalidateLoadGeneration, isCurrent: isCurrentLoadGeneration } = useRequestGeneration();
-  const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const [formState, formDispatch] = useReducer(formReducer, formInitialState);
   const [uiState, uiDispatch] = useReducer(uiReducer, paramReportId, createUiInitialState);
@@ -280,14 +213,12 @@ export function useRecordForm() {
     serviceTime,
     travelTime,
     travelExpenses,
-    images,
     aiFilledFields,
-    hasAiDraftSource,
     isSpanningMonth,
     selectedPart,
     originalShiftTimes,
   } = formState;
-  const { currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting: imageSubmitting } = uiState;
+  const { currentReportId, currentStatus, isDirty, openCloseDialog, loading: uiLoading, errors, submitting: imageSubmitting } = uiState;
   const submitting = imageSubmitting || actionPending;
   const { shiftSuggestions, linkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId } = shiftState;
 
@@ -301,12 +232,7 @@ export function useRecordForm() {
     shiftDispatch({ type: 'SET_FIELD', field, value });
   }, []);
 
-  const setClientName = useCallback((value: SetStateValue<string>) => setFormField('clientName', value), [setFormField]);
-  const setTemplate = useCallback((value: SetStateValue<FormItem[]>) => setFormField('template', value), [setFormField]);
   const setAnswers = useCallback((value: SetStateValue<FormAnswers>) => formDispatch({ type: 'SET_ANSWERS', value }), []);
-  const setSelectableStaffs = useCallback((value: SetStateValue<HelperProfile[]>) => setFormField('selectableStaffs', value), [setFormField]);
-  const setStaffRoles = useCallback((value: SetStateValue<StaffRoleOption[]>) => setFormField('staffRoles', value), [setFormField]);
-  const setServiceTypes = useCallback((value: SetStateValue<ServiceTypeOption[]>) => setFormField('serviceTypes', value), [setFormField]);
   const setSelectedHelpers = useCallback((value: SetStateValue<string[]>) => setFormField('selectedHelpers', value), [setFormField]);
   const setActualStaffs = useCallback((value: SetStateValue<ActualStaffInput[]>) => setFormField('actualStaffs', value), [setFormField]);
   const setActualServiceTypeId = useCallback((value: SetStateValue<string>) => setFormField('actualServiceTypeId', value), [setFormField]);
@@ -315,7 +241,6 @@ export function useRecordForm() {
   const setServiceTime = useCallback((value: SetStateValue<string>) => setFormField('serviceTime', value), [setFormField]);
   const setTravelTime = useCallback((value: SetStateValue<string>) => setFormField('travelTime', value), [setFormField]);
   const setTravelExpenses = useCallback((value: SetStateValue<Record<string, TravelExpense>>) => setFormField('travelExpenses', value), [setFormField]);
-  const setImages = useCallback((value: SetStateValue<{ id: string; url: string }[]>) => setFormField('images', value), [setFormField]);
   const setAiFilledFields = useCallback((value: SetStateValue<Set<string>>) => setFormField('aiFilledFields', value), [setFormField]);
   const setHasAiDraftSource = useCallback((value: SetStateValue<boolean>) => setFormField('hasAiDraftSource', value), [setFormField]);
   const setIsSpanningMonth = useCallback((value: SetStateValue<boolean>) => setFormField('isSpanningMonth', value), [setFormField]);
@@ -326,7 +251,6 @@ export function useRecordForm() {
   const setCurrentStatus = useCallback((value: SetStateValue<ReportStatus | null>) => setUiField('currentStatus', value), [setUiField]);
   const setIsDirty = useCallback((value: SetStateValue<boolean>) => setUiField('isDirty', value), [setUiField]);
   const setOpenCloseDialog = useCallback((value: SetStateValue<boolean>) => setUiField('openCloseDialog', value), [setUiField]);
-  const setLoading = useCallback((value: SetStateValue<boolean>) => setUiField('loading', value), [setUiField]);
   const setErrors = useCallback((value: SetStateValue<Record<string, string>>) => {
     uiDispatch({ type: 'SET_ERROR_MAP', errors: resolveStateValue(value, errors) });
   }, [errors]);
@@ -335,8 +259,20 @@ export function useRecordForm() {
 
   const setShiftSuggestions = useCallback((value: SetStateValue<ShiftSuggestion[]>) => setShiftField('shiftSuggestions', value), [setShiftField]);
   const setLinkedShifts = useCallback((value: SetStateValue<LinkedShift[]>) => setShiftField('linkedShifts', value), [setShiftField]);
-  const setShiftSegments = useCallback((value: SetStateValue<ShiftSegmentData[]>) => setShiftField('shiftSegments', value), [setShiftField]);
   const setSelectedSegmentId = useCallback((value: SetStateValue<string | null>) => setShiftField('selectedSegmentId', value), [setShiftField]);
+
+  const restoreAutosave = useCallback((payload: Partial<RecordAutosaveValues>) => {
+    if (payload.answers) setAnswers(payload.answers);
+    if (payload.selectedHelpers) setSelectedHelpers(payload.selectedHelpers);
+    if (payload.actualStaffs) setActualStaffs(payload.actualStaffs);
+    if (payload.actualServiceTypeId !== undefined) setActualServiceTypeId(payload.actualServiceTypeId);
+    if (payload.startDateTime) setStartDateTime(payload.startDateTime);
+    if (payload.endDateTime) setEndDateTime(payload.endDateTime);
+    if (payload.serviceTime !== undefined) setServiceTime(payload.serviceTime);
+    if (payload.travelTime !== undefined) setTravelTime(payload.travelTime);
+    if (payload.travelExpenses) setTravelExpenses(payload.travelExpenses);
+    setIsDirty(true);
+  }, [setActualServiceTypeId, setActualStaffs, setAnswers, setEndDateTime, setIsDirty, setSelectedHelpers, setServiceTime, setStartDateTime, setTravelExpenses, setTravelTime]);
 
   const formatDatetimeLocal = useCallback((date: Date) => {
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -408,6 +344,50 @@ export function useRecordForm() {
       }
   }, [formatDatetimeLocal, setEndDateTime, setServiceTime, setStartDateTime]);
 
+  const applyForm = useCallback((patch: Partial<FormState>) => formDispatch({ type: 'PATCH', patch }), []);
+  const applyUi = useCallback((patch: Partial<UiState>) => uiDispatch({ type: 'PATCH', patch }), []);
+  const applyShift = useCallback((patch: Partial<ShiftState>) => shiftDispatch({ type: 'PATCH', patch }), []);
+  const reset = useCallback(() => {
+    formDispatch({ type: 'RESET' });
+    uiDispatch({ type: 'RESET', currentReportId: paramReportId });
+    shiftDispatch({ type: 'RESET', selectedSegmentId: segmentId });
+  }, [paramReportId, segmentId]);
+  const { loading, readyLoad, loadError, retryLoad } = useRecordInitialization({
+    recordScopeKey, currentOrg, wsLoading, userId, clientId, paramReportId, shiftId,
+    segmentId, draftKey, uiLoading, contentVersionRef, applyForm, applyUi, applyShift,
+    reset, formatDatetimeLocal, setupTimeForPart, applySegmentDefaults,
+  });
+
+  const { autosaveState, discardCommittedAutosave } = useRecordAutosave({
+    scopeKey: recordScopeKey,
+    organizationId: currentOrg?.id,
+    clientId: clientId as string,
+    reportId: currentReportId,
+    draftKey,
+    loading,
+    isDirty,
+    submitting,
+    status: currentStatus,
+    values: { answers, selectedHelpers, actualStaffs, actualServiceTypeId, startDateTime, endDateTime, serviceTime, travelTime, travelExpenses },
+    restore: restoreAutosave,
+  });
+  const { images, imagesLoading, imagesError, retryImages } = useRecordImages({
+    scopeKey: recordScopeKey,
+    organizationId: currentOrg?.id,
+    reportId: currentReportId,
+    loading,
+    generation: readyLoad?.generation,
+  });
+
+  const {
+    handleDeleteReport, handleDraftSave, handleSubmit, handlePendingSave,
+    handleApprove, handleRemand, handleClose, handleDialogDiscard, handleDialogSaveDraft,
+  } = useRecordActions({
+    currentOrg, clientId: clientId as string, shiftId, segmentId, draftKey, selectedSegmentId,
+    shiftSegmentCount: shiftSegments.length, form: formState, ui: uiState, actions,
+    externalPending, contentVersionRef, applyForm, applyUi, discardCommittedAutosave,
+  });
+
   const handlePartChange = async (part: 'part1' | 'part2') => {
       if (isRunning() || externalPending.current) return;
       if (isDirty) {
@@ -437,7 +417,6 @@ export function useRecordForm() {
       if (existing) {
           setCurrentReportId(existing.id);
           router.replace(`/app/record/${clientId}?reportId=${existing.id}&shiftId=${shiftId}&draftKey=${encodeURIComponent(draftKey)}`);
-          await loadExistingData(existing.id);
       } else {
           setCurrentReportId(null);
           router.replace(`/app/record/${clientId}?shiftId=${shiftId}&draftKey=${encodeURIComponent(draftKey)}`);
@@ -447,170 +426,6 @@ export function useRecordForm() {
           setCurrentStatus('draft');
       }
   };
-
-  const fetchBaseData = useCallback(async (isCurrent: () => boolean, hasExistingReport: boolean) => {
-    if (!currentOrg || typeof clientId !== 'string') return;
-
-    try {
-      const [
-        { data: client },
-        { data: tmpl },
-        { data: staffsData },
-        { data: assignmentRows },
-        { data: serviceTypeData },
-        { data: staffRoleData },
-      ] = await Promise.all([
-        supabase.from('clients').select('*').eq('id', clientId).single(),
-        supabase.from('form_templates').select('schema').eq('client_id', clientId).maybeSingle(),
-        supabase
-          .from('staffs')
-          .select('id, name, user_id')
-          .eq('organization_id', currentOrg.id)
-          .is('archived_at', null)
-          .order('sort_order', { ascending: true, nullsFirst: false })
-          .order('name', { ascending: true }),
-        supabase
-          .from('assignments')
-          .select('staff_id, default_travel_cost_yen')
-          .eq('client_id', clientId),
-        supabase
-          .from('service_types')
-          .select('id, name')
-          .eq('organization_id', currentOrg.id)
-          .eq('is_active', true)
-          .is('deleted_at', null)
-          .order('sort_order', { ascending: true })
-          .order('name', { ascending: true }),
-        supabase
-          .from('staff_roles')
-          .select('id, name')
-          .eq('organization_id', currentOrg.id)
-          .eq('is_active', true)
-          .is('deleted_at', null)
-          .order('sort_order', { ascending: true })
-          .order('name', { ascending: true }),
-      ]);
-
-      if (!isCurrent()) return;
-
-      if (client) {
-        setClientName(client.name);
-        const schema = (tmpl?.schema as FormItem[]) || DEFAULT_TEMPLATE;
-        setTemplate(schema.filter(i => !['service_time', 'travel_time', 'round_trip_distance_km', 'travel_cost_yen'].includes(i.id)));
-      }
-
-      const costByStaffId = new Map((assignmentRows || []).map((assignment) => [assignment.staff_id, assignment.default_travel_cost_yen]));
-      const allStaffs = (staffsData || []).map(s => ({ id: s.id, name: s.name, user_id: s.user_id, defaultTravelCostYen: costByStaffId.get(s.id) ?? null }));
-      setSelectableStaffs(allStaffs);
-
-      setServiceTypes((serviceTypeData ?? []) as ServiceTypeOption[]);
-      setStaffRoles((staffRoleData ?? []) as StaffRoleOption[]);
-
-      if (!hasExistingReport && !shiftId && userId) {
-        const myStaffRecord = allStaffs.find(s => s.user_id === userId);
-        if (myStaffRecord) {
-            setSelectedHelpers([myStaffRecord.name]);
-            setActualStaffs([{ staff_id: myStaffRecord.id, staff_role_id: null }]);
-        }
-      }
-    } catch (error) { console.error('Error fetching base data:', error); }
-  }, [clientId, currentOrg, setActualStaffs, setClientName, setSelectableStaffs, setSelectedHelpers, setServiceTypes, setStaffRoles, setTemplate, shiftId, userId]);
-
-  const loadExistingData = useCallback(async (targetId: string, isCurrent: () => boolean = () => true) => {
-    if (!targetId) return;
-    try {
-      // ★修正: reports と shifts には外部キーが無く埋め込み(shifts(...))が400になるため、shift_id で別途取得する
-      const { data: r, error: rError } = await supabase.from('reports').select('*').eq('id', targetId).is('deleted_at', null).maybeSingle();
-      if (rError) throw rError;
-      if (!isCurrent()) return;
-      if (!r || !r.start_at || !r.end_at) { showToast('記録が見つからないか、日時が不正です', 'error'); return; }
-
-      // ★修正: report_values が無い/読めない場合でも、基本情報（日時・ステータス）は表示する
-      setStartDateTime(formatDatetimeLocal(new Date(r.start_at)));
-      setEndDateTime(formatDatetimeLocal(new Date(r.end_at)));
-      setCurrentStatus((r.status ?? 'draft') as ReportStatus);
-      contentVersionRef.current = Number(r.current_version ?? 0);
-      setSelectedSegmentId(r.segment_id ?? null);
-      setActualServiceTypeId(r.actual_service_type_id ?? '');
-      setIsDirty(false);
-
-      const shiftPromise = (r.shift_id && !r.segment_id)
-        ? supabase.from('shifts').select('start_at, end_at').eq('id', r.shift_id).maybeSingle()
-        : Promise.resolve(null);
-
-      const [
-        shiftResult,
-        { data: v, error: vError },
-        { data: actualStaffRows, error: actualStaffError },
-      ] = await Promise.all([
-        shiftPromise,
-        supabase.from('report_values').select('data').eq('report_id', targetId).maybeSingle(),
-        supabase
-          .from('report_actual_staffs')
-          .select('staff_id, staff_role_id, staff:staffs(name)')
-          .eq('report_id', targetId)
-          .order('sort_order', { ascending: true }),
-        currentOrg
-          ? (async () => {
-              try {
-                await readActionResult(auditReportView(currentOrg.id, targetId));
-                const nextImages = await readActionResult(getReportImages(currentOrg.id, targetId));
-                if (isCurrent()) setImages(nextImages);
-              } catch (auditImageError) {
-                console.error('audit/image load error:', auditImageError);
-              }
-            })()
-          : Promise.resolve(),
-      ]);
-
-      if (!isCurrent()) return;
-
-      if (shiftResult?.data) {
-          const shift = shiftResult.data;
-          const s = new Date(shift.start_at);
-          const e = new Date(shift.end_at);
-          const isCrossMonth = s.getMonth() !== e.getMonth();
-          setIsSpanningMonth(isCrossMonth);
-          setOriginalShiftTimes({ start_at: shift.start_at, end_at: shift.end_at });
-
-          if (isCrossMonth) {
-              const isPart1 = new Date(r.start_at).getTime() === s.getTime();
-              setSelectedPart(isPart1 ? 'part1' : 'part2');
-          }
-      }
-
-      // ★修正: .single() だと行欠落/複数行でエラーになり全項目が空になるため maybeSingle に変更
-      if (vError) console.error('report_values load error:', vError);
-      const data = (v?.data || {}) as FormAnswers & { service_time?: string; travel_time?: string; round_trip_distance_km?: string; _helpers?: string[] };
-      setServiceTime(data.service_time || '');
-      setTravelTime(data.travel_time || '0');
-      if (actualStaffError) console.error('report_actual_staffs load error:', actualStaffError);
-      const typedActualStaffRows = (actualStaffRows ?? []) as unknown as Array<{ staff_id: string; staff_role_id: string | null; staff?: { name: string } | { name: string }[] | null }>;
-      const travelRows = (v?.data as { travel_expenses?: Array<{ staff_id: string; method: TravelExpense['method']; amount_yen: number | null }> } | null)?.travel_expenses;
-      if (Array.isArray(travelRows)) {
-        setTravelExpenses(Object.fromEntries(travelRows.map((row) => [row.staff_id, { method: row.method, amountYen: row.amount_yen == null ? '' : String(row.amount_yen) }])));
-      } else if (typedActualStaffRows.length === 1 && data.travel_cost_yen !== undefined) {
-        setTravelExpenses({ [typedActualStaffRows[0].staff_id]: { method: 'car', amountYen: String(data.travel_cost_yen) } });
-      } else {
-        setTravelExpenses({});
-      }
-      if (typedActualStaffRows.length > 0) {
-        setActualStaffs(typedActualStaffRows.map((staff) => ({ staff_id: staff.staff_id, staff_role_id: staff.staff_role_id ?? null })));
-        setSelectedHelpers(typedActualStaffRows.map((staff) => {
-          const nestedStaff = Array.isArray(staff.staff) ? staff.staff[0] : staff.staff;
-          return nestedStaff?.name;
-        }).filter((name): name is string => Boolean(name)));
-      } else {
-        setActualStaffs([]);
-        setSelectedHelpers(data._helpers || []);
-      }
-      setAnswers(data);
-    } catch (e) {
-      if (!isCurrent()) return;
-      console.error(e);
-      showToast('記録の読み込みに失敗しました', 'error');
-    }
-  }, [showToast, formatDatetimeLocal, currentOrg, setActualServiceTypeId, setActualStaffs, setAnswers, setCurrentStatus, setEndDateTime, setImages, setIsDirty, setIsSpanningMonth, setOriginalShiftTimes, setSelectedHelpers, setSelectedPart, setSelectedSegmentId, setServiceTime, setStartDateTime, setTravelExpenses, setTravelTime]);
 
   useEffect(() => {
     if (currentReportId || selectableStaffs.length === 0 || selectedHelpers.length === 0) return;
@@ -624,153 +439,6 @@ export function useRecordForm() {
   }, [currentReportId, selectableStaffs, selectedHelpers, setTravelExpenses]);
 
   useEffect(() => {
-    autosaveRestoredRef.current = false;
-    autosaveRevisionRef.current = 0;
-    contentVersionRef.current = 0;
-  }, [recordScopeKey]);
-
-  useEffect(() => {
-    const generation = nextLoadGeneration();
-    const isCurrent = () => isCurrentLoadGeneration(generation);
-    const init = async () => {
-      let targetId = paramReportId;
-      setSelectedSegmentId(segmentId);
-
-      if (shiftId && !paramReportId) {
-          const { data: shiftData } = await supabase
-              .from('shifts')
-              .select(`
-                  start_at, end_at,
-                  shift_staffs (
-                      staff_id,
-                      staffs (name)
-                  ),
-                  shift_segments (
-                      id,
-                      service_type_id,
-                      start_at,
-                      end_at,
-                      sort_order,
-                      service_type:service_types ( id, name ),
-                      shift_segment_staffs (
-                          staff_id,
-                          staff_role_id,
-                          staff:staffs ( name )
-                      )
-                  )
-              `)
-              .eq('id', shiftId)
-              .single();
-
-          if (!isCurrent()) return;
-
-          const typedSegments = (((shiftData?.shift_segments as unknown as ShiftSegmentData[]) ?? [])
-              .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()));
-          setShiftSegments(typedSegments);
-
-          const effectiveSegmentId = segmentId || (typedSegments.length === 1 ? typedSegments[0].id : null);
-          if (typedSegments.length === 1 && !segmentId) {
-              router.replace(`/app/record/${clientId}?shiftId=${shiftId}&segmentId=${typedSegments[0].id}&draftKey=${encodeURIComponent(draftKey)}`);
-          }
-
-          if (effectiveSegmentId) {
-              const { data: existingReport } = await supabase
-                  .from('reports')
-                  .select('id')
-                  .eq('shift_id', shiftId)
-                  .eq('segment_id', effectiveSegmentId)
-                  .is('deleted_at', null)
-                  .maybeSingle();
-
-              if (!isCurrent()) return;
-
-              if (existingReport) {
-                  targetId = existingReport.id;
-                  setCurrentReportId(targetId);
-                  router.replace(`/app/record/${clientId}?reportId=${targetId}&shiftId=${shiftId}&segmentId=${effectiveSegmentId}&draftKey=${encodeURIComponent(draftKey)}`);
-                  showToast('この区間にはすでに記録が存在します。該当する記録を開きました。', 'info');
-              } else {
-                  const targetSegment = typedSegments.find((segment) => segment.id === effectiveSegmentId);
-                  if (targetSegment) applySegmentDefaults(targetSegment);
-              }
-          } else if (typedSegments.length > 1) {
-              setCurrentStatus('draft');
-          } else {
-              const { data: existingReport } = await supabase
-                  .from('reports')
-                  .select('id')
-                  .eq('shift_id', shiftId)
-                  .is('segment_id', null)
-                  .is('deleted_at', null)
-                  .maybeSingle();
-
-              if (!isCurrent()) return;
-
-              if (existingReport) {
-                  targetId = existingReport.id;
-                  setCurrentReportId(targetId);
-                  router.replace(`/app/record/${clientId}?reportId=${targetId}&shiftId=${shiftId}&draftKey=${encodeURIComponent(draftKey)}`);
-                  showToast('このシフトにはすでに記録が存在します。該当する記録を開きました。', 'info');
-              } else if (shiftData) {
-                  const s = new Date(shiftData.start_at);
-                  const e = new Date(shiftData.end_at);
-                  const isCrossMonth = s.getMonth() !== e.getMonth();
-
-                  setIsSpanningMonth(isCrossMonth);
-                  setOriginalShiftTimes({ start_at: shiftData.start_at, end_at: shiftData.end_at });
-
-                  if (isCrossMonth) {
-                      setupTimeForPart('part1', shiftData.start_at, shiftData.end_at);
-                  } else {
-                      setStartDateTime(formatDatetimeLocal(s));
-                      setEndDateTime(formatDatetimeLocal(e));
-                      const diffHours = (e.getTime() - s.getTime()) / (1000 * 60 * 60);
-                      setServiceTime(diffHours.toString());
-                  }
-
-                  const staffNames: string[] = [];
-                  const typedShiftStaffs = (shiftData.shift_staffs as unknown as ShiftStaffData[]) || [];
-
-                  typedShiftStaffs.forEach(s => {
-                      const name = Array.isArray(s.staffs) ? s.staffs[0]?.name : s.staffs?.name;
-                      if (name) staffNames.push(name);
-                  });
-
-                  setSelectedHelpers(staffNames);
-                  setActualStaffs(typedShiftStaffs.map((staff) => ({ staff_id: staff.staff_id, staff_role_id: null })));
-                  setCurrentStatus('draft');
-              }
-          }
-      }
-
-      if (!targetId && !shiftId) {
-        const now = new Date();
-        setStartDateTime(formatDatetimeLocal(now));
-        setEndDateTime(formatDatetimeLocal(new Date(now.getTime() + 3600000)));
-        setCurrentStatus('draft');
-      }
-
-      await fetchBaseData(isCurrent, Boolean(targetId));
-      if (!isCurrent()) return;
-      if (targetId) {
-          await loadExistingData(targetId, isCurrent);
-      }
-      if (!isCurrent()) return;
-      setLoading(false);
-    };
-
-    formDispatch({ type: 'RESET' });
-    uiDispatch({ type: 'RESET', currentReportId: paramReportId });
-    shiftDispatch({ type: 'RESET', selectedSegmentId: segmentId });
-    if (!wsLoading && currentOrg) {
-      void init();
-    }
-    return () => {
-      if (isCurrent()) invalidateLoadGeneration();
-    };
-  }, [wsLoading, currentOrg, paramReportId, shiftId, segmentId, clientId, draftKey, router, showToast, fetchBaseData, loadExistingData, formatDatetimeLocal, setupTimeForPart, applySegmentDefaults, invalidateLoadGeneration, isCurrentLoadGeneration, nextLoadGeneration, setActualStaffs, setCurrentReportId, setCurrentStatus, setEndDateTime, setIsSpanningMonth, setLoading, setOriginalShiftTimes, setSelectedHelpers, setSelectedSegmentId, setServiceTime, setShiftSegments, setStartDateTime]);
-
-  useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
         if (isDirty) {
             e.preventDefault();
@@ -781,89 +449,8 @@ export function useRecordForm() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
-  // Recover private server-side work in progress. It is intentionally not kept
-  // in localStorage because this screen can contain sensitive care information.
   useEffect(() => {
-    if (loading || !currentOrg || autosaveRestoredRef.current || currentStatus === 'approved') return;
-    let cancelled = false;
-    autosaveRestoredRef.current = true;
-    void readActionResult(loadReportAutosave(currentOrg.id, draftKey)).then((saved) => {
-      if (cancelled) return;
-      if (!saved?.payload) return;
-      const payload = saved.payload as Partial<{
-        answers: FormAnswers;
-        selectedHelpers: string[];
-        actualStaffs: ActualStaffInput[];
-        actualServiceTypeId: string;
-        startDateTime: string;
-        endDateTime: string;
-        serviceTime: string;
-        travelTime: string;
-        travelExpenses: Record<string, TravelExpense>;
-      }>;
-      if (payload.answers) setAnswers(payload.answers);
-      if (payload.selectedHelpers) setSelectedHelpers(payload.selectedHelpers);
-      if (payload.actualStaffs) setActualStaffs(payload.actualStaffs);
-      if (payload.actualServiceTypeId !== undefined) setActualServiceTypeId(payload.actualServiceTypeId);
-      if (payload.startDateTime) setStartDateTime(payload.startDateTime);
-      if (payload.endDateTime) setEndDateTime(payload.endDateTime);
-      if (payload.serviceTime !== undefined) setServiceTime(payload.serviceTime);
-      if (payload.travelTime !== undefined) setTravelTime(payload.travelTime);
-      if (payload.travelExpenses) setTravelExpenses(payload.travelExpenses);
-      autosaveRevisionRef.current = saved.autosave_revision ?? 0;
-      setIsDirty(true);
-      setAutosaveState('saved');
-      showToast('入力途中の内容を復元しました', 'info');
-    }).catch((error) => {
-      if (cancelled) return;
-      console.error('Failed to restore report autosave', error);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentOrg, currentStatus, draftKey, loading, recordScopeKey, setActualServiceTypeId, setActualStaffs, setAnswers, setEndDateTime, setIsDirty, setSelectedHelpers, setServiceTime, setStartDateTime, setTravelExpenses, setTravelTime, showToast]);
-
-  useEffect(() => {
-    if (!isDirty || loading || submitting || !currentOrg || currentStatus === 'approved') return;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      const revision = autosaveRevisionRef.current + 1;
-      setAutosaveState('saving');
-      void readActionResult(saveReportAutosave({
-        organizationId: currentOrg.id,
-        clientId: clientId as string,
-        reportId: currentReportId,
-        draftKey,
-        autosaveRevision: revision,
-        payload: {
-          answers,
-          selectedHelpers,
-          actualStaffs,
-          actualServiceTypeId,
-          startDateTime,
-          endDateTime,
-          serviceTime,
-          travelTime,
-          travelExpenses,
-        },
-      })).then((result) => {
-        if (cancelled) return;
-        if (result.saved) autosaveRevisionRef.current = revision;
-        setAutosaveState('saved');
-      }).catch((error) => {
-        if (cancelled) return;
-        console.error('Report autosave failed', error);
-        setAutosaveState('error');
-      });
-    }, 3000);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, currentStatus, draftKey, endDateTime, isDirty, loading, recordScopeKey, selectedHelpers, serviceTime, submitting, startDateTime, travelExpenses, travelTime]);
-
-  useEffect(() => {
-    if (!currentReportId || !currentOrg) return;
+    if (loading || !currentReportId || !currentOrg) return;
     let cancelled = false;
     void Promise.all([
       readActionResult(getLinkedShifts(currentReportId)),
@@ -882,7 +469,7 @@ export function useRecordForm() {
     return () => {
       cancelled = true;
     };
-  }, [currentReportId, currentOrg, linksReload, recordScopeKey, setLinkedShifts, setShiftSuggestions]);
+  }, [loading, currentReportId, currentOrg, linksReload, recordScopeKey, setLinkedShifts, setShiftSuggestions]);
 
   const handleChange = useCallback((setter: (val: string) => void, val: string) => {
     setter(val);
@@ -898,167 +485,16 @@ export function useRecordForm() {
   const handleImageUpload = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
     if (!currentReportId || !e.target.files?.length || isRunning() || externalPending.current) return;
     const file = e.target.files[0];
-    await run(async () => {
+    await run(async (isCurrent) => {
       if (!currentOrg) throw new Error('事業所が選択されていません');
       const formData = new FormData();
       formData.set('organizationId', currentOrg.id);
       formData.set('reportId', currentReportId);
       formData.set('file', file);
       await readActionResult(uploadReportImage(formData));
-      await loadExistingData(currentReportId);
+      if (isCurrent()) retryImages();
     }, { successMessage: '画像をアップロードしました', errorMessage: 'アップロード失敗' });
-  }, [currentOrg, currentReportId, isRunning, loadExistingData, run]);
-
-  const handleDeleteReport = useCallback(async () => {
-    if (externalPending.current) return;
-    if (currentStatus === 'approved') { showToast('承認済みの記録は削除できません', 'error'); return; }
-    const outcome = await run(async () => {
-      if (!currentReportId || !currentOrg) throw new Error('削除対象が不正です');
-      await commitRecordChange(currentOrg.id, () => readActionResult(softDeleteReports(currentOrg.id, [currentReportId], '記録編集画面から削除')));
-    }, {
-      confirm: () => confirm({ title: '記録の削除', message: '本当に削除しますか？', confirmText: '削除する', confirmColor: 'error' }),
-      successMessage: '削除しました', errorMessage: '削除に失敗しました。もう一度操作してください。',
-    });
-    if (outcome.ok) router.back();
-  }, [confirm, currentOrg, currentReportId, currentStatus, router, run, showToast]);
-
-  const getTravelExpense = useCallback((staffId: string): TravelExpense => {
-    const configured = travelExpenses[staffId];
-    if (configured) return configured;
-    if (currentReportId) return { method: 'car', amountYen: '' };
-    const defaultYen = selectableStaffs.find((staff) => staff.id === staffId)?.defaultTravelCostYen;
-    return { method: 'car', amountYen: defaultYen == null ? '' : String(defaultYen) };
-  }, [currentReportId, selectableStaffs, travelExpenses]);
-
-  const travelExpenseRows = useMemo(() => actualStaffs.map((staff) => {
-    const expense = getTravelExpense(staff.staff_id);
-    return {
-      staff_id: staff.staff_id,
-      staff_name: selectableStaffs.find((candidate) => candidate.id === staff.staff_id)?.name ?? '',
-      method: expense.method,
-      amount_yen: expense.amountYen === '' ? null : Number(expense.amountYen),
-    };
-  }), [actualStaffs, getTravelExpense, selectableStaffs]);
-
-  const validate = useCallback(() => {
-    const ne: Record<string, string> = {};
-    if (!serviceTime) ne['serviceTime'] = '必須項目です';
-    if (selectedHelpers.length === 0) ne['helpers'] = '担当スタッフを選択してください';
-    if (actualStaffs.length !== selectedHelpers.length) ne['helpers'] = '担当スタッフをスタッフ名簿から選択してください';
-    for (const expense of travelExpenseRows) {
-      if (expense.amount_yen === null || !Number.isInteger(expense.amount_yen) || expense.amount_yen < 0 || expense.amount_yen > 100000) {
-        ne[`travel_${expense.staff_id}`] = '交通費を0〜100000円で入力してください';
-      }
-    }
-    template.forEach(item => {
-      const val = answers[item.id];
-      if (item.required && (!val || (Array.isArray(val) && val.length === 0))) ne[item.id] = '必須項目です';
-    });
-    setErrors(ne);
-    return Object.keys(ne).length === 0;
-  }, [actualStaffs.length, answers, selectedHelpers.length, serviceTime, setErrors, template, travelExpenseRows]);
-
-  const saveReport = useCallback(async (status: ReportStatus, skipValidation: boolean, feedback: { message: string; confirm?: () => Promise<boolean> }) => {
-    if (externalPending.current) return false;
-    let savedUrl: string | null = null;
-    const outcome = await run(async (isCurrent) => {
-      if (shiftId && shiftSegments.length > 0 && !selectedSegmentId) {
-        showToast('記録を作成する前にサービス区間を選択してください', 'warning');
-        return false;
-      }
-      if (!skipValidation && !validate()) { showToast('入力不備があります', 'error'); window.scrollTo({ top: 0, behavior: 'smooth' }); return false; }
-      const finalData = {
-        ...answers,
-        _helpers: selectedHelpers,
-        service_time: serviceTime,
-        travel_time: travelTime,
-        travel_expenses: travelExpenseRows,
-        travel_cost_yen: travelExpenseRows.reduce((sum, expense) => sum + (expense.amount_yen ?? 0), 0),
-      };
-      if (!currentOrg) throw new Error('事業所が選択されていません');
-      const payload = {
-        organizationId: currentOrg.id,
-        reportId: currentReportId,
-        clientId: clientId as string,
-        startAt: new Date(startDateTime).toISOString(),
-        endAt: new Date(endDateTime).toISOString(),
-        status,
-        shiftId: shiftId || null,
-        segmentId: selectedSegmentId || segmentId || null,
-        actualServiceTypeId: actualServiceTypeId || null,
-        actualStaffs,
-        values: finalData,
-        expectedVersion: contentVersionRef.current,
-        ...(status === 'draft' && hasAiDraftSource
-          ? { auditSource: 'ai_import' as const, auditFileCount: 1 }
-          : {}),
-      } satisfies Omit<Parameters<typeof saveReportAction>[0], 'idempotencyKey'>;
-      const result = await commitRecordChange(currentOrg.id, () => readActionResult(saveReportAction({ ...payload, idempotencyKey: attemptKey('report', payload) })));
-      finishAttempt('report');
-      if (!isCurrent()) return false;
-      const targetReportId = result.reportId;
-      contentVersionRef.current = result.version;
-      setTravelExpenses(Object.fromEntries(travelExpenseRows.map((expense) => [expense.staff_id, { method: expense.method, amountYen: expense.amount_yen == null ? '' : String(expense.amount_yen) }])));
-      if (!currentReportId) setCurrentReportId(targetReportId);
-      if (status === 'draft') setHasAiDraftSource(false);
-      setIsDirty(false);
-      void readActionResult(discardReportAutosave(currentOrg.id, draftKey)).catch((error) => {
-        console.error('Failed to discard committed autosave', error);
-      });
-      setAutosaveState('idle');
-      
-      if (!currentReportId && targetReportId) {
-          const newUrl = `/app/record/${clientId}?reportId=${targetReportId}&draftKey=${encodeURIComponent(draftKey)}`;
-          savedUrl = newUrl;
-      }
-
-      return true;
-    }, {
-      confirm: feedback.confirm,
-      successMessage: (saved) => saved ? feedback.message : null,
-      errorMessage: (error) => error instanceof ActionResultError && error.code === 'VERSION_CONFLICT'
-        ? '他の利用者がこの記録を更新しました。入力内容は保持しています。再読み込みして差分を確認してください。'
-        : '保存に失敗しました。入力内容は保持しています。もう一度操作してください。',
-    });
-    if (outcome.ok && outcome.value && savedUrl) router.replace(savedUrl);
-    return outcome.ok && outcome.value;
-  }, [actualServiceTypeId, actualStaffs, answers, clientId, currentOrg, currentReportId, draftKey, endDateTime, hasAiDraftSource, attemptKey, finishAttempt, router, run, segmentId, selectedHelpers, selectedSegmentId, serviceTime, setCurrentReportId, setHasAiDraftSource, setIsDirty, setTravelExpenses, shiftId, shiftSegments.length, showToast, startDateTime, travelExpenseRows, travelTime, validate]);
-
-  const handleDraftSave = useCallback(() => saveReport('draft', true, { message: '下書きを保存しました' }), [saveReport]);
-  const handleSubmit = useCallback(async () => {
-    if (await saveReport('pending', false, {
-      message: '記録を送信しました',
-      confirm: () => confirm({ title: '送信の確認', message: '記録を送信しますか？', confirmText: '送信する' }),
-    })) router.push('/app/record');
-  }, [confirm, router, saveReport]);
-  const handlePendingSave = useCallback(() => saveReport('pending', false, { message: '承認待ちのまま変更を保存しました' }), [saveReport]);
-  const handleApprove = useCallback(async () => {
-    if (externalPending.current) return;
-    if (!currentOrg || !currentReportId) return;
-    const outcome = await run(() => commitRecordChange(currentOrg.id, () => readActionResult(transitionReports(currentOrg.id, [currentReportId], 'approve'))), {
-      confirm: () => confirm({ title: '承認の確認', message: 'この記録を承認しますか？', confirmText: '承認する', confirmColor: 'primary' }),
-      successMessage: '承認しました', errorMessage: '承認に失敗しました。もう一度操作してください。',
-    });
-    if (outcome.ok) router.push('/app/reports');
-  }, [confirm, currentOrg, currentReportId, router, run]);
-  const handleRemand = useCallback(async () => {
-    if (externalPending.current) return;
-    if (!currentOrg || !currentReportId) return;
-    const outcome = await run(() => commitRecordChange(currentOrg.id, () => readActionResult(transitionReports(currentOrg.id, [currentReportId], 'remand'))), {
-      confirm: () => confirm({ title: '承認取消の確認', message: '承認を取り消し、差し戻しますか？', confirmText: '差し戻す', confirmColor: 'warning' }),
-      successMessage: '記録を差し戻しました', successSeverity: 'info', errorMessage: '差し戻しに失敗しました。もう一度操作してください。',
-    });
-    if (outcome.ok) router.push('/app/reports');
-  }, [confirm, currentOrg, currentReportId, router, run]);
-
-  const handleClose = useCallback(() => { if (isRunning() || externalPending.current || imageSubmitting) return; if (isDirty) setOpenCloseDialog(true); else router.back(); }, [imageSubmitting, isDirty, isRunning, router, setOpenCloseDialog]);
-  const handleDialogDiscard = useCallback(() => { if (isRunning()) return; setOpenCloseDialog(false); router.back(); }, [isRunning, router, setOpenCloseDialog]);
-  const handleDialogSaveDraft = useCallback(async () => {
-    if (await saveReport('draft', true, { message: '下書きを保存しました' })) {
-      setOpenCloseDialog(false);
-      router.back();
-    }
-  }, [router, saveReport, setOpenCloseDialog]);
+  }, [currentOrg, currentReportId, isRunning, retryImages, run]);
 
   const handleAiExtracted = useCallback((result: ExtractionResult) => {
     const filled = new Set(Object.keys(result.values));
@@ -1142,7 +578,7 @@ export function useRecordForm() {
     router, showToast, currentOrg, clientId, shiftId, segmentId,
     autosaveState, clientName, template, answers, selectableStaffs, staffRoles, serviceTypes,
     selectedHelpers, actualStaffs, actualServiceTypeId, startDateTime, endDateTime,
-    serviceTime, travelTime, travelExpenses, images,
+    serviceTime, travelTime, travelExpenses, images, imagesLoading, imagesError, retryImages, loadError, retryLoad,
     aiFilledFields, isSpanningMonth, selectedPart, originalShiftTimes,
     currentReportId, currentStatus, isDirty, openCloseDialog, loading, errors, submitting, actionError, actionErrorCause,
     shiftSuggestions, linkedShifts, linkedLoadError, retryLinkedShifts, dismissedSuggestions, shiftSegments, selectedSegmentId,

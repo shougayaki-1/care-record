@@ -29,3 +29,24 @@ export const SaveFailure: Story = { args: { rows: [{ ...sampleRow, status: 'conf
   const dialog = within(context.canvasElement.ownerDocument.body).getByRole('dialog', { name: '提供記録の確認・修正' });
   await expect(within(dialog).getAllByRole('alert').map((alert) => alert.textContent).join(' ')).toContain('再試行してください');
 } };
+
+// Candidate loading/failure uses the existing disabled review state while the
+// page keeps files and reviewed rows available for retry.
+export const CandidatesUnavailable: Story = { args: { clients: [], helpers: [], saving: true, rows: [{ ...sampleRow, status: 'confirmed' }] }, play: async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await expect(canvas.getAllByText('利用者未選択').length).toBeGreaterThan(0);
+  await expect(canvas.getAllByText('スタッフ未選択').length).toBeGreaterThan(0);
+  await expect(canvas.getByRole('button', { name: '選択した記録を下書き保存' })).toBeDisabled();
+  for (const button of canvas.getAllByRole('button', { name: '内容を確認・修正' })) await expect(button).toBeDisabled();
+} };
+
+export const PartialSaveFailure: Story = { args: { rows: [
+  { ...sampleRow, id: 'saved', status: 'confirmed', saveStatus: 'saved' },
+  { ...sampleRow, id: 'failed', fileName: 'retry.pdf', status: 'confirmed', saveStatus: 'error', saveError: '保存に失敗しました。入力内容を確認して再試行してください。' },
+] }, play: async ({ canvasElement, args }) => {
+  const canvas = within(canvasElement);
+  await expect(within(canvas.getByRole('table')).getByText('保存済み')).toBeVisible();
+  await expect(within(canvas.getByRole('table')).getByText('保存に失敗しました。入力内容を確認して再試行してください。')).toBeVisible();
+  await userEvent.click(canvas.getByRole('button', { name: '選択した記録を下書き保存' }));
+  await expect(args.onSaveSelected).toHaveBeenCalledWith(['failed']);
+} };

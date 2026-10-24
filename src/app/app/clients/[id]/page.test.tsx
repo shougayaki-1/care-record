@@ -6,23 +6,30 @@
 // Promise.all as the non-throwing supabase queries, so its rejection rejected the
 // whole batch and the client name was silently dropped (catch → console.error).
 
-import { render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/components/clients/FormBuilderTab', () => ({ FormBuilderTab: () => null }));
 vi.mock('@/components/clients/IntegrationsTab', () => ({ IntegrationsTab: () => null }));
 vi.mock('@/components/clients/StaffAssignmentTab', () => ({ StaffAssignmentTab: () => null }));
 
+const mocks = vi.hoisted(() => ({
+  params: { id: 'client-1' },
+  router: { push: vi.fn(), replace: vi.fn(), back: vi.fn() },
+  workspace: { currentOrg: { id: 'org-1', role: 'owner', effectivePermissions: {} }, loading: false },
+  toast: { showToast: vi.fn() },
+  confirm: vi.fn(),
+}));
+const searchParams = new URLSearchParams('');
 vi.mock('next/navigation', () => ({
-  useParams: () => ({ id: 'client-1' }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(''),
+  useParams: () => mocks.params,
+  useRouter: () => mocks.router,
+  useSearchParams: () => searchParams,
 }));
-vi.mock('@/context/WorkspaceContext', () => ({
-  useWorkspace: () => ({ currentOrg: { id: 'org-1', role: 'owner', effectivePermissions: {} }, loading: false }),
-}));
-vi.mock('@/components/ui/ToastProvider', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
-vi.mock('@/components/ui/ConfirmProvider', () => ({ useConfirm: () => vi.fn() }));
+vi.mock('@/context/WorkspaceContext', () => ({ useWorkspace: () => mocks.workspace }));
+vi.mock('@/components/ui/ToastProvider', () => ({ useToast: () => mocks.toast }));
+vi.mock('@/components/ui/ConfirmProvider', () => ({ useConfirm: () => mocks.confirm }));
+afterEach(cleanup);
 vi.mock('@/app/actions/gas', () => ({ callGasApi: vi.fn() }));
 
 // The permission-hints Server Action rejects (permission denial / DB error).

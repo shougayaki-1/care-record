@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import bundleAnalyzer from '@next/bundle-analyzer';
+import { localE2ERewrites } from './scripts/e2e/rewrites.mjs';
 
 const withBundleAnalyzer = bundleAnalyzer({
   enabled: process.env.ANALYZE === 'true',
@@ -30,6 +31,7 @@ const nextConfig: NextConfig = {
     config.resolve.alias.canvas = false;
     return config;
   },
+  rewrites: () => localE2ERewrites(process.env),
   async headers() {
     return [
       { source: '/(.*)', headers: securityHeaders },
