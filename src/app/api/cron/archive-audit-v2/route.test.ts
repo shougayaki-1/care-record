@@ -6,7 +6,7 @@ vi.mock('@/utils/auditArchive/gcs', () => ({ createArchiveStore: mocks.store }))
 vi.mock('@/utils/auditArchive/source', () => ({ createArchiveSource: mocks.source }));
 vi.mock('@/utils/auditArchive/publisher', () => ({ loadControl: mocks.control, runArchive: mocks.run, archiveHealth: mocks.health, archivePrefix: () => 'archive/staging/pre-cutover/' }));
 import { GET } from './route';
-const request = (auth = 'Bearer test-only', environment = 'staging', mode = '') => new NextRequest(`https://example.test/api/cron/archive-audit${mode}`, { headers: { authorization: auth, 'x-carerecord-environment': environment } });
+const request = (auth = 'Bearer test-only', environment = 'staging', mode = '') => new NextRequest(`https://example.test/api/cron/archive-audit-v2${mode}`, { headers: { authorization: auth, 'x-carerecord-environment': environment } });
 afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubEnv('CRON_SECRET', 'test-only');

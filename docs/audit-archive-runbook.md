@@ -9,7 +9,7 @@
 1. A の準備 schema の適用・配備と旧アプリ互換を確認する。B の migration は追加のみで、監査イベントや v1 trigger/default は変更しない。shared/production への適用は手動承認の対象。
 2. 新しい環境別10年監査 bucket を実確認する。`GCS_AUDIT_BUCKET` は名前に `-staging-` または `-production-` を含める。既存の `care-record-archive-7y` 等は `GCS_AUDIT_LEGACY_BUCKET` として区別し、既存 object・generation・lock・保持期間を維持する。移動・削除・保持短縮はしない。
 3. operator が `control/<environment>/preparation.json` を create-only で発行し、name/generation/SHA-256/size を DB 外の環境設定 `AUDIT_CONTROL_*` に固定する。DB に提示された切替IDや GENESIS を設定へ自動転記しない。前の control と承認記録も保管する。
-4. B の配備切替は、既存 Cron の停止・in-flight drain・新設定投入を計画して別途承認する。本 PR は `vercel.json`、稼働中 Cron、secret、IAM、bucket を変更しない。未設定の新ルートは 503 で停止するため、旧ルートを無計画に置換しない。旧日時 checkpoint や HMAC 受信結果を新系列の receipt に使わない。
+4. B の配備切替は、既存 Cron の停止・in-flight drain・新設定投入を計画して別途承認する。本 PR は `vercel.json`、稼働中 Cron、secret、IAM、bucket を変更しない。新ルート `/api/cron/archive-audit-v2` は未設定では503で停止する。既存 `/api/cron/archive-audit` と `vercel.json` の旧日次jobは配備後も維持する。Gの承認済み切替時に旧jobを停止・drainし、設定/準備control固定後の新endpointへ接続する。新旧を同時に正式publisherとして運用しない。旧日時 checkpoint や HMAC 受信結果を新系列の receipt に使わない。
 5. 準備段階は `AUDIT_ARCHIVE_MODE=inventory`。v1 を毎回全量 snapshot として保全し、NULL hash/global を含める。遅れて commit した過去日時の v1 は次回の全量取得に含む。完了 receipt は `kind=inventory`、HTTP 202/`ok:false` で、確定 baseline・v2 完全保存とは扱わない。
 6. G の切替後も inventory mode で **全 v1** の収集を完了する。この mode は同居する v2 を正式系列へ発行しない。固定した v1 集合、全旧 export/generation、件数・差異・未解決異常を照合し、G で baseline を承認する。切替前の receipt を、後から承認なしに確定済み扱いしない。
 7. G が発行した baseline/control の receipt を別権限で固定し、`AUDIT_ARCHIVE_MODE=v2` にする。baseline と参照 inventory receipt の v1 count/digest が異なる場合は停止。確定済み v1 の DB 全行再照合は週次 C で実施する。新切替ID・GENESIS を自動採用しない。新 control は前 control を参照する承認済み更新として管理する。

@@ -10,7 +10,7 @@ try {
   if (!['staging', 'production'].includes(environment) || !secret || !origin) throw new Error();
   const url = new URL(origin);
   if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error();
-  url.pathname = '/api/cron/archive-audit';
+  url.pathname = '/api/cron/archive-audit-v2';
   url.searchParams.set('mode', 'health');
   const response = await fetch(url, {
     redirect: 'error', signal: AbortSignal.timeout(30_000), cache: 'no-store',
