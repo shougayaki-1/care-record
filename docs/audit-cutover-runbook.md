@@ -214,8 +214,8 @@ DBが外部headより先なら、外部sequence位置の保存hashを`archiveAnc
 CLI `db reset` で全migration適用が成功したという意味ではない。GitHub CIの通常空DB/upgrade結果はPRを参照する。
 
 `test-audit-cutover.mjs` は同じ専用stack内にschema-onlyの空DBと、所有者・ACLを保持した論理dump/restore DBを作り、手動切替SQLそのものを実行する。
-実lock timeoutで全rollback、DDL待機中INSERT、切替前開始のRC/RR/Serializable、version省略の旧アプリ、既存v1行の不変、v1持込み拒否、RLS/ACL・境界の追記保護を検査する。
-40001はtransaction全体をrollbackし、v1へfallbackしない。開発/共有コンテナ名はDockerを呼ぶ前に拒否し、試験後は専用stackを破棄する。
+実lock timeoutで全rollback、DDL待機中INSERT、切替前開始のRC/RR/Serializable、version省略の旧アプリ、既存v1行の不変、v1持込み拒否、RLS/ACL・境界の追記保護を検査する。v2の実論理backup/restore後のhead一致、backup後の古いhead、同連番・別hashの再開も照合し、後2者を拒否する。
+40001はtransaction全体をrollbackし、v1へfallbackしない。開発/共有コンテナ名はDockerを呼ぶ前に拒否し、試験後は専用stackを破棄する。管理ロールの復元接続は専用コンテナ内部の既存ローカルpasswordを使い、値をホスト引数・ログへ出さない。
 
 ```sh
 node --test scripts/audit/*.test.mjs

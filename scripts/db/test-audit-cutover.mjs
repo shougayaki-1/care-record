@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { verifyRestoredDatabase } from '../audit/cutover-control.mjs';
+import { inventorySummary, readInventory } from '../audit/cutover-inventory.mjs';
 const container=process.argv[2];
 if(!/^supabase_db_care-record-(?:audit-v2-test|owner-add-test)(?:-[a-z0-9]+)?$/.test(container??''))
   throw new Error('Pass a dedicated disposable audit-v2-test or owner-add-test container.');
@@ -11,7 +12,12 @@ const database=`audit_cutover_151_test_${process.pid}`;
 const cutover='15100000-0000-4000-8000-000000000001';
 const evidence='1'.repeat(64);
 const migration=readFileSync(new URL('../../supabase/manual-migrations/20261025000001_audit_v2_cutover.sql',import.meta.url),'utf8');
-const args=(db,role='postgres')=>['exec','-i',container,'psql','-X','-At','-U',role,'-d',db,'-v','ON_ERROR_STOP=1','-v','VERBOSITY=verbose'];
+// CLI images differ in socket auth. Use ONLY the guarded container's existing
+// local password inside that container: never inspect, print, or pass its value
+// through host argv. No host/cloud credentials or hosted DB URLs are accepted.
+const command=(program,parameters)=>['exec','-i',container,'sh','-c',
+  'PGPASSWORD="$POSTGRES_PASSWORD" exec "$@"','audit-cutover-fixture',program,...parameters];
+const args=(db,role='postgres')=>command('psql',['-w','-X','-At','-U',role,'-d',db,'-v','ON_ERROR_STOP=1','-v','VERBOSITY=verbose']);
 function sql(input,db=database,role='postgres') {
   const r=spawnSync('docker',args(db,role),{input,encoding:'utf8',timeout:40_000});
   if(r.error || r.status!==0)throw new Error(r.stderr||'cutover_test_failed');
@@ -60,9 +66,18 @@ const configured=`SET care_record.audit_cutover_id='${cutover}';SET care_record.
 function state() {return sql(`SELECT (SELECT pg_get_expr(adbin,adrelid) FROM pg_attrdef WHERE adrelid='public.audit_events'::regclass
   AND adnum=(SELECT attnum FROM pg_attribute WHERE attrelid='public.audit_events'::regclass AND attname='integrity_version'))
   || ':' || (SELECT tgfoid::regproc::text FROM pg_trigger WHERE tgrelid='public.audit_events'::regclass AND tgname='audit_events_chain_insert');`);}
+function snapshot(db) {
+  const result=JSON.parse(sql(`SELECT json_build_object('cutoverId',cutover_id,'ordinal','1','v1Count',v1_count::text,
+    'heads',(SELECT json_agg(json_build_object('scope',scope,'sequence',last_sequence::text,'hash',last_hash,'cutoverId',cutover_id)) FROM private.audit_chain_heads))
+    FROM private.audit_cutover_state;`,db));
+  const items=JSON.parse(sql(`SELECT coalesce(json_agg(json_build_object('kind','v1','id',id,
+    'inventory',replace(encode(private.audit_inventory_bytes(e),'base64'),E'\\n',''))),'[]') FROM public.audit_events e WHERE integrity_version=1;`,db));
+  result.v1Digest=inventorySummary(readInventory(items)).v1Digest;
+  return result;
+}
 try {
   const emptyDatabase=`audit_cutover_151_empty_${process.pid}`;
-  const schema=spawnSync('docker',['exec',container,'pg_dump','-U','supabase_admin','--schema-only','postgres'],{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
+  const schema=spawnSync('docker',command('pg_dump',['-w','-U','supabase_admin','--schema-only','postgres']),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
   assert.equal(schema.status,0,schema.stderr);
   sql(`CREATE DATABASE ${emptyDatabase} TEMPLATE template0;`,'postgres');
   sql(schema.stdout,emptyDatabase,'supabase_admin');
@@ -73,7 +88,7 @@ try {
   console.log('PASS: schema-only empty rebuild cuts over and accepts old-app INSERT at sequence 1');
   // Real logical restore also avoids interrupting Supabase's background
   // connections (CREATE DATABASE ... TEMPLATE postgres requires zero clients).
-  const dump=spawnSync('docker',['exec',container,'pg_dump','-U','supabase_admin','postgres'],{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
+  const dump=spawnSync('docker',command('pg_dump',['-w','-U','supabase_admin','postgres']),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
   assert.equal(dump.status,0,dump.stderr);
   sql(`CREATE DATABASE ${database} TEMPLATE template0;`,'postgres');
   sql(dump.stdout,database,'supabase_admin');
@@ -135,6 +150,24 @@ try {
   const oldSnapshot=JSON.parse(sql(`SELECT json_build_object('cutoverId',null,'v1Count',count(*)::text,'heads','[]'::json) FROM public.audit_events WHERE integrity_version=1;`,'postgres'));
   assert.throws(()=>verifyRestoredDatabase(external,oldSnapshot));
   console.log('PASS: cutover boundary has RLS/explicit ACL, is immutable, and an old snapshot cannot reset the external chain');
+
+  // Restore a REAL post-cutover logical backup, then advance the source beyond
+  // its frozen head. Comparison must stop a stale restore before any reuse.
+  const frozen=snapshot(database), restoredDatabase=`audit_cutover_151_replay_${process.pid}`;
+  const v2dump=spawnSync('docker',command('pg_dump',['-w','-U','supabase_admin',database]),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
+  assert.equal(v2dump.status,0,v2dump.stderr);
+  sql(`CREATE DATABASE ${restoredDatabase} TEMPLATE template0;`,'postgres');
+  sql(v2dump.stdout,restoredDatabase,'supabase_admin');
+  assert.equal(verifyRestoredDatabase(frozen,snapshot(restoredDatabase)).status,'consistent');
+  sql(insert('fixture.cutover.after-backup'));
+  const latest=snapshot(database);
+  assert.throws(()=>verifyRestoredDatabase(latest,snapshot(restoredDatabase)));
+  // Deliberately model an unauthorized restart in the disposable restore only:
+  // the same number gets a different hash. The operator preflight rejects it.
+  sql(insert('fixture.cutover.forked-restart'),restoredDatabase);
+  assert.equal(snapshot(restoredDatabase).heads[0].sequence,latest.heads[0].sequence);
+  assert.throws(()=>verifyRestoredDatabase(latest,snapshot(restoredDatabase)));
+  console.log('PASS: real v2 logical restore matches the frozen head, then rejects stale heads and same-sequence divergent replay');
 } finally {
   for(const session of sessions)if(!session.closed){session.process.stdin.end();session.process.kill();}
 }
