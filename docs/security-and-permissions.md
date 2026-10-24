@@ -30,6 +30,7 @@
 - 外部アーカイブ送信（別アカウント/WORM相当）: 環境変数 `AUDIT_ARCHIVE_URL` /
   `AUDIT_ARCHIVE_HMAC_SECRET`（署名検証・重複排除は受信側の実装に依存、要確認）
 - 閲覧・CSVエクスポートUI: `src/app/app/logs/`
+- 週次チェーン検証と認可回帰テストの設計: [Issue #101設計](audit-chain-verification-design.md)（未実装・本番未検証）
 
 ## 暗号化・秘密情報
 
