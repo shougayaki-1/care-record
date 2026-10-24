@@ -31,6 +31,7 @@
   `AUDIT_ARCHIVE_HMAC_SECRET`（署名検証・重複排除は受信側の実装に依存、要確認）
 - 閲覧・CSVエクスポートUI: `src/app/app/logs/`
 - アーカイブBの全量inventory・単一manifest系列・配備条件: [監査保全手順](audit-archive-runbook.md)（A依存、実環境未適用）
+- v2書込みの準備schema・内部head・canonical関数: [Issue #149実装](audit-v2-foundation.md)。v1書込みを維持し、本番v2切替・外部基準点・週次検証は未実施。内部headは業務ロールの権限外。
 - 週次チェーン検証と認可回帰テストの設計: [Issue #101設計](audit-chain-verification-design.md)（未実装・本番未検証）
 
 ## 暗号化・秘密情報
