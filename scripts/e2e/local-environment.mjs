@@ -1,4 +1,4 @@
-const localHosts = new Set(['localhost', '127.0.0.1', '::1']);
+const localHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
 const apiUrlVariables = ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL', 'API_URL'];
 const databaseUrlVariables = ['SUPABASE_DB_URL', 'DATABASE_URL', 'POSTGRES_URL', 'DB_URL'];
 
