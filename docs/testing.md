@@ -2,6 +2,9 @@
 
 Node.js 24、npm、Docker、Supabase CLI 2.108.0 を使用します。通常の変更では `feature/*` ブランチから PR を作成し、`.github/workflows/ci.yml` を実行します。最終判定には固定名の `CI` job を使います。CI は変更されたファイルに応じて追加の検査を選択し、選択されず省略された job は失敗とみなしません。
 
+CIのSupabaseイメージは `SUPABASE_INTERNAL_IMAGE_REGISTRY=ghcr.io` で公式GHCRミラーから取得します。
+共有runnerのECR data limitによる再試行・fallback待ちを避けます。イメージのversionはCLI固定版のままです。
+
 | 変更内容 | 自動検査 |
 | --- | --- |
 | アプリ・設定・テスト・workflow | lint、型、単体テスト、service role利用検査、本番build、CI判定範囲のテスト |
