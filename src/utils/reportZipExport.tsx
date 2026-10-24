@@ -1,4 +1,5 @@
 import React from 'react';
+import { downloadBlob } from '@/utils/downloadBlob';
 import type { DocumentProps } from '@react-pdf/renderer';
 import JSZip from 'jszip';
 import type { PdfReportData } from '@/components/pdf/ServiceRecordDocument';
@@ -6,15 +7,6 @@ import type { PdfReportData } from '@/components/pdf/ServiceRecordDocument';
 type PdfEntry = {
   data: PdfReportData;
   fileName: string;
-};
-
-const triggerDownload = (blob: Blob, fileName: string) => {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  URL.revokeObjectURL(url);
 };
 
 export async function downloadReportZip(entries: PdfEntry[], zipBaseName: string): Promise<void> {
@@ -28,7 +20,7 @@ export async function downloadReportZip(entries: PdfEntry[], zipBaseName: string
   if (entries.length === 1) {
     const document = React.createElement(ServiceRecordDocument, { reports: [entries[0].data] }) as React.ReactElement<DocumentProps>;
     const blob = await pdf(document).toBlob();
-    triggerDownload(blob, entries[0].fileName);
+    downloadBlob(blob, entries[0].fileName);
     return;
   }
 
@@ -39,7 +31,7 @@ export async function downloadReportZip(entries: PdfEntry[], zipBaseName: string
     zip.file(entry.fileName, blob);
   }
   const zipBlob = await zip.generateAsync({ type: 'blob' });
-  triggerDownload(zipBlob, `${zipBaseName}.zip`);
+  downloadBlob(zipBlob, `${zipBaseName}.zip`);
 }
 
 export function buildReportFileName(

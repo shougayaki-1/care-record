@@ -5,8 +5,6 @@ import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useRecordQuery } from '@/hooks/useRecordQuery';
 import { commitRecordChange } from '@/utils/recordFeedUpdates';
 import { useState, useCallback } from 'react';
-import type { ReactElement } from 'react';
-import type { DocumentProps } from '@react-pdf/renderer';
 import {
   Box, Typography, Button, CircularProgress, Stack, TextField, MenuItem,
   Switch, FormControlLabel, LinearProgress, Alert
@@ -22,44 +20,22 @@ import RestoreIcon from '@mui/icons-material/Restore';
 import SettingsIcon from '@mui/icons-material/Settings';
 
 import { supabase } from '@/lib/supabase';
-import type { PdfReportData } from '@/components/pdf/ServiceRecordDocument';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useRouter } from 'next/navigation';
-import { callGasApi } from '@/app/actions/gas';
-import { auditReportExport, softDeleteReports, transitionReports } from '@/app/actions/reports';
-import { updateClientGoogleLink } from '@/app/actions/clients';
-import { generateKeyMap, FormItem as HelperFormItem, FormValue } from '@/utils/templateHelper';
+import { softDeleteReports, transitionReports } from '@/app/actions/reports';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { AppButton, InnerPageHeader, PageBody, PageLayout, TablePageSkeleton } from '@/components/ui';
 import { checkManagementPermission, checkRecordPermission } from '@/utils/permissions';
 import { buildRecordPath } from '@/utils/recordNavigation';
-import { getReportStatusChipColor, getReportStatusLabel, type ReportStatus } from '@/utils/reportStatus';
-import {
-  buildReportsCsv,
-  buildTravelSettlementCsv,
-  getReportData,
-  getReportHelperNames as getExportHelperNames,
-} from '@/utils/reportsExport';
+import { getReportStatusChipColor, getReportStatusLabel } from '@/utils/reportStatus';
+import { useReportExport } from '@/hooks/useReportExport';
+import type { Report } from '@/utils/reportExportData';
 import { useReportFilters } from '@/hooks/useReportFilters';
 import { RecordListFilterBar } from '@/components/record/RecordListFilterBar';
 import { RecordListTable, type RecordListRow } from '@/components/record/RecordListTable';
 
-type ReportValuesData = Record<string, FormValue>;
-
-type Report = {
-  id: string; start_at: string; end_at: string; created_at: string; updated_at: string; status: ReportStatus; approved_at: string | null;
-  segment_id: string | null;
-  segment?: { service_type: { name: string } | null } | null;
-  clients: { id: string; name: string; organization_id: string };
-  helper: { name: string };
-  approved_by_user?: { name: string };
-  report_values: { helpers: string[] | null } | { helpers: string[] | null }[] | null;
-};
 type ClientData = { id: string; name: string };
-type ExportReport = Omit<Report, 'report_values'> & {
-  report_values: { data: ReportValuesData } | { data: ReportValuesData }[];
-};
 
 const REPORT_PAGE_SIZE = 50;
 
@@ -68,21 +44,6 @@ function getHelperNames(report: Report): string {
   const helpers = values?.helpers;
   if (Array.isArray(helpers) && helpers.length > 0) return helpers.join(', ');
   return report.helper?.name || '不明';
-}
-
-async function loadReportValues(reports: Report[]): Promise<ExportReport[]> {
-  const valuesById = new Map<string, ReportValuesData>();
-  for (let start = 0; start < reports.length; start += REPORT_PAGE_SIZE) {
-    const ids = reports.slice(start, start + REPORT_PAGE_SIZE).map((report) => report.id);
-    const { data, error } = await supabase.from('report_values').select('report_id, data').in('report_id', ids);
-    if (error) throw error;
-    for (const row of data ?? []) valuesById.set(row.report_id, row.data as ReportValuesData);
-  }
-  return reports.map((report) => {
-    const value = valuesById.get(report.id);
-    if (value == null) throw new Error('Export report body is missing');
-    return { ...report, report_values: { data: value } };
-  });
 }
 
 const EMPTY_CLIENTS: ClientData[] = [];
@@ -131,7 +92,6 @@ export default function ReportsClientPage() {
   const [selected, setSelected] = useState<readonly string[]>([]);
   
   const [processing, setProcessing] = useState(false);
-  const [gasProgress, setGasProgress] = useState<{ total: number, current: number, currentName: string } | null>(null);
 
   const loadReports = useCallback(async () => {
     if (!currentOrg) return EMPTY_REPORTS;
@@ -181,6 +141,8 @@ export default function ReportsClientPage() {
   }, [currentOrg, filterClientId, filterStatus, startDate, endDate, onlyPending, orderBy, order, filterShiftId]);
 
   const { data: { reports, aiSentCount }, loading, error: loadError, refresh: fetchReports } = useRecordQuery({ organizationId: wsLoading || !filtersReady ? undefined : currentOrg?.id, queryKey: `${filterClientId}/${filterStatus}/${startDate}/${endDate}/${onlyPending}/${orderBy}/${order}/${filterShiftId}`, load: loadReports, empty: EMPTY_REPORTS, onError: logReportError });
+
+  const { exporting, gasProgress, handleExportCSV, handleExportTravelCosts, handleBulkDownloadPDF, handleCreateGasPdf } = useReportExport({ organizationId: currentOrg?.id, reports, selected, filterShiftId });
 
   const pageCount = Math.max(1, Math.ceil(reports.length / REPORT_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
@@ -244,8 +206,6 @@ export default function ReportsClientPage() {
     } finally { setProcessing(false); }
   };
 
-  const getTargetReports = () => selected.length > 0 ? reports.filter(r => selected.includes(r.id)) : reports;
-
   const formatReportDateTime = (d: Date) => {
       return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
@@ -255,283 +215,6 @@ export default function ReportsClientPage() {
       const end = new Date(report.end_at);
       const durationHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
       return durationHours > 24 || durationHours < 0;
-  };
-
-  const handleExportCSV = async () => {
-      const targetReports = getTargetReports();
-      if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
-      if (!(await confirm({ message: `${targetReports.length}件のデータをエクスポートします。\n差し込み印刷用に全ての項目を列に展開します。よろしいですか？` }))) return;
-      setProcessing(true);
-      try {
-        await readActionResult(auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'csv'));
-        const clientIds = Array.from(new Set(targetReports.map(r => r.clients.id)));
-        const { data: templates, error: templatesError } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
-        if (templatesError) throw templatesError;
-
-        const exportReports = await loadReportValues(targetReports);
-        const csvContent = buildReportsCsv(
-          exportReports,
-          (templates ?? []).map((template) => ({
-            schema: template.schema as HelperFormItem[] | null,
-          })),
-        );
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `reports_export_${new Date().toISOString().slice(0,10)}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } catch (e) { console.error(e); showToast('エクスポート中にエラーが発生しました', 'error'); } finally { setProcessing(false); }
-  };
-
-  const handleExportTravelCosts = async () => {
-      const targetReports = getTargetReports();
-      if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
-      try {
-        const exportReports = await loadReportValues(targetReports);
-        const { csv, missingCount, itemCount } = buildTravelSettlementCsv(exportReports);
-        if (missingCount > 0) {
-          showToast(`${missingCount}件の承認済み記録にスタッフ別交通費がありません。記録を確認してください。`, 'warning');
-          return;
-        }
-        if (itemCount === 0) { showToast('出力できる承認済みの交通費がありません', 'warning'); return; }
-        await readActionResult(auditReportExport(currentOrg!.id, exportReports.filter((report) => report.status === 'approved').map((report) => report.id), 'csv'));
-        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `travel_settlement_${new Date().toISOString().slice(0, 10)}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      } catch (error) {
-        console.error(error);
-        showToast('交通費の出力に失敗しました', 'error');
-      }
-  };
-
-  const handleBulkDownloadPDF = async () => {
-      const targetReports = getTargetReports();
-      if (targetReports.length === 0) { showToast('出力するデータがありません', 'warning'); return; }
-      const pdfConfirmMsg = targetReports.length > 50
-        ? `${targetReports.length}件のPDFを作成します。\n時間がかかる場合があります。`
-        : `${targetReports.length}件のPDFを出力しますか？`;
-      if (!(await confirm({ message: pdfConfirmMsg }))) return;
-
-      try {
-        await readActionResult(auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'pdf'));
-        const exportReports = await loadReportValues(targetReports);
-        const pdfReports = await Promise.all(exportReports.map(async (report) => {
-          const data = getReportData(report);
-          if (!data) throw new Error('Export report body is missing');
-          const { data: tmplData, error: templateError } = await supabase.from('form_templates').select('schema').eq('client_id', report.clients.id).maybeSingle();
-          if (templateError) throw templateError;
-          
-          const pdfData: PdfReportData = {
-            id: report.id, 
-            clientName: report.clients.name, 
-            helperName: getExportHelperNames(report),
-            startAt: report.start_at, endAt: report.end_at, 
-            data: data, 
-            template: (tmplData?.schema as HelperFormItem[]) || []
-          };
-          return { reportId: report.id, report, pdfData };
-        }));
-        
-        const validReports = pdfReports.map(({ pdfData }) => pdfData);
-
-        if (filterShiftId) {
-          const { downloadReportZip, buildReportFileName } = await import('@/utils/reportZipExport');
-          const entries = pdfReports
-            .map(({ report, pdfData }) => {
-              const serviceTypeName = report.segment?.service_type?.name ?? null;
-              return {
-                data: pdfData,
-                fileName: buildReportFileName(report.clients.name, serviceTypeName, report.start_at, report.end_at),
-              };
-            });
-          const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-          await downloadReportZip(entries, `サービス提供記録_${dateStr}`);
-        } else {
-          const [{ pdf }, { ServiceRecordDocument }] = await Promise.all([
-            import('@react-pdf/renderer'),
-            import('@/components/pdf/ServiceRecordDocument'),
-          ]);
-          const pdfDocument = <ServiceRecordDocument reports={validReports} /> as ReactElement<DocumentProps>;
-          const blob = await pdf(pdfDocument).toBlob();
-          const link = document.createElement('a');
-          link.href = URL.createObjectURL(blob);
-          link.download = `reports_${new Date().toISOString().slice(0,10)}.pdf`;
-          link.click();
-        }
-      } catch (e) { console.error(e); showToast('PDF作成中にエラーが発生しました', 'error'); }
-  };
-
-  const preparePdfData = (
-    rawData: ReportValuesData, 
-    schema: HelperFormItem[], 
-    keyMap: Record<string, string>
-  ): Record<string, unknown> => {
-    const result: Record<string, unknown> = {};
-    schema.forEach(item => {
-        const labelKey = keyMap[item.id] || item.id;
-        const val = rawData[item.id];
-        if (item.type === 'checkbox') {
-            result[labelKey] = !!val; 
-            if (item.hasDetail) {
-                const detailKey = `${labelKey}_詳細`;
-                result[detailKey] = rawData[`${item.id}_detail`] || "";
-            }
-        } 
-        else if (item.type === 'multicheckbox' || item.type === 'select') {
-            const selectedValues: string[] = Array.isArray(val) ? val : (val ? [String(val)] : []);
-            if (item.options) {
-                item.options.split(',').forEach((opt: string) => {
-                    const cleanOpt = opt.trim();
-                    const optKey = `${labelKey}_${cleanOpt}`;
-                    result[optKey] = selectedValues.includes(cleanOpt);
-                });
-            }
-            if (item.hasDetail) {
-                const detailKey = `${labelKey}_詳細`;
-                result[detailKey] = rawData[`${item.id}_detail`] || "";
-            }
-        } 
-        else {
-            result[labelKey] = (val === null || val === undefined) ? "" : val;
-        }
-    });
-    return result;
-  };
-
-  const handleCreateGasPdf = async () => {
-      const targetReports = getTargetReports();
-      if (targetReports.length === 0) { showToast('出力するデータがありません。', 'warning'); return; }
-      try {
-          const clientIds = Array.from(new Set(targetReports.map((report) => report.clients.id)));
-          const { data: clientsInfo, error: clientsInfoError } = await supabase.from('clients').select('id, name, google_template_id, google_folder_id').in('id', clientIds);
-          if (clientsInfoError) throw clientsInfoError;
-          if (clientIds.some((id) => !clientsInfo?.some((client) => client.id === id))) {
-              throw new Error('Export client is missing');
-          }
-      
-          const { data: templates, error: templatesError } = await supabase.from('form_templates').select('client_id, schema').in('client_id', clientIds);
-          if (templatesError) throw templatesError;
-
-          const schemaMap: Record<string, HelperFormItem[]> = {};
-          const keyMaps: Record<string, Record<string, string>> = {};
-
-          templates?.forEach(t => {
-              const s = (t.schema as HelperFormItem[] | null) ?? [];
-              schemaMap[t.client_id] = s;
-              keyMaps[t.client_id] = generateKeyMap(s);
-          });
-
-          const { data: orgInfo, error: orgError } = await supabase.from('organizations').select('google_folder_id').eq('id', currentOrg!.id).single();
-          if (orgError) throw orgError;
-          if (!orgInfo) throw new Error('Export organization is missing');
-          if (!orgInfo.google_folder_id) { showToast('事業所のGoogleドライブ連携が設定されていません。設定画面から連携を行ってください。', 'warning'); return; }
-
-          if (!(await confirm({ message: `${targetReports.length}件の帳票を作成しますか？\n（Googleドライブに保存されます）` }))) return;
-          setGasProgress({ total: targetReports.length, current: 0, currentName: '準備中...' });
-
-          let lastOpenedFolderUrl: string | null = null;
-
-          const exportReports = await loadReportValues(targetReports);
-          await readActionResult(auditReportExport(currentOrg!.id, targetReports.map((report) => report.id), 'pdf'));
-          const clientGroups: Record<string, ExportReport[]> = {};
-          exportReports.forEach((report) => {
-              const clientId = report.clients.id;
-              if (!clientGroups[clientId]) clientGroups[clientId] = [];
-              clientGroups[clientId].push(report);
-          });
-          let processedCount = 0;
-          const now = new Date();
-          const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-          const exportFolderName = `${timeStr}_出力分`;
-
-          for (const client of clientsInfo || []) {
-              const reports = clientGroups[client.id];
-              if (!reports) continue;
-              if (!client.google_template_id) {
-                  processedCount += reports.length;
-                  setGasProgress({ total: targetReports.length, current: processedCount, currentName: `${client.name}: テンプレート未設定のためスキップ` });
-                  continue;
-              }
-
-              setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: フォルダ確認中...` }));
-              
-              const folderRes = await readActionResult(callGasApi({
-                  action: 'manage_client_folder',
-                  organizationId: currentOrg!.id,
-                  clientId: client.id,
-                  orgFolderId: orgInfo.google_folder_id,
-                  clientName: client.name,
-                  currentFolderId: client.google_folder_id
-              }));
-
-
-              if (folderRes.folderId && folderRes.folderId !== client.google_folder_id) {
-                  await readActionResult(updateClientGoogleLink(currentOrg!.id, client.id, { folderId: folderRes.folderId }));
-              }
-              const clientRootFolderId = folderRes.folderId;
-
-              setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: サブフォルダ作成中...` }));
-              const subFolderRes = await readActionResult(callGasApi({
-                  action: 'create_sub_folder',
-                  organizationId: currentOrg!.id,
-                  clientId: client.id,
-                  parentId: clientRootFolderId,
-                  folderName: exportFolderName
-              }));
-              const targetFolderId = subFolderRes.folderId; 
-              lastOpenedFolderUrl = subFolderRes.folderUrl;
-
-              const clientSchema = schemaMap[client.id] || [];
-              const clientKeyMap = keyMaps[client.id] || {};
-
-              for (const report of reports) {
-                  setGasProgress(prev => ({ ...prev!, currentName: `${client.name}: ${new Date(report.start_at).toLocaleDateString()} の記録を作成中...` }));
-                  const data = getReportData(report) || {};
-                  
-                  const flatData: Record<string, string | number | boolean | null | undefined> = {};
-                  
-                  const start = new Date(report.start_at);
-                  const end = new Date(report.end_at);
-                  
-                  flatData['利用者名'] = client.name;
-                  flatData['担当ヘルパー名'] = getExportHelperNames(report);
-                  flatData['開始日付'] = `${start.getFullYear()}/${start.getMonth()+1}/${start.getDate()}`;
-                  flatData['開始時刻'] = `${start.getHours()}:${String(start.getMinutes()).padStart(2,'0')}`;
-                  flatData['終了日付'] = `${end.getFullYear()}/${end.getMonth()+1}/${end.getDate()}`;
-                  flatData['終了時刻'] = `${end.getHours()}:${String(end.getMinutes()).padStart(2,'0')}`;
-                  flatData['サービス時間'] = (data.service_time as string | number) || '0';
-                  flatData['移動時間'] = (data.travel_time as string | number) || '0';
-
-                  const readableData = preparePdfData(data, clientSchema, clientKeyMap);
-                  const finalPayload = { ...flatData, ...readableData } as Record<string, unknown>;
-
-                  await readActionResult(callGasApi({
-                      action: 'create_pdf',
-                      organizationId: currentOrg!.id,
-                      clientId: client.id,
-                      reportId: report.id,
-                      folderId: targetFolderId, 
-                      templateId: client.google_template_id,
-                      data: finalPayload, 
-                      fileName: `${client.name}_${(flatData['開始日付'] as string).replace(/\//g,'-')}_提供記録`
-                  }));
-                  processedCount++;
-                  setGasProgress({ total: targetReports.length, current: processedCount, currentName: '' });
-              }
-          }
-          showToast('作成が完了しました。保存先のフォルダを開きます。');
-          if (lastOpenedFolderUrl) window.open(lastOpenedFolderUrl, '_blank');
-
-      } catch (e) { console.error(e); showToast(getActionErrorMessage(e, 'エラーが発生しました'), 'error'); }
-      finally { setGasProgress(null); }
   };
 
   const handleOpenDetail = (report: Report) => { router.push(buildRecordPath(report.clients.id, { reportId: report.id })); };
@@ -603,20 +286,20 @@ export default function ReportsClientPage() {
                    </Typography>
                </Box>
                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}>
-                 {isExportView && <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing}>CSV</Button>}
-                 {isExportView && <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportTravelCosts} disabled={processing}>交通費精算CSV</Button>}
-                 {isExportView && <Button variant="outlined" size="small" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF}>PDF</Button>}
+                 {isExportView && <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing || exporting}>CSV</Button>}
+                 {isExportView && <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportTravelCosts} disabled={processing || exporting}>交通費精算CSV</Button>}
+                 {isExportView && <Button variant="outlined" size="small" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF} disabled={processing || exporting}>PDF</Button>}
                  {selected.length > 0 ? (
                     <>
-                        {isExportView && <Button variant="contained" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
+                        {isExportView && <Button variant="contained" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={processing || exporting}>
                             {gasProgress ? '作成中...' : '帳票作成(GAS)'}
                         </Button>}
-                        {!isExportView && canApproveRecords && <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing} sx={{ boxShadow: 'none' }}>一括承認</Button>}
-                        {!isExportView && canApproveRecords && <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing}>一括差戻し</Button>}
-                        {!isExportView && canDeleteRecords && <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing}>削除</Button>}
+                        {!isExportView && canApproveRecords && <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing || exporting} sx={{ boxShadow: 'none' }}>一括承認</Button>}
+                        {!isExportView && canApproveRecords && <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing || exporting}>一括差戻し</Button>}
+                        {!isExportView && canDeleteRecords && <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing || exporting}>削除</Button>}
                     </>
                  ) : isExportView ? (
-                     <Button variant="outlined" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={!!gasProgress}>
+                     <Button variant="outlined" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={processing || exporting}>
                         {gasProgress ? '作成中...' : '全件帳票作成'}
                      </Button>
                  ) : null}

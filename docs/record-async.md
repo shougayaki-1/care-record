@@ -48,3 +48,17 @@ Issue #109の初期読込整理では、上記の資料を再確認し、マス�
 `useAiImportCandidates` はorganization IDと取得世代に束縛し、利用者・スタッフの両クエリが成功した場合だけ候補をまとめて公開する。取得中・取得失敗・正常0件を区別し、取得中と失敗中は抽出開始と下書き保存を停止する。正常0件は取得成功として扱い、登録が必要な候補を警告する。候補再取得は同じ組織の選択ファイル・レビュー修正・保存再試行キーを保持する。組織切替時は画面の入力と候補を破棄し、旧応答・unmount後の応答を反映しない。候補ID・氏名照合、AI機能フラグ、API認可・RLS・監査・保存契約は維持する。
 
 2026-10-23: Context7のReact公式資料でReact 19のEffect cleanupによる古い応答の破棄を確認。Next.js 16の同梱`use client`資料も確認した。単体テストでは両候補の遅延・失敗・0件、再試行、応答逆転、組織変更、StrictMode、unmount、抽出・保存の停止と入力保持を検証し、実AIサービスは呼ばない。
+
+## AI一括取込の責務分担
+
+Issue #134では、組織IDで再マウントする`AiImportWorkspace`と既存の候補取得hookを維持し、`src/hooks/aiImport/`へ以下を分離した。
+
+- `useAiImportFiles`: ファイルの追加・選択・グループ化とpreview URLの所有。削除後もレビュー行が参照するURLは維持し、参照消滅・クリア・unmountで解放する。
+- `transforms`: 元ファイル順のprocessing groups、候補ID優先・氏名fallback、日時検証、レビュー行と保存payloadの純粋変換。
+- `useAiImportExtraction`: FormData構築、既存`readAiExtractSse`による結果・進捗の受信、初回部分結果と再抽出失敗時の修正内容保持。
+- `useAiImportReview`: レビュー編集、行ごとの保存結果と再試行。成功行は表示を維持して再送対象から外し、同一payloadの失敗行には同じ冪等キーを使用する。フィード更新は既存`commitRecordChange`で部分成功を含むバッチごとに一度だけ行う。
+- `src/components/ai-import/AiImportFiles`: ファイル一覧・グループ表示・進捗の描画。空・選択・グループ・進捗はStorybookで、部分保存失敗は既存レビュー表のstoryで確認する。
+
+抽出・保存・閉じる確認はページで生成した一つの`useAsyncRecordAction`を共有する。ファイル操作とレビュー編集も同じ同期ロックを参照し、旧組織の結果・通知・遷移は適用しない。モデル・プロンプト・API・有効化条件・対応形式・認可・監査契約は変更しない。
+
+2026-10-23: Context7でReact（使用版19.2.3）のcustom hook、Effect cleanupと古い非同期応答の破棄、Next.js 16.3.6同梱の`use client`資料を確認した。検証にはmockのSSE・保存ActionとローカルStorybookを用い、実AIサービスには接続しない。
