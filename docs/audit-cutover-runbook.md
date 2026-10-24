@@ -182,14 +182,14 @@ planの契約:
 | schema / environment / cutoverId | `audit-cutover-plan:1` / `local`・`staging`・`production` / 承認済み切替UUID |
 | evidenceDigest | 手動切替に使った適用証跡のSHA-256 |
 | evidence | `aDeployment`・`bDeployment`・`backupFreshness`・`oldJobsDrained`・`legacyExportsReviewed`・`migrationApplied`・`approval`それぞれの確認証跡のSHA-256 |
-| boundary | DBから読んだ`cutoverId`・`v1Count`（10進文字列）・`at`（boundary_at） |
+| boundary | DBから読んだ`cutoverId`・`v1Count`（10進文字列）・`at`（boundary_at）と、外部writerとは独立したDB全量inventoryから計算する`v1Digest` |
 | inventoryRun / snapshotStartedAt | 切替commit後に開始したB run UUIDとDB started_at |
 | inventoryReceipts | `archive/<environment>/pre-cutover/manifests/1.json`から、当該runの最終inventoryまでの全receiptを順序どおりに列挙 |
 | previousControl | DB外に固定済みのpreparation control receipt |
 | monitoringStartedAt | 新系列の監視開始時刻。再送時に変更しない |
 
 各receiptは`name`・`generation`・`size`・`digest`。数値は10進文字列。
-ツールはgeneration指定で外部objectを読み、全receiptの連番・前digest、当該runの全chunkと累積v1 digest・件数、DB境界件数、snapshot時刻を照合する。
+ツールはgeneration指定で外部objectを読み、全receiptの連番・前digest、当該runの全chunkと累積v1 digest・件数、独立したDB全量inventoryのdigest・境界件数、snapshot時刻を照合する。外部manifestのdigestをDB照合値へそのまま転記しない。
 証跡digestの存在は検査するが、A/Bが実配備済みか、legacyの全generationを人が確認したかを自動で保証しない。証跡本体のレビューを省略しない。
 
 異常は500行ずつの内容hash名objectに分け、分類summary、B互換`audit-baseline:1`、前controlを参照する`audit-control:1`を順にcreate-only発行する。

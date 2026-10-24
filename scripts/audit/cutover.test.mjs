@@ -61,7 +61,7 @@ async function fixture() {
   const final=await store.create('archive/local/pre-cutover/manifests/2.json',Buffer.from(JSON.stringify({schema:'audit-manifest:1',environment:'local',cutoverId:'pre-cutover',ordinal:'2',previousDigest:first.ref.digest,run,kind:'inventory',chunk:null,createdAt:'2026-10-25T01:02:00Z',...summary})));
   return {store,plan:{schema:'audit-cutover-plan:1',environment:'local',cutoverId,evidenceDigest:hash(1),
     evidence:Object.fromEntries(['aDeployment','bDeployment','backupFreshness','oldJobsDrained','legacyExportsReviewed','migrationApplied','approval'].map(k=>[k,hash(2)])),
-    boundary:{cutoverId,v1Count:'2',at:'2026-10-25T01:00:00Z'},inventoryRun:run,snapshotStartedAt:'2026-10-25T01:01:00Z',
+    boundary:{cutoverId,v1Count:'2',v1Digest:summary.v1Digest,at:'2026-10-25T01:00:00Z'},inventoryRun:run,snapshotStartedAt:'2026-10-25T01:01:00Z',
     monitoringStartedAt:'2026-10-25T01:03:00Z',previousControl:structuredClone(previous.ref),inventoryReceipts:structuredClone([first.ref,final.ref])}};
 }
 test('operator issues generation-pinned baseline/control, preserves unresolved history and never enables mode',async()=>{
@@ -84,7 +84,7 @@ test('interruption before control publication resumes identical objects; conflic
 test('rejects unapproved dependencies, pre-cutover snapshots, missing/generation-changed/foreign receipts or incomplete v1',async()=>{
   for(const mutate of [p=>{delete p.evidence.bDeployment;},p=>{p.snapshotStartedAt='2026-10-24T00:00:00Z';},
     p=>{p.inventoryReceipts.shift();},p=>{p.previousControl.generation='9007199254740992';},
-    p=>{p.inventoryReceipts[0].name='archive/production/pre-cutover/manifests/1.json';},p=>{p.boundary.v1Count='3';}]) {
+    p=>{p.inventoryReceipts[0].name='archive/production/pre-cutover/manifests/1.json';},p=>{p.boundary.v1Count='3';},p=>{p.boundary.v1Digest=hash(9);}]) {
     const {store,plan}=await fixture();mutate(plan);await assert.rejects(issueControl(store,plan));
     assert.equal([...store.objects.keys()].some(name=>name.endsWith('/control.json')),false);
   }
@@ -93,6 +93,7 @@ test('restore checks external ordinal and heads before resuming, refuses reset o
   const id=randomUUID(),head={scope:'global',sequence:'9007199254740993',hash:hash(4),cutoverId:id};
   const external={cutoverId:id,ordinal:'9007199254740995',v1Count:'0',v1Digest:sha256(Buffer.alloc(0)),heads:[head]};
   const db={...external,heads:[head]};assert.equal(verifyRestoredDatabase(external,db).automaticReset,false);
+  assert.throws(()=>verifyRestoredDatabase({ordinal:'1',heads:[]},{heads:[]}));
   for(const changed of [{...db,cutoverId:randomUUID()},{...db,v1Digest:hash(9)},
     {...db,heads:[{...head,sequence:'9007199254740992'}]},{...db,heads:[{...head,hash:hash(5)}]}])
     assert.throws(()=>verifyRestoredDatabase(external,changed));

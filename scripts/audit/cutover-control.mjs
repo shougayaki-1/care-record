@@ -19,6 +19,7 @@ export async function issueControl(store, plan, recomputation = null) {
   check(plan.schema === 'audit-cutover-plan:1' && ['local','staging','production'].includes(plan.environment)
     && uuid.test(plan.cutoverId) && digest.test(plan.evidenceDigest)
     && plan.boundary?.cutoverId === plan.cutoverId && decimal.test(plan.boundary.v1Count)
+    && digest.test(plan.boundary.v1Digest)
     && Number.isFinite(Date.parse(plan.boundary.at)) && Number.isFinite(Date.parse(plan.monitoringStartedAt)));
   for (const gate of ['aDeployment','bDeployment','backupFreshness','oldJobsDrained','legacyExportsReviewed','migrationApplied','approval'])
     check(digest.test(plan.evidence?.[gate]));
@@ -53,7 +54,7 @@ export async function issueControl(store, plan, recomputation = null) {
   }
   const classification = classifyInventory(items,recomputation);
   check(classification.v1Count === final.v1Count && classification.v1Digest === final.v1Digest
-    && classification.v1Count === plan.boundary.v1Count);
+    && classification.v1Count === plan.boundary.v1Count && classification.v1Digest === plan.boundary.v1Digest);
   // Explicit DB snapshot evidence binds this run to a snapshot AFTER the locked
   // boundary. A pre-cutover run is never relabelled as a finalized baseline.
   check(plan.inventoryRun === final.run && Date.parse(plan.snapshotStartedAt) >= Date.parse(plan.boundary.at)
@@ -92,10 +93,22 @@ export async function issueControl(store, plan, recomputation = null) {
 // External manifests are the trusted reference. This never updates heads or
 // issues another control. A DB ahead of the archive must prove its old anchor.
 export function verifyRestoredDatabase(external, database) {
-  check(external.cutoverId === database.cutoverId && decimal.test(external.ordinal)
+  check(uuid.test(external.cutoverId) && external.cutoverId === database.cutoverId
+    && typeof external.ordinal==='string' && decimal.test(external.ordinal) && BigInt(external.ordinal)>0n
+    && typeof external.v1Count==='string' && decimal.test(external.v1Count) && digest.test(external.v1Digest)
+    && Array.isArray(external.heads) && Array.isArray(database.heads)
     && external.v1Digest === database.v1Digest && external.v1Count === database.v1Count);
-  const seen=new Set();
-  for (const head of database.heads) { check(!seen.has(head.scope)); seen.add(head.scope); }
+  function heads(values) {
+    const seen=new Set();
+    for(const head of values) {
+      check(typeof head.scope==='string' && (head.scope==='global' || (head.scope.startsWith('org:') && uuid.test(head.scope.slice(4))))
+        && typeof head.sequence==='string' && decimal.test(head.sequence) && BigInt(head.sequence)>0n
+        && digest.test(head.hash) && !seen.has(head.scope));
+      seen.add(head.scope);
+    }
+  }
+  heads(external.heads);heads(database.heads);
+  for(const head of database.heads)check(head.cutoverId===external.cutoverId);
   for (const anchor of external.heads) {
     const head=database.heads.find(value=>value.scope===anchor.scope);
     check(head && decimal.test(head.sequence) && decimal.test(anchor.sequence)

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { issueControl } from '../../../scripts/audit/cutover-control.mjs';
+import { inventorySummary, readInventory } from '../../../scripts/audit/cutover-inventory.mjs';
 import { runArchive, type Manifest } from '../auditArchive/publisher';
 import { encode, sha256, type Control, type Event, type ObjectRef, type Source, type Store } from '../auditArchive/contracts';
 
@@ -40,7 +41,7 @@ it('finalizes the exact B inventory and supplies a baseline/control the unchange
   const snapshotStartedAt = new Date(Date.now() - 1000).toISOString();
   const pins = await issueControl(store, {
     schema: 'audit-cutover-plan:1', environment: 'local', cutoverId, evidenceDigest: '1'.repeat(64),
-    boundary: { cutoverId, v1Count: '1', at: boundaryAt }, inventoryRun: final.run,
+    boundary: { cutoverId, v1Count: '1', v1Digest: inventorySummary(readInventory([row])).v1Digest, at: boundaryAt }, inventoryRun: final.run,
     snapshotStartedAt, monitoringStartedAt: final.createdAt,
     previousControl: previous.ref, inventoryReceipts: receipts.map(object => object.ref),
     evidence: Object.fromEntries(['aDeployment', 'bDeployment', 'backupFreshness', 'oldJobsDrained', 'legacyExportsReviewed', 'migrationApplied', 'approval'].map(key => [key, '2'.repeat(64)])),
