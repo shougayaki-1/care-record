@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { assertLocalSupabaseEnvironment } from './local-environment.mjs';
 import { playwrightArguments } from './playwright-arguments.mjs';
 import { disableLocalSeed } from './local-config.mjs';
+import { e2eApiPath, e2eAppOrigin } from './rewrites.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sourceSupabaseDir = resolve(repoRoot, 'supabase');
@@ -121,7 +122,9 @@ try {
     AI_IMPORT_ENABLED: 'false',
     EXTERNAL_INTEGRATIONS_ENABLED: 'false',
     E2E_TEST_ENV: 'true',
-    NEXT_PUBLIC_SUPABASE_URL: localConfig.API_URL,
+    // Keep browser connections same-origin under the unchanged production CSP.
+    NEXT_PUBLIC_SUPABASE_URL: `${e2eAppOrigin}${e2eApiPath}`,
+    E2E_SUPABASE_TARGET_URL: localConfig.API_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: localConfig.ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY: localConfig.SERVICE_ROLE_KEY,
     SUPABASE_DB_URL: localConfig.DB_URL,
@@ -131,6 +134,10 @@ try {
   if (!supabaseEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY || !supabaseEnv.SUPABASE_SERVICE_ROLE_KEY || !supabaseEnv.SUPABASE_DB_URL) {
     throw new Error('Supabase CLI did not return the local API keys and database URL required for E2E tests.');
   }
+
+  // NEXT_PUBLIC_* is embedded at build time. Build only after the disposable DB
+  // exists, with the same environment passed to next start and the browser tests.
+  run('npm', ['run', 'build'], { env: supabaseEnv, inherit: true, phase: 'production-build' });
 
   const startedAt = performance.now();
   const result = spawnSync('npx', ['--no-install', 'playwright', ...playwrightArgs], {

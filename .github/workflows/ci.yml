@@ -289,7 +289,9 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: playwright-report-${{ matrix.project }}
-          path: playwright-report/
+          path: |
+            playwright-report/
+            test-results/results.json
           if-no-files-found: ignore
           retention-days: 14
 

@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { assertLocalSupabaseEnvironment } from './scripts/e2e/local-environment.mjs';
+import { e2eAppOrigin } from './scripts/e2e/rewrites.mjs';
 
 if (process.env.E2E_TEST_ENV !== 'true') {
   throw new Error('Playwright E2E tests must run through the local Supabase test runner.');
@@ -17,7 +18,7 @@ export default defineConfig({
   retries: process.env.GITHUB_ACTIONS ? 1 : 0,
   workers: 1,
   reporter: process.env.GITHUB_ACTIONS
-    ? [['line'], ['html', { open: 'never' }], ['json', { outputFile: 'playwright-report/results.json' }]]
+    ? [['line'], ['html', { open: 'never' }], ['json', { outputFile: 'test-results/results.json' }]]
     : 'html',
   timeout: 60 * 1000,
   expect: {
@@ -25,7 +26,7 @@ export default defineConfig({
   },
 
   use: {
-    baseURL: 'http://127.0.0.1:3000',
+    baseURL: e2eAppOrigin,
     actionTimeout: 15 * 1000,
     trace: 'on-first-retry',
   },
@@ -41,8 +42,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev -- --hostname 127.0.0.1',
-    url: 'http://127.0.0.1:3000',
+    command: 'npm run start -- --hostname 127.0.0.1',
+    url: e2eAppOrigin,
     // An existing app may point at a hosted database, even when this runner is local.
     reuseExistingServer: false,
     timeout: 120 * 1000,

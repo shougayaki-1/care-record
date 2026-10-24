@@ -19,7 +19,7 @@ Node.js 24、npm、Docker、Supabase CLI 2.108.0 を使用します。通常の�
 unitテストファイルだけを変更した場合はcoreを実行し、DB・UI・E2Eは起動しません。
 DB SQL試験、Storybook stories、E2E spec、runner、共通設定の変更はこの省略に含めません。
 関連E2Eの対応表は `scripts/ci/classify-changes.mjs` の `featureSuites` が正本です。
-主要5シナリオは常に維持し、認証・所属変更では復旧/招待、記録・帳票変更では
+主要6シナリオ（ブラウザによるCSP拒否も含む）は常に維持し、認証・所属変更では復旧/招待、記録・帳票変更では
 履歴/記録遷移/帳票条件/承認、アカウント等の変更では管理/招待specを追加します。
 
 基本コマンド:
@@ -101,6 +101,15 @@ UUID付き新規projectの設定ではseedを明示的に無効化します。`s
 Postgres Meta・Edge Runtimeは起動せず、Auth・Storage・Realtime・Mailpitは維持します。
 `[e2e:database-start]` / `[e2e:playwright]` / `[e2e:database-stop]` に所要秒を出力します。
 CLIの環境出力にはkeysがあるため表示しません。CIはHTMLとJSONレポートをproject別に保持します。
+E2EはDBのURL/keyを取得してから同じ環境で `npm run build` → `npm run start` を使います。
+別jobのダミーURL入りbuild成果物は流用しません。これによりproductionの認証・Action応答を
+検証し、開発サーバーのFast Refreshが試験中に画面を再読込する要因を取り除きます。
+build時間は `[e2e:production-build]` へ記録します。ローカルでもbuild時のGoogle Fonts取得等に
+ネットワークが必要です。
+production CSPは別originのlocalhost APIを許可しないため、E2Eでは同一originの
+`/api/e2e-supabase` から専用APIへ転送します。`APP_ENV=test` とrunnerの `E2E_TEST_ENV=true` が
+両方あるbuildだけで有効になり、転送先はpath・資格情報のない別portのloopback originに限定します。
+通常buildには転送endpointを作りません。CSP、security headers、ブラウザのCSP検証は維持します。
 
 実行していない検査を「確認済み」と記録しないでください。CI の最終判定が失敗した場合は、選択された job のログを確認します。
 
@@ -155,6 +164,7 @@ hash連鎖・監査失敗時の原子的rollbackを検査します。`api/ai/ext
 Context7確認日: 2026-10-24。Playwright1.61.1のCI/image/network、Vitest4.1.6のproject workers、
 Supabase CLIのfresh-volume migration/seed/excludeを確認。実装対象はPlaywright1.61.1、
 Vitest4.1.11、Supabase CLI2.108.0。CLI資料は現行developも含むため、固定版で実動作を検証します。
+productionでのE2Eとrewriteは、インストール済みNext.js16.3.6のPlaywright/rewritesガイドも確認しています。
 
 ## Branch / worktree運用の検証
 
