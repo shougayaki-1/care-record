@@ -2897,6 +2897,14 @@ export type Database = {
         }
         Returns: string
       }
+      begin_audit_archive: {
+        Args: { p_include_v1?: boolean; p_positions?: Json }
+        Returns: string
+      }
+      cache_audit_archive: {
+        Args: { p_destination: string; p_digest: string; p_ordinal: string }
+        Returns: undefined
+      }
       complete_google_oauth_connection: {
         Args: {
           p_calendar_id: string
@@ -3056,6 +3064,10 @@ export type Database = {
           p_role_id: string
         }
         Returns: string
+      }
+      read_audit_archive: {
+        Args: { p_cursor?: Json; p_run: string }
+        Returns: Json
       }
       refresh_shift_staffs: { Args: { p_shift_id: string }; Returns: undefined }
       refresh_shift_title: { Args: { p_shift_id: string }; Returns: undefined }
