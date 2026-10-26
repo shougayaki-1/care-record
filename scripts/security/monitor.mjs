@@ -143,6 +143,18 @@ function sql(query) {
   }).trim();
 }
 
+export function readMonitorSnapshot() {
+  return validateSnapshot(JSON.parse(sql('SELECT private.security_monitor_snapshot();')));
+}
+
+export async function saveMonitorState(version, state) {
+  if (!count(version)) throw new Error('invalid_version');
+  const hex = Buffer.from(JSON.stringify(state)).toString('hex');
+  const next = Number(sql(`SELECT private.security_monitor_save(${version}, convert_from(decode('${hex}','hex'),'UTF8')::jsonb);`));
+  if (!count(next)) throw new Error('invalid_version');
+  return next;
+}
+
 export async function main() {
   const environment = process.env.APP_ENV;
   const link = process.env.EVIDENCE_URL;
@@ -153,21 +165,14 @@ export async function main() {
       || !process.env.PGHOST || process.env.PGUSER !== `security_monitor_${environment}.${project}` || !process.env.PGPASSWORD
       || process.env.PGSSLMODE !== 'verify-full') throw new Error('invalid_config');
     evidenceUrl(link);
-    const snapshot = JSON.parse(sql('SELECT private.security_monitor_snapshot();'));
-    validateSnapshot(snapshot);
+    const snapshot = readMonitorSnapshot();
     const enabled = process.env.SECURITY_FIREWALL_ENABLED === 'true';
     const firewall = await collectFirewall({ environment, enabled });
     const firewallDaily = snapshot.state.daily_end !== snapshot.day_end ? await collectFirewall({ environment, enabled, since: '24h' }) : undefined;
     const result = await runMonitor({ snapshot, environment, link, notify,
       firewall, firewallDaily,
       probe: process.env.SECURITY_MONITOR_PROBE === 'true',
-      save: async (version, state) => {
-        // Hex encodes our projected state to avoid SQL quoting/interpolation hazards.
-        const hex = Buffer.from(JSON.stringify(state)).toString('hex');
-        const next = Number(sql(`SELECT private.security_monitor_save(${version}, convert_from(decode('${hex}','hex'),'UTF8')::jsonb);`));
-        if (!count(next)) throw new Error('invalid_version');
-        return next;
-      },
+      save: saveMonitorState,
     });
     console.log(JSON.stringify(result));
     if (result.deliveryFailures) process.exitCode = 1;
