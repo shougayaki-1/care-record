@@ -18,6 +18,12 @@ const migration=readFileSync(new URL('../../supabase/manual-migrations/202610250
 const command=(program,parameters)=>['exec','-i',container,'sh','-c',
   'PGPASSWORD="$POSTGRES_PASSWORD" exec "$@"','audit-cutover-fixture',program,...parameters];
 const args=(db,role='postgres')=>command('psql',['-w','-X','-At','-U',role,'-d',db,'-v','ON_ERROR_STOP=1','-v','VERBOSITY=verbose']);
+// Supabase provisions graphql_public.graphql through extension hooks. Some
+// image versions dump its ACL without recreating the managed wrapper. GraphQL
+// is outside this audit restore contract; retain all application/Auth/Storage
+// schemas, ownership, ACLs, triggers and data, and keep ON_ERROR_STOP enabled.
+const dumpArgs=(db,schemaOnly=false)=>command('pg_dump',['-w','-U','supabase_admin',
+  '--exclude-schema=graphql_public',...(schemaOnly?['--schema-only']:[]),db]);
 function sql(input,db=database,role='postgres') {
   const r=spawnSync('docker',args(db,role),{input,encoding:'utf8',timeout:40_000});
   if(r.error || r.status!==0)throw new Error(r.stderr||'cutover_test_failed');
@@ -77,7 +83,7 @@ function snapshot(db) {
 }
 try {
   const emptyDatabase=`audit_cutover_151_empty_${process.pid}`;
-  const schema=spawnSync('docker',command('pg_dump',['-w','-U','supabase_admin','--schema-only','postgres']),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
+  const schema=spawnSync('docker',dumpArgs('postgres',true),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
   assert.equal(schema.status,0,schema.stderr);
   sql(`CREATE DATABASE ${emptyDatabase} TEMPLATE template0;`,'postgres');
   sql(schema.stdout,emptyDatabase,'supabase_admin');
@@ -88,7 +94,7 @@ try {
   console.log('PASS: schema-only empty rebuild cuts over and accepts old-app INSERT at sequence 1');
   // Real logical restore also avoids interrupting Supabase's background
   // connections (CREATE DATABASE ... TEMPLATE postgres requires zero clients).
-  const dump=spawnSync('docker',command('pg_dump',['-w','-U','supabase_admin','postgres']),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
+  const dump=spawnSync('docker',dumpArgs('postgres'),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
   assert.equal(dump.status,0,dump.stderr);
   sql(`CREATE DATABASE ${database} TEMPLATE template0;`,'postgres');
   sql(dump.stdout,database,'supabase_admin');
@@ -154,7 +160,7 @@ try {
   // Restore a REAL post-cutover logical backup, then advance the source beyond
   // its frozen head. Comparison must stop a stale restore before any reuse.
   const frozen=snapshot(database), restoredDatabase=`audit_cutover_151_replay_${process.pid}`;
-  const v2dump=spawnSync('docker',command('pg_dump',['-w','-U','supabase_admin',database]),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
+  const v2dump=spawnSync('docker',dumpArgs(database),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
   assert.equal(v2dump.status,0,v2dump.stderr);
   sql(`CREATE DATABASE ${restoredDatabase} TEMPLATE template0;`,'postgres');
   sql(v2dump.stdout,restoredDatabase,'supabase_admin');

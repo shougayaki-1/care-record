@@ -225,3 +225,18 @@ node scripts/db/test-audit-cutover.mjs supabase_db_care-record-audit-v2-test-151
 offline/メモリStore試験は異常分類・精度・control途中失敗/再開・別内容再送拒否・古いsnapshot拒否を確認する。
 `auditCutoverFlow.test.ts` は実B publisherで発行したinventoryからGのbaseline/controlを発行し、Bの新系列がそのreceiptを受理することを確認する。
 実GCSのIAM拒否・create-only、Staging切替、Production適用は未実施であり、Issue完了・準拠完了として扱わない。
+
+### CI復元fixtureの修正（2026-10-26）
+
+CIの管理ロール認証は専用コンテナ内の既存passwordを使用する。
+また、Supabase管理の`graphql_public.graphql`はextension hookで用意される版があり、
+pg_dumpのACLだけを空DBへ復元すると関数不在で停止するため、この監査復元fixtureでは
+`--exclude-schema=graphql_public`を指定する。アプリ/public・private・Auth・Storage、
+所有者、ACL、trigger、監査データは保持し、復元エラーは引き続き`ON_ERROR_STOP`で拒否する。
+この試験は監査切替と復元後の連番/head照合を対象とし、Supabase管理GraphQLを含む
+プラットフォーム全体の復旧成功を証明するものではない。
+
+再開時の固定CLI2.108.0はローカルでPostgreSQLイメージ`17.6.1.139`を選択した。
+過去のCIイメージ`17.6.1.063`と同一イメージでのローカル再現とは扱わず、
+最終のGitHub CI結果を別途確認する。Context7で2026-10-26にPostgreSQL17の
+pg_dump/extension member・schema除外・template0への復元契約を再確認した。
