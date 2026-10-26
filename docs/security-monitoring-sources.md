@@ -61,3 +61,43 @@ Stagingでの合成試行、専用ロールの権限拒否、実配送、障害�
 監視の収集元を増やしても、未確認の経路をhealthyと表示しない。
 
 Context7では2026-10-26にVercel Firewall Traffic/Alertsのプラン・窓、Supabaseの停止・Auth Audit Logsを確認した。
+
+## 追加確認と実行予定（2026-10-27 JST）
+
+利用者の回答を受け、通知方針は「既存Stagingバックアップ通知先、閲覧者は本人のみ、保持期限なし」として記録する。
+これは利用者による方針確認であり、Discordの権限・保持設定をAPIで読み戻した証拠ではない。
+Webhook URLやsecret値はチャット・証跡に記載しない。
+
+読み取り専用で、両projectのAuth設定 `audit_log_disable_postgres=true` を確認した。
+`auth.audit_log_entries` へ保存しない設定であり、同表の0件を直接Auth試行のゼロと解釈しない。
+organization entitlementはログ保持1日、Log Drainとaudit Log Drainは利用不可だった。
+統合ログAPIで `select count() as event_count from logs where source = 'auth_logs'` を直近15分に限定して実行し、
+両環境とも取得成功・0件だった。生ログは取得していない。これはAPIの取得可否の確認であり、失敗イベントの網羅性や取込正常の証拠ではない。
+Auth設定は変更していない。APIのClickHouse SQLと再開endpointを2026-10-27に一次資料・Context7で確認した。
+
+Staging再開は自動承認レビューに拒否され、実行されていない。
+理由は、通知方針への「OK」は、費用・稼働状態を変更し得るproject再開の明示承認ではないため。
+再開要求を他の経路で試していない。GitHub Environmentの許可branch一覧も空のままである。
+
+承認を得た後の作業範囲は次の通りとする。
+
+1. **既存Stagingだけを再開する。** 対象は `care-record-staging` / `xhvvfovvlqzlkirpjocv`。
+   新規project作成、プラン変更、追加addon購入は行わない。追加費用が必要な条件なら実行せず確認する。
+2. **Staging Environmentの許可branchを限定する。** `main` と `codex/issue-160-monitoring-sources` のみを許可し、
+   検証branchの許可は試験終了後に削除する。Production Environmentや全branch許可には変更しない。
+3. **Stagingのschema差分を再確認する。** 履歴とdry-runを読み、候補が下記の4本と一致する場合に限り順に適用する。
+   異なる未適用migration、既存schemaとの不整合、予期しないデータ変更があれば中止する。
+   既存migrationの編集・audit v2 triggerの有効化・履歴の修正は行わない。
+
+   - `20261024000001_audit_v2_foundation.sql`
+   - `20261024000002_audit_archive.sql`
+   - `20261024000003_audit_archive_typed_initialization.sql`
+   - `20261026000001_security_monitor.sql`
+
+4. **Stagingの専用LOGINと検証設定を用意する。** `care_security_monitor` だけを継承し、
+   生のlogin/audit行の取得拒否とTLS検証を確認する。資格情報はStagingのGitHub Environmentへだけ保存する。
+   通知は承認済みの既存Staging通知先を使い、Productionの値をコピーしない。
+5. **合成データで手動検証する。** 急増→初回通知→抑制→解消→再通知、配送失敗を模擬した後の再送を記録する。
+   物理DELETE・業務記録や既存監査イベントの変更は行わない。定期実行は無効のままとし、E2Eを新たに実行しない。
+
+Productionの再開・schema・secret・Firewallルール・通知先は、この検証変更の対象に含めない。
