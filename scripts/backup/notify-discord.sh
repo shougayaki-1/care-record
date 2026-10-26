@@ -13,6 +13,7 @@ case "$severity" in Critical|High|Warning|Info) ;; *) severity="Critical" ;; esa
 case "$check" in *[!A-Za-z0-9_.:-]*|'') check="invalid_check_name" ;; esac
 case "$APP_ENV" in production|staging) ;; *) APP_ENV="unknown" ;; esac
 if [[ -n "$details" && ! "$details" =~ ^[A-Za-z0-9_.:=\ -]+$ ]]; then details="unavailable"; fi
+if [[ ! "$evidence_url" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$ ]]; then evidence_url="unavailable"; fi
 
 payload="$(jq -n \
   --arg environment "$APP_ENV" \
@@ -30,7 +31,5 @@ payload="$(jq -n \
   ] + (if $details == "" then [] else [{name: "Details", value: $details, inline: false}] end))}]}'
 )"
 
-curl --fail --silent --show-error \
-  --header 'Content-Type: application/json' \
-  --data "$payload" \
-  "$DISCORD_ALERT_WEBHOOK_URL" >/dev/null
+transport="$(cd "$(dirname "${BASH_SOURCE[0]}")/../security" && pwd)/discord-cli.mjs"
+printf '%s' "$payload" | node "$transport"

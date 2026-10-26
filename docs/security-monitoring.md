@@ -1,0 +1,112 @@
+# 不審アクセスの監視 (#159)
+
+この実装はログイン異常の候補を集計し、個人情報を含まない Discord 通知と前日JSTの集計を送る。
+攻撃確定という判定は行わない。Firewall の新たな Deny / Challenge、契約変更、本番設定は行わない。
+本番有効化・Discord実配送・ホスト済みStagingの試験は、コードがあるだけでは確認済みにならない。
+
+## 取得元と現状（2026-10-26）
+
+| ソース | 取得・料金・保持 | 欠測・制約 |
+| --- | --- | --- |
+| Vercel Firewall | 接続ツールで `care-record` / `care-record-staging` の存在を確認。両方のactive config APIは404 `Seawall Config not found` | 攻撃ゼロ・設定なしの証拠ではない。プラン、Attack Detected webhookの利用権、Traffic APIの取得可能性・保持・料金は未確認。block/challengeは常に `unavailable` |
+| `login_attempts` | 新規の集計専用SQL関数で5分・15分・前日JSTを読取。アプリ側のsalt付きハッシュをDB内で比較する。既存行は変更しない | データ保持は現状自動削除なし。急増による容量増は既存DB容量監視で確認。ハッシュ欠落はWarning。無活動と両方の書込み停止は区別できず `ingestion=unverified` |
+| `audit_events` | `auth.login`件数と重要操作allowlistの前日件数のみ。本文・details・組織IDは出さない。既存の検索1年・外部10年の保持方針を変更しない | 15分のlogin_attemptsとの差が3件以上でWarning。OAuth、書込み順・境界等でも差が出るため「監査失敗確定」ではない。チェーン整合性・外部保存は #152 の領域 |
+| Supabase Auth Audit Logs | [公式](https://supabase.com/docs/guides/auth/audit-logs)を確認。ホスト済みの保存設定・保持・プランは未確認 | Authへ直接アクセスした失敗、アプリのレート制限前の試行はこの集計では網羅しない。常に `Auth direct=unverified`。生ログの転送は追加していない |
+| Actions / Discord | 5分監視、独立した毎時watchdog、前日集計は日付変更後の最初の成功時。Actions利用枠・Discord送信先は有効化前に確認 | GitHub遅延時は5分を保証しない。GitHub全体とDiscord同時停止は外部監視が必要。Actionsの失敗通知を別経路として有効にする |
+
+Vercelは [Firewall Overview / Traffic](https://vercel.com/docs/vercel-firewall/firewall-observability) を
+両プロジェクトのdashboardから確認する。取得可能なプラン・権限を確認後に別Issueで連携する。
+[Vercel webhooks](https://vercel.com/docs/webhooks) はすべての遮断イベントを配信するものではない。
+今回受信経路は作らないため、署名・リプレイ試験は対象外。有効化時にはraw bodyのHMAC-SHA1署名、
+timing-safe比較、イベント重複排除、時刻・サイズ・schema・project検証を必須とする。
+
+## DB権限と環境の分離
+
+`20261026000001_security_monitor.sql` は追加のみ。`private.security_monitor_snapshot()` は時刻・件数・通知状態だけを返す。
+`care_security_monitor` はNOLOGIN/NOBYPASSRLSで、テーブルSELECTやDMLは許可しない。
+private schemaはPostgRESTへ公開しない。`security_monitor_save` のCASで状態だけを書き換える。
+`anon` / `authenticated` / `service_role` に両関数の実行権はない。
+組織横断の識別不能な基盤集計であり、業務権限 `permissions.ts` と既存RLSの変更はない。
+新規state表はRLS有効・policyなし・全アプリロールをREVOKE。監査対象の業務操作ではなく派生状態のため監査イベントは追加しない。
+
+Staging、Productionの順に通常のmigration手順で適用する。本PRの作業では本番へ適用しない。
+DB管理者が環境ごとに `security_monitor_staging` / `security_monitor_production` の専用LOGINを作り、`care_security_monitor` のみを付与する。
+LOGINを `postgres` / `authenticated` / `service_role` のmemberにしない。パスワードはsecret managerで生成する。
+接続にはSupavisor session poolerを使い、project ref、LOGIN suffix、TLS CAを対応する環境で確認する。
+`PGUSER` は `security_monitor_<環境>.<project ref>` のみ許可し、期待project refとの不一致を接続前に拒否する。
+資格情報やCAをコマンド引数・ログへ出さない。SSLは `verify-full` 固定。
+
+## 有効化
+
+1. ホスト済みStagingでmigration適用・専用LOGINの直接テーブル読取拒否を確認する。
+2. Discordで環境別のprivate channelとwebhookを作る。担当者だけに閲覧・管理権を与え、外部委託・保存条件を確認する。
+3. 各GitHub Environmentに下記を設定する。Production/Stagingで資格情報・Webhook URLを共有しない。
+4. `SECURITY_MONITOR_ENABLED=true` をStagingのみ設定し、手動 `Security monitoring` のprobeを実行する。
+5. 合成試行の急増→一度だけ通知→継続時抑制→2回の低下で解消→再上昇で通知を確認する。Discord本文とActionsログに秘密情報がないことも確認する。
+6. Discordを一時的に無効化した検証用webhookで失敗・復旧後のpending再送を確認する。Actions失敗通知の受信とwatchdogも確認する。
+7. 証跡（commit、環境、日時、runリンク、件数、配送結果）をPRに記録し、Productionを同様に有効化する。
+8. Repository Variable `SECURITY_MONITOR_SCHEDULE_ENABLED=true` を設定して、定期監視とwatchdogを有効化する。
+   未設定時はscheduleのjobを起動せず、secret未投入のまま定期課金を始めない。main以外からの手動実行も拒否する。
+
+| GitHub Environment 設定 | 種別 |
+| --- | --- |
+| `SECURITY_MONITOR_ENABLED` (`true` のみ起動) | Variable |
+| `SECURITY_MONITOR_PGHOST`, `SECURITY_MONITOR_PGPORT`, `SECURITY_MONITOR_PGUSER` | Variable |
+| `SECURITY_MONITOR_PROJECT_REF`（当該環境の20文字ref） | Variable |
+| `SECURITY_MONITOR_PGPASSWORD`, `SECURITY_MONITOR_CA_CERT` | Secret |
+| `DISCORD_SECURITY_WEBHOOK_URL` | Secret（既存backup用とは別） |
+
+未設定時はinactiveを明記し、ゼロ件の成功レポートを出さない。workflowはmainからのみ運用する。
+監視の定期実行を有効にするとActions使用量が増える。現在の契約枠・予算を確認してから有効化する。
+
+## 通知の意味と対応
+
+`scripts/security/monitor.mjs` の `rules` が初期閾値の正本。5分20失敗・15分50失敗、
+単一IPから5アカウント以上／単一アカウントへ5IP以上、5失敗の後の成功をHigh候補とする。
+共有ネットワークや利用者の操作でも起こるため、自動でアカウント停止・IP遮断しない。
+ハッシュ欠落・件数不一致・20分以上の実行間隔はWarning、取得不能とwatchdog異常はCritical。
+Highは速やかに認証・監査dashboardを確認し、Warningは当日中に確認する。
+件数・時刻（JST/UTC）・時間窓・環境・Actions runを必ず付ける。
+
+アラートは初回に送り、継続中は1時間ごとに再通知する。解除閾値（失敗5分<=5／15分<=10、他0）を
+2回連続で満たすとInfoの解消通知を送り、次の上昇で再度通知する。欠測は解消観測に数えない。
+短い急増はActionsの遅延で見逃す可能性がある。前日集計は完全な試行件数を再集計するが、
+ユニークな攻撃件数や「終日異常なし」を意味しない。初回や長期停止後は直前の1日だけを集計し、
+それ以前の欠落はActions履歴・DBから別途調査する。
+
+Discord transportは[429 Retry-After](https://docs.discord.com/developers/topics/rate-limits)・5xx・通信エラーを
+最大4回再試行する。30秒を超えるRetry-Afterは次回へ持ち越す。失敗したアラートはDB outboxに保持し、
+観測窓が過ぎても再送する。永続的な配送失敗はrunを失敗にするが、残りの候補は処理する。
+成功後にackを書き、途中失敗によって別アラートのackを消さない。送信直後のプロセス停止・応答消失では重複し得る
+（Discordに冪等キーがないためat-least-once）。同環境の手動プロセスを並行起動しない。
+取得不能時はDB状態で抑制できないためCriticalが各runで再通知され得る。
+
+既存 `scripts/backup/notify-discord.sh` も同じNode transportへ接続し、従来の4引数・本文・終了コードを維持する。
+URLをargvへ渡さず、redirectを禁止し、mentionsを抑止する。backupの通知には監視用outboxは適用せず、
+配送失敗は従来通り呼出しworkflowの失敗となる。Ubuntu runnerのNode.jsが必要。
+
+watchdogは別workflowで直近20分のmain上の環境別jobと収集stepの成功を調べる。
+skip、失敗、未実行を正常と扱わず、毎時再通知する。watchdog自体の失敗はActions通知でも追う。
+Discord自身が停止したときの確認先はActions失敗通知。これも同時に失われる環境では独立した外形監視を別途用意する。
+
+## 秘密情報、保持、ローテーション
+
+Discordに送るのはallowlist分類・数値・時刻・固定文言・queryのないこのリポジトリのActions run URLのみ。
+email/IPハッシュも送らない。生IP、メール、氏名、記録、Cookie、JWT、audit details、URL query、DB例外は送信・ログ出力しない。
+DB stateはsingleton・最大32KiBの派生情報で履歴を増やさない。Discordメッセージの保存期限・閲覧者は運営側で設定し、
+未確認のまま準拠済みとしない。ActionsにDB snapshotや資格情報をartifact保存しない。
+
+Webhook交換は新しい環境別URLをsecretへ登録→probe→日次集計とwatchdog確認→旧webhookを失効の順。
+失敗時は新secretを修正して再実行する。ロールパスワードも環境ごとに交換する。
+実トラフィックで閾値を調整する場合は、個人情報のない件数と誤検知理由を記録し、ruleとテストをPRで更新する。
+
+## 検証と残る外部確認
+
+ローカルでは合成データ・fake Discordで検出→抑制→解消→再通知、再送、429/5xx、秘匿、watchdogを検証する。
+DBは専用ローカルprojectで全migration適用、`security_monitor.test.sql`、既存security_hardeningを実行する。
+E2E・実Discord送信・本番DB読取はこの検証に含まない。
+
+Context7確認: 2026-10-26、Supabase PostgreSQL関数（SECURITY DEFINER、空search_path、PUBLIC EXECUTEのREVOKE）。
+採用するCLIは既存の2.108.0。外部仕様を理由に依存バージョンを変更しない。
+Firewall連携、直接Authログ・ログ書込み失敗の独立検知、実プラン/保持・実配送の確認は未完であり、#159の受け入れ証跡を残す必要がある。
+後続の契約・取得可否確認と環境検証は [#160 (Phase 2)](https://github.com/shougayaki-1/care-record/issues/160) で追跡する。
