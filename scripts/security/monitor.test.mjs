@@ -148,3 +148,15 @@ test('existing backup shell uses shared transport and strips query/detail secret
   assert.ok(!result.stdout.includes('email@'));
   assert.ok(!result.stdout.includes('synthetic-token'));
 });
+
+test('Staging Auth count alerts, missing source warns and cannot resolve an active alert', async () => {
+  const s = fixture();
+  const auth = { status: 'available', invalid_credentials: 50, start: '2026-10-26T00:45:00Z', end: '2026-10-26T01:00:00Z' };
+  const first = (await run(s, () => false, { auth })).sent;
+  assert.equal(category(first, 'auth_invalid_credentials').length, 1);
+  advance(s); const missing = (await run(s, () => false, { auth: { status: 'unavailable' } })).sent;
+  assert.equal(category(missing, 'auth_source_gap').length, 1);
+  assert.equal(s.state.alerts.auth_invalid_credentials.active, true);
+  advance(s); await run(s, () => false, { auth: { status: 'unavailable' } });
+  assert.equal(s.state.alerts.auth_invalid_credentials.active, true);
+});

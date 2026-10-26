@@ -133,3 +133,17 @@ CLIはmigration適用後のpg-deltaカタログキャッシュにCAファイル�
 
 定期実行flagは無効のまま。Productionのschema・secret・Firewallルールには変更なし。
 Production有効化、Auth/アプリ書込み失敗の継続検知、GitHub/Discord双方停止時の独立監視は残件として維持する。
+
+## 直接Auth集計の追加（2026-10-27 JST）
+
+Staging限定で `invalid_credentials` の15分間件数をSupabase Management APIから取得する実装を追加した。
+ログ本文・アドレス・IP・識別子は取得せず、固定SQLで件数だけを返す。管理API tokenは監視本体と別stepに限定し、
+監視本体へ渡す一時ファイルには件数と集計期間だけを保存する。専用DB LOGINに管理権限は付与しない。
+`SECURITY_AUTH_LOGS_ENABLED=true` と監視本体の有効化が両方必要で、現在はいずれも有効化していない。
+Stagingのread-only実接続で取得成功（15分間0件）を確認し、前段の合成認証失敗が同じ集計SQLで1件となった証跡と合わせて確認した。
+50件以上でHigh、10件以下の2回連続で解消。取得不能・不正値・古い窓は0件とせずWarningとし、既存アラートを解消しない。
+
+対象は `invalid_credentials` のみで、アプリ経由の失敗も含み得る。Supabaseのログ遅延、欠落、他の認証エラーの網羅性は保証できず、
+ゼロ件は正常性の証拠ではない。通知の `Auth direct=unverified` は直接経路全体の網羅性・取込健全性が未検証であることを示す。
+Productionへの接続は実装上拒否し、Production tokenは追加していない。Context7でSupabase Management APIのログSQL、
+期間指定と権限を2026-10-27に確認した。アプリ両書込みの同時障害とActions/Discord双方停止時の独立検知は未解決。

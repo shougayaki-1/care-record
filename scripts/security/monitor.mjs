@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { evidenceUrl, sendDiscord } from './discord.mjs';
 import { collectFirewall } from './firewall.mjs';
 
@@ -17,7 +18,7 @@ export const rules = {
 const count = n => Number.isSafeInteger(n) && n >= 0;
 const timestamp = s => typeof s === 'string' && Number.isFinite(Date.parse(s));
 const categories = [...Object.keys(rules), 'audit_gap_15m', 'schedule_gap', 'daily_summary', 'notification_probe', 'source_unavailable',
-  'firewall_denies', 'firewall_active_alerts', 'firewall_source_gap'];
+  'firewall_denies', 'firewall_active_alerts', 'firewall_source_gap', 'auth_invalid_credentials', 'auth_source_gap'];
 
 function firewallSummary(firewall) {
   if (!firewall || !['available', 'incomplete', 'disabled'].includes(firewall.status)) return 'Firewall=unavailable';
@@ -56,7 +57,7 @@ export function payload(environment, link, category, severity, value, start, end
 }
 
 // Injected IO allows complete synthetic runs with no real Discord/DB access.
-export async function runMonitor({ snapshot, save, notify, environment, link, probe = false, firewall = { status: 'disabled' }, firewallDaily }) {
+export async function runMonitor({ snapshot, save, notify, environment, link, probe = false, firewall = { status: 'disabled' }, firewallDaily, auth = { status: 'disabled' } }) {
   const s = validateSnapshot(snapshot);
   evidenceUrl(link);
   const now = Date.parse(s.observed_at);
@@ -76,11 +77,14 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
     schedule_gap: !timestamp(previous.last_observed) || now - Date.parse(previous.last_observed) > 20 * 60000 ? 1 : 0,
     firewall_denies: firewall.traffic && count(firewall.traffic.counts?.deny) && Date.parse(firewall.traffic.end) - Date.parse(firewall.traffic.start) <= 30 * 60000 ? firewall.traffic.counts.deny : null,
     firewall_active_alerts: count(firewall.alerts?.active) ? firewall.alerts.active : null,
+    auth_invalid_credentials: auth.status === 'available' && count(auth.invalid_credentials) && timestamp(auth.start) && timestamp(auth.end) && Date.parse(auth.end) - Date.parse(auth.start) === 15 * 60000 && Math.abs(now - Date.parse(auth.end)) <= 5 * 60000 ? auth.invalid_credentials : null,
+    auth_source_gap: auth.status === 'disabled' ? null : auth.status === 'available' && count(auth.invalid_credentials) && timestamp(auth.start) && timestamp(auth.end) && Date.parse(auth.end) - Date.parse(auth.start) === 15 * 60000 && Math.abs(now - Date.parse(auth.end)) <= 5 * 60000 ? 0 : 1,
     firewall_source_gap: firewall.status === 'disabled' ? null : firewall.status === 'available' && (!firewallDaily || firewallDaily.status === 'available') ? 0 : 1,
   };
   const allRules = { ...rules, audit_gap_15m: { high: 3, clear: 0, severity: 'Warning' }, schedule_gap: { high: 1, clear: 0, severity: 'Warning' },
     firewall_denies: { high: 20, clear: 5, severity: 'High' }, firewall_active_alerts: { high: 1, clear: 0, severity: 'High' },
-    firewall_source_gap: { high: 1, clear: 0, severity: 'Warning' } };
+    firewall_source_gap: { high: 1, clear: 0, severity: 'Warning' },
+    auth_invalid_credentials: { high: 50, clear: 10, severity: 'High' }, auth_source_gap: { high: 1, clear: 0, severity: 'Warning' } };
   const pendingValid = p => p && count(p.value) && timestamp(p.start) && timestamp(p.end)
     && ['open', 'reminder', 'resolved'].includes(p.status);
   // Populate every key before the first write so a mid-run crash preserves later acks.
@@ -92,6 +96,7 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
   }
   for (const [key, rule] of Object.entries(allRules)) {
     const old = state.alerts[key];
+    if (key.startsWith('auth_') && auth.status === 'disabled') { state.alerts[key].clears = 0; continue; }
     if (key.startsWith('firewall_') && firewall.status === 'disabled') { state.alerts[key].clears = 0; continue; }
     if (old.pending) {
       const p = old.pending;
@@ -114,8 +119,8 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
       if (next.clears >= 2) status = 'resolved';
     }
     if (status) {
-      const start = key === 'firewall_denies' ? firewall.traffic.start : new Date(now - (key.endsWith('_5m') ? 5 : key === 'schedule_gap' ? 20 : 15) * 60000).toISOString();
-      const end = key === 'firewall_denies' ? firewall.traffic.end : s.observed_at;
+      const start = key === 'auth_invalid_credentials' ? auth.start : key === 'firewall_denies' ? firewall.traffic.start : new Date(now - (key.endsWith('_5m') ? 5 : key === 'schedule_gap' ? 20 : 15) * 60000).toISOString();
+      const end = key === 'auth_invalid_credentials' ? auth.end : key === 'firewall_denies' ? firewall.traffic.end : s.observed_at;
       // Persist an outbox entry BEFORE attempting delivery; failures survive even
       // if the triggering time window has expired by the next successful run.
       state.alerts[key] = { ...next, pending: { value, start, end, status } };
@@ -169,7 +174,14 @@ export async function main() {
     const enabled = process.env.SECURITY_FIREWALL_ENABLED === 'true';
     const firewall = await collectFirewall({ environment, enabled });
     const firewallDaily = snapshot.state.daily_end !== snapshot.day_end ? await collectFirewall({ environment, enabled, since: '24h' }) : undefined;
-    const result = await runMonitor({ snapshot, environment, link, notify,
+    let auth = { status: 'disabled' };
+    if (environment === 'staging' && process.env.SECURITY_AUTH_LOGS_ENABLED === 'true') {
+      try {
+        const collected = JSON.parse(readFileSync(process.env.AUTH_LOGS_RESULT_FILE, 'utf8'));
+        auth = collected && typeof collected === 'object' && !Array.isArray(collected) ? collected : { status: 'unavailable' };
+      } catch { auth = { status: 'unavailable' }; }
+    }
+    const result = await runMonitor({ snapshot, environment, link, notify, auth,
       firewall, firewallDaily,
       probe: process.env.SECURITY_MONITOR_PROBE === 'true',
       save: saveMonitorState,

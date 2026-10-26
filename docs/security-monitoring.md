@@ -139,3 +139,11 @@ Context7確認: 2026-10-26、Supabase PostgreSQL関数（SECURITY DEFINER、空s
 採用するCLIは既存の2.108.0。外部仕様を理由に依存バージョンを変更しない。
 FirewallのCLI集計連携は追加済みだが、定期実行の設定、直接Authログ・ログ書込み失敗の独立検知、Supabaseの実プラン/保持・実配送の確認は未完であり、#159の受け入れ証跡を残す必要がある。
 後続の契約・取得可否確認と環境検証は [#160 (Phase 2)](https://github.com/shougayaki-1/care-record/issues/160) で追跡する。
+
+### Stagingの直接Auth失敗集計
+
+`SECURITY_AUTH_LOGS_ENABLED=true` をStaging Environmentに設定した場合だけ、Management APIで
+`invalid_credentials` の直近15分の件数を収集する。定期監視も別途有効でなければ実行されない。
+50件以上でHigh、10件以下が2回連続で解消し、取得不能・不正・古いデータではWarningを出して解消しない。
+Management API tokenはStagingの集計stepのみで使い、件数のみを監視本体へ渡す。Productionには対応していない。
+失敗種別の一部に限定され、ログの遅延や欠落は区別できないため、0件を取込正常や安全と解釈しない。
