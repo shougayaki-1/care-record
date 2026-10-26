@@ -26,5 +26,5 @@ jobs:
           APP_ENV: ${{ matrix.environment }}
           GITHUB_TOKEN: ${{ github.token }}
           EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_SECURITY_WEBHOOK_URL }}
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_SECURITY_WEBHOOK_URL || secrets.DISCORD_ALERT_WEBHOOK_URL }}
         run: node scripts/security/watchdog.mjs

@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { evidenceUrl, sendDiscord } from './discord.mjs';
+import { collectFirewall } from './firewall.mjs';
 
 // Count thresholds are deliberately fixed and reviewed in code. Hysteresis clears
 // only at <= clear for two consecutive successful observations.
@@ -15,7 +17,18 @@ export const rules = {
 };
 const count = n => Number.isSafeInteger(n) && n >= 0;
 const timestamp = s => typeof s === 'string' && Number.isFinite(Date.parse(s));
-const categories = [...Object.keys(rules), 'audit_gap_15m', 'schedule_gap', 'daily_summary', 'notification_probe', 'source_unavailable'];
+const categories = [...Object.keys(rules), 'audit_gap_15m', 'schedule_gap', 'daily_summary', 'notification_probe', 'source_unavailable',
+  'firewall_denies', 'firewall_active_alerts', 'firewall_source_gap', 'auth_invalid_credentials', 'auth_source_gap'];
+
+function firewallSummary(firewall) {
+  if (!firewall || !['available', 'incomplete', 'disabled'].includes(firewall.status)) return 'Firewall=unavailable';
+  const t = firewall.traffic;
+  const a = firewall.alerts;
+  const traffic = t && timestamp(t.start) && timestamp(t.end) && ['deny', 'challenge', 'rate_limit'].every(k => count(t.counts?.[k]))
+    ? `deny=${t.counts.deny} challenge=${t.counts.challenge} rate_limit=${t.counts.rate_limit} window=${new Date(t.start).toISOString()}/${new Date(t.end).toISOString()}` : 'traffic=unavailable';
+  const alerts = a && count(a.active) && count(a.resolved) ? `active_alerts=${a.active} resolved_alerts=${a.resolved}` : 'alerts=unavailable';
+  return `Firewall=${firewall.status} ${traffic} ${alerts}`;
+}
 
 export function validateSnapshot(s) {
   if (!s || !timestamp(s.observed_at) || !timestamp(s.day_start) || !timestamp(s.day_end)
@@ -28,7 +41,7 @@ export function validateSnapshot(s) {
   return s;
 }
 
-export function payload(environment, link, category, severity, value, start, end, status = 'open', daily) {
+export function payload(environment, link, category, severity, value, start, end, status = 'open', daily, firewall) {
   if (!['production', 'staging'].includes(environment) || !categories.includes(category)
     || !['Critical', 'High', 'Warning', 'Info'].includes(severity) || !count(value)
     || !timestamp(start) || !timestamp(end) || !['open', 'reminder', 'resolved', 'summary', 'test'].includes(status)
@@ -39,12 +52,12 @@ export function payload(environment, link, category, severity, value, start, end
   const summary = daily ? ` failures=${daily.failures} successes=${daily.successes} missing_hashes=${daily.missing_hashes} important_events=${daily.important_events}` : '';
   return {
     content: `[CareRecord] ${severity} | ${environment} | ${category} | ${status}`,
-    embeds: [{ description: `${category === 'daily_summary' ? '集計（重要監査は正常操作を含む）' : '疑わしい傾向／監視状態（攻撃確定ではありません）'}\ncount=${category === 'source_unavailable' ? 'unavailable' : value}${summary}\nwindow=${new Date(start).toISOString()} / ${utc}\nJST=${jst} / UTC=${utc}\nFirewall block/challenge=unavailable; Auth direct=unverified; ingestion=unverified\n対応: Actions実行結果と認証・監査ダッシュボードを確認。Highは速やかに、Warningは当日中。\n${evidenceUrl(link)}` }],
+    embeds: [{ description: `${category === 'daily_summary' ? '集計（重要監査は正常操作を含む）' : category === 'firewall_active_alerts' ? 'Vercelが報告した異常・防御アラート（アプリ侵害の確定ではありません）' : '疑わしい傾向／監視状態（攻撃確定ではありません）'}\ncount=${category === 'source_unavailable' ? 'unavailable' : value}${summary}\nwindow=${new Date(start).toISOString()} / ${utc}\nJST=${jst} / UTC=${utc}\n${firewallSummary(firewall)}; Auth direct=unverified; ingestion=unverified\n対応: Actions実行結果と認証・監査ダッシュボードを確認。Highは速やかに、Warningは当日中。\n${evidenceUrl(link)}` }],
   };
 }
 
 // Injected IO allows complete synthetic runs with no real Discord/DB access.
-export async function runMonitor({ snapshot, save, notify, environment, link, probe = false }) {
+export async function runMonitor({ snapshot, save, notify, environment, link, probe = false, firewall = { status: 'disabled' }, firewallDaily, auth = { status: 'disabled' } }) {
   const s = validateSnapshot(snapshot);
   evidenceUrl(link);
   const now = Date.parse(s.observed_at);
@@ -57,12 +70,21 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
   const persist = async () => { version = await save(version, state); };
   const deliver = async (...args) => {
     if (deliveryUnavailable) { deliveryFailures++; return false; }
-    try { await notify(payload(environment, link, ...args)); return true; }
+    try { await notify(payload(environment, link, ...args.slice(0, 6), args[6], args[0] === 'daily_summary' ? firewallDaily : firewall)); return true; }
     catch { deliveryFailures++; deliveryUnavailable = true; return false; }
   };
   const metrics = { ...s.metrics, audit_gap_15m: Math.abs(s.metrics.attempts_15m - s.metrics.audit_logins_15m),
-    schedule_gap: !timestamp(previous.last_observed) || now - Date.parse(previous.last_observed) > 20 * 60000 ? 1 : 0 };
-  const allRules = { ...rules, audit_gap_15m: { high: 3, clear: 0, severity: 'Warning' }, schedule_gap: { high: 1, clear: 0, severity: 'Warning' } };
+    schedule_gap: !timestamp(previous.last_observed) || now - Date.parse(previous.last_observed) > 20 * 60000 ? 1 : 0,
+    firewall_denies: firewall.traffic && count(firewall.traffic.counts?.deny) && Date.parse(firewall.traffic.end) - Date.parse(firewall.traffic.start) <= 30 * 60000 ? firewall.traffic.counts.deny : null,
+    firewall_active_alerts: count(firewall.alerts?.active) ? firewall.alerts.active : null,
+    auth_invalid_credentials: auth.status === 'available' && count(auth.invalid_credentials) && timestamp(auth.start) && timestamp(auth.end) && Date.parse(auth.end) - Date.parse(auth.start) === 15 * 60000 && Math.abs(now - Date.parse(auth.end)) <= 5 * 60000 ? auth.invalid_credentials : null,
+    auth_source_gap: auth.status === 'disabled' ? null : auth.status === 'available' && count(auth.invalid_credentials) && timestamp(auth.start) && timestamp(auth.end) && Date.parse(auth.end) - Date.parse(auth.start) === 15 * 60000 && Math.abs(now - Date.parse(auth.end)) <= 5 * 60000 ? 0 : 1,
+    firewall_source_gap: firewall.status === 'disabled' ? null : firewall.status === 'available' && (!firewallDaily || firewallDaily.status === 'available') ? 0 : 1,
+  };
+  const allRules = { ...rules, audit_gap_15m: { high: 3, clear: 0, severity: 'Warning' }, schedule_gap: { high: 1, clear: 0, severity: 'Warning' },
+    firewall_denies: { high: 20, clear: 5, severity: 'High' }, firewall_active_alerts: { high: 1, clear: 0, severity: 'High' },
+    firewall_source_gap: { high: 1, clear: 0, severity: 'Warning' },
+    auth_invalid_credentials: { high: 50, clear: 10, severity: 'High' }, auth_source_gap: { high: 1, clear: 0, severity: 'Warning' } };
   const pendingValid = p => p && count(p.value) && timestamp(p.start) && timestamp(p.end)
     && ['open', 'reminder', 'resolved'].includes(p.status);
   // Populate every key before the first write so a mid-run crash preserves later acks.
@@ -74,6 +96,8 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
   }
   for (const [key, rule] of Object.entries(allRules)) {
     const old = state.alerts[key];
+    if (key.startsWith('auth_') && auth.status === 'disabled') { state.alerts[key].clears = 0; continue; }
+    if (key.startsWith('firewall_') && firewall.status === 'disabled') { state.alerts[key].clears = 0; continue; }
     if (old.pending) {
       const p = old.pending;
       if (await deliver(key, p.status === 'resolved' ? 'Info' : rule.severity, p.value, p.start, p.end, p.status)) {
@@ -86,6 +110,7 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
     const sent = timestamp(old?.sent) ? Date.parse(old.sent) : 0;
     const clears = count(old?.clears) ? Math.min(old.clears, 2) : 0;
     const value = metrics[key];
+    if (value === null) { state.alerts[key].clears = 0; continue; } // Missing data breaks consecutive recovery observations.
     let next = { active, sent: sent ? new Date(sent).toISOString() : null, clears: 0 };
     let status;
     if (value >= rule.high && (!active || now - sent >= 60 * 60000)) status = active ? 'reminder' : 'open';
@@ -94,12 +119,13 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
       if (next.clears >= 2) status = 'resolved';
     }
     if (status) {
-      const start = new Date(now - (key.endsWith('_5m') ? 5 : key === 'schedule_gap' ? 20 : 15) * 60000).toISOString();
+      const start = key === 'auth_invalid_credentials' ? auth.start : key === 'firewall_denies' ? firewall.traffic.start : new Date(now - (key.endsWith('_5m') ? 5 : key === 'schedule_gap' ? 20 : 15) * 60000).toISOString();
+      const end = key === 'auth_invalid_credentials' ? auth.end : key === 'firewall_denies' ? firewall.traffic.end : s.observed_at;
       // Persist an outbox entry BEFORE attempting delivery; failures survive even
       // if the triggering time window has expired by the next successful run.
-      state.alerts[key] = { ...next, pending: { value, start, end: s.observed_at, status } };
+      state.alerts[key] = { ...next, pending: { value, start, end, status } };
       await persist();
-      if (await deliver(key, status === 'resolved' ? 'Info' : rule.severity, value, start, s.observed_at, status)) {
+      if (await deliver(key, status === 'resolved' ? 'Info' : rule.severity, value, start, end, status)) {
         next = { active: status !== 'resolved', sent: s.observed_at, clears: 0 };
       } else next = state.alerts[key];
     }
@@ -111,7 +137,7 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
   }
   if (probe) await deliver('notification_probe', 'Info', 0, s.observed_at, s.observed_at, 'test');
   await persist();
-  return { deliveryFailures, source: 'available', firewall: 'unavailable', authDirect: 'unverified', ingestion: 'unverified' };
+  return { deliveryFailures, source: 'available', firewall: firewall.status, authDirect: 'unverified', ingestion: 'unverified' };
 }
 
 function sql(query) {
@@ -120,6 +146,18 @@ function sql(query) {
     input: `SET statement_timeout='20s'; SET timezone='UTC'; ${query}`, encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000, maxBuffer: 65536,
   }).trim();
+}
+
+export function readMonitorSnapshot() {
+  return validateSnapshot(JSON.parse(sql('SELECT private.security_monitor_snapshot();')));
+}
+
+export async function saveMonitorState(version, state) {
+  if (!count(version)) throw new Error('invalid_version');
+  const hex = Buffer.from(JSON.stringify(state)).toString('hex');
+  const next = Number(sql(`SELECT private.security_monitor_save(${version}, convert_from(decode('${hex}','hex'),'UTF8')::jsonb);`));
+  if (!count(next)) throw new Error('invalid_version');
+  return next;
 }
 
 export async function main() {
@@ -132,16 +170,21 @@ export async function main() {
       || !process.env.PGHOST || process.env.PGUSER !== `security_monitor_${environment}.${project}` || !process.env.PGPASSWORD
       || process.env.PGSSLMODE !== 'verify-full') throw new Error('invalid_config');
     evidenceUrl(link);
-    const snapshot = JSON.parse(sql('SELECT private.security_monitor_snapshot();'));
-    const result = await runMonitor({ snapshot, environment, link, notify,
+    const snapshot = readMonitorSnapshot();
+    const enabled = process.env.SECURITY_FIREWALL_ENABLED === 'true';
+    const firewall = await collectFirewall({ environment, enabled });
+    const firewallDaily = snapshot.state.daily_end !== snapshot.day_end ? await collectFirewall({ environment, enabled, since: '24h' }) : undefined;
+    let auth = { status: 'disabled' };
+    if (environment === 'staging' && process.env.SECURITY_AUTH_LOGS_ENABLED === 'true') {
+      try {
+        const collected = JSON.parse(readFileSync(process.env.AUTH_LOGS_RESULT_FILE, 'utf8'));
+        auth = collected && typeof collected === 'object' && !Array.isArray(collected) ? collected : { status: 'unavailable' };
+      } catch { auth = { status: 'unavailable' }; }
+    }
+    const result = await runMonitor({ snapshot, environment, link, notify, auth,
+      firewall, firewallDaily,
       probe: process.env.SECURITY_MONITOR_PROBE === 'true',
-      save: async (version, state) => {
-        // Hex encodes our projected state to avoid SQL quoting/interpolation hazards.
-        const hex = Buffer.from(JSON.stringify(state)).toString('hex');
-        const next = Number(sql(`SELECT private.security_monitor_save(${version}, convert_from(decode('${hex}','hex'),'UTF8')::jsonb);`));
-        if (!count(next)) throw new Error('invalid_version');
-        return next;
-      },
+      save: saveMonitorState,
     });
     console.log(JSON.stringify(result));
     if (result.deliveryFailures) process.exitCode = 1;

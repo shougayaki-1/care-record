@@ -9,13 +9,17 @@ on:
         description: Send an additional synthetic delivery probe (both enabled environments)
         type: boolean
         default: false
+      verify_staging:
+        description: Run synthetic DB/Discord verification in Staging only (requires an explicitly allowed branch)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   monitor:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.SECURITY_MONITOR_SCHEDULE_ENABLED == 'true')
+    if: inputs.verify_staging != true && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.SECURITY_MONITOR_SCHEDULE_ENABLED == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +35,17 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+      - name: Install pinned read-only Firewall CLI
+        if: vars.SECURITY_MONITOR_ENABLED == 'true' && vars.SECURITY_FIREWALL_ENABLED == 'true'
+        run: npm install --prefix "${RUNNER_TEMP}/security-vercel" --ignore-scripts --no-audit --no-fund vercel@65.2.0
+      - name: Collect Staging Auth aggregate (isolated management token)
+        if: matrix.environment == 'staging' && vars.SECURITY_MONITOR_ENABLED == 'true' && vars.SECURITY_AUTH_LOGS_ENABLED == 'true'
+        env:
+          APP_ENV: staging
+          SECURITY_MONITOR_PROJECT_REF: ${{ vars.SECURITY_MONITOR_PROJECT_REF }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          AUTH_LOGS_RESULT_FILE: ${{ runner.temp }}/security-auth-count.json
+        run: node scripts/security/auth-logs.mjs
       - name: Collect counts and deliver pending alerts
         if: vars.SECURITY_MONITOR_ENABLED == 'true'
         env:
@@ -45,9 +60,14 @@ jobs:
           PGSSLROOTCERT: ${{ runner.temp }}/security-monitor-ca.crt
           PGCONNECT_TIMEOUT: '10'
           MONITOR_CA: ${{ secrets.SECURITY_MONITOR_CA_CERT }}
-          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_SECURITY_WEBHOOK_URL }}
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_SECURITY_WEBHOOK_URL || secrets.DISCORD_ALERT_WEBHOOK_URL }}
           EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SECURITY_MONITOR_PROBE: ${{ inputs.probe || 'false' }}
+          SECURITY_FIREWALL_ENABLED: ${{ vars.SECURITY_FIREWALL_ENABLED || 'false' }}
+          SECURITY_AUTH_LOGS_ENABLED: ${{ vars.SECURITY_AUTH_LOGS_ENABLED || 'false' }}
+          AUTH_LOGS_RESULT_FILE: ${{ runner.temp }}/security-auth-count.json
+          VERCEL_SECURITY_CLI: ${{ runner.temp }}/security-vercel/node_modules/.bin/vercel
+          VERCEL_TOKEN: ${{ secrets.VERCEL_SECURITY_READ_TOKEN }}
         run: |
           umask 077
           printf '%s\n' "$MONITOR_CA" > "$PGSSLROOTCERT"
@@ -55,6 +75,43 @@ jobs:
       - name: Explicitly report inactive monitoring
         if: vars.SECURITY_MONITOR_ENABLED != 'true'
         run: echo 'security_monitor_disabled — no source observations or delivery guarantees' >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove temporary TLS CA
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/security-monitor-ca.crt" "${RUNNER_TEMP}/security-auth-count.json"
+
+  verify-staging:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_staging == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    concurrency:
+      group: security-monitor-staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Verify synthetic spike, suppression, recovery and durable retry
+        env:
+          APP_ENV: staging
+          PGHOST: ${{ vars.SECURITY_MONITOR_PGHOST }}
+          PGPORT: ${{ vars.SECURITY_MONITOR_PGPORT || '5432' }}
+          PGDATABASE: postgres
+          PGUSER: ${{ vars.SECURITY_MONITOR_PGUSER }}
+          SECURITY_MONITOR_PROJECT_REF: ${{ vars.SECURITY_MONITOR_PROJECT_REF }}
+          PGPASSWORD: ${{ secrets.SECURITY_MONITOR_PGPASSWORD }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ runner.temp }}/security-monitor-ca.crt
+          PGCONNECT_TIMEOUT: '10'
+          MONITOR_CA: ${{ secrets.SECURITY_MONITOR_CA_CERT }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+          EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          umask 077
+          printf '%s\n' "$MONITOR_CA" > "$PGSSLROOTCERT"
+          node scripts/security/verify-staging.mjs
       - name: Remove temporary TLS CA
         if: always()
         run: rm -f "${RUNNER_TEMP}/security-monitor-ca.crt"
