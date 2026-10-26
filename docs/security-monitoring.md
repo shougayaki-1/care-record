@@ -59,7 +59,8 @@ LOGINを `postgres` / `authenticated` / `service_role` のmemberにしない。�
 | `VERCEL_SECURITY_READ_TOKEN` | Environment Secret（対象teamの読み取りに限定した資格情報） |
 
 Stagingは利用者承認により、監視専用Webhook未設定時に同じEnvironmentの既存`DISCORD_ALERT_WEBHOOK_URL`を使える。
-Productionにこのfallbackは適用しない。
+Productionも利用者の承認により、同じEnvironmentの既存バックアップ通知先を使用できる。
+2026-10-27の利用者確認では閲覧者は本人のみ・保持期限なし。Discord側の設定を読み戻した証拠ではない。
 
 ### Stagingの合成通知検証
 
