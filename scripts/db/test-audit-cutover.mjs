@@ -29,6 +29,17 @@ function sql(input,db=database,role='postgres') {
   if(r.error || r.status!==0)throw new Error(r.stderr||'cutover_test_failed');
   return r.stdout.trim();
 }
+const graphqlDefinition=sql(`SELECT coalesce((SELECT pg_get_functiondef(p.oid) || E';\n' ||
+  format('ALTER FUNCTION graphql_public.graphql(text,text,jsonb,jsonb) OWNER TO %I;',pg_get_userbyid(p.proowner))
+  FROM pg_proc p WHERE p.oid=to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)')),'');`,'postgres','supabase_admin');
+function restore(dump,db) {
+  // Other Supabase extension/default-ACL definitions still name this namespace.
+  // Bootstrap the REAL source wrapper and its owner, never a stub. Its SQL
+  // dependency is restored by pg_graphql later in the dump, as with pg_dump's
+  // own check_function_bodies=false restore ordering. ACLs then apply normally.
+  sql('CREATE SCHEMA graphql_public; SET check_function_bodies=false;'+graphqlDefinition,db,'supabase_admin');
+  sql(dump,db,'supabase_admin');
+}
 const sessions=[];
 class Session {
   constructor(name) {
@@ -86,7 +97,7 @@ try {
   const schema=spawnSync('docker',dumpArgs('postgres',true),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
   assert.equal(schema.status,0,schema.stderr);
   sql(`CREATE DATABASE ${emptyDatabase} TEMPLATE template0;`,'postgres');
-  sql(schema.stdout,emptyDatabase,'supabase_admin');
+  restore(schema.stdout,emptyDatabase);
   sql(configured+migration,emptyDatabase);
   sql(insert('fixture.cutover.empty-old-app'),emptyDatabase);
   assert.equal(sql("SELECT integrity_version::text||':'||chain_sequence::text FROM public.audit_events;",emptyDatabase),'2:1');
@@ -97,7 +108,7 @@ try {
   const dump=spawnSync('docker',dumpArgs('postgres'),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
   assert.equal(dump.status,0,dump.stderr);
   sql(`CREATE DATABASE ${database} TEMPLATE template0;`,'postgres');
-  sql(dump.stdout,database,'supabase_admin');
+  restore(dump.stdout,database);
   assert.equal(state(),'1:private.chain_audit_event');
   sql(insert('fixture.cutover.existing'));
   const originalRows=JSON.parse(sql(`SELECT coalesce(json_agg(json_build_object('id',e.id,'digest',encode(extensions.digest(convert_to(to_jsonb(e)::text,'UTF8'),'sha256'),'hex'))),'[]') FROM public.audit_events e WHERE integrity_version=1;`));
@@ -163,7 +174,7 @@ try {
   const v2dump=spawnSync('docker',dumpArgs(database),{encoding:'utf8',timeout:30_000,maxBuffer:32*1024*1024});
   assert.equal(v2dump.status,0,v2dump.stderr);
   sql(`CREATE DATABASE ${restoredDatabase} TEMPLATE template0;`,'postgres');
-  sql(v2dump.stdout,restoredDatabase,'supabase_admin');
+  restore(v2dump.stdout,restoredDatabase);
   assert.equal(verifyRestoredDatabase(frozen,snapshot(restoredDatabase)).status,'consistent');
   sql(insert('fixture.cutover.after-backup'));
   const latest=snapshot(database);

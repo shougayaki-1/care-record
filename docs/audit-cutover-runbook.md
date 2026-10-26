@@ -229,14 +229,20 @@ offline/メモリStore試験は異常分類・精度・control途中失敗/再�
 ### CI復元fixtureの修正（2026-10-26）
 
 CIの管理ロール認証は専用コンテナ内の既存passwordを使用する。
-また、Supabase管理の`graphql_public.graphql`はextension hookで用意される版があり、
-pg_dumpのACLだけを空DBへ復元すると関数不在で停止するため、この監査復元fixtureでは
-`--exclude-schema=graphql_public`を指定する。アプリ/public・private・Auth・Storage、
-所有者、ACL、trigger、監査データは保持し、復元エラーは引き続き`ON_ERROR_STOP`で拒否する。
-この試験は監査切替と復元後の連番/head照合を対象とし、Supabase管理GraphQLを含む
-プラットフォーム全体の復旧成功を証明するものではない。
+Supabase管理の`graphql_public.graphql`はextension hookで用意される版があり、
+pg_dumpのACLだけを空DBへ復元すると関数不在で停止する。
+この監査復元fixtureは`graphql_public`を通常dumpから除き、ACLからの参照を保つため、
+復元元の`pg_get_functiondef`で取得した実wrapper定義と所有者を先に復元する。
+ダミー関数は作らず、他のアプリ/public・private・Auth・Storage、所有者、ACL、trigger、
+監査データを保持し、復元エラーは引き続き`ON_ERROR_STOP`で拒否する。
+wrapperのSQL依存は後続のextension復元で揃えるため、pg_dumpと同じく復元時だけ
+`check_function_bodies=false`を使う。稼働中のアプリや元DBの設定は変更しない。
+この試験は監査切替と復元後の連番/head照合を対象とし、プラットフォーム全体の
+Supabase復旧成功を証明するものではない。
 
-再開時の固定CLI2.108.0はローカルでPostgreSQLイメージ`17.6.1.139`を選択した。
-過去のCIイメージ`17.6.1.063`と同一イメージでのローカル再現とは扱わず、
-最終のGitHub CI結果を別途確認する。Context7で2026-10-26にPostgreSQL17の
+当初、固定CLI2.108.0のローカル既定値はDBイメージ`17.6.1.139`だった。
+その後、リポジトリの`.temp/postgres-version`だけを専用設定へ複製し、CIと同じ
+`17.6.1.063`で旧fixtureの失敗を再現した。同一イメージ上で修正後の空DB・切替・
+timeout・2接続境界・実v2 dump/restore・同連番異hash拒否がすべて成功した。
+最終のGitHub CI結果は別途PRへ記録する。Context7で2026-10-26にPostgreSQL17の
 pg_dump/extension member・schema除外・template0への復元契約を再確認した。
