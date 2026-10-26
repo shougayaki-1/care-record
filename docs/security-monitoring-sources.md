@@ -75,11 +75,9 @@ organization entitlementはログ保持1日、Log Drainとaudit Log Drainは利�
 両環境とも取得成功・0件だった。生ログは取得していない。これはAPIの取得可否の確認であり、失敗イベントの網羅性や取込正常の証拠ではない。
 Auth設定は変更していない。APIのClickHouse SQLと再開endpointを2026-10-27に一次資料・Context7で確認した。
 
-Staging再開は自動承認レビューに拒否され、実行されていない。
-理由は、通知方針への「OK」は、費用・稼働状態を変更し得るproject再開の明示承認ではないため。
-再開要求を他の経路で試していない。GitHub Environmentの許可branch一覧も空のままである。
+以下の計画について利用者の明示承認を得て実行した。実施結果は後段を参照する。
 
-承認を得た後の作業範囲は次の通りとする。
+承認済みの作業範囲は次の通りとする。
 
 1. **既存Stagingだけを再開する。** 対象は `care-record-staging` / `xhvvfovvlqzlkirpjocv`。
    新規project作成、プラン変更、追加addon購入は行わない。追加費用が必要な条件なら実行せず確認する。
