@@ -67,6 +67,7 @@ jobs:
       - run: npm run security:service-role
       - run: npm run test:ci-scope
       - run: node --test scripts/backup/*.test.mjs
+      - run: node --test scripts/security/*.test.mjs
       - run: npm run test:codex-worker
 
   typecheck:

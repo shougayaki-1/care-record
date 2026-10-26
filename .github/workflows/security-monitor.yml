@@ -1,0 +1,60 @@
+name: Security monitoring
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      probe:
+        description: Send an additional synthetic delivery probe (both enabled environments)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.SECURITY_MONITOR_SCHEDULE_ENABLED == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [staging, production]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ${{ matrix.environment }}
+    concurrency:
+      group: security-monitor-${{ matrix.environment }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Collect counts and deliver pending alerts
+        if: vars.SECURITY_MONITOR_ENABLED == 'true'
+        env:
+          APP_ENV: ${{ matrix.environment }}
+          PGHOST: ${{ vars.SECURITY_MONITOR_PGHOST }}
+          PGPORT: ${{ vars.SECURITY_MONITOR_PGPORT || '5432' }}
+          PGDATABASE: postgres
+          PGUSER: ${{ vars.SECURITY_MONITOR_PGUSER }}
+          SECURITY_MONITOR_PROJECT_REF: ${{ vars.SECURITY_MONITOR_PROJECT_REF }}
+          PGPASSWORD: ${{ secrets.SECURITY_MONITOR_PGPASSWORD }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ runner.temp }}/security-monitor-ca.crt
+          PGCONNECT_TIMEOUT: '10'
+          MONITOR_CA: ${{ secrets.SECURITY_MONITOR_CA_CERT }}
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_SECURITY_WEBHOOK_URL }}
+          EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SECURITY_MONITOR_PROBE: ${{ inputs.probe || 'false' }}
+        run: |
+          umask 077
+          printf '%s\n' "$MONITOR_CA" > "$PGSSLROOTCERT"
+          node scripts/security/monitor.mjs
+      - name: Explicitly report inactive monitoring
+        if: vars.SECURITY_MONITOR_ENABLED != 'true'
+        run: echo 'security_monitor_disabled — no source observations or delivery guarantees' >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove temporary TLS CA
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/security-monitor-ca.crt"

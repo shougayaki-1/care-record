@@ -1,0 +1,30 @@
+name: Security monitoring watchdog
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  watchdog:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.SECURITY_MONITOR_SCHEDULE_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [staging, production]
+    environment: ${{ matrix.environment }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - if: vars.SECURITY_MONITOR_ENABLED == 'true'
+        env:
+          APP_ENV: ${{ matrix.environment }}
+          GITHUB_TOKEN: ${{ github.token }}
+          EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_SECURITY_WEBHOOK_URL }}
+        run: node scripts/security/watchdog.mjs
