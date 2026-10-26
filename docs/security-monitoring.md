@@ -58,6 +58,26 @@ LOGINを `postgres` / `authenticated` / `service_role` のmemberにしない。�
 | `SECURITY_FIREWALL_ENABLED`（`true` のみCLI読取を起動） | Environment Variable |
 | `VERCEL_SECURITY_READ_TOKEN` | Environment Secret（対象teamの読み取りに限定した資格情報） |
 
+Stagingは利用者承認により、監視専用Webhook未設定時に同じEnvironmentの既存`DISCORD_ALERT_WEBHOOK_URL`を使える。
+Productionにこのfallbackは適用しない。
+
+### Stagingの合成通知検証
+
+`verify_staging=true` の手動実行はStagingだけを対象にし、通常monitor job（Productionを含む）は実行しない。
+許可済みbranch、専用LOGIN、検証用CA、Stagingの既存Supabase/Discord secretを必要とする。
+このworkflowを含むPRのmerge後はmainから次のように実行できる。
+
+```sh
+gh workflow run security-monitor.yml --ref main -f verify_staging=true
+```
+
+`scripts/security/verify-staging.mjs` は開始時の試行件数・active/pending状態が空であることを確認する。
+集計と通知ackは専用ロール・実PostgreSQL、合成行の挿入は固定Staging projectへのManagement APIを使用する。
+すべての通知に`[SYNTHETIC TEST]`を付け、試行窓の外へ合成行を移した後もoutboxが再送できることを検証する。
+配送障害はDiscordへ不正リクエストを送る代わりに、送信直前の例外として1回だけ模擬する。
+合成行は自身のrun hashで限定して古い日時へ移す。DELETE、既存監査イベントの更新、実ユーザーのAuth操作は行わない。
+最後に解消状態を確認する。異常終了時はpendingを消さず、復旧後の再送判断を運用者へ残す。
+
 未設定時はinactiveを明記し、ゼロ件の成功レポートを出さない。workflowはmainからのみ運用する。
 監視の定期実行を有効にするとActions使用量が増える。現在の契約枠・予算を確認してから有効化する。
 

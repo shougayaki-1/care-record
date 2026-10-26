@@ -52,7 +52,7 @@ jobs:
           PGSSLROOTCERT: ${{ runner.temp }}/security-monitor-ca.crt
           PGCONNECT_TIMEOUT: '10'
           MONITOR_CA: ${{ secrets.SECURITY_MONITOR_CA_CERT }}
-          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_SECURITY_WEBHOOK_URL }}
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_SECURITY_WEBHOOK_URL || (matrix.environment == 'staging' && secrets.DISCORD_ALERT_WEBHOOK_URL) }}
           EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SECURITY_MONITOR_PROBE: ${{ inputs.probe || 'false' }}
           SECURITY_FIREWALL_ENABLED: ${{ vars.SECURITY_FIREWALL_ENABLED || 'false' }}

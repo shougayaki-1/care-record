@@ -101,3 +101,37 @@ Staging再開は自動承認レビューに拒否され、実行されていな�
    物理DELETE・業務記録や既存監査イベントの変更は行わない。定期実行は無効のままとし、E2Eを新たに実行しない。
 
 Productionの再開・schema・secret・Firewallルール・通知先は、この検証変更の対象に含めない。
+
+## 承認後の実施結果（2026-10-27 JST）
+
+上記のStaging限定作業について利用者から「許可します」と明示承認を得て実行した。
+
+| 項目 | 実施結果 |
+| --- | --- |
+| Staging再開 | 既存`xhvvfovvlqzlkirpjocv`を再開し、`ACTIVE_HEALTHY`を確認。プラン・addonの変更なし |
+| migration | 履歴差分とCLI dry-runが予定4本だけと一致。順に適用し、DB履歴への4 version登録を別途確認 |
+| 集計LOGIN | `security_monitor_staging`を作成し、`care_security_monitor`のみを継承。NOBYPASSRLS、NOSUPERUSER、NOCREATEDB、NOCREATEROLE |
+| TLS | Supabase公式Studio参照の`prod-ca-2021.crt`を使い、session poolerで`verify-full`接続成功。CA検証を緩和していない |
+| 権限拒否 | 同LOGINで`public.login_attempts` / `public.audit_events`の`SELECT ... LIMIT 0`がpermission denied。集計関数は実行可能 |
+| Staging設定 | 専用password・CAをStaging Environment secretに登録。接続先・port・user・期待project refは同Environment variableに登録。秘密値はログに出していない |
+| 合成DB/Discord検証 | [run 40408682272](https://github.com/shougayaki-1/care-record/actions/runs/40408682272)成功。通常monitor jobはskip、Staging検証jobだけ実行 |
+| 一時branch許可の後処理 | 検証branchの許可を削除し、Staging Environmentはmainだけを許可する状態へ戻した |
+
+検証runの結果JSONは`ok=true`、`storage=postgres`、`notification=discord`、
+`duplicateSuppression=true`、`recovery=true`、`outboxRetry=true`。
+`failures_5m`分類について初回・再開・模擬配送障害後の再送と各解消、計6件の送信成功を確認した。
+他の合成分類・日次通知も発生し得るため、6件は通知総数を意味しない。
+Discordがメッセージ作成を受理した証拠であり、利用者が既読にした証拠ではない。
+試験後の集計は直近失敗0、該当alertはactive=false・pendingなし。合成行は物理削除せず試行窓外へ移した。
+
+CLIはmigration適用後のpg-deltaカタログキャッシュにCAファイル参照の警告を出した。
+終了コードだけで成功扱いにせず、4本の履歴・集計関数・専用LOGINでの接続を再確認して適用を確認した。
+
+直接Authの別試験では、架空の`example.invalid`アカウントでStagingのpassword token endpointへ1回だけ失敗要求を送った。
+アカウント作成・メール送信はしていない。Authログのstatusは文字列形式、pathは完全一致で扱えないため、
+件数のみを返す集計へ修正して、HTTP失敗1件・`invalid_credentials`イベント1件を確認した。
+アプリの試行表やDB内Auth監査表に依存せず観測できる経路の証跡である。
+この確認は手動であり、直接Authとアプリ書込み失敗の継続監視を有効化したことを意味しない。
+
+定期実行flagは無効のまま。Productionのschema・secret・Firewallルールには変更なし。
+Production有効化、Auth/アプリ書込み失敗の継続検知、GitHub/Discord双方停止時の独立監視は残件として維持する。
