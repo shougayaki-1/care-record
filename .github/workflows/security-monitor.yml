@@ -31,6 +31,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+      - name: Install pinned read-only Firewall CLI
+        if: vars.SECURITY_MONITOR_ENABLED == 'true' && vars.SECURITY_FIREWALL_ENABLED == 'true'
+        run: npm install --prefix "${RUNNER_TEMP}/security-vercel" --ignore-scripts --no-audit --no-fund vercel@65.2.0
       - name: Collect counts and deliver pending alerts
         if: vars.SECURITY_MONITOR_ENABLED == 'true'
         env:
@@ -48,6 +51,9 @@ jobs:
           DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_SECURITY_WEBHOOK_URL }}
           EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SECURITY_MONITOR_PROBE: ${{ inputs.probe || 'false' }}
+          SECURITY_FIREWALL_ENABLED: ${{ vars.SECURITY_FIREWALL_ENABLED || 'false' }}
+          VERCEL_SECURITY_CLI: ${{ runner.temp }}/security-vercel/node_modules/.bin/vercel
+          VERCEL_TOKEN: ${{ secrets.VERCEL_SECURITY_READ_TOKEN }}
         run: |
           umask 077
           printf '%s\n' "$MONITOR_CA" > "$PGSSLROOTCERT"

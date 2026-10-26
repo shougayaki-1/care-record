@@ -15,9 +15,10 @@ function fixture() {
       success_after_failures_15m: 0, missing_hashes_15m: 0, attempts_15m: 0, audit_logins_15m: 0 },
     daily: { failures: 0, successes: 0, missing_hashes: 0, important_events: 0 } };
 }
-async function run(s, fail = () => false) {
+async function run(s, fail = () => false, options = {}) {
   const sent = [];
   const result = await runMonitor({ snapshot: s, environment: 'staging', link,
+    ...options,
     save: async (version, state) => { assert.equal(version, s.version); s.version++; s.state = structuredClone(state); return s.version; },
     notify: async p => { if (fail(p)) throw new Error('credential-do-not-log'); sent.push(p); },
   });
@@ -80,9 +81,32 @@ test('invalid data never becomes zero; state/metrics/details/identifiers are not
   const all = JSON.stringify((await run(s)).sent);
   for (const value of ['secret@', 'Cookie', 'JWT', '192.0.2.1', 'synthetic-token']) assert.ok(!all.includes(value));
   assert.ok(all.includes('攻撃確定ではありません'));
-  assert.ok(all.includes('Firewall block/challenge=unavailable'));
+  assert.ok(all.includes('Firewall=disabled traffic=unavailable'));
   assert.throws(() => evidenceUrl(`${link}?token=secret`));
   assert.throws(() => payload('production', link, 'secret@example.test', 'Info', 0, s.observed_at, s.observed_at));
+});
+test('Firewall counts use actual source window, alerts have explicit provider attribution, missing data cannot resolve', async () => {
+  const s = fixture();
+  const firewall = { status: 'available', traffic: { start: '2026-10-26T00:44:00Z', end: '2026-10-26T01:00:00Z', counts: { deny: 20, challenge: 3, rate_limit: 1 } },
+    alerts: { active: 1, resolved: 0 }, ip: 'PRIVATE-IP' };
+  const first = (await run(s, () => false, { firewall })).sent;
+  assert.equal(category(first, 'firewall_denies').length, 1);
+  assert.ok(JSON.stringify(category(first, 'firewall_denies')).includes('00:44:00.000Z'));
+  assert.ok(JSON.stringify(category(first, 'firewall_active_alerts')).includes('Vercelが報告した'));
+  assert.ok(!JSON.stringify(first).includes('PRIVATE-IP'));
+  firewall.traffic.counts.deny = 0; firewall.alerts.active = 0;
+  advance(s); await run(s, () => false, { firewall }); // first clear observation
+  advance(s);
+  const missing = { status: 'incomplete', traffic: null, alerts: null };
+  await run(s, () => false, { firewall: missing });
+  advance(s);
+  const second = (await run(s, () => false, { firewall: missing })).sent;
+  assert.equal(category(second, 'firewall_denies').length, 0);
+  assert.equal(s.state.alerts.firewall_denies.active, true);
+  advance(s); await run(s, () => false, { firewall });
+  assert.equal(s.state.alerts.firewall_denies.active, true); // gap broke the earlier clear streak
+  advance(s);
+  assert.match(category((await run(s, () => false, { firewall })).sent, 'firewall_denies')[0].content, /resolved/);
 });
 test('Discord retries 429 Retry-After and 5xx, suppresses mentions, never follows redirects', async () => {
   const statuses = [429, 503, 200], delays = [];

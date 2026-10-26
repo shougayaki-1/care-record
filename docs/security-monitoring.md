@@ -8,14 +8,14 @@
 
 | ソース | 取得・料金・保持 | 欠測・制約 |
 | --- | --- | --- |
-| Vercel Firewall | 接続ツールで `care-record` / `care-record-staging` の存在を確認。両方のactive config APIは404 `Seawall Config not found` | 攻撃ゼロ・設定なしの証拠ではない。プラン、Attack Detected webhookの利用権、Traffic APIの取得可能性・保持・料金は未確認。block/challengeは常に `unavailable` |
+| Vercel Firewall | HobbyをCLIで確認。active config APIは404だが、CLI 65.2.0のTraffic/Alertsは取得可能。既存Webhook一覧は空 | opt-in後にaction別件数を取得。失敗した側はunavailableとして、欠測でアラートを解除しない。Account Webhookは現プランの対象外。詳細は[取得証跡](security-monitoring-sources.md) |
 | `login_attempts` | 新規の集計専用SQL関数で5分・15分・前日JSTを読取。アプリ側のsalt付きハッシュをDB内で比較する。既存行は変更しない | データ保持は現状自動削除なし。急増による容量増は既存DB容量監視で確認。ハッシュ欠落はWarning。無活動と両方の書込み停止は区別できず `ingestion=unverified` |
 | `audit_events` | `auth.login`件数と重要操作allowlistの前日件数のみ。本文・details・組織IDは出さない。既存の検索1年・外部10年の保持方針を変更しない | 15分のlogin_attemptsとの差が3件以上でWarning。OAuth、書込み順・境界等でも差が出るため「監査失敗確定」ではない。チェーン整合性・外部保存は #152 の領域 |
 | Supabase Auth Audit Logs | [公式](https://supabase.com/docs/guides/auth/audit-logs)を確認。ホスト済みの保存設定・保持・プランは未確認 | Authへ直接アクセスした失敗、アプリのレート制限前の試行はこの集計では網羅しない。常に `Auth direct=unverified`。生ログの転送は追加していない |
 | Actions / Discord | 5分監視、独立した毎時watchdog、前日集計は日付変更後の最初の成功時。Actions利用枠・Discord送信先は有効化前に確認 | GitHub遅延時は5分を保証しない。GitHub全体とDiscord同時停止は外部監視が必要。Actionsの失敗通知を別経路として有効にする |
 
 Vercelは [Firewall Overview / Traffic](https://vercel.com/docs/vercel-firewall/firewall-observability) を
-両プロジェクトのdashboardから確認する。取得可能なプラン・権限を確認後に別Issueで連携する。
+両プロジェクトのdashboardから確認する。#160でTraffic/AlertsのCLI取得を確認し、opt-inの集計連携を追加した。
 [Vercel webhooks](https://vercel.com/docs/webhooks) はすべての遮断イベントを配信するものではない。
 今回受信経路は作らないため、署名・リプレイ試験は対象外。有効化時にはraw bodyのHMAC-SHA1署名、
 timing-safe比較、イベント重複排除、時刻・サイズ・schema・project検証を必須とする。
@@ -55,6 +55,8 @@ LOGINを `postgres` / `authenticated` / `service_role` のmemberにしない。�
 | `SECURITY_MONITOR_PROJECT_REF`（当該環境の20文字ref） | Variable |
 | `SECURITY_MONITOR_PGPASSWORD`, `SECURITY_MONITOR_CA_CERT` | Secret |
 | `DISCORD_SECURITY_WEBHOOK_URL` | Secret（既存backup用とは別） |
+| `SECURITY_FIREWALL_ENABLED`（`true` のみCLI読取を起動） | Environment Variable |
+| `VERCEL_SECURITY_READ_TOKEN` | Environment Secret（対象teamの読み取りに限定した資格情報） |
 
 未設定時はinactiveを明記し、ゼロ件の成功レポートを出さない。workflowはmainからのみ運用する。
 監視の定期実行を有効にするとActions使用量が増える。現在の契約枠・予算を確認してから有効化する。
@@ -96,6 +98,13 @@ email/IPハッシュも送らない。生IP、メール、氏名、記録、Cook
 DB stateはsingleton・最大32KiBの派生情報で履歴を増やさない。Discordメッセージの保存期限・閲覧者は運営側で設定し、
 未確認のまま準拠済みとしない。ActionsにDB snapshotや資格情報をartifact保存しない。
 
+Firewallは`SECURITY_FIREWALL_ENABLED=true`で取得を有効にする。CLI 65.2.0をrunnerの一時ディレクトリに入れ、global版・アプリ依存は変更しない。
+denyが20件以上の短期取得窓（要求15分、実窓を表示）、active alertが1件以上でHigh候補とする。
+Vercel報告のalertと単なる遮断件数を区別し、アプリ侵害の確定とは表示しない。
+前日JSTのアプリ集計に付けるFirewall件数は、保持制限に合わせた**直近24時間の取得窓**を明記する。
+Firewallの日次取得失敗もWarningにし、前日全体の攻撃ゼロと扱わない。
+CLIの取得失敗・新しい未知action・不正payloadは欠測。policyやWebhook作成は行わない。
+
 Webhook交換は新しい環境別URLをsecretへ登録→probe→日次集計とwatchdog確認→旧webhookを失効の順。
 失敗時は新secretを修正して再実行する。ロールパスワードも環境ごとに交換する。
 実トラフィックで閾値を調整する場合は、個人情報のない件数と誤検知理由を記録し、ruleとテストをPRで更新する。
@@ -108,5 +117,5 @@ E2E・実Discord送信・本番DB読取はこの検証に含まない。
 
 Context7確認: 2026-10-26、Supabase PostgreSQL関数（SECURITY DEFINER、空search_path、PUBLIC EXECUTEのREVOKE）。
 採用するCLIは既存の2.108.0。外部仕様を理由に依存バージョンを変更しない。
-Firewall連携、直接Authログ・ログ書込み失敗の独立検知、実プラン/保持・実配送の確認は未完であり、#159の受け入れ証跡を残す必要がある。
+FirewallのCLI集計連携は追加済みだが、定期実行の設定、直接Authログ・ログ書込み失敗の独立検知、Supabaseの実プラン/保持・実配送の確認は未完であり、#159の受け入れ証跡を残す必要がある。
 後続の契約・取得可否確認と環境検証は [#160 (Phase 2)](https://github.com/shougayaki-1/care-record/issues/160) で追跡する。
