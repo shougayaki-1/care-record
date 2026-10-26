@@ -1,8 +1,8 @@
 # 不審アクセスの監視 (#159)
 
 この実装はログイン異常の候補を集計し、個人情報を含まない Discord 通知と前日JSTの集計を送る。
-攻撃確定という判定は行わない。Firewall の新たな Deny / Challenge、契約変更、本番設定は行わない。
-本番有効化・Discord実配送・ホスト済みStagingの試験は、コードがあるだけでは確認済みにならない。
+攻撃確定という判定は行わない。Firewall の新たな Deny / Challengeや契約変更は行わない。
+有効化・Discord実配送・ホスト済み環境の試験は、コードがあるだけでは確認済みにならない。
 
 ## 取得元と現状（2026-10-26）
 
@@ -29,7 +29,7 @@ private schemaはPostgRESTへ公開しない。`security_monitor_save` のCASで
 組織横断の識別不能な基盤集計であり、業務権限 `permissions.ts` と既存RLSの変更はない。
 新規state表はRLS有効・policyなし・全アプリロールをREVOKE。監査対象の業務操作ではなく派生状態のため監査イベントは追加しない。
 
-Staging、Productionの順に通常のmigration手順で適用する。本PRの作業では本番へ適用しない。
+Staging、Productionの順に通常のmigration手順で適用する。2026-10-27に両環境へ適用し、履歴を確認した。
 DB管理者が環境ごとに `security_monitor_staging` / `security_monitor_production` の専用LOGINを作り、`care_security_monitor` のみを付与する。
 LOGINを `postgres` / `authenticated` / `service_role` のmemberにしない。パスワードはsecret managerで生成する。
 接続にはSupavisor session poolerを使い、project ref、LOGIN suffix、TLS CAを対応する環境で確認する。
