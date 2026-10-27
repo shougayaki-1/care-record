@@ -139,6 +139,25 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           import { collectFirewall } from './scripts/security/firewall.mjs';
-          const result = await collectFirewall({ environment: 'production', enabled: true });
-          console.log(JSON.stringify({ status: result.status, trafficAvailable: result.traffic !== null, alertsAvailable: result.alerts !== null }));
+          import { execFile } from 'node:child_process';
+          import { promisify } from 'node:util';
+          const run = promisify(execFile);
+          const categories = {};
+          const runner = async args => {
+            try {
+              const { stdout } = await run(process.env.VERCEL_SECURITY_CLI, args, { timeout: 45000, maxBuffer: 262144 });
+              return JSON.parse(stdout);
+            } catch (e) {
+              const data = String(e.stderr || '');
+              categories[args[1]] = {
+                permissionDenied: /403|forbidden|not authorized|permission|access denied/i.test(data),
+                invalidToken: /invalid token|not authenticated|log in|login required|unauthorized|401/i.test(data),
+                projectOrTeamScope: /project.scoped|team.scope|scope|team not found|project not found/i.test(data),
+                timedOut: e.killed === true,
+              };
+              throw new Error('source_unavailable');
+            }
+          };
+          const result = await collectFirewall({ environment: 'production', enabled: true, runner });
+          console.log(JSON.stringify({ status: result.status, trafficAvailable: result.traffic !== null, alertsAvailable: result.alerts !== null, categories }));
           JS
