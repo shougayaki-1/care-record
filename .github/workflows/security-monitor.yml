@@ -173,6 +173,19 @@ jobs:
             projectStatus = response.status;
           } catch {}
           const result = await collectFirewall({ environment: 'production', enabled: true, runner });
-          console.log(JSON.stringify({ projectStatus }));
+          const headers = { Authorization: `Bearer ${process.env.VERCEL_TOKEN}` };
+          const getStatus = async path => {
+            try { return (await fetch(`https://api.vercel.com${path}`, { headers, redirect: 'error', signal: AbortSignal.timeout(10000) })).status; }
+            catch { return null; }
+          };
+          const teamStatus = await getStatus('/v2/teams/team_ysW0wFQFYn4lGeDbqSnJtdDc');
+          const userStatus = await getStatus('/v2/user');
+          const withoutScope = async args => {
+            const i = args.indexOf('--scope');
+            if (i >= 0) args = [...args.slice(0, i), ...args.slice(i + 2)];
+            return runner(args);
+          };
+          const direct = await collectFirewall({ environment: 'production', enabled: true, runner: withoutScope });
+          console.log(JSON.stringify({ projectStatus, teamStatus, userStatus, withoutScope: { trafficAvailable: direct.traffic !== null, alertsAvailable: direct.alerts !== null } }));
           console.log(JSON.stringify({ credentialPresent: !!process.env.VERCEL_TOKEN, projectTokenFormat: /^vcp_/.test(process.env.VERCEL_TOKEN || ''), status: result.status, trafficAvailable: result.traffic !== null, alertsAvailable: result.alerts !== null, categories }));
           JS
