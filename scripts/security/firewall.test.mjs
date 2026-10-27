@@ -57,3 +57,20 @@ test('CLI subprocess receives only its own credential, never database or Discord
   assert.equal(result.status, 'available');
   assert.ok(!JSON.stringify(result).includes('PRIVATE'));
 });
+
+test('project token DDoS mode exports only active count and marks other Firewall sources incomplete', async () => {
+  const result = await collectFirewall({ environment: 'production', enabled: true, mode: 'ddos-only', token: 'test-token', fetcher: async (url, init) => {
+    assert.equal(url.searchParams.get('projectId'), 'prj_hM6VAEcC8T773hF48MSRHtkLKyl2');
+    assert.equal(init.redirect, 'error');
+    return Response.json({ anomalies: [{ startTime: '2026-10-27T00:00:00Z', endTime: null, affectedHostMap: { PRIVATE: { ip: 'SECRET' } } },
+      { startTime: '2026-10-27T00:00:00Z', endTime: '2026-10-27T00:30:00Z' }] });
+  } });
+  assert.deepEqual(result, { status: 'incomplete', mode: 'ddos-only', traffic: null, alerts: null, ddos: { status: 'available', active: 1 } });
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE|SECRET|test-token/);
+});
+test('DDoS source failure or malformed events remain unavailable, never healthy zero', async () => {
+  for (const response of [new Response(null, { status: 403 }), Response.json({}), Response.json({ anomalies: [{ startTime: 'invalid' }] })]) {
+    const result = await collectFirewall({ environment: 'production', enabled: true, mode: 'ddos-only', token: 'test-token', fetcher: async () => response });
+    assert.deepEqual(result.ddos, { status: 'unavailable', active: null });
+  }
+});

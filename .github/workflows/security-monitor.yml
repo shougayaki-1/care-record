@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: 24
       - name: Install pinned read-only Firewall CLI
-        if: vars.SECURITY_MONITOR_ENABLED == 'true' && vars.SECURITY_FIREWALL_ENABLED == 'true'
+        if: vars.SECURITY_MONITOR_ENABLED == 'true' && vars.SECURITY_FIREWALL_ENABLED == 'true' && vars.SECURITY_FIREWALL_MODE != 'ddos-only'
         run: npm install --prefix "${RUNNER_TEMP}/security-vercel" --ignore-scripts --no-audit --no-fund vercel@65.2.0
       - name: Collect Auth aggregate (isolated scoped token)
         if: vars.SECURITY_MONITOR_ENABLED == 'true' && vars.SECURITY_AUTH_LOGS_ENABLED == 'true'
@@ -64,6 +64,7 @@ jobs:
           EVIDENCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SECURITY_MONITOR_PROBE: ${{ inputs.probe || 'false' }}
           SECURITY_FIREWALL_ENABLED: ${{ vars.SECURITY_FIREWALL_ENABLED || 'false' }}
+          SECURITY_FIREWALL_MODE: ${{ vars.SECURITY_FIREWALL_MODE || 'full' }}
           SECURITY_AUTH_LOGS_ENABLED: ${{ vars.SECURITY_AUTH_LOGS_ENABLED || 'false' }}
           AUTH_LOGS_RESULT_FILE: ${{ runner.temp }}/security-auth-count.json
           VERCEL_SECURITY_CLI: ${{ runner.temp }}/security-vercel/node_modules/.bin/vercel
