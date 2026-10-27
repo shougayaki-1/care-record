@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(13);
+select plan(14);
 grant usage on schema extensions to mcp_import;
 grant execute on all functions in schema extensions to mcp_import;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values
@@ -13,6 +13,7 @@ insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,cl
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('16800000-0000-0000-0000-000000000004','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003','openid');
 insert into auth.sessions(id,user_id,oauth_client_id) values ('16800000-0000-0000-0000-000000000005','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003');
 select ok(not has_function_privilege('mcp_import','private.is_mcp_oauth_active()','EXECUTE'),'helper is not callable by MCP role');
+select ok(not has_function_privilege('mcp_import','private.is_mcp_oauth_active_for_read()','EXECUTE'),'read helper is not callable by MCP role');
 select ok(not has_table_privilege('mcp_import','auth.sessions','SELECT'),'session table remains private');
 set local role mcp_import;
 select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","client_id":"16800000-0000-0000-0000-000000000003","session_id":"16800000-0000-0000-0000-000000000005"}',true);
