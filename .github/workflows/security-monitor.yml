@@ -9,6 +9,10 @@ on:
         description: Send an additional synthetic delivery probe (both enabled environments)
         type: boolean
         default: false
+      firewall_diagnostic:
+        description: Check read-only Firewall sources in production without starting monitoring
+        type: boolean
+        default: false
       verify_staging:
         description: Run synthetic DB/Discord verification in Staging only (requires an explicitly allowed branch)
         type: boolean
@@ -115,3 +119,26 @@ jobs:
       - name: Remove temporary TLS CA
         if: always()
         run: rm -f "${RUNNER_TEMP}/security-monitor-ca.crt"
+
+  firewall-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.firewall_diagnostic == true && github.ref == 'refs/heads/codex/issue-160-firewall-check'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install pinned Vercel CLI
+        run: npm install --prefix "${RUNNER_TEMP}/security-vercel" --ignore-scripts --no-audit --no-fund vercel@65.2.0
+      - name: Check read-only aggregate availability
+        env:
+          VERCEL_SECURITY_CLI: ${{ runner.temp }}/security-vercel/node_modules/.bin/vercel
+          VERCEL_TOKEN: ${{ secrets.VERCEL_SECURITY_READ_TOKEN }}
+        run: |
+          node --input-type=module <<'JS'
+          import { collectFirewall } from './scripts/security/firewall.mjs';
+          const result = await collectFirewall({ environment: 'production', enabled: true });
+          console.log(JSON.stringify({ status: result.status, trafficAvailable: result.traffic !== null, alertsAvailable: result.alerts !== null }));
+          JS
