@@ -151,6 +151,12 @@ jobs:
               const data = String(e.stderr || '');
               categories[args[1]] = {
                 permissionDenied: /403|forbidden|not authorized|permission|access denied/i.test(data),
+                exitCode: typeof e.code === 'number' ? e.code : null,
+                parseError: e instanceof SyntaxError,
+                stderrPresent: data.length > 0,
+                mentionsToken: /token/i.test(data),
+                mentionsValid: /valid/i.test(data),
+                mentionsAuthentication: /auth|login|log in/i.test(data),
                 invalidToken: /invalid token|not authenticated|log in|login required|unauthorized|401/i.test(data),
                 projectOrTeamScope: /project.scoped|team.scope|scope|team not found|project not found/i.test(data),
                 timedOut: e.killed === true,
@@ -159,5 +165,5 @@ jobs:
             }
           };
           const result = await collectFirewall({ environment: 'production', enabled: true, runner });
-          console.log(JSON.stringify({ status: result.status, trafficAvailable: result.traffic !== null, alertsAvailable: result.alerts !== null, categories }));
+          console.log(JSON.stringify({ credentialPresent: !!process.env.VERCEL_TOKEN, projectTokenFormat: /^vcp_/.test(process.env.VERCEL_TOKEN || ''), status: result.status, trafficAvailable: result.traffic !== null, alertsAvailable: result.alerts !== null, categories }));
           JS
