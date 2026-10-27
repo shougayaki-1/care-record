@@ -25,8 +25,15 @@ select ok(not has_table_privilege('mcp_import','private.mcp_import_controls','SE
 select ok(not has_function_privilege('mcp_import','public.disable_mcp_import(uuid)','EXECUTE'),'MCP cannot change switch');
 select ok(not has_function_privilege('anon','public.disable_mcp_import(uuid)','EXECUTE'),'anon cannot change switch');
 set local role mcp_import;
-select set_config('request.jwt.claims','{"sub":"16900000-0000-0000-0000-000000000002","role":"mcp_import","client_id":"16900000-0000-0000-0000-000000000003","session_id":"16900000-0000-0000-0000-000000000004"}',true);
+select set_config('request.jwt.claims','{"sub":"16900000-0000-0000-0000-000000000002","role":"mcp_import","exp":4102444800,"client_id":"16900000-0000-0000-0000-000000000003","session_id":"16900000-0000-0000-0000-000000000004"}',true);
 select throws_ok($$select public.submit_mcp_candidate('16900000-0000-0000-0000-00000000000a','test.pdf','{"meta":{},"values":{},"warnings":[],"confidence":"low"}')$$,'42501','mcp_import_unavailable','missing switch rejects direct RPC');
+select set_config('request.jwt.claims','{"sub":"16900000-0000-0000-0000-000000000002","role":"mcp_import","client_id":"16900000-0000-0000-0000-000000000003","session_id":"16900000-0000-0000-0000-000000000004"}',true);
+select throws_ok($$select public.submit_mcp_candidate('16900000-0000-0000-0000-00000000000a','', '{}')$$,'42501','mcp_oauth_required','missing exp rejects');
+select set_config('request.jwt.claims','{"sub":"16900000-0000-0000-0000-000000000002","role":"mcp_import","exp":"4102444800","client_id":"16900000-0000-0000-0000-000000000003","session_id":"16900000-0000-0000-0000-000000000004"}',true);
+select throws_ok($$select public.submit_mcp_candidate('16900000-0000-0000-0000-00000000000a','', '{}')$$,'42501','mcp_oauth_required','non-numeric exp rejects');
+select set_config('request.jwt.claims','{"sub":"16900000-0000-0000-0000-000000000002","role":"mcp_import","exp":1,"client_id":"16900000-0000-0000-0000-000000000003","session_id":"16900000-0000-0000-0000-000000000004"}',true);
+select throws_ok($$select public.submit_mcp_candidate('16900000-0000-0000-0000-00000000000a','', '{}')$$,'42501','mcp_oauth_required','expired exp rejects');
+
 reset role;
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"16900000-0000-0000-0000-000000000002","role":"authenticated","session_id":"mcp169-member"}',true);
@@ -42,7 +49,7 @@ select is(public.get_mcp_import_control('16900000-0000-0000-0000-00000000000a')-
 reset role;
 select is((select count(*)::int from public.audit_events where organization_id='16900000-0000-0000-0000-00000000000a' and action_type='integration.mcp_import.enable' and details->'confirmedFields' ? 'region' and not (details ? 'conditions')),1,'condition fields and actor are audited without free text');
 set local role mcp_import;
-select set_config('request.jwt.claims','{"sub":"16900000-0000-0000-0000-000000000002","role":"mcp_import","client_id":"16900000-0000-0000-0000-000000000003","session_id":"16900000-0000-0000-0000-000000000004"}',true);
+select set_config('request.jwt.claims','{"sub":"16900000-0000-0000-0000-000000000002","role":"mcp_import","exp":4102444800,"client_id":"16900000-0000-0000-0000-000000000003","session_id":"16900000-0000-0000-0000-000000000004"}',true);
 select lives_ok($$select public.submit_mcp_candidate('16900000-0000-0000-0000-00000000000a','test.pdf','{"meta":{},"values":{},"warnings":[],"confidence":"low"}')$$,'enabled organization can submit');
 select throws_ok($$select public.submit_mcp_candidate('16900000-0000-0000-0000-00000000000b','test.pdf','{"meta":{},"values":{},"warnings":[],"confidence":"low"}')$$,'42501','mcp_import_unavailable','another organization remains disabled');
 reset role;
@@ -56,7 +63,7 @@ select is((select enabled from private.mcp_import_controls where organization_id
 select is((select count(*)::int from public.audit_events where organization_id='16900000-0000-0000-0000-00000000000a' and action_type='integration.mcp_import.disable' and actor_id='16900000-0000-0000-0000-000000000001' and details->>'previouslyEnabled'='true'),1,'change is audited');
 select is((select count(*)::int from public.ai_import_candidates where organization_id='16900000-0000-0000-0000-00000000000a'),1,'existing candidate remains available for review');
 set local role mcp_import;
-select set_config('request.jwt.claims','{"sub":"16900000-0000-0000-0000-000000000002","role":"mcp_import","client_id":"16900000-0000-0000-0000-000000000003","session_id":"16900000-0000-0000-0000-000000000004"}',true);
+select set_config('request.jwt.claims','{"sub":"16900000-0000-0000-0000-000000000002","role":"mcp_import","exp":4102444800,"client_id":"16900000-0000-0000-0000-000000000003","session_id":"16900000-0000-0000-0000-000000000004"}',true);
 select throws_ok($$select public.submit_mcp_candidate('16900000-0000-0000-0000-00000000000a','test.pdf','{"meta":{},"values":{},"warnings":[],"confidence":"low"}')$$,'42501','mcp_import_unavailable','disabled switch rejects direct RPC');
 reset role;
 create function public.mcp169_fail_audit() returns trigger language plpgsql set search_path='' as $$begin if new.action_type='integration.mcp_import.disable' then raise exception 'fixture_audit_failed'; end if; return new; end$$;

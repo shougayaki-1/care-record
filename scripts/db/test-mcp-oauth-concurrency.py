@@ -41,7 +41,7 @@ def wait_lock(name):
  raise RuntimeError('did not observe lock '+name)
 for mode in ('send-revoke','revoke-send','send-leave','leave-send'):
  u,c,s,cons,o=setup();a=Session('issue168_a');b=Session('issue168_b')
- claims=f'{{"sub":"{u}","role":"mcp_import","client_id":"{c}","session_id":"{s}"}}'
+ claims=f'{{"sub":"{u}","role":"mcp_import","exp":4102444800,"client_id":"{c}","session_id":"{s}"}}'
  send=f"select public.submit_mcp_candidate('{o}','','{{\"meta\":{{}},\"values\":{{}},\"warnings\":[],\"confidence\":\"low\"}}');"
  revoke=f"update auth.oauth_consents set revoked_at=now() where id='{cons}'; delete from auth.sessions where id='{s}';"
  leave=f"delete from public.organization_members where organization_id='{o}' and user_id='{u}';"
@@ -77,7 +77,7 @@ for mode in ('send-revoke','revoke-send','send-leave','leave-send'):
 # Observe read behavior while removal is uncommitted; neither read currently
 # takes a membership lock. A later call must see the committed removal.
 u,c,s,cons,o=setup();remover=Session('issue168_read_remove');reader=Session('issue168_read')
-claims=f'{{"sub":"{u}","role":"mcp_import","client_id":"{c}","session_id":"{s}"}}'
+claims=f'{{"sub":"{u}","role":"mcp_import","exp":4102444800,"client_id":"{c}","session_id":"{s}"}}'
 try:
  remover.run(f"begin; delete from public.organization_members where organization_id='{o}' and user_id='{u}';")
  reader.run(f"begin; set local role mcp_import; select set_config('request.jwt.claims','{claims}',true);")
@@ -94,7 +94,7 @@ finally:
 # READ COMMITTED establishes a statement snapshot. A read already in progress
 # may complete after revoke; a later statement must fail with the same JWT.
 u,c,s,cons,o=setup(); revoker=Session('issue168_snapshot_revoke'); reader=Session('issue168_snapshot_read')
-claims=f'{{"sub":"{u}","role":"mcp_import","client_id":"{c}","session_id":"{s}"}}'
+claims=f'{{"sub":"{u}","role":"mcp_import","exp":4102444800,"client_id":"{c}","session_id":"{s}"}}'
 try:
  reader.run(f"begin read only; set local role mcp_import; select set_config('request.jwt.claims','{claims}',true);")
  observed=[];errors=[]
@@ -121,7 +121,7 @@ finally:
 
 # A lock wait can cross not_after. The final pre-insert check must reject.
 u,c,s,cons,o=setup(); locker=Session('issue168_expiry_lock');sender=Session('issue168_expiry_send')
-claims=f'{{"sub":"{u}","role":"mcp_import","client_id":"{c}","session_id":"{s}"}}'
+claims=f'{{"sub":"{u}","role":"mcp_import","exp":4102444800,"client_id":"{c}","session_id":"{s}"}}'
 try:
  query(f"update auth.sessions set not_after=clock_timestamp()+interval '2 seconds' where id='{s}';")
  locker.run(f"begin; select pg_advisory_xact_lock(pg_catalog.hashtextextended('mcp_candidate:' || '{u}', 0));")
@@ -140,6 +140,28 @@ try:
  assert len(result)==1 and '42501' in result[0] and 'mcp_oauth_required' in result[0],result
  assert query(f"select count(*) from public.ai_import_candidates where organization_id='{o}'")=='0'
  print('PASS session expiration during advisory-lock wait rejects before insert',flush=True)
+finally:
+ locker.close()
+ if sender.p.poll() is None:sender.close()
+
+# A valid JWT can expire while the sender waits for the candidate lock.
+u,c,s,cons,o=setup(); locker=Session('issue168_jwt_lock');sender=Session('issue168_jwt_send')
+expiry=int(time.time())+3
+claims=f'{{"sub":"{u}","role":"mcp_import","exp":{expiry},"client_id":"{c}","session_id":"{s}"}}'
+try:
+ locker.run(f"begin; select pg_advisory_xact_lock(pg_catalog.hashtextextended('mcp_candidate:' || '{u}', 0));")
+ sender.run(f"begin; set local role mcp_import; select set_config('request.jwt.claims','{claims}',true);")
+ result=[]
+ def jwt_blocked_send():
+  try:sender.run(f"select public.submit_mcp_candidate('{o}','','{{\"meta\":{{}},\"values\":{{}},\"warnings\":[],\"confidence\":\"low\"}}');");result.append('success')
+  except Exception as e:result.append(str(e))
+ t=threading.Thread(target=jwt_blocked_send,daemon=True);t.start();wait_lock('issue168_jwt_send')
+ while time.time() < expiry + .1:time.sleep(.05)
+ locker.run('commit;');t.join(10)
+ if t.is_alive():raise RuntimeError('JWT expiry test timed out')
+ assert len(result)==1 and '42501' in result[0] and 'mcp_oauth_required' in result[0],result
+ assert query(f"select count(*) from public.ai_import_candidates where organization_id='{o}'")=='0'
+ print('PASS JWT expiration during advisory-lock wait rejects before insert',flush=True)
 finally:
  locker.close()
  if sender.p.poll() is None:sender.close()

@@ -14,11 +14,11 @@ SELECT set_config('request.jwt.claims','{"sub":"19200000-0000-4000-8000-00000000
 SELECT public.enable_mcp_import('19200000-0000-4000-8000-000000000011','{"provider":"a","processing":"b","region":"c","retention":"d","secondary_use":"e","notice":"f"}');
 }
 session "sender"
-step "begin_sender" { BEGIN; SET LOCAL ROLE mcp_import; SELECT set_config('request.jwt.claims','{"sub":"19200000-0000-4000-8000-000000000001","role":"mcp_import","client_id":"19200000-0000-4000-8000-000000000012","session_id":"19200000-0000-4000-8000-000000000013"}',true); }
+step "begin_sender" { BEGIN; SET LOCAL ROLE mcp_import; SELECT set_config('request.jwt.claims','{"sub":"19200000-0000-4000-8000-000000000001","role":"mcp_import","exp":4102444800,"client_id":"19200000-0000-4000-8000-000000000012","session_id":"19200000-0000-4000-8000-000000000013"}',true); }
 step "send" { SELECT public.submit_mcp_candidate('19200000-0000-4000-8000-000000000011','synthetic.pdf','{"meta":{},"values":{},"warnings":[],"confidence":"low"}'); }
 step "send_rejected" { DO $$ BEGIN BEGIN PERFORM public.submit_mcp_candidate('19200000-0000-4000-8000-000000000011','synthetic.pdf','{"meta":{},"values":{},"warnings":[],"confidence":"low"}'); RAISE EXCEPTION 'send unexpectedly accepted'; EXCEPTION WHEN insufficient_privilege THEN IF SQLERRM <> 'mcp_import_unavailable' THEN RAISE; END IF; END; END $$; }
 step "commit_sender" { COMMIT; }
-step "begin_sender_again" { BEGIN; SET LOCAL ROLE mcp_import; SELECT set_config('request.jwt.claims','{"sub":"19200000-0000-4000-8000-000000000001","role":"mcp_import","client_id":"19200000-0000-4000-8000-000000000012","session_id":"19200000-0000-4000-8000-000000000013"}',true); }
+step "begin_sender_again" { BEGIN; SET LOCAL ROLE mcp_import; SELECT set_config('request.jwt.claims','{"sub":"19200000-0000-4000-8000-000000000001","role":"mcp_import","exp":4102444800,"client_id":"19200000-0000-4000-8000-000000000012","session_id":"19200000-0000-4000-8000-000000000013"}',true); }
 step "commit_sender_again" { COMMIT; }
 session "stopper"
 step "begin_stopper" { BEGIN; SET LOCAL ROLE authenticated; SELECT set_config('request.jwt.claims','{"sub":"19200000-0000-4000-8000-000000000001","role":"authenticated","session_id":"mcp192"}',true); }
