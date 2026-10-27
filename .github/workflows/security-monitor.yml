@@ -205,3 +205,17 @@ jobs:
           console.log(JSON.stringify({ projectStatus, teamStatus, userStatus, metricsStatus, attackStatus, attackCount, alertsStatus, withoutScope: { trafficAvailable: direct.traffic !== null, alertsAvailable: direct.alerts !== null } }));
           console.log(JSON.stringify({ credentialPresent: !!process.env.VERCEL_TOKEN, projectTokenFormat: /^vcp_/.test(process.env.VERCEL_TOKEN || ''), status: result.status, trafficAvailable: result.traffic !== null, alertsAvailable: result.alerts !== null, categories }));
           JS
+      - name: Check out DDoS monitoring candidate
+        uses: actions/checkout@v5
+        with:
+          ref: b8a32e21b221e5b635e06ed001bc34aaf8cdb31d
+      - name: Test candidate DDoS-only collector
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_SECURITY_READ_TOKEN }}
+        run: |
+          node --input-type=module <<'JS'
+          import { collectFirewall } from './scripts/security/firewall.mjs';
+          const result = await collectFirewall({ environment: 'production', enabled: true, mode: 'ddos-only' });
+          console.log(JSON.stringify({ status: result.status, mode: result.mode, ddos: result.ddos }));
+          if (result.ddos?.status !== 'available') process.exitCode = 1;
+          JS
