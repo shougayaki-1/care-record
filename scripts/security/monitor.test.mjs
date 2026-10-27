@@ -191,3 +191,16 @@ test('認証失敗とアプリ側の記録がともにゼロの場合は原因�
   advance(s); auth.start = new Date(Date.parse(s.observed_at) - 15 * 60000).toISOString(); auth.end = s.observed_at;
   assert.match(category((await run(s, () => false, { auth })).sent, 'ingestion_evidence_gap')[0].content, /解消/);
 });
+
+test('DDoS-only monitoring alerts on active mitigations without treating other sources as available', async () => {
+  const s = fixture();
+  const firewall = { status: 'incomplete', mode: 'ddos-only', traffic: null, alerts: null, ddos: { status: 'available', active: 1 } };
+  const sent = (await run(s, () => false, { firewall })).sent;
+  assert.equal(category(sent, 'firewall_ddos_active').length, 1);
+  assert.equal(category(sent, 'firewall_source_gap').length, 1);
+  assert.equal(category(sent, 'firewall_ddos_source_gap').length, 0);
+  advance(s);
+  const missing = await run(s, () => false, { firewall: { ...firewall, ddos: { status: 'unavailable', active: null } } });
+  assert.equal(category(missing.sent, 'firewall_ddos_source_gap').length, 1);
+  assert.equal(s.state.alerts.firewall_ddos_active.active, true);
+});

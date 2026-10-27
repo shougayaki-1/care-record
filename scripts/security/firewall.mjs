@@ -25,10 +25,29 @@ export function projectAlerts(data) {
   return { active: data.active.length, resolved: data.resolved.length };
 }
 
-export async function collectFirewall({ environment, enabled, runner, now = Date.now(), since = '15m' }) {
+export async function collectFirewall({ environment, enabled, runner, now = Date.now(), since = '15m', mode = 'full', token = process.env.VERCEL_TOKEN, fetcher = fetch }) {
   if (!Object.hasOwn(projects, environment)) throw new Error('firewall_invalid_environment');
   if (!enabled) return { status: 'disabled' };
   if (!['15m', '24h'].includes(since)) throw new Error('firewall_invalid_window');
+  if (!['full', 'ddos-only'].includes(mode)) throw new Error('firewall_invalid_mode');
+  if (mode === 'ddos-only') {
+    // The provider returns event records with host details. Keep them in memory
+    // only, validate their shape, and expose counts rather than raw records.
+    try {
+      if (!token) throw new Error('firewall_missing_token');
+      const url = new URL('https://api.vercel.com/v1/security/firewall/attack-status');
+      url.search = new URLSearchParams({ projectId: projects[environment], teamId: team, since: '1' });
+      const response = await fetcher(url, { headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(20000) });
+      if (!response.ok) throw new Error('firewall_source_unavailable');
+      const body = await response.text();
+      if (body.length > 262144) throw new Error('firewall_response_too_large');
+      const data = JSON.parse(body);
+      if (!Array.isArray(data?.anomalies) || data.anomalies.length > 10000 || !data.anomalies.every(a => a && typeof a === 'object' && !Array.isArray(a)
+        && typeof a.startTime === 'string' && Number.isFinite(Date.parse(a.startTime))
+        && (a.endTime == null || (typeof a.endTime === 'string' && Number.isFinite(Date.parse(a.endTime)))))) throw new Error('firewall_invalid_attack_status');
+      return { status: 'incomplete', mode, traffic: null, alerts: null, ddos: { status: 'available', active: data.anomalies.filter(a => a.endTime == null).length } };
+    } catch { return { status: 'incomplete', mode, traffic: null, alerts: null, ddos: { status: 'unavailable', active: null } }; }
+  }
   const run = runner ?? (async args => {
     const env = Object.fromEntries(['PATH', 'HOME', 'TMPDIR', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'VERCEL_TOKEN', 'NODE_EXTRA_CA_CERTS', 'CI']
       .filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));

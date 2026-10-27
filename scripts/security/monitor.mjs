@@ -18,7 +18,7 @@ export const rules = {
 const count = n => Number.isSafeInteger(n) && n >= 0;
 const timestamp = s => typeof s === 'string' && Number.isFinite(Date.parse(s));
 const categories = [...Object.keys(rules), 'audit_gap_15m', 'schedule_gap', 'daily_summary', 'notification_probe', 'source_unavailable',
-  'firewall_denies', 'firewall_active_alerts', 'firewall_source_gap', 'auth_invalid_credentials', 'auth_source_gap', 'ingestion_evidence_gap'];
+  'firewall_denies', 'firewall_active_alerts', 'firewall_source_gap', 'firewall_ddos_active', 'firewall_ddos_source_gap', 'auth_invalid_credentials', 'auth_source_gap', 'ingestion_evidence_gap'];
 
 export function validateSnapshot(s) {
   if (!s || !timestamp(s.observed_at) || !timestamp(s.day_start) || !timestamp(s.day_end)
@@ -49,7 +49,9 @@ export function payload(environment, link, category, severity, value, start, end
     source_unavailable: ['監視に必要な情報を取得できません', 'すぐに実行結果を開き、データベースへの接続と監視設定を確認してください。'],
     firewall_denies: ['外部からのアクセスが多数拒否されました', 'VercelのFirewall画面でアクセス状況を確認してください。拒否だけでは被害があったとは限りません。'],
     firewall_active_alerts: ['Vercelがアクセスの異常を報告しています', 'VercelのFirewall画面でアラートを確認し、影響がないか調べてください。'],
-    firewall_source_gap: ['Firewallの情報を取得できません', '今日中に実行結果を開き、Vercelの接続設定と権限を確認してください。'],
+    firewall_ddos_active: ['VercelがDDoS対策を実行しています', 'すぐにVercelのFirewall画面を開き、サービスへの影響や継続状況を確認してください。'],
+    firewall_source_gap: ['Firewallの一部の情報を取得できません', 'アクセス拒否数や他のアラートはVercelのFirewall画面で直接確認してください。実行結果では接続設定も確認できます。'],
+    firewall_ddos_source_gap: ['DDoS対策の状態を取得できません', '今日中にVercelのFirewall画面で状態を確認し、実行結果から接続設定を確認してください。'],
     auth_invalid_credentials: ['認証サービスでログイン失敗が増えています', 'すぐにSupabaseの認証ログを確認し、心当たりのない試行がないか調べてください。'],
     ingestion_evidence_gap: ['認証サービスとアプリの記録に差があります', '認証サービスでは失敗が見つかりましたが、アプリの記録は見つかりません。アプリの記録エラーと直接アクセスの有無を確認してください。'],
     auth_source_gap: ['認証サービスのログを取得できません', '今日中に実行結果を開き、Supabaseのログ取得設定と権限を確認してください。'],
@@ -61,7 +63,7 @@ export function payload(environment, link, category, severity, value, start, end
   const urgency = { Critical: '至急確認', High: '早めに確認', Warning: '今日中に確認', Info: 'お知らせ' }[severity];
   const format = value => new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
   const dailyText = daily ? `\n前日のログイン失敗 ${daily.failures}件・成功 ${daily.successes}件・確認用情報なし ${daily.missing_hashes}件・重要操作 ${daily.important_events}件` : '';
-  const firewallText = category === 'daily_summary' && firewall?.traffic && count(firewall.traffic.counts?.deny) ? `\n前日のアクセス拒否 ${firewall.traffic.counts.deny}件` : '';
+  const firewallText = category !== 'daily_summary' ? '' : firewall?.mode === 'ddos-only' ? '\nFirewall は DDoS 対策状態のみ確認中です。アクセス拒否数と他のアラートは未監視です。' : firewall?.traffic && count(firewall.traffic.counts?.deny) ? `\n前日のアクセス拒否 ${firewall.traffic.counts.deny}件` : '';
   const countText = category === 'source_unavailable' ? '' : `\n件数: ${value}件`;
   const instruction = status === 'resolved' ? '監視上の数値は落ち着きました。必要に応じて、それまでの履歴を確認してください。' : action;
   return {
@@ -96,11 +98,13 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
     auth_invalid_credentials: authValid ? auth.invalid_credentials : null,
     auth_source_gap: auth.status === 'disabled' ? null : authValid ? 0 : 1,
     ingestion_evidence_gap: authValid ? (auth.invalid_credentials >= 3 && s.metrics.attempts_15m === 0 && s.metrics.audit_logins_15m === 0 ? 1 : 0) : null,
+    firewall_ddos_active: firewall.mode === 'ddos-only' && firewall.ddos?.status === 'available' && count(firewall.ddos.active) ? firewall.ddos.active : null,
+    firewall_ddos_source_gap: firewall.mode === 'ddos-only' ? (firewall.ddos?.status === 'available' && count(firewall.ddos.active) ? 0 : 1) : null,
     firewall_source_gap: firewall.status === 'disabled' ? null : firewall.status === 'available' && (!firewallDaily || firewallDaily.status === 'available') ? 0 : 1,
   };
   const allRules = { ...rules, audit_gap_15m: { high: 3, clear: 0, severity: 'Warning' }, schedule_gap: { high: 1, clear: 0, severity: 'Warning' },
     firewall_denies: { high: 20, clear: 5, severity: 'High' }, firewall_active_alerts: { high: 1, clear: 0, severity: 'High' },
-    firewall_source_gap: { high: 1, clear: 0, severity: 'Warning' },
+    firewall_source_gap: { high: 1, clear: 0, severity: 'Warning' }, firewall_ddos_active: { high: 1, clear: 0, severity: 'High' }, firewall_ddos_source_gap: { high: 1, clear: 0, severity: 'Warning' },
     auth_invalid_credentials: { high: 50, clear: 10, severity: 'High' }, auth_source_gap: { high: 1, clear: 0, severity: 'Warning' },
     ingestion_evidence_gap: { high: 1, clear: 0, severity: 'Warning' } };
   const pendingValid = p => p && count(p.value) && timestamp(p.start) && timestamp(p.end)
@@ -137,7 +141,7 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
       if (next.clears >= 2) status = 'resolved';
     }
     if (status) {
-      const start = key === 'auth_invalid_credentials' ? auth.start : key === 'firewall_denies' ? firewall.traffic.start : new Date(now - (key.endsWith('_5m') ? 5 : key === 'schedule_gap' ? 20 : 15) * 60000).toISOString();
+      const start = key === 'firewall_ddos_active' ? new Date(now - 24 * 60 * 60000).toISOString() : key === 'auth_invalid_credentials' ? auth.start : key === 'firewall_denies' ? firewall.traffic.start : new Date(now - (key.endsWith('_5m') ? 5 : key === 'schedule_gap' ? 20 : 15) * 60000).toISOString();
       const end = key === 'auth_invalid_credentials' ? auth.end : key === 'firewall_denies' ? firewall.traffic.end : s.observed_at;
       // Persist an outbox entry BEFORE attempting delivery; failures survive even
       // if the triggering time window has expired by the next successful run.
@@ -190,8 +194,9 @@ export async function main() {
     evidenceUrl(link);
     const snapshot = readMonitorSnapshot();
     const enabled = process.env.SECURITY_FIREWALL_ENABLED === 'true';
-    const firewall = await collectFirewall({ environment, enabled });
-    const firewallDaily = snapshot.state.daily_end !== snapshot.day_end ? await collectFirewall({ environment, enabled, since: '24h' }) : undefined;
+    const mode = process.env.SECURITY_FIREWALL_MODE || 'full';
+    const firewall = await collectFirewall({ environment, enabled, mode });
+    const firewallDaily = snapshot.state.daily_end !== snapshot.day_end ? await collectFirewall({ environment, enabled, mode, since: '24h' }) : undefined;
     let auth = { status: 'disabled' };
     if (process.env.SECURITY_AUTH_LOGS_ENABLED === 'true') {
       try {
