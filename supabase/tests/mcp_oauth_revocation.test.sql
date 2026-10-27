@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(14);
+select plan(15);
 grant usage on schema extensions to mcp_import;
 grant execute on all functions in schema extensions to mcp_import;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values
@@ -12,18 +12,20 @@ insert into public.organization_members(organization_id,user_id,role) values ('1
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('16800000-0000-0000-0000-000000000003','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('16800000-0000-0000-0000-000000000004','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003','openid');
 insert into auth.sessions(id,user_id,oauth_client_id) values ('16800000-0000-0000-0000-000000000005','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003');
+insert into private.mcp_import_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('16800000-0000-0000-0000-000000000002',true,'{}','16800000-0000-0000-0000-000000000001',now());
 select ok(not has_function_privilege('mcp_import','private.is_mcp_oauth_active()','EXECUTE'),'helper is not callable by MCP role');
 select ok(not has_function_privilege('mcp_import','private.is_mcp_oauth_active_for_read()','EXECUTE'),'read helper is not callable by MCP role');
 select ok(not has_table_privilege('mcp_import','auth.sessions','SELECT'),'session table remains private');
 set local role mcp_import;
-select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","client_id":"16800000-0000-0000-0000-000000000003","session_id":"16800000-0000-0000-0000-000000000005"}',true);
+select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","exp":4102444800,"client_id":"16800000-0000-0000-0000-000000000003","session_id":"16800000-0000-0000-0000-000000000005"}',true);
 select is((select count(*)::int from public.list_mcp_workspaces()),1,'active OAuth session lists membership');
 select lives_ok($$select public.get_mcp_self_staff_names('16800000-0000-0000-0000-000000000002')$$,'active session can call self staff names');
-select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","client_id":"16800000-0000-0000-0000-000000000099","session_id":"16800000-0000-0000-0000-000000000005"}',true);
+select lives_ok($$select public.submit_mcp_candidate('16800000-0000-0000-0000-000000000002','','{"meta":{},"values":{},"warnings":[],"confidence":"low"}')$$,'active consent and unexpired JWT can submit');
+select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","exp":4102444800,"client_id":"16800000-0000-0000-0000-000000000099","session_id":"16800000-0000-0000-0000-000000000005"}',true);
 select throws_ok($$select public.list_mcp_workspaces()$$,'42501','mcp_oauth_required','different client rejects');
-select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000099","role":"mcp_import","client_id":"16800000-0000-0000-0000-000000000003","session_id":"16800000-0000-0000-0000-000000000005"}',true);
+select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000099","role":"mcp_import","exp":4102444800,"client_id":"16800000-0000-0000-0000-000000000003","session_id":"16800000-0000-0000-0000-000000000005"}',true);
 select throws_ok($$select public.list_mcp_workspaces()$$,'42501','mcp_oauth_required','different user rejects');
-select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","client_id":"16800000-0000-0000-0000-000000000003","session_id":"16800000-0000-0000-0000-000000000005"}',true);
+select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","exp":4102444800,"client_id":"16800000-0000-0000-0000-000000000003","session_id":"16800000-0000-0000-0000-000000000005"}',true);
 select throws_ok($$select public.get_mcp_self_staff_names('16800000-0000-0000-0000-000000000099')$$,'42501','mcp_oauth_required','other organization rejects');
 reset role;
 update auth.oauth_consents set revoked_at=now() where id='16800000-0000-0000-0000-000000000004';
@@ -36,12 +38,12 @@ update auth.oauth_consents set revoked_at=null where id='16800000-0000-0000-0000
 update auth.sessions set not_after=now()-interval '1 second' where id='16800000-0000-0000-0000-000000000005';
 set local role mcp_import;
 select throws_ok($$select public.list_mcp_workspaces()$$,'42501','mcp_oauth_required','expired session rejects');
-select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","client_id":"wrong","session_id":"bad"}',true);
+select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","exp":4102444800,"client_id":"wrong","session_id":"bad"}',true);
 select throws_ok($$select public.list_mcp_workspaces()$$,'42501','mcp_oauth_required','invalid claims fail closed');
 reset role;
 delete from auth.sessions where id='16800000-0000-0000-0000-000000000005';
 set local role mcp_import;
-select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","client_id":"16800000-0000-0000-0000-000000000003","session_id":"16800000-0000-0000-0000-000000000005"}',true);
+select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","exp":4102444800,"client_id":"16800000-0000-0000-0000-000000000003","session_id":"16800000-0000-0000-0000-000000000005"}',true);
 select throws_ok($$select public.list_mcp_workspaces()$$,'42501','mcp_oauth_required','deleted session rejects old JWT');
 select * from finish();
 rollback;
