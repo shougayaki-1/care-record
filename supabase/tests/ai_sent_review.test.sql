@@ -25,14 +25,20 @@ insert into public.user_session_activity (session_hash, auth_session_id, user_id
   ('ai-manager-hash', 'ai-manager-session', 'd1111111-0000-0000-0000-000000000001', now(), now() + interval '1 hour'),
   ('ai-staff-hash', 'ai-staff-session', 'd2222222-0000-0000-0000-000000000002', now(), now() + interval '1 hour');
 
+insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('d6666666-0000-0000-0000-000000000006','dynamic','http://localhost/callback','authorization_code','public','none');
+insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('daaaaaaa-0000-0000-0000-00000000000a','d2222222-0000-0000-0000-000000000002','d6666666-0000-0000-0000-000000000006','openid');
+insert into auth.sessions(id,user_id,oauth_client_id) values ('d7777777-0000-0000-0000-000000000007','d2222222-0000-0000-0000-000000000002','d6666666-0000-0000-0000-000000000006');
+insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('dbbbbbbb-0000-0000-0000-00000000000b','d1111111-0000-0000-0000-000000000001','d6666666-0000-0000-0000-000000000006','openid');
+insert into auth.sessions(id,user_id,oauth_client_id) values ('d8888888-0000-0000-0000-000000000008','d1111111-0000-0000-0000-000000000001','d6666666-0000-0000-0000-000000000006');
+
 set local role mcp_import;
-select set_config('request.jwt.claims', '{"sub":"d2222222-0000-0000-0000-000000000002","role":"mcp_import","client_id":"ai-test-client"}', true);
+select set_config('request.jwt.claims', '{"sub":"d2222222-0000-0000-0000-000000000002","role":"mcp_import","client_id":"d6666666-0000-0000-0000-000000000006","session_id":"d7777777-0000-0000-0000-000000000007"}', true);
 do $$ begin
   if array_to_string(public.get_mcp_self_staff_names('dddddddd-0000-0000-0000-000000000001'), ',') <> 'AI test staff' then
     raise exception 'MCP could not read its own staff name';
   end if;
 end $$;
-select set_config('request.jwt.claims', '{"sub":"d1111111-0000-0000-0000-000000000001","role":"mcp_import","client_id":"ai-test-client"}', true);
+select set_config('request.jwt.claims', '{"sub":"d1111111-0000-0000-0000-000000000001","role":"mcp_import","client_id":"d6666666-0000-0000-0000-000000000006","session_id":"d8888888-0000-0000-0000-000000000008"}', true);
 do $$ begin
   if coalesce(array_length(public.get_mcp_self_staff_names('dddddddd-0000-0000-0000-000000000001'), 1), 0) <> 0 then
     raise exception 'MCP received another user staff name';
