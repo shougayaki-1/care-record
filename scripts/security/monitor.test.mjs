@@ -174,3 +174,20 @@ test('通知は状況と次の行動を日本語で示し、個別の記録は�
   assert.match(recovered.content, /解消/);
   assert.match(recovered.embeds[0].description, /落ち着きました/);
 });
+
+test('認証失敗とアプリ側の記録がともにゼロの場合は原因未確定の警告を出す', async () => {
+  const s = fixture();
+  const auth = { status: 'available', invalid_credentials: 3, start: '2026-10-26T00:45:00Z', end: s.observed_at };
+  const first = await run(s, () => false, { auth });
+  const warning = category(first.sent, 'ingestion_evidence_gap');
+  assert.equal(warning.length, 1);
+  assert.match(warning[0].embeds[0].description, /直接アクセス/);
+  advance(s); await run(s, () => false, { auth: { status: 'unavailable' } });
+  assert.equal(s.state.alerts.ingestion_evidence_gap.active, true);
+  s.metrics.attempts_15m = 1; advance(s);
+  auth.start = new Date(Date.parse(s.observed_at) - 15 * 60000).toISOString(); auth.end = s.observed_at;
+  await run(s, () => false, { auth });
+  assert.equal(s.state.alerts.ingestion_evidence_gap.active, true);
+  advance(s); auth.start = new Date(Date.parse(s.observed_at) - 15 * 60000).toISOString(); auth.end = s.observed_at;
+  assert.match(category((await run(s, () => false, { auth })).sent, 'ingestion_evidence_gap')[0].content, /解消/);
+});

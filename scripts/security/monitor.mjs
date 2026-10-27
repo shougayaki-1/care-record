@@ -18,7 +18,7 @@ export const rules = {
 const count = n => Number.isSafeInteger(n) && n >= 0;
 const timestamp = s => typeof s === 'string' && Number.isFinite(Date.parse(s));
 const categories = [...Object.keys(rules), 'audit_gap_15m', 'schedule_gap', 'daily_summary', 'notification_probe', 'source_unavailable',
-  'firewall_denies', 'firewall_active_alerts', 'firewall_source_gap', 'auth_invalid_credentials', 'auth_source_gap'];
+  'firewall_denies', 'firewall_active_alerts', 'firewall_source_gap', 'auth_invalid_credentials', 'auth_source_gap', 'ingestion_evidence_gap'];
 
 export function validateSnapshot(s) {
   if (!s || !timestamp(s.observed_at) || !timestamp(s.day_start) || !timestamp(s.day_end)
@@ -51,6 +51,7 @@ export function payload(environment, link, category, severity, value, start, end
     firewall_active_alerts: ['Vercelがアクセスの異常を報告しています', 'VercelのFirewall画面でアラートを確認し、影響がないか調べてください。'],
     firewall_source_gap: ['Firewallの情報を取得できません', '今日中に実行結果を開き、Vercelの接続設定と権限を確認してください。'],
     auth_invalid_credentials: ['認証サービスでログイン失敗が増えています', 'すぐにSupabaseの認証ログを確認し、心当たりのない試行がないか調べてください。'],
+    ingestion_evidence_gap: ['認証サービスとアプリの記録に差があります', '認証サービスでは失敗が見つかりましたが、アプリの記録は見つかりません。アプリの記録エラーと直接アクセスの有無を確認してください。'],
     auth_source_gap: ['認証サービスのログを取得できません', '今日中に実行結果を開き、Supabaseのログ取得設定と権限を確認してください。'],
     daily_summary: ['前日のセキュリティ集計', '件数に気になる変化がないか確認してください。重要操作には正常な操作も含まれます。'],
     notification_probe: ['通知テスト', 'テスト通知です。この通知が届いていれば、特別な対応は不要です。'],
@@ -87,18 +88,21 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
     try { await notify(payload(environment, link, ...args.slice(0, 6), args[6], args[0] === 'daily_summary' ? firewallDaily : firewall)); return true; }
     catch { deliveryFailures++; deliveryUnavailable = true; return false; }
   };
+  const authValid = auth.status === 'available' && count(auth.invalid_credentials) && timestamp(auth.start) && timestamp(auth.end) && Date.parse(auth.end) - Date.parse(auth.start) === 15 * 60000 && Math.abs(now - Date.parse(auth.end)) <= 5 * 60000;
   const metrics = { ...s.metrics, audit_gap_15m: Math.abs(s.metrics.attempts_15m - s.metrics.audit_logins_15m),
     schedule_gap: !timestamp(previous.last_observed) || now - Date.parse(previous.last_observed) > 20 * 60000 ? 1 : 0,
     firewall_denies: firewall.traffic && count(firewall.traffic.counts?.deny) && Date.parse(firewall.traffic.end) - Date.parse(firewall.traffic.start) <= 30 * 60000 ? firewall.traffic.counts.deny : null,
     firewall_active_alerts: count(firewall.alerts?.active) ? firewall.alerts.active : null,
-    auth_invalid_credentials: auth.status === 'available' && count(auth.invalid_credentials) && timestamp(auth.start) && timestamp(auth.end) && Date.parse(auth.end) - Date.parse(auth.start) === 15 * 60000 && Math.abs(now - Date.parse(auth.end)) <= 5 * 60000 ? auth.invalid_credentials : null,
-    auth_source_gap: auth.status === 'disabled' ? null : auth.status === 'available' && count(auth.invalid_credentials) && timestamp(auth.start) && timestamp(auth.end) && Date.parse(auth.end) - Date.parse(auth.start) === 15 * 60000 && Math.abs(now - Date.parse(auth.end)) <= 5 * 60000 ? 0 : 1,
+    auth_invalid_credentials: authValid ? auth.invalid_credentials : null,
+    auth_source_gap: auth.status === 'disabled' ? null : authValid ? 0 : 1,
+    ingestion_evidence_gap: authValid ? (auth.invalid_credentials >= 3 && s.metrics.attempts_15m === 0 && s.metrics.audit_logins_15m === 0 ? 1 : 0) : null,
     firewall_source_gap: firewall.status === 'disabled' ? null : firewall.status === 'available' && (!firewallDaily || firewallDaily.status === 'available') ? 0 : 1,
   };
   const allRules = { ...rules, audit_gap_15m: { high: 3, clear: 0, severity: 'Warning' }, schedule_gap: { high: 1, clear: 0, severity: 'Warning' },
     firewall_denies: { high: 20, clear: 5, severity: 'High' }, firewall_active_alerts: { high: 1, clear: 0, severity: 'High' },
     firewall_source_gap: { high: 1, clear: 0, severity: 'Warning' },
-    auth_invalid_credentials: { high: 50, clear: 10, severity: 'High' }, auth_source_gap: { high: 1, clear: 0, severity: 'Warning' } };
+    auth_invalid_credentials: { high: 50, clear: 10, severity: 'High' }, auth_source_gap: { high: 1, clear: 0, severity: 'Warning' },
+    ingestion_evidence_gap: { high: 1, clear: 0, severity: 'Warning' } };
   const pendingValid = p => p && count(p.value) && timestamp(p.start) && timestamp(p.end)
     && ['open', 'reminder', 'resolved'].includes(p.status);
   // Populate every key before the first write so a mid-run crash preserves later acks.
@@ -110,7 +114,7 @@ export async function runMonitor({ snapshot, save, notify, environment, link, pr
   }
   for (const [key, rule] of Object.entries(allRules)) {
     const old = state.alerts[key];
-    if (key.startsWith('auth_') && auth.status === 'disabled') { state.alerts[key].clears = 0; continue; }
+    if ((key.startsWith('auth_') || key === 'ingestion_evidence_gap') && auth.status === 'disabled') { state.alerts[key].clears = 0; continue; }
     if (key.startsWith('firewall_') && firewall.status === 'disabled') { state.alerts[key].clears = 0; continue; }
     if (old.pending) {
       const p = old.pending;
