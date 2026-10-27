@@ -16,7 +16,7 @@ export async function verifyStaging({ read, save, insert, expire, notify, link }
   let simulateFailure = false;
   const cycle = async () => runMonitor({ snapshot: await read(), save, environment: 'staging', link,
     notify: async p => {
-      const target = p.content.includes('| failures_5m |');
+      const target = p.embeds?.[0]?.footer?.text?.startsWith('failures_5m |');
       if (target && simulateFailure) { simulateFailure = false; throw new Error('synthetic_delivery_failure'); }
       await notify({ ...p, content: `[SYNTHETIC TEST] ${p.content}` });
       if (target) failuresMessages++;

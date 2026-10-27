@@ -141,10 +141,17 @@ Context7確認: 2026-10-26、Supabase PostgreSQL関数（SECURITY DEFINER、空s
 FirewallのCLI集計連携は追加済みだが、定期実行の設定、直接Authログ・ログ書込み失敗の独立検知、Supabaseの実プラン/保持・実配送の確認は未完であり、#159の受け入れ証跡を残す必要がある。
 後続の契約・取得可否確認と環境検証は [#160 (Phase 2)](https://github.com/shougayaki-1/care-record/issues/160) で追跡する。
 
-### Stagingの直接Auth失敗集計
+### 直接Auth失敗集計（未有効）
 
-`SECURITY_AUTH_LOGS_ENABLED=true` をStaging Environmentに設定した場合だけ、Management APIで
-`invalid_credentials` の直近15分の件数を収集する。定期監視も別途有効でなければ実行されない。
+Staging・Productionそれぞれに対し、`SECURITY_AUTH_LOGS_ENABLED=true` の場合だけ、Management APIで
+`invalid_credentials` の直近15分の件数を収集する。専用の `SUPABASE_SECURITY_LOGS_TOKEN` Environment secretが必要。
+管理API tokenは集計stepだけに渡し、監視本体には件数だけを渡す。tokenの対象projectとログの読取権限を検証し、
+広い権限を持つ既存tokenを流用しない。各環境の有効化と実配送は別途確認する。
 50件以上でHigh、10件以下が2回連続で解消し、取得不能・不正・古いデータではWarningを出して解消しない。
-Management API tokenはStagingの集計stepのみで使い、件数のみを監視本体へ渡す。Productionには対応していない。
 失敗種別の一部に限定され、ログの遅延や欠落は区別できないため、0件を取込正常や安全と解釈しない。
+
+### Discord通知の読み方
+
+通知は本番かテスト環境か、確認の緊急度、何が起きたか、次に取る行動、対象期間を日本語で示す。
+「解消」はその検出条件が解除されたことを表し、原因の調査が完了したことは意味しない。
+「実行結果」はGitHub Actionsへのリンク。情報が取れなかったときはゼロ件・安全とは扱わない。

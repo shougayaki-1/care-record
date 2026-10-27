@@ -147,3 +147,16 @@ Stagingのread-only実接続で取得成功（15分間0件）を確認し、前�
 ゼロ件は正常性の証拠ではない。通知の `Auth direct=unverified` は直接経路全体の網羅性・取込健全性が未検証であることを示す。
 Productionへの接続は実装上拒否し、Production tokenは追加していない。Context7でSupabase Management APIのログSQL、
 期間指定と権限を2026-10-27に確認した。アプリ両書込みの同時障害とActions/Discord双方停止時の独立検知は未解決。
+
+## 継続対応（2026-10-27 JST）
+
+定期実行の変数を有効化後、監視workflowとwatchdogの自動実行が確認できなかった。
+両workflowはGitHub API上active、手動実行は成功している。他の定期workflowにも長い間隔があり、
+原因を特定できていない。GitHub公式は高負荷時にscheduleが遅延または破棄され得ると説明している。
+本番の手動実行 [40436492466](https://github.com/shougayaki-1/care-record/actions/runs/40436492466) は成功した。
+次回候補では5分間隔を維持して毎時0分を避けるが、これによって定期起動が保証されたとは扱わない。
+
+Supabase公式PATの `Logs: Read` とproject単位のscopeを確認した。両環境でそれぞれ必要なprojectに限定した
+専用tokenを用意し、集計APIのアクセス成功と範囲外拒否を検証するまで直接Authの継続監視は無効のまま。
+Vercel Firewallの専用read tokenも未設定である。アプリのログイン試行・監査記録が同時に失敗する場合の
+確実な検出は未実装で、引き続き `ingestion=unverified` とする。
