@@ -186,6 +186,16 @@ jobs:
             return runner(args);
           };
           const direct = await collectFirewall({ environment: 'production', enabled: true, runner: withoutScope });
-          console.log(JSON.stringify({ projectStatus, teamStatus, userStatus, withoutScope: { trafficAvailable: direct.traffic !== null, alertsAvailable: direct.alerts !== null } }));
+          const end = new Date(); const start = new Date(end.getTime() - 15 * 60 * 1000);
+          const owner = 'team_ysW0wFQFYn4lGeDbqSnJtdDc'; const project = 'prj_hM6VAEcC8T773hF48MSRHtkLKyl2';
+          const base = `https://api.vercel.com/metrics/v1?teamId=${owner}`;
+          let metricsStatus = null;
+          try {
+            const response = await fetch(base, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(20000), body: JSON.stringify({ scope: { ownerId: owner, projectIds: [project] }, timeRange: { start: start.toISOString(), end: end.toISOString() }, metrics: { value: { metric: 'vercel.firewall_action.count', aggregation: 'count' } }, outputs: ['value'], groupBy: ['wafAction'], rowLimit: 100 }) });
+            metricsStatus = response.status; await response.body?.cancel();
+          } catch {}
+          const attackStatus = await getStatus(`/v1/security/firewall/attack-status?projectId=${project}&teamId=${owner}&since=1`);
+          const alertsStatus = await getStatus(`/alerts/v3/groups?projectId=${project}&teamId=${owner}&from=${encodeURIComponent(start.toISOString())}&to=${encodeURIComponent(end.toISOString())}&limit=200&types=botId_anomaly&types=firewallSystemRule_anomaly&types=firewallCustomRule_anomaly`);
+          console.log(JSON.stringify({ projectStatus, teamStatus, userStatus, metricsStatus, attackStatus, alertsStatus, withoutScope: { trafficAvailable: direct.traffic !== null, alertsAvailable: direct.alerts !== null } }));
           console.log(JSON.stringify({ credentialPresent: !!process.env.VERCEL_TOKEN, projectTokenFormat: /^vcp_/.test(process.env.VERCEL_TOKEN || ''), status: result.status, trafficAvailable: result.traffic !== null, alertsAvailable: result.alerts !== null, categories }));
           JS
