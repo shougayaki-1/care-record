@@ -2976,12 +2976,20 @@ export type Database = {
         Args: { p_org_id: string; p_segment_id: string }
         Returns: undefined
       }
+      disable_mcp_import: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       discard_ai_import_candidate: {
         Args: { p_candidate_id: string; p_organization_id: string }
         Returns: undefined
       }
       discard_report_autosave_authorized: {
         Args: { p_draft_key: string; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_import: {
+        Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
       finish_report_image_upload: {
@@ -3015,6 +3023,10 @@ export type Database = {
         Returns: Json
       }
       get_invitation_preview: { Args: { p_code: string }; Returns: Json }
+      get_mcp_import_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
       get_mcp_self_staff_names: {
         Args: { p_organization_id: string }
         Returns: string[]
