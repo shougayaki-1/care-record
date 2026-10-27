@@ -18,6 +18,8 @@
 
 ### 2026-10-28 の追加証跡
 
+このセッションで「CareRecord」アプリの3ツールの宣言を確認でき、`submit_record_candidate` に `send_anyway` がないことを再確認した。宣言にはサーバーURLが含まれず、本番候補URLとの同一性やクライアント側の定義更新時期は特定できない。ステージング接続とは別のアプリである。
+
 過去の本番配備記録が示す Supabase project `ougdmklcwargnmaphkdn` の `care-record-mcp` は ACTIVE、version 3。配備済み関数本体と同梱の共有ファイルを取得し、`origin/main` `b4bf9fd0cb94d006937548578e216517614bfbfd` の対応ファイルと一致することを確認した。未認証の関数URLは401と同projectのOAuth metadataを返した。配備ソースと現在のコードの一致は、配備時のGit SHAや、クライアントがこのURLを使っていることを証明しない。クライアントに `send_anyway` が見えなかった原因も未確定。
 
 新しいチャットではステージングMCPの `list_workspaces` が合成データ用事業所を返し、公開スキーマに `send_anyway` がある。ステージングのSupabase Site URLは失敗済みPreviewを指していたため、稼働中の固定Previewに変更し、そのcallback・reauth-callback・recovery-callbackを許可URLに追加した。通常のCodex OAuth再認可は成功した。これは固定配備を使う暫定復旧であり、恒久URLとVercel SSOが他の利用者に与える影響は未確認。
