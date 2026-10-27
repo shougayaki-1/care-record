@@ -2,17 +2,17 @@ import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { writeFileSync } from 'node:fs';
 
-const stagingRef = 'xhvvfovvlqzlkirpjocv';
+const projectRefs = { staging: 'xhvvfovvlqzlkirpjocv', production: 'ougdmklcwargnmaphkdn' };
 const query = "select countIf(position(log_attributes['error_code'], 'invalid_credentials') > 0) as invalid_credentials from logs where source = 'auth_logs'";
 const count = n => Number.isSafeInteger(n) && n >= 0;
 
 // This API can return sensitive logs; request a fixed aggregate only and never
 // print response bodies or errors. An empty aggregate is not proof of ingestion.
 export async function collectAuthLogs({ environment, project, token, fetcher = fetch, now = Date.now() }) {
-  if (environment !== 'staging' || project !== stagingRef || !token || !Number.isFinite(now)) throw new Error('invalid_auth_config');
+  if (!Object.hasOwn(projectRefs, environment) || project !== projectRefs[environment] || !token || !Number.isFinite(now)) throw new Error('invalid_auth_config');
   const end = new Date(Math.floor(now / 1000) * 1000);
   const start = new Date(end.getTime() - 15 * 60000);
-  const url = new URL(`https://api.supabase.com/v1/projects/${stagingRef}/analytics/endpoints/logs`);
+  const url = new URL(`https://api.supabase.com/v1/projects/${project}/analytics/endpoints/logs`);
   url.search = new URLSearchParams({ sql: query, iso_timestamp_start: start.toISOString().replace('.000Z', 'Z'), iso_timestamp_end: end.toISOString().replace('.000Z', 'Z') });
   try {
     const response = await fetcher(url, { headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(20000) });

@@ -15,6 +15,7 @@ test('requests only a bounded aggregate and returns allowlisted fields', async (
 });
 test('rejects production and treats bad or missing responses as unavailable', async () => {
   await assert.rejects(collectAuthLogs({ ...config, environment: 'production' }));
+  assert.equal((await collectAuthLogs({ ...config, environment: 'production', project: 'ougdmklcwargnmaphkdn', fetcher: async () => Response.json({ result: [{ invalid_credentials: 0 }] }) })).status, 'available');
   for (const response of [new Response(null, { status: 403 }), Response.json({ result: [] }), Response.json({ result: [{ invalid_credentials: -1 }] }), Response.json({ result: [{ invalid_credentials: '1' }] })]) {
     assert.deepEqual(await collectAuthLogs({ ...config, fetcher: async () => response }), { status: 'unavailable' });
   }

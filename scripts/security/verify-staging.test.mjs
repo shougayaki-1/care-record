@@ -19,7 +19,7 @@ test('hosted verification driver checks duplicate suppression, recovery, failed 
   const f = fixture(); const result = await verifyStaging(f.io);
   assert.equal(result.ok, true); assert.equal(result.failureMessages, 6); assert.equal(result.outboxRetry, true);
   assert.ok(f.expired() >= 3);
-  assert.ok(f.messages.every(m => m.content.startsWith('[SYNTHETIC TEST]') && m.content.includes('staging')));
+  assert.ok(f.messages.every(m => m.content.startsWith('[SYNTHETIC TEST]') && m.content.includes('テスト環境')));
   assert.equal(f.snapshot.state.alerts.failures_5m.active, false);
   assert.equal(f.snapshot.state.alerts.failures_5m.pending, undefined);
 });

@@ -24,7 +24,7 @@ async function run(s, fail = () => false, options = {}) {
   });
   return { sent, result };
 }
-const category = (messages, key) => messages.filter(p => p.content.includes(`| ${key} |`));
+const category = (messages, key) => messages.filter(p => p.embeds?.[0]?.footer?.text?.startsWith(`${key} |`));
 function advance(s, minutes = 5) { s.observed_at = new Date(Date.parse(s.observed_at) + minutes * 60000).toISOString(); }
 
 test('synthetic spike -> one alert -> suppression -> two clear observations -> alert again', async () => {
@@ -33,20 +33,20 @@ test('synthetic spike -> one alert -> suppression -> two clear observations -> a
   advance(s); assert.equal(category((await run(s)).sent, 'failures_5m').length, 0);
   s.metrics.failures_5m = 0;
   advance(s); assert.equal(category((await run(s)).sent, 'failures_5m').length, 0);
-  advance(s); assert.match(category((await run(s)).sent, 'failures_5m')[0].content, /resolved/);
+  advance(s); assert.match(category((await run(s)).sent, 'failures_5m')[0].content, /解消/);
   s.metrics.failures_5m = 20; advance(s);
-  assert.match(category((await run(s)).sent, 'failures_5m')[0].content, /open/);
+  assert.match(category((await run(s)).sent, 'failures_5m')[0].content, /発生/);
 });
 test('persistent anomalies remind hourly; no recovery across hysteresis band', async () => {
   const s = fixture(); s.metrics.failures_5m = 20; await run(s);
-  advance(s, 60); assert.match(category((await run(s)).sent, 'failures_5m')[0].content, /reminder/);
+  advance(s, 60); assert.match(category((await run(s)).sent, 'failures_5m')[0].content, /継続中/);
   s.metrics.failures_5m = 8;
   advance(s); await run(s); advance(s);
   assert.equal(category((await run(s)).sent, 'failures_5m').length, 0);
 });
 test('failed delivery retains outbox and retries after the observation window expires', async () => {
   const s = fixture(); s.metrics.failures_5m = 20;
-  const first = await run(s, p => p.content.includes('failures_5m'));
+  const first = await run(s, p => p.embeds?.[0]?.footer?.text?.startsWith('failures_5m |'));
   assert.ok(first.result.deliveryFailures >= 1);
   assert.ok(s.state.alerts.failures_5m.pending);
   s.metrics.failures_5m = 0; advance(s, 30);
@@ -65,7 +65,7 @@ test('Discord outage does not starve detection of later categories or overwrite 
   assert.equal(s.state.alerts.missing_hashes_15m.active, true);
 });
 test('daily summary retries and deduplicates, schedule gap and source gaps are explicit', async () => {
-  const s = fixture(); await run(s, p => p.content.includes('daily_summary'));
+  const s = fixture(); await run(s, p => p.embeds?.[0]?.footer?.text?.startsWith('daily_summary |'));
   advance(s); assert.equal(category((await run(s)).sent, 'daily_summary').length, 1);
   advance(s); assert.equal(category((await run(s)).sent, 'daily_summary').length, 0);
   advance(s, 25); assert.equal(category((await run(s)).sent, 'schedule_gap').length, 1);
@@ -80,8 +80,7 @@ test('invalid data never becomes zero; state/metrics/details/identifiers are not
   s.state.private = s.metrics.details; s.daily.details = s.metrics.details;
   const all = JSON.stringify((await run(s)).sent);
   for (const value of ['secret@', 'Cookie', 'JWT', '192.0.2.1', 'synthetic-token']) assert.ok(!all.includes(value));
-  assert.ok(all.includes('攻撃確定ではありません'));
-  assert.ok(all.includes('Firewall=disabled traffic=unavailable'));
+  assert.ok(all.includes('攻撃や被害があったと確定した通知ではありません'));
   assert.throws(() => evidenceUrl(`${link}?token=secret`));
   assert.throws(() => payload('production', link, 'secret@example.test', 'Info', 0, s.observed_at, s.observed_at));
 });
@@ -91,8 +90,8 @@ test('Firewall counts use actual source window, alerts have explicit provider at
     alerts: { active: 1, resolved: 0 }, ip: 'PRIVATE-IP' };
   const first = (await run(s, () => false, { firewall })).sent;
   assert.equal(category(first, 'firewall_denies').length, 1);
-  assert.ok(JSON.stringify(category(first, 'firewall_denies')).includes('00:44:00.000Z'));
-  assert.ok(JSON.stringify(category(first, 'firewall_active_alerts')).includes('Vercelが報告した'));
+  assert.ok(JSON.stringify(category(first, 'firewall_denies')).includes('9:44'));
+  assert.ok(JSON.stringify(category(first, 'firewall_active_alerts')).includes('Vercelがアクセスの異常を報告'));
   assert.ok(!JSON.stringify(first).includes('PRIVATE-IP'));
   firewall.traffic.counts.deny = 0; firewall.alerts.active = 0;
   advance(s); await run(s, () => false, { firewall }); // first clear observation
@@ -106,7 +105,7 @@ test('Firewall counts use actual source window, alerts have explicit provider at
   advance(s); await run(s, () => false, { firewall });
   assert.equal(s.state.alerts.firewall_denies.active, true); // gap broke the earlier clear streak
   advance(s);
-  assert.match(category((await run(s, () => false, { firewall })).sent, 'firewall_denies')[0].content, /resolved/);
+  assert.match(category((await run(s, () => false, { firewall })).sent, 'firewall_denies')[0].content, /解消/);
 });
 test('Discord retries 429 Retry-After and 5xx, suppresses mentions, never follows redirects', async () => {
   const statuses = [429, 503, 200], delays = [];
@@ -159,4 +158,19 @@ test('Staging Auth count alerts, missing source warns and cannot resolve an acti
   assert.equal(s.state.alerts.auth_invalid_credentials.active, true);
   advance(s); await run(s, () => false, { auth: { status: 'unavailable' } });
   assert.equal(s.state.alerts.auth_invalid_credentials.active, true);
+});
+
+test('通知は状況と次の行動を日本語で示し、個別の記録は含めない', () => {
+  const s = fixture();
+  for (const key of [...Object.keys((s.metrics)), 'audit_gap_15m', 'schedule_gap', 'source_unavailable', 'firewall_denies', 'firewall_active_alerts', 'firewall_source_gap', 'auth_invalid_credentials', 'auth_source_gap', 'daily_summary', 'notification_probe']) {
+    if (['attempts_15m', 'audit_logins_15m'].includes(key)) continue;
+    const message = payload('production', link, key, 'Warning', 3, s.observed_at, s.observed_at);
+    assert.match(message.content, /本番/);
+    assert.match(message.embeds[0].description, /何をすればいい？/);
+    assert.doesNotMatch(message.embeds[0].description, /\\\\n/);
+    assert.match(message.embeds[0].description, /日本時間/);
+  }
+  const recovered = payload('production', link, 'failures_5m', 'Info', 0, s.observed_at, s.observed_at, 'resolved');
+  assert.match(recovered.content, /解消/);
+  assert.match(recovered.embeds[0].description, /落ち着きました/);
 });

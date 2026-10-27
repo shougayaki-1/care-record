@@ -2,7 +2,7 @@ name: Security monitoring
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '2-59/5 * * * *'
   workflow_dispatch:
     inputs:
       probe:
@@ -38,12 +38,12 @@ jobs:
       - name: Install pinned read-only Firewall CLI
         if: vars.SECURITY_MONITOR_ENABLED == 'true' && vars.SECURITY_FIREWALL_ENABLED == 'true'
         run: npm install --prefix "${RUNNER_TEMP}/security-vercel" --ignore-scripts --no-audit --no-fund vercel@65.2.0
-      - name: Collect Staging Auth aggregate (isolated management token)
-        if: matrix.environment == 'staging' && vars.SECURITY_MONITOR_ENABLED == 'true' && vars.SECURITY_AUTH_LOGS_ENABLED == 'true'
+      - name: Collect Auth aggregate (isolated scoped token)
+        if: vars.SECURITY_MONITOR_ENABLED == 'true' && vars.SECURITY_AUTH_LOGS_ENABLED == 'true'
         env:
-          APP_ENV: staging
+          APP_ENV: ${{ matrix.environment }}
           SECURITY_MONITOR_PROJECT_REF: ${{ vars.SECURITY_MONITOR_PROJECT_REF }}
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_SECURITY_LOGS_TOKEN }}
           AUTH_LOGS_RESULT_FILE: ${{ runner.temp }}/security-auth-count.json
         run: node scripts/security/auth-logs.mjs
       - name: Collect counts and deliver pending alerts

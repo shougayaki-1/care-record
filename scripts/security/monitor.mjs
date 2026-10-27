@@ -20,16 +20,6 @@ const timestamp = s => typeof s === 'string' && Number.isFinite(Date.parse(s));
 const categories = [...Object.keys(rules), 'audit_gap_15m', 'schedule_gap', 'daily_summary', 'notification_probe', 'source_unavailable',
   'firewall_denies', 'firewall_active_alerts', 'firewall_source_gap', 'auth_invalid_credentials', 'auth_source_gap'];
 
-function firewallSummary(firewall) {
-  if (!firewall || !['available', 'incomplete', 'disabled'].includes(firewall.status)) return 'Firewall=unavailable';
-  const t = firewall.traffic;
-  const a = firewall.alerts;
-  const traffic = t && timestamp(t.start) && timestamp(t.end) && ['deny', 'challenge', 'rate_limit'].every(k => count(t.counts?.[k]))
-    ? `deny=${t.counts.deny} challenge=${t.counts.challenge} rate_limit=${t.counts.rate_limit} window=${new Date(t.start).toISOString()}/${new Date(t.end).toISOString()}` : 'traffic=unavailable';
-  const alerts = a && count(a.active) && count(a.resolved) ? `active_alerts=${a.active} resolved_alerts=${a.resolved}` : 'alerts=unavailable';
-  return `Firewall=${firewall.status} ${traffic} ${alerts}`;
-}
-
 export function validateSnapshot(s) {
   if (!s || !timestamp(s.observed_at) || !timestamp(s.day_start) || !timestamp(s.day_end)
     || !count(s.version) || !s.state || typeof s.state !== 'object' || Array.isArray(s.state)
@@ -46,13 +36,37 @@ export function payload(environment, link, category, severity, value, start, end
     || !['Critical', 'High', 'Warning', 'Info'].includes(severity) || !count(value)
     || !timestamp(start) || !timestamp(end) || !['open', 'reminder', 'resolved', 'summary', 'test'].includes(status)
     || (daily && !['failures', 'successes', 'missing_hashes', 'important_events'].every(k => count(daily[k])))) throw new Error('invalid_alert');
-  // Rebuild from allowlisted scalars: never serialize a DB/API record, state or error.
-  const utc = new Date(end).toISOString();
-  const jst = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(end));
-  const summary = daily ? ` failures=${daily.failures} successes=${daily.successes} missing_hashes=${daily.missing_hashes} important_events=${daily.important_events}` : '';
+  // The message contains only fixed text and validated counts, never raw records.
+  const details = {
+    failures_5m: ['ログイン失敗が短時間に増えています', 'すぐに管理画面のログイン履歴を確認し、心当たりのない試行がないか調べてください。'],
+    failures_15m: ['ログイン失敗が増えています', 'すぐに管理画面のログイン履歴を確認し、心当たりのない試行がないか調べてください。'],
+    spray_sources_15m: ['複数のアカウントへのログイン失敗がありました', 'すぐにログイン履歴を確認し、心当たりのない試行があれば対象の利用者に確認してください。'],
+    distributed_targets_15m: ['同じアカウントへの複数の接続元からの失敗がありました', 'すぐにログイン履歴を確認し、対象の利用者に心当たりを確認してください。'],
+    success_after_failures_15m: ['連続したログイン失敗の後に成功しました', 'すぐにログイン履歴を確認し、本人の操作か確認してください。'],
+    missing_hashes_15m: ['ログイン履歴の一部に確認用情報がありません', '今日中に実行結果を開き、記録の設定とエラーを確認してください。'],
+    audit_gap_15m: ['ログイン試行と監査記録の件数に差があります', '今日中にログイン履歴と監査ログを確認してください。認証方法の違いや集計時刻でも差が出ます。'],
+    schedule_gap: ['セキュリティ監視が予定どおりに動いていません', '実行結果を開き、失敗や停止がないか確認してください。監視サービスの遅延の場合もあります。'],
+    source_unavailable: ['監視に必要な情報を取得できません', 'すぐに実行結果を開き、データベースへの接続と監視設定を確認してください。'],
+    firewall_denies: ['外部からのアクセスが多数拒否されました', 'VercelのFirewall画面でアクセス状況を確認してください。拒否だけでは被害があったとは限りません。'],
+    firewall_active_alerts: ['Vercelがアクセスの異常を報告しています', 'VercelのFirewall画面でアラートを確認し、影響がないか調べてください。'],
+    firewall_source_gap: ['Firewallの情報を取得できません', '今日中に実行結果を開き、Vercelの接続設定と権限を確認してください。'],
+    auth_invalid_credentials: ['認証サービスでログイン失敗が増えています', 'すぐにSupabaseの認証ログを確認し、心当たりのない試行がないか調べてください。'],
+    auth_source_gap: ['認証サービスのログを取得できません', '今日中に実行結果を開き、Supabaseのログ取得設定と権限を確認してください。'],
+    daily_summary: ['前日のセキュリティ集計', '件数に気になる変化がないか確認してください。重要操作には正常な操作も含まれます。'],
+    notification_probe: ['通知テスト', 'テスト通知です。この通知が届いていれば、特別な対応は不要です。'],
+  };
+  const [title, action] = details[category];
+  const statusText = { open: '発生', reminder: '継続中', resolved: '解消', summary: '日次集計', test: 'テスト' }[status];
+  const urgency = { Critical: '至急確認', High: '早めに確認', Warning: '今日中に確認', Info: 'お知らせ' }[severity];
+  const format = value => new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
+  const dailyText = daily ? `\n前日のログイン失敗 ${daily.failures}件・成功 ${daily.successes}件・確認用情報なし ${daily.missing_hashes}件・重要操作 ${daily.important_events}件` : '';
+  const firewallText = category === 'daily_summary' && firewall?.traffic && count(firewall.traffic.counts?.deny) ? `\n前日のアクセス拒否 ${firewall.traffic.counts.deny}件` : '';
+  const countText = category === 'source_unavailable' ? '' : `\n件数: ${value}件`;
+  const instruction = status === 'resolved' ? '監視上の数値は落ち着きました。必要に応じて、それまでの履歴を確認してください。' : action;
   return {
-    content: `[CareRecord] ${severity} | ${environment} | ${category} | ${status}`,
-    embeds: [{ description: `${category === 'daily_summary' ? '集計（重要監査は正常操作を含む）' : category === 'firewall_active_alerts' ? 'Vercelが報告した異常・防御アラート（アプリ侵害の確定ではありません）' : '疑わしい傾向／監視状態（攻撃確定ではありません）'}\ncount=${category === 'source_unavailable' ? 'unavailable' : value}${summary}\nwindow=${new Date(start).toISOString()} / ${utc}\nJST=${jst} / UTC=${utc}\n${firewallSummary(firewall)}; Auth direct=unverified; ingestion=unverified\n対応: Actions実行結果と認証・監査ダッシュボードを確認。Highは速やかに、Warningは当日中。\n${evidenceUrl(link)}` }],
+    content: `[CareRecord] ${environment === 'production' ? '本番' : 'テスト環境'}｜${urgency}｜${statusText}｜${title}`,
+    embeds: [{ description: `**何をすればいい？**\n${instruction}${countText}${dailyText}${firewallText}\n期間: ${format(start)} 〜 ${format(end)}（日本時間）\n攻撃や被害があったと確定した通知ではありません。\n実行結果: ${evidenceUrl(link)}`,
+      footer: { text: `${category} | ${status}` } }],
   };
 }
 
@@ -175,7 +189,7 @@ export async function main() {
     const firewall = await collectFirewall({ environment, enabled });
     const firewallDaily = snapshot.state.daily_end !== snapshot.day_end ? await collectFirewall({ environment, enabled, since: '24h' }) : undefined;
     let auth = { status: 'disabled' };
-    if (environment === 'staging' && process.env.SECURITY_AUTH_LOGS_ENABLED === 'true') {
+    if (process.env.SECURITY_AUTH_LOGS_ENABLED === 'true') {
       try {
         const collected = JSON.parse(readFileSync(process.env.AUTH_LOGS_RESULT_FILE, 'utf8'));
         auth = collected && typeof collected === 'object' && !Array.isArray(collected) ? collected : { status: 'unavailable' };
