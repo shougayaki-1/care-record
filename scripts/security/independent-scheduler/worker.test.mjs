@@ -17,6 +17,7 @@ function mock({ healthy = true, dispatch = true } = {}) {
 test('healthy collection dispatches without alert', async () => {
   const m = mock(); await run(env, m.fetcher, now);
   assert.equal(m.calls.length, 3);
+  assert.ok(m.calls.every(call => call.options.redirect === 'manual'));
   assert.equal(JSON.parse(m.calls[2].options.body).ref, 'main');
 });
 test('skipped collection alerts and reports failure', async () => {
@@ -46,4 +47,12 @@ test('oversized GitHub response fails closed and alerts', async () => {
   const fetcher = async (url, options) => url.includes('/runs?') ? new Response('x'.repeat(2_000_001)) : m.fetcher(url, options);
   await assert.rejects(run(env, fetcher, now));
   assert.equal(m.calls.at(-1).url, env.DISCORD_WEBHOOK_URL);
+});
+
+test('a redirect response is rejected and never followed', async () => {
+  const m = mock();
+  const fetcher = async (url, options) => url.includes('/dispatches') ? new Response(null, { status: 302, headers: { location: 'https://example.test/other' } }) : m.fetcher(url, options);
+  await assert.rejects(run(env, fetcher, now));
+  assert.equal(m.calls.at(-1).url, env.DISCORD_WEBHOOK_URL);
+  assert.ok(m.calls.every(call => call.url !== 'https://example.test/other'));
 });

@@ -2,7 +2,7 @@ const API = 'https://api.github.com/repos/shougayaki-1/care-record';
 const HEADERS = { accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'care-record-security-scheduler' };
 
 async function request(fetcher, url, options = {}) {
-  const response = await fetcher(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(10000) });
+  const response = await fetcher(url, { ...options, redirect: 'manual', signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new Error('request_failed');
   return response;
 }
