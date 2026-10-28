@@ -31,7 +31,7 @@ insert into public.organizations(id,name) values ('{o}','Synthetic');
 insert into public.organization_members(organization_id,user_id,role) values ('{o}','{u}','owner');
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('{c}','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('{cons}','{u}','{c}','openid');
-insert into auth.sessions(id,user_id,oauth_client_id) values ('{s}','{u}','{c}');
+insert into auth.sessions(id,user_id,oauth_client_id,created_at) values ('{s}','{u}','{c}',now());
 insert into private.mcp_import_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('{o}',true,'{{}}','{u}',now());""")
  return u,c,s,cons,o
 def wait_lock(name):
@@ -91,33 +91,34 @@ try:
 finally:
  remover.close();reader.close()
 
-# READ COMMITTED establishes a statement snapshot. A read already in progress
-# may complete after revoke; a later statement must fail with the same JWT.
-u,c,s,cons,o=setup(); revoker=Session('issue168_snapshot_revoke'); reader=Session('issue168_snapshot_read')
-claims=f'{{"sub":"{u}","role":"mcp_import","exp":4102444800,"client_id":"{c}","session_id":"{s}"}}'
-try:
- reader.run(f"begin read only; set local role mcp_import; select set_config('request.jwt.claims','{claims}',true);")
- observed=[];errors=[]
- def slow_read():
-  try: observed.append(reader.run(f"select count(*) from (select pg_sleep(2)) delay cross join lateral public.list_mcp_workspaces() w where w.id='{o}';"))
-  except Exception as e: errors.append(str(e))
- t=threading.Thread(target=slow_read,daemon=True);t.start()
- for _ in range(100):
-  if query("select count(*) from pg_stat_activity where application_name='issue168_snapshot_read' and wait_event='PgSleep'")=='1':break
-  time.sleep(.02)
- else:raise RuntimeError('read did not enter PgSleep')
- revoker.run(f"begin; update auth.oauth_consents set revoked_at=now() where id='{cons}'; delete from auth.sessions where id='{s}'; commit;")
- t.join(5)
- if t.is_alive() or errors:raise RuntimeError('slow read failed or timed out: '+repr(errors))
- assert observed[0].strip()=='1',observed
- try:reader.run('select public.list_mcp_workspaces();')
- except Exception as e:
-  assert '42501' in str(e) and 'mcp_oauth_required' in str(e),str(e)
- else:raise AssertionError('new statement after revoke unexpectedly succeeded')
- print('PASS in-flight statement snapshot; next statement rejects revoked JWT',flush=True)
-finally:
- revoker.close()
- if reader.p.poll() is None:reader.close()
+# A read that has acquired the OAuth locks and a grant revoke serialize.
+for read_order in ('read-first', 'revoke-first'):
+ u,c,s,cons,o=setup();revoker=Session('issue168_read_revoke');reader=Session('issue168_read_revoke_reader')
+ claims=f'{{"sub":"{u}","role":"mcp_import","exp":4102444800,"client_id":"{c}","session_id":"{s}"}}'
+ revoke=f"update auth.oauth_consents set revoked_at=now() where id='{cons}'; delete from auth.sessions where id='{s}';"
+ try:
+  revoker.run('begin;');reader.run(f"begin; set local role mcp_import; select set_config('request.jwt.claims','{claims}',true);")
+  errors=[]
+  if read_order=='read-first':
+   assert reader.run(f"select count(*) from public.list_mcp_workspaces() where id='{o}';").strip()=='1'
+   def revoke_action():
+    try:revoker.run(revoke)
+    except Exception as e:errors.append(str(e))
+   t=threading.Thread(target=revoke_action,daemon=True);t.start();wait_lock('issue168_read_revoke');reader.run('commit;');t.join(10)
+   if t.is_alive() or errors:raise RuntimeError('revoke failed or timed out: '+repr(errors))
+   revoker.run('commit;')
+  else:
+   revoker.run(revoke)
+   def read_action():
+    try:reader.run('select public.list_mcp_workspaces();');errors.append('unexpected success')
+    except Exception as e:errors.append(str(e))
+   t=threading.Thread(target=read_action,daemon=True);t.start();wait_lock('issue168_read_revoke_reader');revoker.run('commit;');t.join(10)
+   if t.is_alive():raise RuntimeError('read timed out')
+   assert len(errors)==1 and '42501' in errors[0] and 'mcp_oauth_required' in errors[0],errors
+  print('PASS read revoke',read_order,flush=True)
+ finally:
+  if revoker.p.poll() is None:revoker.close()
+  if reader.p.poll() is None:reader.close()
 
 # A lock wait can cross not_after. The final pre-insert check must reject.
 u,c,s,cons,o=setup(); locker=Session('issue168_expiry_lock');sender=Session('issue168_expiry_send')
@@ -217,3 +218,28 @@ for change in ('permissions', 'assignment'):
   finally:
    if sender.p.poll() is None:sender.close()
    if manager_session.p.poll() is None:manager_session.close()
+
+# A session can reach its 30-day limit while the sender waits for a lock.
+u,c,s,cons,o=setup(); locker=Session('issue168_lifetime_lock');sender=Session('issue168_lifetime_send')
+claims=f'{{"sub":"{u}","role":"mcp_import","exp":4102444800,"client_id":"{c}","session_id":"{s}"}}'
+try:
+ query(f"update auth.sessions set created_at=clock_timestamp()-interval '30 days'+interval '2 seconds' where id='{s}';")
+ locker.run(f"begin; select pg_advisory_xact_lock(pg_catalog.hashtextextended('mcp_candidate:' || '{u}', 0));")
+ sender.run(f"begin; set local role mcp_import; select set_config('request.jwt.claims','{claims}',true);")
+ result=[]
+ def lifetime_blocked_send():
+  try:sender.run(f"select public.submit_mcp_candidate('{o}','','{{\"meta\":{{}},\"values\":{{}},\"warnings\":[],\"confidence\":\"low\"}}');");result.append('success')
+  except Exception as e:result.append(str(e))
+ t=threading.Thread(target=lifetime_blocked_send,daemon=True);t.start();wait_lock('issue168_lifetime_send')
+ for _ in range(100):
+  if query(f"select (created_at + interval '30 days' <= clock_timestamp())::text from auth.sessions where id='{s}'")=='true':break
+  time.sleep(.05)
+ else:raise RuntimeError('session did not reach its 30-day limit')
+ locker.run('commit;');t.join(10)
+ if t.is_alive():raise RuntimeError('30-day limit test timed out')
+ assert len(result)==1 and '42501' in result[0] and 'mcp_oauth_required' in result[0],result
+ assert query(f"select count(*) from public.ai_import_candidates where organization_id='{o}'")=='0'
+ print('PASS 30-day limit during advisory-lock wait rejects before insert',flush=True)
+finally:
+ locker.close()
+ if sender.p.poll() is None:sender.close()

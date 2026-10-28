@@ -9,7 +9,7 @@ INSERT INTO public.organization_members(organization_id,user_id,role) VALUES('19
 INSERT INTO public.user_session_activity(session_hash,auth_session_id,user_id,last_activity,absolute_expires_at) VALUES('mcp192','mcp192','19200000-0000-4000-8000-000000000001',now(),now()+interval '1 hour');
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('19200000-0000-4000-8000-000000000012','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('19200000-0000-4000-8000-000000000014','19200000-0000-4000-8000-000000000001','19200000-0000-4000-8000-000000000012','openid');
-insert into auth.sessions(id,user_id,oauth_client_id) values ('19200000-0000-4000-8000-000000000013','19200000-0000-4000-8000-000000000001','19200000-0000-4000-8000-000000000012');
+insert into auth.sessions(id,user_id,oauth_client_id,created_at) values ('19200000-0000-4000-8000-000000000013','19200000-0000-4000-8000-000000000001','19200000-0000-4000-8000-000000000012',now());
 SELECT set_config('request.jwt.claims','{"sub":"19200000-0000-4000-8000-000000000001","role":"authenticated","session_id":"mcp192"}',false);
 SELECT public.enable_mcp_import('19200000-0000-4000-8000-000000000011','{"provider":"a","processing":"b","region":"c","retention":"d","secondary_use":"e","notice":"f"}');
 }

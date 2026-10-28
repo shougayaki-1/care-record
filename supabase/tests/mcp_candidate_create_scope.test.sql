@@ -10,7 +10,7 @@ insert into public.organizations(id,name) values ('16830000-0000-0000-0000-00000
 insert into public.organization_members(organization_id,user_id,role) values ('16830000-0000-0000-0000-000000000002','16830000-0000-0000-0000-000000000001','member');
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('16830000-0000-0000-0000-000000000003','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('16830000-0000-0000-0000-000000000004','16830000-0000-0000-0000-000000000001','16830000-0000-0000-0000-000000000003','openid');
-insert into auth.sessions(id,user_id,oauth_client_id) values ('16830000-0000-0000-0000-000000000005','16830000-0000-0000-0000-000000000001','16830000-0000-0000-0000-000000000003');
+insert into auth.sessions(id,user_id,oauth_client_id,created_at) values ('16830000-0000-0000-0000-000000000005','16830000-0000-0000-0000-000000000001','16830000-0000-0000-0000-000000000003',now());
 insert into private.mcp_import_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('16830000-0000-0000-0000-000000000002',true,'{}','16830000-0000-0000-0000-000000000001',now());
 insert into public.organization_roles(id,organization_id,name,permissions) values ('16830000-0000-0000-0000-000000000006','16830000-0000-0000-0000-000000000002','Scope','{"records":{"create":"assigned"}}');
 insert into public.organization_member_roles(organization_id,user_id,role_id) values ('16830000-0000-0000-0000-000000000002','16830000-0000-0000-0000-000000000001','16830000-0000-0000-0000-000000000006');

@@ -22,7 +22,7 @@ insert into public.user_session_activity(session_hash,auth_session_id,user_id,la
  ('mcp169-member','mcp169-member','16900000-0000-0000-0000-000000000002',now(),now()+interval '1 hour');
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('16900000-0000-0000-0000-000000000003','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('16900000-0000-0000-0000-000000000005','16900000-0000-0000-0000-000000000002','16900000-0000-0000-0000-000000000003','openid');
-insert into auth.sessions(id,user_id,oauth_client_id) values ('16900000-0000-0000-0000-000000000004','16900000-0000-0000-0000-000000000002','16900000-0000-0000-0000-000000000003');
+insert into auth.sessions(id,user_id,oauth_client_id,created_at) values ('16900000-0000-0000-0000-000000000004','16900000-0000-0000-0000-000000000002','16900000-0000-0000-0000-000000000003',now());
 select ok(not has_table_privilege('authenticated','private.mcp_import_controls','SELECT,INSERT,UPDATE,DELETE'),'authenticated cannot access switch directly');
 select ok(not has_table_privilege('mcp_import','private.mcp_import_controls','SELECT,INSERT,UPDATE,DELETE'),'MCP cannot access switch directly');
 select ok(not has_function_privilege('mcp_import','public.disable_mcp_import(uuid)','EXECUTE'),'MCP cannot change switch');

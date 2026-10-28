@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(15);
+select plan(18);
 grant usage on schema extensions to mcp_import;
 grant execute on all functions in schema extensions to mcp_import;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values
@@ -11,7 +11,7 @@ insert into public.organizations(id,name) values ('16800000-0000-0000-0000-00000
 insert into public.organization_members(organization_id,user_id,role) values ('16800000-0000-0000-0000-000000000002','16800000-0000-0000-0000-000000000001','owner');
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('16800000-0000-0000-0000-000000000003','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('16800000-0000-0000-0000-000000000004','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003','openid');
-insert into auth.sessions(id,user_id,oauth_client_id) values ('16800000-0000-0000-0000-000000000005','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003');
+insert into auth.sessions(id,user_id,oauth_client_id,created_at) values ('16800000-0000-0000-0000-000000000005','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003',now());
 insert into private.mcp_import_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('16800000-0000-0000-0000-000000000002',true,'{}','16800000-0000-0000-0000-000000000001',now());
 select ok(not has_function_privilege('mcp_import','private.is_mcp_oauth_active()','EXECUTE'),'helper is not callable by MCP role');
 select ok(not has_function_privilege('mcp_import','private.is_mcp_oauth_active_for_read()','EXECUTE'),'read helper is not callable by MCP role');
@@ -27,6 +27,21 @@ select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-00000000
 select throws_ok($$select public.list_mcp_workspaces()$$,'42501','mcp_oauth_required','different user rejects');
 select set_config('request.jwt.claims','{"sub":"16800000-0000-0000-0000-000000000001","role":"mcp_import","exp":4102444800,"client_id":"16800000-0000-0000-0000-000000000003","session_id":"16800000-0000-0000-0000-000000000005"}',true);
 select throws_ok($$select public.get_mcp_self_staff_names('16800000-0000-0000-0000-000000000099')$$,'42501','mcp_oauth_required','other organization rejects');
+reset role;
+update auth.sessions set created_at=null where id='16800000-0000-0000-0000-000000000005';
+set local role mcp_import;
+select throws_ok($$select public.list_mcp_workspaces()$$,'42501','mcp_oauth_required','missing session creation rejects');
+reset role;
+update auth.sessions set created_at=clock_timestamp()+interval '1 hour' where id='16800000-0000-0000-0000-000000000005';
+set local role mcp_import;
+select throws_ok($$select public.list_mcp_workspaces()$$,'42501','mcp_oauth_required','future session creation rejects');
+reset role;
+update auth.sessions set created_at=clock_timestamp()-interval '30 days' where id='16800000-0000-0000-0000-000000000005';
+set local role mcp_import;
+select throws_ok($$select public.list_mcp_workspaces()$$,'42501','mcp_oauth_required','30-day session rejects');
+reset role;
+update auth.sessions set created_at=clock_timestamp() where id='16800000-0000-0000-0000-000000000005';
+set local role mcp_import;
 reset role;
 update auth.oauth_consents set revoked_at=now() where id='16800000-0000-0000-0000-000000000004';
 set local role mcp_import;
