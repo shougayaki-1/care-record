@@ -28,7 +28,7 @@ def setup():
  u,c,s,cons,o=map(lambda _:uid(),range(5))
  query(f"""insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values ('{u}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','{u}@example.invalid','x',now(),now());
 insert into public.organizations(id,name) values ('{o}','Synthetic');
-insert into public.organization_members(organization_id,user_id,role) values ('{o}','{u}','member');
+insert into public.organization_members(organization_id,user_id,role) values ('{o}','{u}','owner');
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('{c}','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('{cons}','{u}','{c}','openid');
 insert into auth.sessions(id,user_id,oauth_client_id) values ('{s}','{u}','{c}');

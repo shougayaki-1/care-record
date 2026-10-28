@@ -8,7 +8,7 @@ insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_
 ('16800000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','mcp168@example.invalid','x',now(),now());
 update public.profiles set name='Synthetic' where id='16800000-0000-0000-0000-000000000001';
 insert into public.organizations(id,name) values ('16800000-0000-0000-0000-000000000002','Synthetic');
-insert into public.organization_members(organization_id,user_id,role) values ('16800000-0000-0000-0000-000000000002','16800000-0000-0000-0000-000000000001','member');
+insert into public.organization_members(organization_id,user_id,role) values ('16800000-0000-0000-0000-000000000002','16800000-0000-0000-0000-000000000001','owner');
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('16800000-0000-0000-0000-000000000003','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('16800000-0000-0000-0000-000000000004','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003','openid');
 insert into auth.sessions(id,user_id,oauth_client_id) values ('16800000-0000-0000-0000-000000000005','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003');

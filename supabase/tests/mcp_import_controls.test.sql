@@ -14,6 +14,9 @@ insert into public.organization_members(organization_id,user_id,role) values
  ('16900000-0000-0000-0000-00000000000a','16900000-0000-0000-0000-000000000001','owner'),
  ('16900000-0000-0000-0000-00000000000a','16900000-0000-0000-0000-000000000002','member'),
  ('16900000-0000-0000-0000-00000000000b','16900000-0000-0000-0000-000000000002','owner');
+-- Keep this member unable to manage integrations while allowing record creation.
+insert into public.organization_roles(id,organization_id,name,permissions) values ('16900000-0000-0000-0000-000000000006','16900000-0000-0000-0000-00000000000a','Record creator','{"records":{"create":"all"}}');
+insert into public.organization_member_roles(organization_id,user_id,role_id) values ('16900000-0000-0000-0000-00000000000a','16900000-0000-0000-0000-000000000002','16900000-0000-0000-0000-000000000006');
 insert into public.user_session_activity(session_hash,auth_session_id,user_id,last_activity,absolute_expires_at) values
  ('mcp169-owner','mcp169-owner','16900000-0000-0000-0000-000000000001',now(),now()+interval '1 hour'),
  ('mcp169-member','mcp169-member','16900000-0000-0000-0000-000000000002',now(),now()+interval '1 hour');
