@@ -165,3 +165,55 @@ try:
 finally:
  locker.close()
  if sender.p.poll() is None:sender.close()
+
+# Use the real role-management RPCs and the same organization lock as submit.
+for change in ('permissions', 'assignment'):
+ for order in ('send-first', 'change-first'):
+  u,c,s,cons,o=setup(); manager,all_role,none_role=uid(),uid(),uid()
+  session_id='session-'+uid()
+  query(f"""insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at)
+    values ('{manager}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','{manager}@example.invalid','x',now(),now());
+    update public.organization_members set role='member' where organization_id='{o}' and user_id='{u}';
+    insert into public.organization_members(organization_id,user_id,role) values ('{o}','{manager}','owner');
+    insert into public.user_session_activity(session_hash,auth_session_id,user_id,last_activity,absolute_expires_at)
+      values ('{session_id}','{session_id}','{manager}',now(),now()+interval '1 hour');
+    insert into public.organization_roles(id,organization_id,name,permissions) values
+      ('{all_role}','{o}','all','{{"records":{{"create":"all"}}}}'),
+      ('{none_role}','{o}','none','{{"records":{{"create":"none"}}}}');
+    insert into public.organization_member_roles(organization_id,user_id,role_id) values ('{o}','{u}','{all_role}');""")
+  sender=Session('issue168_role_sender');manager_session=Session('issue168_role_manager')
+  mcp_claims=f'{{"sub":"{u}","role":"mcp_import","exp":4102444800,"client_id":"{c}","session_id":"{s}"}}'
+  manager_claims=f'{{"sub":"{manager}","role":"authenticated","session_id":"{session_id}"}}'
+  send=f"select public.submit_mcp_candidate('{o}','','{{\"meta\":{{}},\"values\":{{}},\"warnings\":[],\"confidence\":\"low\"}}');"
+  if change=='permissions':
+   operation=f"select public.mutate_organization_role_authorized('{o}','{all_role}','update','all',null,'{{\"records\":{{\"create\":\"none\"}}}}',false);"
+  else:
+   operation=f"select public.account_replace_member_roles('{o}','{u}',array['{none_role}'::uuid]);"
+  try:
+   sender.run(f"begin; set local role mcp_import; select set_config('request.jwt.claims','{mcp_claims}',true);")
+   manager_session.run(f"begin; set local role authenticated; select set_config('request.jwt.claims','{manager_claims}',true);")
+   errors=[]
+   if order=='send-first':
+    sender.run(send)
+    def change_action():
+     try:manager_session.run(operation)
+     except Exception as e:errors.append(str(e))
+    t=threading.Thread(target=change_action,daemon=True);t.start();wait_lock('issue168_role_manager')
+    sender.run('commit;');t.join(10)
+    if t.is_alive() or errors:raise RuntimeError('role change failed or timed out: '+repr(errors))
+    manager_session.run('commit;')
+    assert query(f"select count(*) from public.ai_import_candidates where organization_id='{o}'")=='1'
+   else:
+    manager_session.run(operation)
+    def send_action():
+     try:sender.run(send);errors.append('unexpected success')
+     except Exception as e:errors.append(str(e))
+    t=threading.Thread(target=send_action,daemon=True);t.start();wait_lock('issue168_role_sender')
+    manager_session.run('commit;');t.join(10)
+    if t.is_alive():raise RuntimeError('send timed out')
+    assert len(errors)==1 and '42501' in errors[0] and 'mcp_import_unavailable' in errors[0],errors
+    assert query(f"select count(*) from public.ai_import_candidates where organization_id='{o}'")=='0'
+   print('PASS role',change,order,flush=True)
+  finally:
+   if sender.p.poll() is None:sender.close()
+   if manager_session.p.poll() is None:manager_session.close()
