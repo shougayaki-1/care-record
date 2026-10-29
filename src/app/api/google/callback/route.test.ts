@@ -13,7 +13,7 @@ vi.mock('@/utils/googleCalendar', () => ({
     OAUTH_STATE_COOKIE: 'g_oauth_state',
     getGoogleOAuthClient: () => ({ getToken: mocks.getToken, setCredentials: mocks.setCredentials }),
 }));
-vi.mock('googleapis', () => ({ google: { calendar: () => ({ calendars: {
+vi.mock('@/lib/googleApis', () => ({ google: { calendar: () => ({ calendars: {
     get: mocks.calendarGet, insert: mocks.calendarInsert,
 } }) } }));
 vi.mock('@/utils/googleTokenCrypto', () => ({ encryptGoogleToken: () => 'encrypted-test-token' }));
