@@ -6,6 +6,7 @@ import { z } from 'npm:zod@^4.3.6';
 import formTemplate from '../_shared/default-form-template.json' with { type: 'json' };
 import { buildClarificationQuestions } from '../_shared/clarify-candidate.ts';
 import { normalizeDate, normalizeTime, normalizeValues, type FormItem } from '../_shared/validate-candidate.ts';
+import { observeMcpTool } from '../_shared/mcp-observability.ts';
 
 const template = formTemplate as FormItem[];
 const uuid = z.uuid();
@@ -42,19 +43,19 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       description: 'サインイン中の利用者が所属する事業所を一覧し、AI読み取り候補の取込先を選びます。',
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    }, async () => {
+    }, async () => observeMcpTool('list_workspaces', async () => {
       const { data, error } = await supabase.rpc('list_mcp_workspaces');
       if (error) throw new Error(connectionError);
       const workspaces = (data ?? []).map((item: { id: string; name: string }) => ({ id: item.id, name: item.name }));
       return { structuredContent: { workspaces }, content: [{ type: 'text', text: JSON.stringify({ workspaces }) }] };
-    });
+    }));
 
     server.registerTool('get_record_form', {
       title: 'サービス提供記録のフォームを取得',
       description: '紙の記録を読み取る前に、取込先アプリのフィールドID・選択肢を取得します。',
       inputSchema: z.object({ organization_id: uuid }),
       annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    }, async ({ organization_id }) => {
+    }, async ({ organization_id }) => observeMcpTool('get_record_form', async () => {
       const { data, error } = await supabase.rpc('list_mcp_workspaces');
       if (error) throw new Error(connectionError);
       if (!(data ?? []).some((item: { id: string }) => item.id === organization_id)) {
@@ -85,7 +86,7 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
         ],
       };
       return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
-    });
+    }));
 
     server.registerTool('submit_record_candidate', {
       title: 'AI読み取り記録を管理者へ送信',
@@ -97,7 +98,7 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
         send_anyway: z.boolean().default(false),
       }),
       annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
-    }, async ({ organization_id, source_file_name, record, send_anyway }) => {
+    }, async ({ organization_id, source_file_name, record, send_anyway }) => observeMcpTool('submit_record_candidate', async () => {
       const warnings = [...record.warnings];
       const payload = {
         meta: {
@@ -141,7 +142,7 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
         message: 'AI読み取り記録を送信しました。管理者の確認待ちです。',
       };
       return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
-    });
+    }));
 
     return server;
   });
