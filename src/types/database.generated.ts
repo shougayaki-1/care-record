@@ -2905,6 +2905,10 @@ export type Database = {
         Args: { p_destination: string; p_digest: string; p_ordinal: string }
         Returns: undefined
       }
+      check_mcp_shift_read: {
+        Args: { p_organization_id: string }
+        Returns: boolean
+      }
       complete_google_oauth_connection: {
         Args: {
           p_calendar_id: string
@@ -2980,6 +2984,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      disable_mcp_shift_read: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       discard_ai_import_candidate: {
         Args: { p_candidate_id: string; p_organization_id: string }
         Returns: undefined
@@ -2989,6 +2997,10 @@ export type Database = {
         Returns: undefined
       }
       enable_mcp_import: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_shift_read: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
@@ -3035,6 +3047,14 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: string[]
       }
+      get_mcp_shift: {
+        Args: { p_organization_id: string; p_shift_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_read_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
       get_my_org_id: { Args: never; Returns: string }
       is_org_admin: { Args: { _org_id: string }; Returns: boolean }
       is_org_member: { Args: { _org_id: string }; Returns: boolean }
@@ -3042,6 +3062,20 @@ export type Database = {
       leave_organization_atomic: {
         Args: { p_org_id: string }
         Returns: undefined
+      }
+      list_mcp_shifts: {
+        Args: {
+          p_client_id?: string
+          p_end: string
+          p_limit?: number
+          p_offset?: number
+          p_organization_id: string
+          p_staff_id?: string
+          p_start: string
+          p_sync_status?: string
+          p_unassigned?: boolean
+        }
+        Returns: Json
       }
       list_mcp_workspaces: {
         Args: never
