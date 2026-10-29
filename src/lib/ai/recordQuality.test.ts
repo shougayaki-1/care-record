@@ -15,4 +15,9 @@ describe('record quality', () => {
     expect(checkRecordQuality({ ...source, shift: { ...source.shift, end_at: '2026-10-29T03:00:00Z' } }, template).issues).toContain('予定と実績の日時が異なります。理由を確認してください');
     expect(checkRecordQuality({ ...source, shift: null }, template).status).toBe('needs_confirmation');
   });
+  it('requires review when matching dates cross a month in Japan', () => {
+    const start_at = '2026-10-31T14:00:00Z';
+    const end_at = '2026-10-31T16:00:00Z';
+    expect(checkRecordQuality({ ...source, service_date: '2026-10-31', start_at, end_at, shift: { ...source.shift, start_at, end_at } }, template).issues).toContain('月をまたぐ記録の日時を確認してください');
+  });
 });

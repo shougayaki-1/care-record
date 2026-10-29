@@ -36,6 +36,10 @@ export function checkRecordQuality(source: Source, defaultTemplate: TemplateItem
   const end = source.end_at ? Date.parse(source.end_at) : NaN;
   if (!source.service_date || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) issues.push('記録の日時を確認してください');
   else if (new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(start)) !== source.service_date) issues.push('記録日と開始日時を確認してください');
+  if (Number.isFinite(start) && Number.isFinite(end)) {
+    const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit' });
+    if (month.format(new Date(start)) !== month.format(new Date(end))) issues.push('月をまたぐ記録の日時を確認してください');
+  }
   if (!source.shift) issues.push('対応するシフトを確認できません。予定との比較は要確認です');
   else {
     if (source.linked_shift_count > 1) issues.push('複数のシフトとの対応を確認してください');
