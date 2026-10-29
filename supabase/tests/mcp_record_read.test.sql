@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(11);
+select plan(19);
 grant usage on schema extensions to mcp_import;
 grant execute on all functions in schema extensions to mcp_import;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values
@@ -20,6 +20,7 @@ insert into public.staffs(id,organization_id,name) values ('17200000-0000-0000-0
 
 insert into public.reports(id,client_id,helper_id,service_date,status) values
 ('17400000-0000-0000-0000-000000000001','17200000-0000-0000-0000-000000000006','17200000-0000-0000-0000-000000000001','2026-10-28','pending');
+insert into public.reports(id,client_id,helper_id,service_date,status) values ('17500000-0000-0000-0000-000000000001','17200000-0000-0000-0000-000000000006','17200000-0000-0000-0000-000000000001','2026-10-27','remanded');
 insert into public.report_values(report_id,data) values ('17400000-0000-0000-0000-000000000001','{"note":"synthetic"}');
 select set_config('test.record_version', (select current_version::text from public.reports where id='17400000-0000-0000-0000-000000000001'), true);
 set local role mcp_import;
@@ -34,6 +35,13 @@ select is(public.get_mcp_record('17200000-0000-0000-0000-000000000002','17400000
 select is(public.get_mcp_record('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001')->>'current_version', current_setting('test.record_version'), 'version matches source');
 select is(jsonb_array_length(public.list_mcp_records('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28',p_status:='approved')->'records'),0,'status filter excludes mismatches');
 select ok(not (public.list_mcp_records('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28')->'records'->0 ? 'values'),'list omits content');
+select is((public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28')->'counts'->>'pending')::int, 1, 'queue counts pending records');
+select is(jsonb_array_length(public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28',p_status:='remanded')->'records'), 0, 'empty filtered queue');
+select is((public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-29','2026-10-29')->'counts'->>'pending')::int, 0, 'empty period counts zero');
+select is((public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-27','2026-10-28',p_status:='pending')->'counts'->>'remanded')::int, 1, 'counts include remanded regardless of selected status');
+select is(jsonb_array_length(public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-27','2026-10-28',p_limit:=1)->'records'), 1, 'queue page is limited');
+select is((public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-27','2026-10-28',p_limit:=1)->>'has_more')::boolean, true, 'queue indicates more records');
+select throws_ok($$select public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000099','2026-10-28','2026-10-28')$$,'42501','mcp_record_read_unavailable','queue denies other organization');
 select throws_ok($$select public.list_mcp_records('17200000-0000-0000-0000-000000000099','2026-10-28','2026-10-28')$$,'42501','mcp_record_read_unavailable','other organization denied');
 reset role;
 update public.organization_members set role='member' where organization_id='17200000-0000-0000-0000-000000000002' and user_id='17200000-0000-0000-0000-000000000001';
@@ -41,6 +49,7 @@ insert into public.organization_roles(id,organization_id,name,permissions) value
 insert into public.organization_member_roles(organization_id,user_id,role_id) values ('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000001','17400000-0000-0000-0000-000000000002');
 set local role mcp_import;
 select is(jsonb_array_length(public.list_mcp_records('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28')->'records'),0,'unassigned client excluded');
+select is((public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28')->'counts'->>'pending')::int, 0, 'queue excludes unassigned records from counts');
 select is(public.get_mcp_record('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001'),null::jsonb,'unassigned record hidden');
 reset role;
 update public.organization_roles set permissions='{"records":{"view":"none"}}' where id='17400000-0000-0000-0000-000000000002';

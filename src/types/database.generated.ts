@@ -3091,6 +3091,17 @@ export type Database = {
         Args: { p_org_id: string }
         Returns: undefined
       }
+      list_mcp_approval_queue: {
+        Args: {
+          p_end: string
+          p_limit?: number
+          p_offset?: number
+          p_organization_id: string
+          p_start: string
+          p_status?: string
+        }
+        Returns: Json
+      }
       list_mcp_records: {
         Args: {
           p_client_id?: string
