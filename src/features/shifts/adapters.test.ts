@@ -6,7 +6,7 @@ import type { ShiftListSource } from './adapters';
 const shift: ShiftListSource = {
     id: 'shift', organization_id: 'org', client_id: 'client', title: null,
     start_at: '2026-10-01T00:00:00Z', end_at: '2026-10-01T02:00:00Z',
-    status: null, cancel_reason: null, clients: null, shift_staffs: [], report_shifts: [],
+    status: null, cancel_reason: null, clients: null, shift_staffs: [], shift_segments: [], report_shifts: [],
 };
 const pattern: Parameters<typeof toShiftPatternData>[0] = {
     id: 'pattern', client_id: 'client', title: null, start_time: '09:00:00', end_time: '12:00:00',
@@ -16,7 +16,9 @@ const pattern: Parameters<typeof toShiftPatternData>[0] = {
 describe('shift query adapters', () => {
     it('preserves null relations, nullable scalars and empty staff lists through calendar conversion', () => {
         const result = toShiftListItem(shift);
-        expect(result).toEqual({ ...shift, report_statuses: [] });
+        const { shift_segments: _segments, ...expected } = shift;
+        void _segments;
+        expect(result).toEqual({ ...expected, report_statuses: [] });
         const event = convertToCalendarEvents([result])[0];
         expect(event).toMatchObject({ title: '予定 様', start: shift.start_at, end: shift.end_at,
             extendedProps: { clientName: '', staffNames: '', reportStatuses: [], shiftData: result } });
