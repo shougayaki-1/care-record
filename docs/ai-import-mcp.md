@@ -20,7 +20,11 @@ Supabase AuthのOAuth 2.1サーバーを使う。`/oauth/consent` に既存ロ�
 
 OAuthトークンはそのままだと通常の `authenticated` ロールを持ち、MCPツール以外のData APIも呼べる。Custom Access Token Hookで `client_id` を持つOAuthトークンを `mcp_import` ロールへ切り替える。このロールは `list_mcp_workspaces`、本人のスタッフ名だけを返す `get_mcp_self_staff_names`、`submit_mcp_candidate` の実行権限だけを持ち、一般テーブルへの権限は持たない。候補登録RPCもロール・`client_id`・事業所所属・サイズ・件数を検証する。通常のアプリセッションは `authenticated` のまま。OAuthスコープ自体はDBアクセスを制限しない。
 
-利用者はアカウント設定の「AIアプリとの接続」でOAuth許可を確認・解除できる。解除すると更新トークンは失効するが、発行済みJWTは有効期限まで利用できる可能性がある。PDFや画像をAIサービスに添付する場合、原本の取り扱いはそのサービスの契約・設定にも依存するため、同意画面で明示している。
+利用者はアカウント設定の「AIアプリとの接続」でOAuth許可を確認・解除できる。DB側は本人・クライアントに対応する有効なOAuthセッションと同意を操作時に確認し、解除済みの接続は有効期限内のJWTでも拒否する。MCPのOAuthセッションは無操作期限を設けず、セッション開始から30日を絶対期限とする。期限後の新しい接続には再認証が必要である。直接RPCの呼び出しはPOSTを使用し、GETは使用しない。既存GET利用者の確認と移行通知、期限後の実際の再認証は提供前に検証する。PDFや画像をAIサービスに添付する場合、原本の取り扱いはそのサービスの契約・設定にも依存するため、同意画面で明示している。
+
+接続時は通常アプリのパスワードまたは連携済みSSOで本人確認する。単回の短期証明を本人・ブラウザーセッション・認可リクエストに結び付け、認可完了時に本人・OAuthクライアント・同意世代に対応する確認日時をDBへ保存する。各MCP RPCはこの確認から30日以内であることも検証する。既存同意によってAuthが自動承認しても、この本人確認を省略した接続ではRPCを実行できない。本人確認の成功監査と証明の確定は同じDBトランザクションで行う。
+
+従来の候補送信は利用者名だけを受け取り対象IDを固定できないため、`records.create=all` の本人に限る。`assigned` と `none` は拒否する。担当制の送信を公開するには、対象IDの安全な選択、候補への束縛、承認時の対象照合と担当変更との競合制御を別途整備する。
 
 ローカルの `supabase/config.toml` でOAuthサーバーと動的クライアント登録を有効にしている。本番に接続する前に、Supabase Dashboardの **Authentication → OAuth Server** で同機能を有効にし、Authorization Pathを `/oauth/consent` に設定する。MCP Edge Functionの認証には非対称JWT署名鍵（ES256またはRS256）が必要。OAuth同意画面とMCPエンドポイントを公開HTTPSで提供する。
 
@@ -34,6 +38,7 @@ OAuthトークンはそのままだと通常の `authenticated` ロールを持�
 - MCP URLは `https://<project-ref>.supabase.co/functions/v1/care-record-mcp`。ChatGPT Workの開発者モードとClaudeのカスタムコネクタに登録し、各サービスからOAuth接続を試す。
 - MCP Inspectorで未認証リクエストの `401` と `WWW-Authenticate`、認証後の3ツール、他事業所への送信拒否を確認する。発行済みOAuthトークンでData APIの一般テーブルと `save_report_versioned` が拒否されることも確認する。
 - AI取込の既存APIは `AI_IMPORT_ENABLED=false` のままにする。MCP候補機能はこのフラグに依存しない。
+- `20261028000005_mcp_reauthentication.sql` の適用時は既存接続も本人確認が必要になり、それまでRPCは拒否される。先に新しい本人確認画面を配備し、対象環境のSite URL・callback許可先がその配備を指すことを確認する。適用後に通常のOAuth再接続と本人確認、合成データでのRPCを検証する。トークン更新や新しいOAuthセッションの発行だけでは本人確認を満たさない。既存接続の中断と再接続手順を事前に案内する。
 
 ## フォーム定義
 

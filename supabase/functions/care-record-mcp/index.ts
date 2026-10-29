@@ -26,6 +26,7 @@ const recordInput = z.object({
 });
 
 const appOrigin = Deno.env.get('APP_ORIGIN')?.replace(/\/$/, '');
+const connectionError = '処理できませんでした。接続状態を確認し、必要なら再接続してください。';
 
 Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (request, { supabase }) => {
   const handler = createMcpHandler(() => {
@@ -43,7 +44,7 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     }, async () => {
       const { data, error } = await supabase.rpc('list_mcp_workspaces');
-      if (error) throw new Error('事業所を取得できませんでした');
+      if (error) throw new Error(connectionError);
       const workspaces = (data ?? []).map((item: { id: string; name: string }) => ({ id: item.id, name: item.name }));
       return { structuredContent: { workspaces }, content: [{ type: 'text', text: JSON.stringify({ workspaces }) }] };
     });
@@ -55,13 +56,14 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     }, async ({ organization_id }) => {
       const { data, error } = await supabase.rpc('list_mcp_workspaces');
-      if (error || !(data ?? []).some((item: { id: string }) => item.id === organization_id)) {
+      if (error) throw new Error(connectionError);
+      if (!(data ?? []).some((item: { id: string }) => item.id === organization_id)) {
         throw new Error('この事業所へのアクセス権がありません');
       }
       const { data: selfStaffNames, error: staffError } = await supabase.rpc('get_mcp_self_staff_names', {
         p_organization_id: organization_id,
       });
-      if (staffError) throw new Error('本人のスタッフ名を取得できませんでした');
+      if (staffError) throw new Error(connectionError);
       const output = {
         form: template,
         self_staff_names: selfStaffNames ?? [],
@@ -114,6 +116,10 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       };
       const questions = buildClarificationQuestions(record, payload.warnings, template);
       if (questions.length > 0 && !send_anyway) {
+        const { data: workspaces, error: workspaceError } = await supabase.rpc('list_mcp_workspaces');
+        if (workspaceError || !(workspaces ?? []).some((item: { id: string }) => item.id === organization_id)) {
+          throw new Error(connectionError);
+        }
         const result = {
           status: 'needs_clarification',
           questions,
@@ -127,7 +133,7 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
         p_source_file_name: source_file_name ?? '',
         p_payload: payload,
       });
-      if (error || !data) throw new Error('候補を登録できませんでした。取込先と権限を確認してください');
+      if (error || !data) throw new Error(connectionError);
       const result = {
         candidate_id: data,
         status: 'submitted',
