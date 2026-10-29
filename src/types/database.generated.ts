@@ -2837,6 +2837,9 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      prepare_mcp_reauth: { Args: { p_authorization_id: string; p_token_hash: string }; Returns: undefined }
+      mcp_reauth_prepared: { Args: { p_authorization_id: string }; Returns: boolean }
+      finalize_mcp_reauth: { Args: { p_authorization_id: string }; Returns: undefined }
       accept_invitation_atomic: {
         Args: { p_code: string; p_session_id?: string }
         Returns: string

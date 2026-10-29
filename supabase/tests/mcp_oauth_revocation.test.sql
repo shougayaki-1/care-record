@@ -11,6 +11,7 @@ insert into public.organizations(id,name) values ('16800000-0000-0000-0000-00000
 insert into public.organization_members(organization_id,user_id,role) values ('16800000-0000-0000-0000-000000000002','16800000-0000-0000-0000-000000000001','owner');
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('16800000-0000-0000-0000-000000000003','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('16800000-0000-0000-0000-000000000004','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003','openid');
+insert into private.mcp_reauth_proofs(user_id,client_id,consent_granted_at,verified_at) select user_id,client_id,granted_at,clock_timestamp() from auth.oauth_consents where id='16800000-0000-0000-0000-000000000004';
 insert into auth.sessions(id,user_id,oauth_client_id,created_at) values ('16800000-0000-0000-0000-000000000005','16800000-0000-0000-0000-000000000001','16800000-0000-0000-0000-000000000003',now());
 insert into private.mcp_import_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('16800000-0000-0000-0000-000000000002',true,'{}','16800000-0000-0000-0000-000000000001',now());
 select ok(not has_function_privilege('mcp_import','private.is_mcp_oauth_active()','EXECUTE'),'helper is not callable by MCP role');

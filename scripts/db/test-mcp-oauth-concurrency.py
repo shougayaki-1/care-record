@@ -31,6 +31,7 @@ insert into public.organizations(id,name) values ('{o}','Synthetic');
 insert into public.organization_members(organization_id,user_id,role) values ('{o}','{u}','owner');
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('{c}','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('{cons}','{u}','{c}','openid');
+insert into private.mcp_reauth_proofs(user_id,client_id,consent_granted_at,verified_at) select user_id,client_id,granted_at,clock_timestamp() from auth.oauth_consents where id='{cons}';
 insert into auth.sessions(id,user_id,oauth_client_id,created_at) values ('{s}','{u}','{c}',now());
 insert into private.mcp_import_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('{o}',true,'{{}}','{u}',now());""")
  return u,c,s,cons,o

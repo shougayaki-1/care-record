@@ -27,8 +27,10 @@ insert into public.user_session_activity (session_hash, auth_session_id, user_id
 
 insert into auth.oauth_clients(id,registration_type,redirect_uris,grant_types,client_type,token_endpoint_auth_method) values ('d6666666-0000-0000-0000-000000000006','dynamic','http://localhost/callback','authorization_code','public','none');
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('daaaaaaa-0000-0000-0000-00000000000a','d2222222-0000-0000-0000-000000000002','d6666666-0000-0000-0000-000000000006','openid');
+insert into private.mcp_reauth_proofs(user_id,client_id,consent_granted_at,verified_at) select user_id,client_id,granted_at,clock_timestamp() from auth.oauth_consents where id='daaaaaaa-0000-0000-0000-00000000000a';
 insert into auth.sessions(id,user_id,oauth_client_id,created_at) values ('d7777777-0000-0000-0000-000000000007','d2222222-0000-0000-0000-000000000002','d6666666-0000-0000-0000-000000000006',now());
 insert into auth.oauth_consents(id,user_id,client_id,scopes) values ('dbbbbbbb-0000-0000-0000-00000000000b','d1111111-0000-0000-0000-000000000001','d6666666-0000-0000-0000-000000000006','openid');
+insert into private.mcp_reauth_proofs(user_id,client_id,consent_granted_at,verified_at) select user_id,client_id,granted_at,clock_timestamp() from auth.oauth_consents where id='dbbbbbbb-0000-0000-0000-00000000000b';
 insert into auth.sessions(id,user_id,oauth_client_id,created_at) values ('d8888888-0000-0000-0000-000000000008','d1111111-0000-0000-0000-000000000001','d6666666-0000-0000-0000-000000000006',now());
 
 set local role mcp_import;
