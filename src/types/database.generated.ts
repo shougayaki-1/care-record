@@ -3186,6 +3186,16 @@ export type Database = {
         Args: { p_authorization_id: string; p_token_hash: string }
         Returns: undefined
       }
+      propose_mcp_shift_change: {
+        Args: {
+          p_end: string
+          p_organization_id: string
+          p_shift_id: string
+          p_staff_id: string
+          p_start: string
+        }
+        Returns: Json
+      }
       read_audit_archive: {
         Args: { p_cursor?: Json; p_run: string }
         Returns: Json
