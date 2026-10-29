@@ -88,6 +88,17 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
     }));
 
+    server.registerTool('search_people', {
+      title: 'スタッフ・利用者を検索',
+      description: '事業所内の権限のある候補を名前で検索します。同名など複数候補がある場合は登録日とIDを示し、利用者に選択を求めてください。推測して確定しないでください。',
+      inputSchema: z.object({ organization_id: uuid, kind: z.enum(['client', 'staff']), name: z.string().trim().min(1).max(100), limit: z.number().int().min(1).max(100).default(50), offset: z.number().int().min(0).max(10000).default(0) }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('search_people', async () => {
+      const { data, error } = await supabase.rpc('search_mcp_people', { p_organization_id: args.organization_id, p_kind: args.kind, p_name: args.name, p_limit: args.limit, p_offset: args.offset });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] };
+    }));
+
     server.registerTool('list_shifts', {
       title: 'シフトを検索',
       description: '事業所のシフトをJSTの期間で検索します。氏名ではなく確認済みのIDで絞り込んでください。DBが正本であり、Google同期状況は別です。',
