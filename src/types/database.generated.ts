@@ -2992,6 +2992,10 @@ export type Database = {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
+      finalize_mcp_reauth: {
+        Args: { p_authorization_id: string }
+        Returns: undefined
+      }
       finish_report_image_upload: {
         Args: { p_completed: boolean; p_reservation_id: string }
         Returns: undefined
@@ -3065,6 +3069,10 @@ export type Database = {
         Returns: undefined
       }
       mcp_access_token_hook: { Args: { event: Json }; Returns: Json }
+      mcp_reauth_prepared: {
+        Args: { p_authorization_id: string }
+        Returns: boolean
+      }
       mutate_organization_role_authorized: {
         Args: {
           p_action: string
@@ -3076,6 +3084,10 @@ export type Database = {
           p_role_id: string
         }
         Returns: string
+      }
+      prepare_mcp_reauth: {
+        Args: { p_authorization_id: string; p_token_hash: string }
+        Returns: undefined
       }
       read_audit_archive: {
         Args: { p_cursor?: Json; p_run: string }
