@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const stagingEndpoint = 'https://xhvvfovvlqzlkirpjocv.supabase.co/functions/v1/care-record-mcp';
 const maximumResponseBytes = 1_000_000;
-const toolNames = ['get_record_form', 'get_shift', 'list_shifts', 'list_workspaces', 'search_people', 'submit_record_candidate'];
+const toolNames = ['get_record', 'get_record_form', 'get_shift', 'list_records', 'list_shifts', 'list_workspaces', 'search_people', 'submit_record_candidate'];
 
 export class McpContractError extends Error {
   constructor(code) { super(code); this.name = 'McpContractError'; }
@@ -24,8 +24,10 @@ export function validateToolContract(tools) {
   const submit = tools.find(tool => tool.name === 'submit_record_candidate').inputSchema;
   const list = tools.find(tool => tool.name === 'list_shifts').inputSchema;
   const detail = tools.find(tool => tool.name === 'get_shift').inputSchema;
+  const records = tools.find(tool => tool.name === 'list_records').inputSchema;
+  const record = tools.find(tool => tool.name === 'get_record').inputSchema;
   const people = tools.find(tool => tool.name === 'search_people').inputSchema;
-  for (const schema of [form, submit, list, detail, people]) {
+  for (const schema of [form, submit, list, detail, people, records, record]) {
     if (schema.properties?.organization_id?.type !== 'string'
       || schema.properties.organization_id.format !== 'uuid'
       || !schema.required?.includes('organization_id')) fail('organization_input_changed');
@@ -35,6 +37,10 @@ export function validateToolContract(tools) {
   for (const key of ['start_date', 'end_date']) {
     if (list.properties?.[key]?.format !== 'date' || !list.required?.includes(key)) fail('shift_date_input_changed');
   }
+  for (const key of ['start_date', 'end_date']) {
+    if (records.properties?.[key]?.format !== 'date' || !records.required?.includes(key)) fail('record_date_input_changed');
+  }
+  if (record.properties?.record_id?.format !== 'uuid' || !record.required?.includes('record_id')) fail('record_id_input_changed');
   if (detail.properties?.shift_id?.format !== 'uuid' || !detail.required?.includes('shift_id')) fail('shift_id_input_changed');
   if (submit.properties?.send_anyway?.type !== 'boolean'
     || submit.properties.send_anyway.default !== false

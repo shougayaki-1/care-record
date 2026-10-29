@@ -2988,6 +2988,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      disable_mcp_record_read: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       disable_mcp_shift_read: {
         Args: { p_organization_id: string }
         Returns: undefined
@@ -3005,6 +3009,10 @@ export type Database = {
         Returns: undefined
       }
       enable_mcp_person_search: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_record_read: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
@@ -3055,6 +3063,14 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: Json
       }
+      get_mcp_record: {
+        Args: { p_organization_id: string; p_record_id: string }
+        Returns: Json
+      }
+      get_mcp_record_read_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
       get_mcp_self_staff_names: {
         Args: { p_organization_id: string }
         Returns: string[]
@@ -3074,6 +3090,19 @@ export type Database = {
       leave_organization_atomic: {
         Args: { p_org_id: string }
         Returns: undefined
+      }
+      list_mcp_records: {
+        Args: {
+          p_client_id?: string
+          p_end: string
+          p_limit?: number
+          p_offset?: number
+          p_organization_id: string
+          p_staff_id?: string
+          p_start: string
+          p_status?: string
+        }
+        Returns: Json
       }
       list_mcp_shifts: {
         Args: {

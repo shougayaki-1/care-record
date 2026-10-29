@@ -99,6 +99,29 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] };
     }));
 
+    server.registerTool('list_records', {
+      title: '提供記録を検索',
+      description: 'JSTの日付と確認済みの利用者・担当者ID、状態で権限内の記録を検索します。本文は詳細で確認します。',
+      inputSchema: z.object({ organization_id: uuid, start_date: z.iso.date(), end_date: z.iso.date(), client_id: uuid.optional(), staff_id: uuid.optional(), status: z.enum(['draft', 'pending', 'approved', 'remanded']).optional(), limit: z.number().int().min(1).max(100).default(50), offset: z.number().int().min(0).max(10000).default(0) }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('list_records', async () => {
+      const { data, error } = await supabase.rpc('list_mcp_records', { p_organization_id: args.organization_id, p_start: args.start_date, p_end: args.end_date, p_client_id: args.client_id ?? null, p_staff_id: args.staff_id ?? null, p_status: args.status ?? null, p_limit: args.limit, p_offset: args.offset });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] };
+    }));
+
+    server.registerTool('get_record', {
+      title: '提供記録の詳細を取得',
+      description: '確認済みの記録IDから権限内の本文・承認状態・版を取得します。添付ファイルは提供しません。',
+      inputSchema: z.object({ organization_id: uuid, record_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async ({ organization_id, record_id }) => observeMcpTool('get_record', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_record', { p_organization_id: organization_id, p_record_id: record_id });
+      if (error) throw new Error(connectionError);
+      const result = { record: data };
+      return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }));
+
     server.registerTool('list_shifts', {
       title: 'シフトを検索',
       description: '事業所のシフトをJSTの期間で検索します。氏名ではなく確認済みのIDで絞り込んでください。DBが正本であり、Google同期状況は別です。',
