@@ -10,4 +10,10 @@ describe('step-up return paths', () => {
     expect(safeReauthNext('/app/accounts/other')).toBe('/app/settings');
     expect(safeReauthNext('//evil.example/app/accounts')).toBe('/app/settings');
   });
+  it('binds the MCP return path to one authorization and strips arbitrary parameters', () => {
+    expect(safeReauthNext('/oauth/consent?authorization_id=request-123&next=https://evil.example'))
+      .toBe('/oauth/consent?authorization_id=request-123&stepup=1');
+    expect(safeReauthNext('/oauth/consent')).toBe('/app/settings');
+    expect(safeReauthNext('/oauth/consent?authorization_id=bad%2Fid')).toBe('/app/settings');
+  });
 });
