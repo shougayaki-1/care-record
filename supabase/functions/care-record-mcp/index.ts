@@ -110,6 +110,17 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] };
     }));
 
+    server.registerTool('list_approval_queue', {
+      title: '未承認・差戻しの記録を確認',
+      description: 'JSTのサービス日で未承認・差戻しの件数と権限内の記録を参照します。状態別件数は状態フィルタにかかわらず期間全体の件数です。承認や差戻しは実行しません。',
+      inputSchema: z.object({ organization_id: uuid, start_date: z.iso.date(), end_date: z.iso.date(), status: z.enum(['pending', 'remanded']).optional(), limit: z.number().int().min(1).max(100).default(50), offset: z.number().int().min(0).max(10000).default(0) }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('list_approval_queue', async () => {
+      const { data, error } = await supabase.rpc('list_mcp_approval_queue', { p_organization_id: args.organization_id, p_start: args.start_date, p_end: args.end_date, p_status: args.status ?? null, p_limit: args.limit, p_offset: args.offset });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] };
+    }));
+
     server.registerTool('get_record', {
       title: '提供記録の詳細を取得',
       description: '確認済みの記録IDから権限内の本文・承認状態・版を取得します。添付ファイルは提供しません。',
