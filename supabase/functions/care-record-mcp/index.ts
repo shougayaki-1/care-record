@@ -6,6 +6,7 @@ import { z } from 'npm:zod@^4.3.6';
 import formTemplate from '../_shared/default-form-template.json' with { type: 'json' };
 import { buildClarificationQuestions } from '../_shared/clarify-candidate.ts';
 import { normalizeDate, normalizeTime, normalizeValues, type FormItem } from '../_shared/validate-candidate.ts';
+import { checkRecordQuality } from '../_shared/record-quality.ts';
 import { observeMcpTool } from '../_shared/mcp-observability.ts';
 
 const template = formTemplate as FormItem[];
@@ -130,6 +131,18 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       const { data, error } = await supabase.rpc('get_mcp_record', { p_organization_id: organization_id, p_record_id: record_id });
       if (error) throw new Error(connectionError);
       const result = { record: data };
+      return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }));
+
+    server.registerTool('check_record_quality', {
+      title: '提供記録の入力・予定差を確認',
+      description: '権限のある記録の必須項目と日時を確認し、閲覧可能なシフトとの違いを要確認として返します。記録は変更しません。',
+      inputSchema: z.object({ organization_id: uuid, record_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async ({ organization_id, record_id }) => observeMcpTool('check_record_quality', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_record_quality_source', { p_organization_id: organization_id, p_record_id: record_id });
+      if (error) throw new Error(connectionError);
+      const result = { check: data ? checkRecordQuality(data, template) : null };
       return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
     }));
 

@@ -3067,6 +3067,10 @@ export type Database = {
         Args: { p_organization_id: string; p_record_id: string }
         Returns: Json
       }
+      get_mcp_record_quality_source: {
+        Args: { p_organization_id: string; p_record_id: string }
+        Returns: Json
+      }
       get_mcp_record_read_control: {
         Args: { p_organization_id: string }
         Returns: Json

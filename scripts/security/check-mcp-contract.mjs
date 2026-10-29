@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const stagingEndpoint = 'https://xhvvfovvlqzlkirpjocv.supabase.co/functions/v1/care-record-mcp';
 const maximumResponseBytes = 1_000_000;
-const toolNames = ['get_record', 'get_record_form', 'get_shift', 'list_approval_queue', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'propose_shift_change', 'search_people', 'submit_record_candidate'];
+const toolNames = ['check_record_quality', 'get_record', 'get_record_form', 'get_shift', 'list_approval_queue', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'propose_shift_change', 'search_people', 'submit_record_candidate'];
 
 export class McpContractError extends Error {
   constructor(code) { super(code); this.name = 'McpContractError'; }
@@ -29,6 +29,8 @@ export function validateToolContract(tools) {
   for (const key of ['shift_id', 'staff_id']) {
     if (proposal.properties?.[key]?.format !== 'uuid' || !proposal.required?.includes(key)) fail('proposal_input_changed');
   }
+  const quality = tools.find(tool => tool.name === 'check_record_quality').inputSchema;
+  if (quality.properties?.record_id?.format !== 'uuid' || !quality.required?.includes('record_id')) fail('record_input_changed');
   const workspace = tools.find(tool => tool.name === 'list_workspaces').inputSchema;
   if (Object.keys(workspace.properties ?? {}).length) fail('workspace_inputs_changed');
   const form = tools.find(tool => tool.name === 'get_record_form').inputSchema;
@@ -39,7 +41,7 @@ export function validateToolContract(tools) {
   const records = tools.find(tool => tool.name === 'list_records').inputSchema;
   const record = tools.find(tool => tool.name === 'get_record').inputSchema;
   const people = tools.find(tool => tool.name === 'search_people').inputSchema;
-  for (const schema of [form, submit, list, detail, people, records, record, queue, availability, proposal]) {
+  for (const schema of [form, submit, list, detail, people, records, record, queue, availability, proposal, quality]) {
     if (schema.properties?.organization_id?.type !== 'string'
       || schema.properties.organization_id.format !== 'uuid'
       || !schema.required?.includes('organization_id')) fail('organization_input_changed');

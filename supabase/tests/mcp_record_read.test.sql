@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(19);
+select plan(24);
 grant usage on schema extensions to mcp_import;
 grant execute on all functions in schema extensions to mcp_import;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values
@@ -28,7 +28,16 @@ select set_config('request.jwt.claims','{"sub":"17200000-0000-0000-0000-00000000
 select throws_ok($$select public.list_mcp_records('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28')$$,'42501','mcp_record_read_unavailable','default off rejects direct RPC');
 reset role;
 insert into private.mcp_record_read_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('17200000-0000-0000-0000-000000000002',true,'{}','17200000-0000-0000-0000-000000000001',now());
+insert into public.shifts(id,organization_id,client_id,start_at,end_at,status) values ('17800000-0000-0000-0000-000000000001','17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000006','2026-10-28 01:00+00','2026-10-28 02:00+00','published');
+update public.reports set shift_id='17800000-0000-0000-0000-000000000001' where id='17400000-0000-0000-0000-000000000001';
 set local role mcp_import;
+select is(public.get_mcp_record_quality_source('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001')->'shift', 'null'::jsonb, 'shift hidden when control disabled');
+reset role;
+insert into private.mcp_shift_read_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('17200000-0000-0000-0000-000000000002',true,'{}','17200000-0000-0000-0000-000000000001',now());
+set local role mcp_import;
+select is(public.get_mcp_record_quality_source('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001')->'shift'->>'id','17800000-0000-0000-0000-000000000001','authorized linked shift visible');
+select is(public.get_mcp_record_quality_source('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001')->'values'->>'note','synthetic','authorized record values visible');
+select throws_ok($$select public.get_mcp_record_quality_source('17200000-0000-0000-0000-000000000099','17400000-0000-0000-0000-000000000001')$$,'42501','mcp_record_read_unavailable','other organization denied');
 select is(jsonb_array_length(public.list_mcp_records('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28')->'records'),1,'authorized record listed');
 select is(public.get_mcp_record('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001')->'values'->>'note','synthetic','detail returns authorized content');
 select is(public.get_mcp_record('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001')->>'status','pending','detail returns status');
@@ -51,6 +60,7 @@ set local role mcp_import;
 select is(jsonb_array_length(public.list_mcp_records('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28')->'records'),0,'unassigned client excluded');
 select is((public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28')->'counts'->>'pending')::int, 0, 'queue excludes unassigned records from counts');
 select is(public.get_mcp_record('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001'),null::jsonb,'unassigned record hidden');
+select is(public.get_mcp_record_quality_source('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001'),null::jsonb,'quality source hides unassigned record');
 reset role;
 update public.organization_roles set permissions='{"records":{"view":"none"}}' where id='17400000-0000-0000-0000-000000000002';
 set local role mcp_import;
