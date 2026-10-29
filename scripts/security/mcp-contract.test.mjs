@@ -6,11 +6,11 @@ const endpoint = 'https://xhvvfovvlqzlkirpjocv.supabase.co/functions/v1/care-rec
 const token = 'synthetic-token';
 function contract() {
   const organization = { type: 'string', format: 'uuid' };
-  return ['list_workspaces', 'get_record_form', 'submit_record_candidate'].map(name => ({
+  return ['list_workspaces', 'get_record_form', 'submit_record_candidate', 'list_shifts', 'get_shift'].map(name => ({
     name, annotations: { readOnlyHint: name !== 'submit_record_candidate', openWorldHint: false, destructiveHint: false },
     inputSchema: name === 'list_workspaces' ? { type: 'object', properties: {} } : {
-      type: 'object', required: name === 'get_record_form' ? ['organization_id'] : ['organization_id', 'record'],
-      properties: { organization_id: organization, ...(name === 'submit_record_candidate' ? {
+      type: 'object', required: name === 'get_record_form' ? ['organization_id'] : name === 'list_shifts' ? ['organization_id', 'start_date', 'end_date'] : name === 'get_shift' ? ['organization_id', 'shift_id'] : ['organization_id', 'record'],
+      properties: { organization_id: organization, ...(name === 'list_shifts' ? { start_date: { type: 'string', format: 'date' }, end_date: { type: 'string', format: 'date' } } : {}), ...(name === 'get_shift' ? { shift_id: organization } : {}), ...(name === 'submit_record_candidate' ? {
         record: { type: 'object' }, send_anyway: { type: 'boolean', default: false },
         source_file_name: { type: 'string', maxLength: 255 },
       } : {}) },
@@ -44,7 +44,7 @@ test('checks JSON and SSE metadata contracts without calling business tools', as
   for (const sse of [false, true]) {
     const server = fakeServer({ sse });
     assert.deepEqual(await checkMcpContract({ token, fetchImpl: server.fetchImpl }), {
-      status: 'passed', checked: 'initialize/tools/list', toolCount: 3,
+      status: 'passed', checked: 'initialize/tools/list', toolCount: 5,
     });
     assert.deepEqual(server.calls.map(call => call.method), ['initialize', 'notifications/initialized', 'tools/list']);
   }

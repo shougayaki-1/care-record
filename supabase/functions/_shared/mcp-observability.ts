@@ -1,4 +1,4 @@
-type ToolName = 'list_workspaces' | 'get_record_form' | 'submit_record_candidate';
+type ToolName = 'list_workspaces' | 'get_record_form' | 'submit_record_candidate' | 'list_shifts' | 'get_shift';
 type ObservationOptions = { now?: () => number; traceId?: () => string; emit?: (line: string) => void };
 
 /** Operational counters only. Never serialize tool arguments, results or exceptions. */

@@ -88,6 +88,42 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
     }));
 
+    server.registerTool('list_shifts', {
+      title: 'シフトを検索',
+      description: '事業所のシフトをJSTの期間で検索します。氏名ではなく確認済みのIDで絞り込んでください。DBが正本であり、Google同期状況は別です。',
+      inputSchema: z.object({
+        organization_id: uuid, start_date: z.iso.date(), end_date: z.iso.date(),
+        client_id: uuid.optional(), staff_id: uuid.optional(), unassigned: z.boolean().default(false),
+        sync_status: z.enum(['synced', 'pending_upsert', 'pending_delete', 'failed']).optional(),
+        limit: z.number().int().min(1).max(100).default(50), offset: z.number().int().min(0).max(10000).default(0),
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('list_shifts', async () => {
+      const { data: enabled, error: checkError } = await supabase.rpc('check_mcp_shift_read', { p_organization_id: args.organization_id });
+      if (checkError || enabled !== true) throw new Error(connectionError);
+      const { data, error } = await supabase.rpc('list_mcp_shifts', {
+        p_organization_id: args.organization_id, p_start: args.start_date, p_end: args.end_date,
+        p_client_id: args.client_id ?? null, p_staff_id: args.staff_id ?? null, p_unassigned: args.unassigned,
+        p_sync_status: args.sync_status ?? null, p_limit: args.limit, p_offset: args.offset,
+      });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] };
+    }));
+
+    server.registerTool('get_shift', {
+      title: 'シフトの詳細を取得',
+      description: '確認済みのシフトIDから権限内の詳細を取得します。見つからない場合は別の対象を推測しないでください。',
+      inputSchema: z.object({ organization_id: uuid, shift_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async ({ organization_id, shift_id }) => observeMcpTool('get_shift', async () => {
+      const { data: enabled, error: checkError } = await supabase.rpc('check_mcp_shift_read', { p_organization_id: organization_id });
+      if (checkError || enabled !== true) throw new Error(connectionError);
+      const { data, error } = await supabase.rpc('get_mcp_shift', { p_organization_id: organization_id, p_shift_id: shift_id });
+      if (error) throw new Error(connectionError);
+      const result = { shift: data };
+      return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }));
+
     server.registerTool('submit_record_candidate', {
       title: 'AI読み取り記録を管理者へ送信',
       description: '紙/PDFの読み取り結果を管理者の確認待ちへ送信します。不明な項目は推測せずnullまたは省略し、warningsに記載してください。質問が返った場合は選択肢と自由記入で利用者に尋ね、回答を反映して再実行してください。利用者がこのまま送信を望む場合のみsend_anyway=trueを指定します。',
