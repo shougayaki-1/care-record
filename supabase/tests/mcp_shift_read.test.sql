@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(33);
+select plan(39);
 grant usage on schema extensions to mcp_import;
 grant execute on all functions in schema extensions to mcp_import;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values
@@ -39,6 +39,19 @@ set local role mcp_import;
 select is((select item->>'status' from jsonb_array_elements(public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000002','2026-10-31 14:30+00','2026-10-31 15:00+00')->'candidates') item where item->>'staff_id'='17600000-0000-0000-0000-000000000002'),'overlap','segment overlap detected');
 select is((select item->>'status' from jsonb_array_elements(public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000002','2026-10-31 15:00+00','2026-10-31 15:15+00')->'candidates') item where item->>'staff_id'='17600000-0000-0000-0000-000000000002'),'needs_confirmation','adjacent segment is not an overlap');
 select throws_ok($$select public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000099','2026-10-31 14:30+00','2026-10-31 15:00+00')$$,'42501','mcp_shift_read_unavailable','other organization denied');
+select is(public.propose_mcp_shift_change('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007','17600000-0000-0000-0000-000000000002','2026-11-02 14:30+00','2026-11-02 15:00+00')->>'status','needs_confirmation','proposal excludes its own shift');
+select is(public.propose_mcp_shift_change('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007','17600000-0000-0000-0000-000000000002','2026-11-02 14:30+00','2026-11-02 15:00+00')->>'assigned_to_client','true','proposal reports client assignment');
+select is(public.propose_mcp_shift_change('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007','17600000-0000-0000-0000-000000000002','2026-11-02 14:30+00','2026-11-02 15:00+00')->'before'->>'id','17200000-0000-0000-0000-000000000007','proposal includes original shift');
+reset role;
+savepoint proposal_fixture;
+insert into public.shifts(id,organization_id,client_id,start_at,end_at,status) values ('17700000-0000-0000-0000-000000000001','17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000006','2026-11-02 14:00+00','2026-11-02 15:00+00','published');
+insert into public.shift_staffs(shift_id,staff_id) values ('17700000-0000-0000-0000-000000000001','17600000-0000-0000-0000-000000000002');
+set local role mcp_import;
+select is(public.propose_mcp_shift_change('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007','17600000-0000-0000-0000-000000000002','2026-11-02 14:30+00','2026-11-02 15:00+00')->>'status','overlap','other shift conflicts with proposal');
+select is(public.get_mcp_shift('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007')->>'start_at',(public.propose_mcp_shift_change('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007','17600000-0000-0000-0000-000000000002','2026-11-02 14:30+00','2026-11-02 15:00+00')->'before'->>'start_at'),'proposal does not alter shift');
+reset role;
+rollback to savepoint proposal_fixture;
+set local role mcp_import;
 select is(public.check_mcp_shift_read('17200000-0000-0000-0000-000000000002'),true,'enabled preflight succeeds');
 select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-11-01','2026-11-01')->'shifts'),1,'JST boundary includes overnight shift');
 select is(public.get_mcp_shift('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007')->>'business_date','2026-10-31','business date is JST');
@@ -59,6 +72,7 @@ insert into public.shift_segments(id,shift_id,start_at,end_at) values ('17200000
 insert into public.shift_segment_staffs(segment_id,staff_id) values ('17200000-0000-0000-0000-000000000022','17200000-0000-0000-0000-000000000021');
 set local role mcp_import;
 select throws_ok($$select public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000002','2026-10-31 14:30+00','2026-10-31 15:00+00')$$,'42501','mcp_shift_read_unavailable','partial visibility denied');
+select throws_ok($$select public.propose_mcp_shift_change('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007','17600000-0000-0000-0000-000000000002','2026-11-02 14:30+00','2026-11-02 15:00+00')$$,'42501','mcp_shift_read_unavailable','proposal rejects partial visibility');
 select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-10-01','2026-11-30')->'shifts'),1,'assigned scope only returns assigned shift');
 select is(public.get_mcp_shift('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000008'),null::jsonb,'unassigned detail is hidden');
 select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-10-01','2026-11-30',p_staff_id:='17200000-0000-0000-0000-000000000021')->'shifts'),1,'segment staff filter finds shift');

@@ -1,4 +1,4 @@
-type ToolName = 'list_staff_availability' | 'list_approval_queue' | 'list_records' | 'get_record' | 'search_people' | 'list_workspaces' | 'get_record_form' | 'submit_record_candidate' | 'list_shifts' | 'get_shift';
+type ToolName = 'propose_shift_change' | 'list_staff_availability' | 'list_approval_queue' | 'list_records' | 'get_record' | 'search_people' | 'list_workspaces' | 'get_record_form' | 'submit_record_candidate' | 'list_shifts' | 'get_shift';
 type ObservationOptions = { now?: () => number; traceId?: () => string; emit?: (line: string) => void };
 
 /** Operational counters only. Never serialize tool arguments, results or exceptions. */

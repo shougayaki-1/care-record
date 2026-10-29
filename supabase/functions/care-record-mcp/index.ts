@@ -133,6 +133,17 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
     }));
 
+    server.registerTool('propose_shift_change', {
+      title: 'シフト変更案を確認',
+      description: '確認済みシフトとスタッフのID、変更案の日時を指定して重複と担当登録を確認します。1人の案であり他の担当者や区間への影響は要確認です。変更は実行しません。',
+      inputSchema: z.object({ organization_id: uuid, shift_id: uuid, staff_id: uuid, start_at: z.iso.datetime({ offset: true }), end_at: z.iso.datetime({ offset: true }) }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('propose_shift_change', async () => {
+      const { data, error } = await supabase.rpc('propose_mcp_shift_change', { p_organization_id: args.organization_id, p_shift_id: args.shift_id, p_staff_id: args.staff_id, p_start: args.start_at, p_end: args.end_at });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { proposal: data }, content: [{ type: 'text', text: JSON.stringify({ proposal: data }) }] };
+    }));
+
     server.registerTool('list_staff_availability', {
       title: 'スタッフの割当候補を確認',
       description: '指定時間のシフト重複と利用者の担当登録を確認します。勤務予定、移動時間、資格などは要確認です。割当は変更しません。日時はタイムゾーン付きで指定します。',
