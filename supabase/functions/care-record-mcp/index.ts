@@ -133,6 +133,17 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
     }));
 
+    server.registerTool('list_staff_availability', {
+      title: 'スタッフの割当候補を確認',
+      description: '指定時間のシフト重複と利用者の担当登録を確認します。勤務予定、移動時間、資格などは要確認です。割当は変更しません。日時はタイムゾーン付きで指定します。',
+      inputSchema: z.object({ organization_id: uuid, start_at: z.iso.datetime({ offset: true }), end_at: z.iso.datetime({ offset: true }), client_id: uuid.optional(), limit: z.number().int().min(1).max(100).default(50), offset: z.number().int().min(0).max(10000).default(0) }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('list_staff_availability', async () => {
+      const { data, error } = await supabase.rpc('list_mcp_staff_availability', { p_organization_id: args.organization_id, p_start: args.start_at, p_end: args.end_at, p_client_id: args.client_id ?? null, p_limit: args.limit, p_offset: args.offset });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] };
+    }));
+
     server.registerTool('list_shifts', {
       title: 'シフトを検索',
       description: '事業所のシフトをJSTの期間で検索します。氏名ではなく確認済みのIDで絞り込んでください。DBが正本であり、Google同期状況は別です。',

@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(25);
+select plan(33);
 grant usage on schema extensions to mcp_import;
 grant execute on all functions in schema extensions to mcp_import;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values
@@ -23,7 +23,22 @@ select throws_ok($$select public.list_mcp_shifts('17200000-0000-0000-0000-000000
 select throws_ok($$select public.get_mcp_shift('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007')$$,'42501','mcp_shift_read_unavailable','missing switch rejects detail');
 reset role;
 insert into private.mcp_shift_read_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('17200000-0000-0000-0000-000000000002',true,'{}','17200000-0000-0000-0000-000000000001',now());
+insert into private.mcp_person_search_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('17200000-0000-0000-0000-000000000002',true,'{}','17200000-0000-0000-0000-000000000001',now());
+insert into public.staffs(id,organization_id,name) values ('17600000-0000-0000-0000-000000000001','17200000-0000-0000-0000-000000000002','A synthetic'), ('17600000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000002','B synthetic');
+insert into public.shift_staffs(shift_id,staff_id) values ('17200000-0000-0000-0000-000000000007','17600000-0000-0000-0000-000000000001');
+insert into public.assignments(client_id,staff_id) values ('17200000-0000-0000-0000-000000000006','17600000-0000-0000-0000-000000000002');
 set local role mcp_import;
+select is(public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000002','2026-10-31 14:30+00','2026-10-31 15:00+00')->'candidates'->0->>'status','overlap','overlapping staff detected');
+select is(public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000002','2026-10-31 14:30+00','2026-10-31 15:00+00','17200000-0000-0000-0000-000000000006')->'candidates'->1->>'assigned_to_client','true','client assignment reported');
+select is(public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000002','2026-10-31 14:30+00','2026-10-31 15:00+00')->'candidates'->1->>'status','needs_confirmation','non-overlapping staff requires confirmation');
+select ok(jsonb_array_length(public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000002','2026-10-31 14:30+00','2026-10-31 15:00+00')->'unverified') > 0,'unknown conditions are disclosed');
+reset role;
+insert into public.shift_segments(id,shift_id,start_at,end_at) values ('17600000-0000-0000-0000-000000000003','17200000-0000-0000-0000-000000000007','2026-10-31 14:30+00','2026-10-31 15:00+00');
+insert into public.shift_segment_staffs(segment_id,staff_id) values ('17600000-0000-0000-0000-000000000003','17600000-0000-0000-0000-000000000002');
+set local role mcp_import;
+select is((select item->>'status' from jsonb_array_elements(public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000002','2026-10-31 14:30+00','2026-10-31 15:00+00')->'candidates') item where item->>'staff_id'='17600000-0000-0000-0000-000000000002'),'overlap','segment overlap detected');
+select is((select item->>'status' from jsonb_array_elements(public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000002','2026-10-31 15:00+00','2026-10-31 15:15+00')->'candidates') item where item->>'staff_id'='17600000-0000-0000-0000-000000000002'),'needs_confirmation','adjacent segment is not an overlap');
+select throws_ok($$select public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000099','2026-10-31 14:30+00','2026-10-31 15:00+00')$$,'42501','mcp_shift_read_unavailable','other organization denied');
 select is(public.check_mcp_shift_read('17200000-0000-0000-0000-000000000002'),true,'enabled preflight succeeds');
 select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-11-01','2026-11-01')->'shifts'),1,'JST boundary includes overnight shift');
 select is(public.get_mcp_shift('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007')->>'business_date','2026-10-31','business date is JST');
@@ -31,7 +46,7 @@ select is(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-11
 select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-10-01','2026-11-30',p_limit:=1)->'shifts'),1,'page limit');
 select is(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-10-01','2026-11-30',p_limit:=1)->>'has_more','true','page has more');
 select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-11-01','2026-11-07')->'shifts'),2,'week includes overlap and cancellation');
-select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-11-01','2026-11-30',p_unassigned:=true)->'shifts'),2,'unassigned filter');
+select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-11-01','2026-11-30',p_unassigned:=true)->'shifts'),1,'unassigned filter');
 select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-11-01','2026-11-30',p_sync_status:='synced')->'shifts'),0,'sync filter');
 select throws_ok($$select public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-01-01','2028-01-01')$$,'22023','invalid_shift_query','range bounded');
 select throws_ok($$select public.get_mcp_shift('17200000-0000-0000-0000-000000000099','17200000-0000-0000-0000-000000000007')$$,'42501','mcp_shift_read_unavailable','other organization rejects');
@@ -43,10 +58,11 @@ insert into public.staffs(id,organization_id,user_id,name) values ('17200000-000
 insert into public.shift_segments(id,shift_id,start_at,end_at) values ('17200000-0000-0000-0000-000000000022','17200000-0000-0000-0000-000000000007','2026-10-31 14:30+00','2026-10-31 15:30+00');
 insert into public.shift_segment_staffs(segment_id,staff_id) values ('17200000-0000-0000-0000-000000000022','17200000-0000-0000-0000-000000000021');
 set local role mcp_import;
+select throws_ok($$select public.list_mcp_staff_availability('17200000-0000-0000-0000-000000000002','2026-10-31 14:30+00','2026-10-31 15:00+00')$$,'42501','mcp_shift_read_unavailable','partial visibility denied');
 select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-10-01','2026-11-30')->'shifts'),1,'assigned scope only returns assigned shift');
 select is(public.get_mcp_shift('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000008'),null::jsonb,'unassigned detail is hidden');
 select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-10-01','2026-11-30',p_staff_id:='17200000-0000-0000-0000-000000000021')->'shifts'),1,'segment staff filter finds shift');
-select is(jsonb_array_length(public.get_mcp_shift('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007')->'segments'),1,'segment is included');
+select is(jsonb_array_length(public.get_mcp_shift('17200000-0000-0000-0000-000000000002','17200000-0000-0000-0000-000000000007')->'segments'),2,'segments are included');
 select is(jsonb_array_length(public.list_mcp_shifts('17200000-0000-0000-0000-000000000002','2026-10-01','2026-11-30',p_unassigned:=true)->'shifts'),0,'assigned scope cannot see unrelated unassigned shift');
 reset role;
 insert into public.assignments(client_id,staff_id) values ('17200000-0000-0000-0000-000000000006','17200000-0000-0000-0000-000000000021');

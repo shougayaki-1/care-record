@@ -3129,6 +3129,17 @@ export type Database = {
         }
         Returns: Json
       }
+      list_mcp_staff_availability: {
+        Args: {
+          p_client_id?: string
+          p_end: string
+          p_limit?: number
+          p_offset?: number
+          p_organization_id: string
+          p_start: string
+        }
+        Returns: Json
+      }
       list_mcp_workspaces: {
         Args: never
         Returns: {
