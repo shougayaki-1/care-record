@@ -6,11 +6,11 @@ const endpoint = 'https://xhvvfovvlqzlkirpjocv.supabase.co/functions/v1/care-rec
 const token = 'synthetic-token';
 function contract() {
   const organization = { type: 'string', format: 'uuid' };
-  return ['list_workspaces', 'get_record_form', 'submit_record_candidate', 'list_shifts', 'get_shift', 'search_people', 'list_records', 'get_record', 'list_approval_queue'].map(name => ({
+  return ['list_workspaces', 'get_record_form', 'submit_record_candidate', 'list_shifts', 'get_shift', 'search_people', 'list_records', 'get_record', 'list_approval_queue', 'list_staff_availability'].map(name => ({
     name, annotations: { readOnlyHint: name !== 'submit_record_candidate', openWorldHint: false, destructiveHint: false },
     inputSchema: name === 'list_workspaces' ? { type: 'object', properties: {} } : {
-      type: 'object', required: name === 'search_people' ? ['organization_id', 'kind', 'name'] : name === 'get_record_form' ? ['organization_id'] : ['list_shifts', 'list_records', 'list_approval_queue'].includes(name) ? ['organization_id', 'start_date', 'end_date'] : name === 'get_record' ? ['organization_id', 'record_id'] : name === 'get_shift' ? ['organization_id', 'shift_id'] : ['organization_id', 'record'],
-      properties: { organization_id: organization, ...(name === 'search_people' ? { name: { type: 'string' }, kind: { enum: ['client', 'staff'] } } : {}), ...(['list_shifts', 'list_records', 'list_approval_queue'].includes(name) ? { start_date: { type: 'string', format: 'date' }, end_date: { type: 'string', format: 'date' } } : {}), ...(name === 'get_shift' ? { shift_id: organization } : {}), ...(name === 'get_record' ? { record_id: organization } : {}), ...(name === 'submit_record_candidate' ? {
+      type: 'object', required: name === 'list_staff_availability' ? ['organization_id', 'start_at', 'end_at'] : name === 'search_people' ? ['organization_id', 'kind', 'name'] : name === 'get_record_form' ? ['organization_id'] : ['list_shifts', 'list_records', 'list_approval_queue'].includes(name) ? ['organization_id', 'start_date', 'end_date'] : name === 'get_record' ? ['organization_id', 'record_id'] : name === 'get_shift' ? ['organization_id', 'shift_id'] : ['organization_id', 'record'],
+      properties: { organization_id: organization, ...(name === 'list_staff_availability' ? { start_at: { type: 'string', format: 'date-time' }, end_at: { type: 'string', format: 'date-time' } } : {}), ...(name === 'search_people' ? { name: { type: 'string' }, kind: { enum: ['client', 'staff'] } } : {}), ...(['list_shifts', 'list_records', 'list_approval_queue'].includes(name) ? { start_date: { type: 'string', format: 'date' }, end_date: { type: 'string', format: 'date' } } : {}), ...(name === 'get_shift' ? { shift_id: organization } : {}), ...(name === 'get_record' ? { record_id: organization } : {}), ...(name === 'submit_record_candidate' ? {
         record: { type: 'object' }, send_anyway: { type: 'boolean', default: false },
         source_file_name: { type: 'string', maxLength: 255 },
       } : {}) },
@@ -44,7 +44,7 @@ test('checks JSON and SSE metadata contracts without calling business tools', as
   for (const sse of [false, true]) {
     const server = fakeServer({ sse });
     assert.deepEqual(await checkMcpContract({ token, fetchImpl: server.fetchImpl }), {
-      status: 'passed', checked: 'initialize/tools/list', toolCount: 9,
+      status: 'passed', checked: 'initialize/tools/list', toolCount: 10,
     });
     assert.deepEqual(server.calls.map(call => call.method), ['initialize', 'notifications/initialized', 'tools/list']);
   }
