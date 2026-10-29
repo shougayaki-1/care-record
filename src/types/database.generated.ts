@@ -2984,6 +2984,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      disable_mcp_person_search: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       disable_mcp_shift_read: {
         Args: { p_organization_id: string }
         Returns: undefined
@@ -2997,6 +3001,10 @@ export type Database = {
         Returns: undefined
       }
       enable_mcp_import: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_person_search: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
@@ -3040,6 +3048,10 @@ export type Database = {
       }
       get_invitation_preview: { Args: { p_code: string }; Returns: Json }
       get_mcp_import_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_person_search_control: {
         Args: { p_organization_id: string }
         Returns: Json
       }
@@ -3284,6 +3296,16 @@ export type Database = {
       save_shift_pattern_atomic: {
         Args: { p_org_id: string; p_pattern_id: string; p_payload: Json }
         Returns: string
+      }
+      search_mcp_people: {
+        Args: {
+          p_kind: string
+          p_limit?: number
+          p_name: string
+          p_offset?: number
+          p_organization_id: string
+        }
+        Returns: Json
       }
       soft_delete_organization: { Args: { p_org_id: string }; Returns: string }
       soft_delete_reports_authorized: {
