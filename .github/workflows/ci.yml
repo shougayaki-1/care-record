@@ -99,6 +99,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:unit
+      - name: Verify audit operator tooling offline
+        run: node --test scripts/audit/*.test.mjs
 
   build:
     name: Production build
@@ -155,6 +157,8 @@ jobs:
         run: supabase test db
       - name: Lint database functions and schema
         run: supabase db lint --local --level warning --fail-on warning
+      - name: Verify operator-run audit cutover on disposable logical restores
+        run: node scripts/db/test-audit-cutover.mjs "supabase_db_care-record-owner-add-test-${GITHUB_RUN_ID}a${GITHUB_RUN_ATTEMPT}"
       - name: Verify concurrent owner operations
         run: node scripts/db/test-owner-add-concurrency.mjs "supabase_db_care-record-owner-add-test-${GITHUB_RUN_ID}a${GITHUB_RUN_ATTEMPT}"
       - name: Verify internal-work concurrent retries and rollback

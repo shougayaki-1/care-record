@@ -12,7 +12,9 @@ export type ObjectRef = z.infer<typeof refSchema>;
 export const headSchema = z.object({ kind: z.literal('head'), scope, sequence: decimal, hash: z.string(), cutoverId: z.uuid() });
 export const eventSchema = z.object({
   kind: z.enum(['v1', 'v2']), version: z.number().int(), scope, sequence: decimal,
-  id: z.uuid(), eventId: z.uuid(), hash: digest.nullable(), previousHash: z.string().nullable(),
+  // Preserve malformed historical v1 hashes too. v2 validates its exact SHA-256
+  // against canonical bytes in the publisher; v1 anomalies stay unresolved.
+  id: z.uuid(), eventId: z.uuid(), hash: z.string().nullable(), previousHash: z.string().nullable(),
   cutoverId: z.uuid().nullable(), inventory: z.string(), canonical: z.string().nullable(),
 });
 export const itemSchema = z.union([headSchema, eventSchema]);

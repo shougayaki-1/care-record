@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 test('destructive concurrency fixtures refuse development and unrelated containers', () => {
-  for (const script of ['test-owner-add-concurrency.mjs', 'test-internal-work-concurrency.mjs', 'check-upgrade-fixture.mjs', 'test-audit-v2-concurrency.mjs']) {
+  for (const script of ['test-owner-add-concurrency.mjs', 'test-internal-work-concurrency.mjs', 'check-upgrade-fixture.mjs', 'test-audit-v2-concurrency.mjs', 'test-audit-cutover.mjs']) {
     for (const container of [undefined, 'supabase_db_care-record', 'supabase_db_production', 'supabase_db_care-record-owner-add-test-bad;name']) {
       const result = spawnSync(process.execPath, [`scripts/db/${script}`, ...(container ? [container] : [])], {
         encoding: 'utf8',
