@@ -146,6 +146,29 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
     }));
 
+    server.registerTool('propose_shift_create', {
+      title: 'シフト作成内容を確認',
+      description: '確認済みの利用者・スタッフIDと日時から確認待ちの案を作成します。CareRecord画面で本人が確認するまでシフトは登録されません。',
+      inputSchema: z.object({ organization_id: uuid, client_id: uuid, staff_id: uuid, start_at: z.iso.datetime({ offset: true }), end_at: z.iso.datetime({ offset: true }) }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('propose_shift_create', async () => {
+      const { data, error } = await supabase.rpc('propose_mcp_shift_create', { p_organization_id: args.organization_id, p_client_id: args.client_id, p_staff_id: args.staff_id, p_start: args.start_at, p_end: args.end_at });
+      if (error) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data?.proposal_id ? `${appOrigin}/app/mcp-shift-confirmation/${data.proposal_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
+    server.registerTool('get_shift_create_result', {
+      title: 'シフト作成結果を確認',
+      description: '確認待ちの案について、本人による確認後の作成結果とGoogle同期状態を取得します。',
+      inputSchema: z.object({ organization_id: uuid, proposal_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_shift_create_result', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_shift_create_result', { p_organization_id: args.organization_id, p_proposal_id: args.proposal_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
+    }));
+
     server.registerTool('propose_shift_change', {
       title: 'シフト変更案を確認',
       description: '確認済みシフトとスタッフのID、変更案の日時を指定して重複と担当登録を確認します。1人の案であり他の担当者や区間への影響は要確認です。変更は実行しません。',
