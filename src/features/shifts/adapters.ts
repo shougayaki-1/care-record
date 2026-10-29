@@ -32,8 +32,12 @@ export type ShiftPatternSource = Omit<PatternQueryRow, 'clients' | 'shift_patter
 
 /** Preserve nullable relations and omit report links whose target is missing or deleted. */
 export function toShiftListItem(shift: ShiftListSource) {
+    const { shift_segments, staff_filter, segment_filter, ...listShift } = shift as ShiftListSource & {
+        staff_filter?: unknown; segment_filter?: unknown;
+    };
+    void shift_segments; void staff_filter; void segment_filter;
     return {
-        ...shift,
+        ...listShift,
         clients: shift.clients,
         shift_staffs: shift.shift_staffs.map(staff => ({ staff_id: staff.staff_id, staffs: staff.staffs })),
         report_statuses: shift.report_shifts.flatMap(link => {
