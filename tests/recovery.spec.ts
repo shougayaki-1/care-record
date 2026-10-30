@@ -97,7 +97,7 @@ test('通常の新規登録から未所属のセットアップへ進み、事�
     await page.getByRole('button', { name: '次へ進む' }).click();
   }
   await expect(page.getByText('新しい事業所を作成する')).toBeVisible();
-  await expect(page.getByText('既存の事業所に参加する')).toBeVisible();
+  await expect(page.getByRole('button', { name: '既存の事業所に参加する 招待コードをお持ちの方はこちら' })).toBeVisible();
   await page.getByText('新しい事業所を作成する').click();
   await page.getByLabel('事業所名').fill(user.orgName);
   await page.getByRole('button', { name: '作成して開始' }).click();

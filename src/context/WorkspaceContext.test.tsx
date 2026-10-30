@@ -60,4 +60,36 @@ describe('workspace initialization', () => {
     await act(async () => { resolveMembers({ data: [], error: null }); });
     expect(screen.getByText(/タイムアウト/)).toBeTruthy();
   });
+
+  it('gives a newer lookup its own timeout even while an earlier lookup is pending', async () => {
+    const pending: Array<(value: unknown) => void> = [];
+    mocks.query.mockImplementation((table: string) => table === 'profiles'
+      ? Promise.resolve({ data: null, error: null }) : new Promise(resolve => { pending.push(resolve); }));
+    render(<WorkspaceProvider><Status /></WorkspaceProvider>);
+    await act(async () => { mocks.callback!('INITIAL_SESSION', session); await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(14000); });
+    await act(async () => { mocks.callback!('SIGNED_IN', session); await vi.advanceTimersByTimeAsync(0); });
+    expect(pending).toHaveLength(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.queryByText(/タイムアウト/)).toBeNull();
+    await act(async () => { pending[1]({ data: [], error: null }); });
+    expect(screen.getByText('no_membership')).toBeTruthy();
+    await act(async () => { pending[0]({ data: [], error: null }); });
+    expect(screen.getByText('no_membership')).toBeTruthy();
+  });
+
+
+  it('times out a newer pending lookup only after its own deadline', async () => {
+    mocks.query.mockImplementation((table: string) => table === 'profiles'
+      ? Promise.resolve({ data: null, error: null }) : new Promise(() => {}));
+    render(<WorkspaceProvider><Status /></WorkspaceProvider>);
+    await act(async () => { mocks.callback!('INITIAL_SESSION', session); await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(14000); });
+    await act(async () => { mocks.callback!('SIGNED_IN', session); await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(14999); });
+    expect(screen.queryByText(/タイムアウト/)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.getByText(/タイムアウト/)).toBeTruthy();
+  });
+
 });

@@ -43,12 +43,14 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const [currentOrg, setCurrentOrg] = useState<Workspace | null>(null);
   const [orgList, setOrgList] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(shouldLoadWorkspace);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [status, setStatus] = useState<WorkspaceLoadStatus>(shouldLoadWorkspace ? 'loading' : 'session_expired');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
   const fetchWorkspaces = useCallback(async (knownSession?: Session | null) => {
     const seq = ++fetchSeq.current;
+    setLoadAttempt(seq);
     const isCurrent = () => seq === fetchSeq.current;
     try {
       setLoading(true);
@@ -214,6 +216,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   useEffect(() => {
     if (!shouldLoadWorkspace || !loading) return;
     const timer = setTimeout(() => {
+      if (fetchSeq.current !== loadAttempt) return;
       fetchSeq.current += 1;
       loadedWorkspaceUserId.current = null;
       setCurrentOrg(null);
@@ -223,7 +226,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       setLoading(false);
     }, 15000);
     return () => clearTimeout(timer);
-  }, [loading, shouldLoadWorkspace]);
+  }, [loading, shouldLoadWorkspace, loadAttempt]);
 
   const refreshWorkspace = useCallback(async () => {
     await fetchWorkspaces();
