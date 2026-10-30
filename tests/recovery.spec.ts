@@ -83,3 +83,24 @@ test('所属なしのアカウントからログアウトし、別アカウン�
   await login(page, member.email, member.password);
   await expect(page.getByRole('button', { name: member.orgName })).toBeVisible();
 });
+
+test('通常の新規登録から未所属のセットアップへ進み、事業所を作成できる', async ({ page }) => {
+  const user = generateUser();
+  await page.goto('/');
+  await signUp(page, user.email, user.password);
+  await acceptTerms(page);
+  const welcome = page.getByText('ようこそ！');
+  const choice = page.getByText('事業所の設定');
+  await expect(welcome.or(choice).first()).toBeVisible();
+  if (await welcome.isVisible()) {
+    await page.getByLabel('氏名').fill(user.name);
+    await page.getByRole('button', { name: '次へ進む' }).click();
+  }
+  await expect(page.getByText('新しい事業所を作成する')).toBeVisible();
+  await expect(page.getByText('既存の事業所に参加する')).toBeVisible();
+  await page.getByText('新しい事業所を作成する').click();
+  await page.getByLabel('事業所名').fill(user.orgName);
+  await page.getByRole('button', { name: '作成して開始' }).click();
+  await expect(page).toHaveURL(/\/app\/record$/);
+  await expect(page.getByRole('button', { name: user.orgName })).toBeVisible();
+});
