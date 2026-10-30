@@ -180,3 +180,10 @@ rollbackでschemaを戻してv1書込を再開しない。失敗時は新検証w
 - Google Cloud Storage Node.js SDK: [FileのpreconditionOpts/ifGenerationMatch](https://github.com/googleapis/nodejs-storage/blob/main/src/file.ts)。実bucketのlock状態は配備時の設定証跡で確認する。
 
 - Google Cloud Storage IAM（自己レビュー追加）: [Object Creator/Viewerの権限](https://docs.cloud.google.com/storage/docs/access-control/iam-roles)。2026-10-24に公式資料で確認。create-onlyの役割だけでは既存object読取はできないため、照合に必要なget/listを分離して設計する。
+
+### Issue #154 の途中検証（2026-10-30）
+
+- super-admin画面は `getAllOrganizations` の組織名・作成日・人数集計のみを表示し、`deleteOrganization` は拒否する。`serviceRoleForPlatformMetadata` の利用は同 Action のみで、台帳と一致する。
+- Action unit は問い合わせ先・列・返却項目の許可リストと削除拒否を確認する。認証 guard の unit は super_admin profile と通常 profile を対照する。
+- 合成 owner と非所属 super-admin を使う実DB試験では、記録・値・画像 metadata の owner 読取と super-admin 拒否、autosave RPC 拒否を確認した。Storage object の owner 読取は失敗し、原因を #210 に分離した。owner 対照は TODO として保持する。
+- 未検証: 実 REST/RPC HTTP と Storage 署名URL発行・取得、発行済み署名URLの扱い、実 member/owner を用いた Action 呼出し。Storage の拒否は owner 対照が成立しないため権限境界の証明にはならない。
