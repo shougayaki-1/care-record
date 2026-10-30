@@ -11,6 +11,8 @@ import {
   getReportHours,
   isSlotClipped,
   namesDiffer,
+  summarizeStatisticsRows,
+  summarizeMonthlyStatistics,
   type AggregatedRow,
 } from './statisticsAggregation';
 
@@ -81,6 +83,50 @@ describe('aggregateByTab', () => {
       statusCounts: { pending: 1, remanded: 0 },
     }]);
     expect(result.byStaff.detailItemsPerStaff.佐藤).toHaveLength(3);
+    expect(summarizeStatisticsRows(result.byStaff.rows)).toEqual({
+      plannedHours: 2, actualHours: 2, serviceHours: 1, travelHours: 0.5,
+      internalHours: 0.5, pending: 1, remanded: 0,
+    });
+    expect(summarizeStatisticsRows(result.byClient.rows)).toEqual({
+      plannedHours: 2, actualHours: 1.5, serviceHours: 1, travelHours: 0.5,
+      internalHours: 0, pending: 1, remanded: 0,
+    });
+  });
+
+  it('counts a shared visit per staff but once per client, including month clipping and internal work', () => {
+    const result = aggregateByTab({
+      rawShifts: [{
+        id: 'shift', start_at: '2026-06-30T23:00:00+09:00', end_at: '2026-07-01T02:00:00+09:00',
+        status: 'published', client_id: 'client', clients: { name: 'Synthetic client' },
+        shift_staffs: [{ staff_id: 'a', staffs: { name: 'A' } }, { staff_id: 'b', staffs: { name: 'B' } }],
+      }],
+      rawReports: [{
+        id: 'report', start_at: '2026-07-01T00:00:00+09:00', end_at: '2026-07-01T02:00:00+09:00',
+        status: 'pending', client_id: 'client', clients: { name: 'Synthetic client' },
+        report_values: [{ data: { service_time: 1, travel_time: 0.5 } }],
+        report_actual_staffs: [{ staff: { name: 'A' } }, { staff: { name: 'B' } }],
+      }],
+      internalWorkRecords: [{ id: 'internal', title: 'Synthetic', start_at: '2026-07-02T10:00:00+09:00',
+        end_at: '2026-07-02T10:30:00+09:00', work_hours: 0.5, status: 'remanded', staffs: { name: 'A' } }],
+      targetMonth: '2026-07', premiumTypes: [],
+    });
+    expect(summarizeStatisticsRows(result.byStaff.rows)).toEqual({ plannedHours: 4, actualHours: 3.5,
+      serviceHours: 2, travelHours: 1, internalHours: 0.5, pending: 2, remanded: 1 });
+    expect(summarizeStatisticsRows(result.byClient.rows)).toEqual({ plannedHours: 2, actualHours: 1.5,
+      serviceHours: 1, travelHours: 0.5, internalHours: 0, pending: 1, remanded: 0 });
+  });
+});
+
+describe('summarizeMonthlyStatistics', () => {
+  it('returns only aggregate values, without names or detail rows', () => {
+    const result = summarizeMonthlyStatistics({
+      rawShifts: [{ id: 'shift', start_at: '2026-07-01T09:00:00+09:00', end_at: '2026-07-01T10:00:00+09:00',
+        status: 'published', client_id: 'client', clients: { name: 'Synthetic client' },
+        shift_staffs: [{ staff_id: 'staff', staffs: { name: 'Synthetic staff' } }] }],
+      rawReports: [], internalWorkRecords: [], targetMonth: '2026-07', premiumTypes: [],
+    });
+    expect(result).toMatchObject({ month: '2026-07', byStaff: { plannedHours: 1 }, byClient: { plannedHours: 1 } });
+    expect(JSON.stringify(result)).not.toMatch(/Synthetic|staff_id|client_id|detailItems/);
   });
 });
 
