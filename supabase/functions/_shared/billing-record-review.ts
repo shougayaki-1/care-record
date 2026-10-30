@@ -16,9 +16,9 @@ export async function reviewBillingRecords(
 ) {
   const checks = await Promise.all(page.records.map(async (record) => {
     const source = await getSource(record.id);
-    // Access or data may change between the list and the individual read.
-    if (!source) return { record_id: record.id, service_date: record.service_date, status: record.status,
-      issues: ['記録を再確認できませんでした'], check_status: 'needs_confirmation' as const };
+    // The record may have become inaccessible since the list was read. Do not
+    // return the stale identifier or status after an authorization change.
+    if (!source) throw new Error('記録を再確認できませんでした。もう一度お試しください。');
     const check = checkRecordQuality(source, template);
     const issues = [...check.issues];
     if (record.status !== 'approved') issues.unshift('記録の承認状態を確認してください');

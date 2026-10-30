@@ -16,9 +16,9 @@ describe('billing record review', () => {
     expect(result).toMatchObject({ scanned: 1, has_more: true });
     expect(JSON.stringify(result)).not.toContain('travel_expenses');
   });
-  it('marks a record unavailable between reads for review', async () => {
-    const result = await reviewBillingRecords({ records: [{ id: 'one', service_date: null, status: 'approved' }], has_more: false, limit: 1, offset: 0 }, async () => null, template);
-    expect(result.records[0].issues).toContain('記録を再確認できませんでした');
+  it('does not return a stale record when access changes between reads', async () => {
+    await expect(reviewBillingRecords({ records: [{ id: 'one', service_date: null, status: 'approved' }], has_more: false, limit: 1, offset: 0 }, async () => null, template))
+      .rejects.toThrow('記録を再確認できませんでした。もう一度お試しください。');
   });
   it('does not list a complete approved record as a problem', async () => {
     const complete = { ...source, values: { ...source.values, note: 'synthetic' }, shift: { ...source.shift, end_at: source.end_at } };
