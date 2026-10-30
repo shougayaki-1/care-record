@@ -13,6 +13,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import { OrganizationBasics } from '@/components/settings/OrganizationBasics';
 import { GoogleIntegrationSettings } from '@/components/settings/GoogleIntegrationSettings';
 import { McpImportSettings } from '@/components/settings/McpImportSettings';
+import { McpKpiSettings } from '@/components/settings/McpKpiSettings';
 import { OrganizationDangerSettings } from '@/components/settings/OrganizationDangerSettings';
 
 import { supabase } from '@/lib/supabase';
@@ -435,6 +436,7 @@ function SettingsContent() {
                             handleForceResyncCalendar={handleForceResyncCalendar}
                         />
                         {canManageIntegrations && <McpImportSettings key={currentOrg.id} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpKpiSettings key={currentOrg.id} organizationId={currentOrg.id} />}
                         </>
                     )}
 
