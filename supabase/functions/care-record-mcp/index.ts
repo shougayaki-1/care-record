@@ -7,6 +7,7 @@ import formTemplate from '../_shared/default-form-template.json' with { type: 'j
 import { buildClarificationQuestions } from '../_shared/clarify-candidate.ts';
 import { normalizeDate, normalizeTime, normalizeValues, type FormItem } from '../_shared/validate-candidate.ts';
 import { checkRecordQuality } from '../_shared/record-quality.ts';
+import { reviewBillingRecords } from '../_shared/billing-record-review.ts';
 import { observeMcpTool } from '../_shared/mcp-observability.ts';
 
 const template = formTemplate as FormItem[];
@@ -144,6 +145,33 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       if (error) throw new Error(connectionError);
       const result = { check: data ? checkRecordQuality(data, template) : null };
       return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }));
+
+    server.registerTool('review_billing_records', {
+      title: '請求前の記録を確認',
+      description: '指定期間の権限内の記録について、入力不備、予定との差、承認状態を要確認として一覧します。記録や請求は変更しません。記録のない予定はこの一覧には含まれません。',
+      inputSchema: z.object({ organization_id: uuid, start_date: z.iso.date(), end_date: z.iso.date(), limit: z.number().int().min(1).max(20).default(20), offset: z.number().int().min(0).max(10000).default(0) }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('review_billing_records', async () => {
+      const { data, error } = await supabase.rpc('list_mcp_records', { p_organization_id: args.organization_id, p_start: args.start_date, p_end: args.end_date, p_limit: args.limit, p_offset: args.offset });
+      if (error || !data) throw new Error(connectionError);
+      const result = await reviewBillingRecords(data, async (id) => {
+        const { data: source, error: sourceError } = await supabase.rpc('get_mcp_record_quality_source', { p_organization_id: args.organization_id, p_record_id: id });
+        if (sourceError) throw new Error(connectionError);
+        return source;
+      }, template);
+      return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }));
+
+    server.registerTool('list_billing_unrecorded_shifts', {
+      title: '記録の対応が未確認の予定を一覧',
+      description: '指定期間の予定のうち、記録の紐付けがないものや記録のない区間を要確認として返します。事業所全体の記録閲覧権限とシフト閲覧が必要です。分割記録や紐付け方法を確認し、記録漏れや請求可否を断定しないでください。',
+      inputSchema: z.object({ organization_id: uuid, start_date: z.iso.date(), end_date: z.iso.date(), limit: z.number().int().min(1).max(20).default(20), offset: z.number().int().min(0).max(10000).default(0) }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('list_billing_unrecorded_shifts', async () => {
+      const { data, error } = await supabase.rpc('list_mcp_unrecorded_shifts', { p_organization_id: args.organization_id, p_start: args.start_date, p_end: args.end_date, p_limit: args.limit, p_offset: args.offset });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] };
     }));
 
     server.registerTool('propose_shift_change', {
