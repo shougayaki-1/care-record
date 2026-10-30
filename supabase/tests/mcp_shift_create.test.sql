@@ -29,6 +29,12 @@ select set_config('test.proposal',public.propose_mcp_shift_create('17900000-0000
 select is(public.get_mcp_shift_create_result('17900000-0000-0000-0000-000000000002',current_setting('test.proposal')::uuid)->>'status','confirmation_required','no confirmation does not create');
 reset role;
 select is((select count(*)::integer from public.shifts where organization_id='17900000-0000-0000-0000-000000000002'),0,'no shift before confirmation');
+update public.organizations set deleted_at=clock_timestamp() where id='17900000-0000-0000-0000-000000000002';
+set local role authenticated;
+select set_config('request.jwt.claims','{"sub":"17900000-0000-0000-0000-000000000001","role":"authenticated","session_id":"mcp179-browser"}',true);
+select is(public.get_mcp_shift_create_proposal(current_setting('test.proposal')::uuid),null::jsonb,'deleted organization proposal hidden');
+reset role;
+update public.organizations set deleted_at=null where id='17900000-0000-0000-0000-000000000002';
 update public.organization_members set role='member' where organization_id='17900000-0000-0000-0000-000000000002' and user_id='17900000-0000-0000-0000-000000000001';
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"17900000-0000-0000-0000-000000000001","role":"authenticated","session_id":"mcp179-browser"}',true);
