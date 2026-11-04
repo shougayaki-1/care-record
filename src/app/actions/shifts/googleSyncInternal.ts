@@ -2,7 +2,7 @@ import 'server-only';
 
 import { withRetry } from '@/utils/googleRetry';
 
-import { type calendar_v3, google } from 'googleapis';
+import { type calendar_v3, google } from '@/lib/googleApis';
 
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
 import { logExternalError } from '@/utils/errors';

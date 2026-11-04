@@ -7,7 +7,7 @@ import { createSessionClient, assertOrgRole, assertOrgPermission, assertOwner } 
 import { recordAuditEvent } from '@/utils/supabase/audit';
 import { decryptGoogleToken } from '@/utils/googleTokenCrypto';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';
-import { google } from 'googleapis';
+import { google } from '@/lib/googleApis';
 import { consumeReauthGrant } from '@/utils/supabase/reauth';
 
 export async function updateOrganizationName(orgId: string, name: string) {
