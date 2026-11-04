@@ -24,7 +24,7 @@ begin
   select array_agg(p.proname order by p.proname) into allowed_functions
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and has_function_privilege('mcp_import', p.oid, 'EXECUTE');
-  if allowed_functions is distinct from array['check_mcp_shift_read', 'get_mcp_record', 'get_mcp_record_quality_source', 'get_mcp_self_staff_names', 'get_mcp_shift', 'list_mcp_approval_queue', 'list_mcp_records', 'list_mcp_shifts', 'list_mcp_staff_availability', 'list_mcp_unrecorded_shifts', 'list_mcp_workspaces', 'propose_mcp_shift_change', 'search_mcp_people', 'submit_mcp_candidate'] then
+  if allowed_functions is distinct from array['check_mcp_shift_read', 'get_mcp_kpi_source', 'get_mcp_record', 'get_mcp_record_quality_source', 'get_mcp_self_staff_names', 'get_mcp_shift', 'list_mcp_approval_queue', 'list_mcp_records', 'list_mcp_shifts', 'list_mcp_staff_availability', 'list_mcp_unrecorded_shifts', 'list_mcp_workspaces', 'propose_mcp_shift_change', 'search_mcp_people', 'submit_mcp_candidate'] then
     raise exception 'Unexpected MCP RPC privileges: %', allowed_functions;
   end if;
   if has_table_privilege('authenticated', 'public.ai_import_candidates', 'INSERT')

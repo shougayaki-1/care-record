@@ -18,6 +18,7 @@ import {
     aggregateByTab,
     buildShiftVarianceRows,
     buildStatisticsCsv,
+    summarizeStatisticsRows,
     type PremiumComparison,
     type StaffDetailItem,
     type ShiftVarianceRow,
@@ -91,18 +92,7 @@ export default function StatisticsPage() {
     );
 
     const aggregatedTotals = useMemo(() => {
-        return visibleAggregatedData.rows.reduce(
-            (total, row) => ({
-                plannedHours: total.plannedHours + row.plannedHours,
-                actualHours: total.actualHours + row.actualHours,
-                serviceHours: total.serviceHours + row.serviceHours,
-                travelHours: total.travelHours + row.travelHours,
-                internalHours: total.internalHours + row.internalHours,
-                pending: total.pending + row.statusCounts.pending,
-                remanded: total.remanded + row.statusCounts.remanded,
-            }),
-            { plannedHours: 0, actualHours: 0, serviceHours: 0, travelHours: 0, internalHours: 0, pending: 0, remanded: 0 },
-        );
+        return summarizeStatisticsRows(visibleAggregatedData.rows);
     }, [visibleAggregatedData.rows]);
 
     const premiumTotals = useMemo(() => {

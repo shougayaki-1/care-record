@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const stagingEndpoint = 'https://xhvvfovvlqzlkirpjocv.supabase.co/functions/v1/care-record-mcp';
 const maximumResponseBytes = 1_000_000;
-const toolNames = ['check_record_quality', 'get_record', 'get_record_form', 'get_shift', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'propose_shift_change', 'review_billing_records', 'search_people', 'submit_record_candidate'];
+const toolNames = ['check_record_quality', 'get_monthly_statistics', 'get_record', 'get_record_form', 'get_shift', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'propose_shift_change', 'review_billing_records', 'search_people', 'submit_record_candidate'];
 
 export class McpContractError extends Error {
   constructor(code) { super(code); this.name = 'McpContractError'; }
@@ -32,6 +32,8 @@ export function validateToolContract(tools) {
   const quality = tools.find(tool => tool.name === 'check_record_quality').inputSchema;
   const billing = tools.find(tool => tool.name === 'review_billing_records').inputSchema;
   const unrecorded = tools.find(tool => tool.name === 'list_billing_unrecorded_shifts').inputSchema;
+  const kpi = tools.find(tool => tool.name === 'get_monthly_statistics').inputSchema;
+  if (kpi.properties?.month?.type !== 'string' || typeof kpi.properties.month.pattern !== 'string' || !kpi.required?.includes('month')) fail('kpi_month_input_changed');
   for (const key of ['start_date', 'end_date']) {
     if (billing.properties?.[key]?.format !== 'date' || !billing.required?.includes(key)) fail('billing_date_input_changed');
     if (unrecorded.properties?.[key]?.format !== 'date' || !unrecorded.required?.includes(key)) fail('billing_date_input_changed');
@@ -47,7 +49,7 @@ export function validateToolContract(tools) {
   const records = tools.find(tool => tool.name === 'list_records').inputSchema;
   const record = tools.find(tool => tool.name === 'get_record').inputSchema;
   const people = tools.find(tool => tool.name === 'search_people').inputSchema;
-  for (const schema of [form, submit, list, detail, people, records, record, queue, availability, proposal, quality, billing, unrecorded]) {
+  for (const schema of [form, submit, list, detail, people, records, record, queue, availability, proposal, quality, billing, unrecorded, kpi]) {
     if (schema.properties?.organization_id?.type !== 'string'
       || schema.properties.organization_id.format !== 'uuid'
       || !schema.required?.includes('organization_id')) fail('organization_input_changed');
