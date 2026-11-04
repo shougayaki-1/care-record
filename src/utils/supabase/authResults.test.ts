@@ -85,3 +85,22 @@ describe('classified auth states preserve the authorization boundary', () => {
     expect(mocks.log).toHaveBeenCalled();
   });
 });
+
+describe('super-admin identity is separate from organization ownership', () => {
+  it('rejects an unauthenticated caller before profile access', async () => {
+    mocks.user.mockResolvedValue({ data: { user: null }, error: new AuthSessionMissingError() });
+    await expect(withActionResult('super-admin', () => auth.assertSuperAdmin())).resolves.toMatchObject({ ok: false, error: { code: 'UNAUTHENTICATED' } });
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+  it('rejects a profile without the super-admin role', async () => {
+    mocks.from.mockReturnValueOnce(row({ session_hash: 'synthetic' })).mockReturnValueOnce(row({ role: null }));
+    await expect(withActionResult('super-admin', () => auth.assertSuperAdmin())).resolves.toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+  });
+  it('accepts a verified super-admin profile', async () => {
+    const profile = row({ role: 'super_admin' });
+    mocks.from.mockReturnValueOnce(row({ session_hash: 'synthetic' })).mockReturnValueOnce(profile);
+    await expect(withActionResult('super-admin', () => auth.assertSuperAdmin())).resolves.toEqual({ ok: true, data: { userId: 'user-1' } });
+    expect(profile.select).toHaveBeenCalledWith('role');
+    expect(profile.eq).toHaveBeenCalledWith('id', 'user-1');
+  });
+});
