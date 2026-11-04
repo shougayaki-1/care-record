@@ -172,3 +172,20 @@ Vercel DDoS対策状態だけを取得する。Vercelが過去1日分の結果�
 取得した生のホスト情報・IP・各種識別子は送信や保存をせず、件数だけを処理する。
 このモードではFirewallのアクセス拒否件数や他のアラートは監視できない。日次通知にもこの制限を明示し、
 0件を攻撃なし・安全の証拠にしない。既定の `full` モードは従来のCLI集計を使う。
+
+### Cloudflare による独立起動（#160）
+
+Cloudflare Worker `care-record-security-scheduler` は5分ごとに GitHub Actions の
+`security-monitor.yml` を main で手動起動し、直近20分に本番の収集ステップが成功したかを確認する。
+成功が確認できない場合や起動要求に失敗した場合は、本番 Discord に固定文の警告を送る。
+起動要求の成功は収集の完了を意味せず、次回以降の確認が必要。Staging は現在無効であり、
+この Worker の死活判定には含まれない。障害中の警告は5分ごとに繰り返される。
+既存の GitHub schedule と重複起動する場合があり、同一環境の処理は既存の concurrency で制御する。
+Cloudflare 自体の停止と Discord の同時停止の検知は対象外。Firewall の未監視範囲、
+アプリのログ取込正常性はこの起動経路では解決しない。
+
+Cloudflare の Secret `GITHUB_DISPATCH_TOKEN` はこのリポジトリに限定された GitHub fine-grained token で、
+Actions read/write を必要とする。この権限は他の workflow の起動・無効化も可能であるため、
+期限と更新手順を管理する。`DISCORD_WEBHOOK_URL` は承認済み本番通知先を Secret として保持する。
+値をログ・リポジトリ・通知に出さない。コードと合成検証は `scripts/security/independent-scheduler/` にある。
+Cloudflare の定期実行は遅延し得るため、複数回の実行と GitHub 上の本番収集成功を確認する。
