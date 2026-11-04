@@ -2988,6 +2988,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      disable_mcp_kpi: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       disable_mcp_person_search: {
         Args: { p_organization_id: string }
         Returns: undefined
@@ -3009,6 +3013,10 @@ export type Database = {
         Returns: undefined
       }
       enable_mcp_import: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_kpi: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
@@ -3061,6 +3069,14 @@ export type Database = {
       get_invitation_preview: { Args: { p_code: string }; Returns: Json }
       get_mcp_import_control: {
         Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_kpi_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_kpi_source: {
+        Args: { p_month: string; p_organization_id: string }
         Returns: Json
       }
       get_mcp_person_search_control: {
@@ -3152,6 +3168,16 @@ export type Database = {
       list_mcp_staff_availability: {
         Args: {
           p_client_id?: string
+          p_end: string
+          p_limit?: number
+          p_offset?: number
+          p_organization_id: string
+          p_start: string
+        }
+        Returns: Json
+      }
+      list_mcp_unrecorded_shifts: {
+        Args: {
           p_end: string
           p_limit?: number
           p_offset?: number
