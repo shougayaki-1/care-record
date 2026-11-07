@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const stagingEndpoint = 'https://xhvvfovvlqzlkirpjocv.supabase.co/functions/v1/care-record-mcp';
 const maximumResponseBytes = 1_000_000;
-const toolNames = ['check_record_quality', 'get_monthly_statistics', 'get_record', 'get_record_form', 'get_shift', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'propose_shift_change', 'review_billing_records', 'search_people', 'submit_record_candidate'];
+const toolNames = ['check_record_quality', 'get_monthly_statistics', 'get_record', 'get_record_form', 'get_shift', 'get_shift_cancel_result', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'prepare_shift_cancel', 'propose_shift_change', 'review_billing_records', 'search_people', 'submit_record_candidate'];
 
 export class McpContractError extends Error {
   constructor(code) { super(code); this.name = 'McpContractError'; }
@@ -15,7 +15,7 @@ export function validateToolContract(tools) {
     || tools.map(tool => tool?.name).sort().join(',') !== toolNames.join(',')) fail('tools_changed');
   for (const tool of tools) {
     if (tool.inputSchema?.type !== 'object') fail('input_schema_changed');
-    if (tool.annotations?.readOnlyHint !== (tool.name !== 'submit_record_candidate')
+    if (tool.annotations?.readOnlyHint !== (!['submit_record_candidate', 'prepare_shift_cancel'].includes(tool.name))
       || tool.annotations?.destructiveHint !== false || tool.annotations?.openWorldHint !== false) fail('annotations_changed');
   }
   const availability = tools.find(tool => tool.name === 'list_staff_availability').inputSchema;
@@ -29,6 +29,12 @@ export function validateToolContract(tools) {
   for (const key of ['shift_id', 'staff_id']) {
     if (proposal.properties?.[key]?.format !== 'uuid' || !proposal.required?.includes(key)) fail('proposal_input_changed');
   }
+  const cancel = tools.find(tool => tool.name === 'prepare_shift_cancel').inputSchema;
+  const cancelResult = tools.find(tool => tool.name === 'get_shift_cancel_result').inputSchema;
+  if (cancel.properties?.shift_id?.format !== 'uuid' || !cancel.required?.includes('shift_id')
+    || cancel.properties?.operation?.enum?.join(',') !== 'cancel,soft_delete' || !cancel.required?.includes('operation')
+    || cancel.properties?.reason?.type !== 'string' || cancel.properties.reason.maxLength !== 500 || !cancel.required?.includes('reason')
+    || cancelResult.properties?.proposal_id?.format !== 'uuid' || !cancelResult.required?.includes('proposal_id')) fail('cancel_input_changed');
   const quality = tools.find(tool => tool.name === 'check_record_quality').inputSchema;
   const billing = tools.find(tool => tool.name === 'review_billing_records').inputSchema;
   const unrecorded = tools.find(tool => tool.name === 'list_billing_unrecorded_shifts').inputSchema;
@@ -49,7 +55,7 @@ export function validateToolContract(tools) {
   const records = tools.find(tool => tool.name === 'list_records').inputSchema;
   const record = tools.find(tool => tool.name === 'get_record').inputSchema;
   const people = tools.find(tool => tool.name === 'search_people').inputSchema;
-  for (const schema of [form, submit, list, detail, people, records, record, queue, availability, proposal, quality, billing, unrecorded, kpi]) {
+  for (const schema of [form, submit, list, detail, people, records, record, queue, availability, proposal, quality, billing, unrecorded, kpi, cancel, cancelResult]) {
     if (schema.properties?.organization_id?.type !== 'string'
       || schema.properties.organization_id.format !== 'uuid'
       || !schema.required?.includes('organization_id')) fail('organization_input_changed');

@@ -199,6 +199,29 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: data, content: [{ type: 'text', text: JSON.stringify(data) }] };
     }));
 
+    server.registerTool('prepare_shift_cancel', {
+      title: 'シフト取消・論理削除の確認案を作成',
+      description: '指定されたシフトの取消または論理削除の案を作ります。本人が CareRecord の画面で内容を確認するまで実行されません。操作は本人に確認し推測しないでください。関連記録は保持されます。',
+      inputSchema: z.object({ organization_id: uuid, shift_id: uuid, operation: z.enum(['cancel', 'soft_delete']), reason: z.string().max(500) }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_shift_cancel', async () => {
+      const { data, error } = await supabase.rpc('prepare_mcp_shift_cancel', { p_organization_id: args.organization_id, p_shift_id: args.shift_id, p_operation: args.operation, p_reason: args.reason });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.proposal_id ? `${appOrigin}/app/mcp-shift-cancel/${data.proposal_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
+    server.registerTool('get_shift_cancel_result', {
+      title: 'シフト取消・削除の確認結果を取得',
+      description: '本人の確認待ち、実行済み、期限切れ、対象変更と Google 同期の状態を確認します。',
+      inputSchema: z.object({ organization_id: uuid, proposal_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_shift_cancel_result', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_shift_cancel_result', { p_organization_id: args.organization_id, p_proposal_id: args.proposal_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
+    }));
+
     server.registerTool('propose_shift_change', {
       title: 'シフト変更案を確認',
       description: '確認済みシフトとスタッフのID、変更案の日時を指定して重複と担当登録を確認します。1人の案であり他の担当者や区間への影響は要確認です。変更は実行しません。',
