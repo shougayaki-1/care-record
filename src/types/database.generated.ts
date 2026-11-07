@@ -2918,6 +2918,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      confirm_mcp_shift_cancel: {
+        Args: { p_proposal_id: string }
+        Returns: Json
+      }
       confirm_mcp_shift_create: {
         Args: { p_proposal_id: string }
         Returns: Json
@@ -3004,6 +3008,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      disable_mcp_shift_cancel: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       disable_mcp_shift_read: {
         Args: { p_organization_id: string }
         Returns: undefined
@@ -3033,6 +3041,10 @@ export type Database = {
         Returns: undefined
       }
       enable_mcp_record_read: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_shift_cancel: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
@@ -3113,6 +3125,18 @@ export type Database = {
       }
       get_mcp_shift: {
         Args: { p_organization_id: string; p_shift_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_cancel_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_cancel_proposal: {
+        Args: { p_proposal_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_cancel_result: {
+        Args: { p_organization_id: string; p_proposal_id: string }
         Returns: Json
       }
       get_mcp_shift_create_control: {
@@ -3259,6 +3283,15 @@ export type Database = {
       prepare_mcp_reauth: {
         Args: { p_authorization_id: string; p_token_hash: string }
         Returns: undefined
+      }
+      prepare_mcp_shift_cancel: {
+        Args: {
+          p_operation: string
+          p_organization_id: string
+          p_reason: string
+          p_shift_id: string
+        }
+        Returns: Json
       }
       prepare_mcp_shift_update: {
         Args: {
