@@ -2918,6 +2918,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      confirm_mcp_shift_update: {
+        Args: { p_proposal_id: string }
+        Returns: Json
+      }
       create_invitation_authorized: {
         Args: {
           p_code: string
@@ -3000,6 +3004,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      disable_mcp_shift_update: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       discard_ai_import_candidate: {
         Args: { p_candidate_id: string; p_organization_id: string }
         Returns: undefined
@@ -3025,6 +3033,10 @@ export type Database = {
         Returns: undefined
       }
       enable_mcp_shift_read: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_shift_update: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
@@ -3101,6 +3113,22 @@ export type Database = {
       }
       get_mcp_shift_read_control: {
         Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_update_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_update_proposal: {
+        Args: { p_proposal_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_update_result: {
+        Args: { p_organization_id: string; p_proposal_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_update_template: {
+        Args: { p_organization_id: string; p_shift_id: string }
         Returns: Json
       }
       get_my_org_id: { Args: never; Returns: string }
@@ -3215,6 +3243,16 @@ export type Database = {
       prepare_mcp_reauth: {
         Args: { p_authorization_id: string; p_token_hash: string }
         Returns: undefined
+      }
+      prepare_mcp_shift_update: {
+        Args: {
+          p_end: string
+          p_organization_id: string
+          p_segments: Json
+          p_shift_id: string
+          p_start: string
+        }
+        Returns: Json
       }
       propose_mcp_shift_change: {
         Args: {
