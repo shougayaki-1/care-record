@@ -16,6 +16,7 @@ import { McpImportSettings } from '@/components/settings/McpImportSettings';
 import { McpShiftCreateSettings } from '@/components/settings/McpShiftCreateSettings';
 import { McpKpiSettings } from '@/components/settings/McpKpiSettings';
 import { McpShiftCancelSettings } from '@/components/settings/McpShiftCancelSettings';
+import { McpShiftUpdateSettings } from '@/components/settings/McpShiftUpdateSettings';
 import { OrganizationDangerSettings } from '@/components/settings/OrganizationDangerSettings';
 
 import { supabase } from '@/lib/supabase';
@@ -441,6 +442,7 @@ function SettingsContent() {
                         {canManageIntegrations && <McpShiftCreateSettings key={`shift-${currentOrg.id}`} organizationId={currentOrg.id} />}
                         {canManageIntegrations && <McpKpiSettings key={currentOrg.id} organizationId={currentOrg.id} />}
                         {canManageIntegrations && <McpShiftCancelSettings key={currentOrg.id} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpShiftUpdateSettings key={`shift-update-${currentOrg.id}`} organizationId={currentOrg.id} />}
                         </>
                     )}
 

@@ -245,6 +245,43 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
     }));
 
+    server.registerTool('get_shift_update_template', {
+      title: '変更前のシフト区間を確認',
+      description: '変更前の全区間、担当者、担当役割とサービスを取得します。draft_segments を基に確認した変更後の全区間を案に含め、元パターンとの関連が解除されることを伝えてください。区間がない場合は内容を本人に確認してください。',
+      inputSchema: z.object({ organization_id: uuid, shift_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_shift_update_template', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_shift_update_template', { p_organization_id: args.organization_id, p_shift_id: args.shift_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { template: data }, content: [{ type: 'text', text: JSON.stringify({ template: data }) }] };
+    }));
+
+    server.registerTool('prepare_shift_update', {
+      title: 'シフト変更の確認案を作成',
+      description: '変更後の全サービス区間と担当者を指定し、本人が CareRecord 画面で確認する案を作成します。区間を省略すると保持されません。確認までシフトは変更されません。',
+      inputSchema: z.object({ organization_id: uuid, shift_id: uuid,
+        start_at: z.iso.datetime({ offset: true }), end_at: z.iso.datetime({ offset: true }),
+        segments: z.array(z.strictObject({ start_at: z.iso.datetime({ offset: true }), end_at: z.iso.datetime({ offset: true }),
+          service_type_id: uuid.nullable().optional(), staffs: z.array(z.strictObject({ staff_id: uuid, staff_role_id: uuid.nullable().optional() })).min(1).max(20) })).min(1).max(32) }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_shift_update', async () => {
+      const { data, error } = await supabase.rpc('prepare_mcp_shift_update', { p_organization_id: args.organization_id, p_shift_id: args.shift_id, p_start: args.start_at, p_end: args.end_at, p_segments: args.segments });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.proposal_id ? `${appOrigin}/app/mcp-shift-update/${data.proposal_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
+    server.registerTool('get_shift_update_result', {
+      title: 'シフト変更の確認結果を取得',
+      description: '本人の確認待ち、変更済み、期限切れ、対象変更と Google 同期の状態を確認します。',
+      inputSchema: z.object({ organization_id: uuid, proposal_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_shift_update_result', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_shift_update_result', { p_organization_id: args.organization_id, p_proposal_id: args.proposal_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
+    }));
+
     server.registerTool('propose_shift_change', {
       title: 'シフト変更案を確認',
       description: '確認済みシフトとスタッフのID、変更案の日時を指定して重複と担当登録を確認します。1人の案であり他の担当者や区間への影響は要確認です。変更は実行しません。',
