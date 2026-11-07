@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(22);
+select plan(24);
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values ('18100000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','mcp181@example.invalid','x',now(),now());
 insert into public.organizations(id,name) values ('18100000-0000-0000-0000-000000000002','Synthetic');
 insert into public.organization_members(organization_id,user_id,role) values ('18100000-0000-0000-0000-000000000002','18100000-0000-0000-0000-000000000001','owner');
@@ -11,12 +11,18 @@ insert into private.mcp_reauth_proofs(user_id,client_id,consent_granted_at,verif
 insert into auth.sessions(id,user_id,oauth_client_id,created_at) values ('18100000-0000-0000-0000-000000000005','18100000-0000-0000-0000-000000000001','18100000-0000-0000-0000-000000000003',now());
 insert into public.clients(id,organization_id,name) values ('18100000-0000-0000-0000-000000000006','18100000-0000-0000-0000-000000000002','Synthetic client');
 insert into public.staffs(id,organization_id,name) values ('18100000-0000-0000-0000-000000000007','18100000-0000-0000-0000-000000000002','Synthetic staff');
+insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values ('18100000-0000-0000-0000-000000000009','00000000-0000-0000-0000-000000000000','authenticated','authenticated','mcp-recipient@example.invalid','x',now(),now());
+insert into public.organization_members(organization_id,user_id,role) values ('18100000-0000-0000-0000-000000000002','18100000-0000-0000-0000-000000000009','member');
+update public.staffs set user_id='18100000-0000-0000-0000-000000000009' where id='18100000-0000-0000-0000-000000000007';
+
 insert into public.shifts(id,organization_id,client_id,start_at,end_at,status) values ('18100000-0000-0000-0000-000000000008','18100000-0000-0000-0000-000000000002','18100000-0000-0000-0000-000000000006','2026-11-01 00:00+00','2026-11-01 01:00+00','published');
 insert into private.mcp_shift_read_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('18100000-0000-0000-0000-000000000002',true,'{}','18100000-0000-0000-0000-000000000001',now());
 insert into private.mcp_person_search_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('18100000-0000-0000-0000-000000000002',true,'{}','18100000-0000-0000-0000-000000000001',now());
 select set_config('request.jwt.claims','{"sub":"18100000-0000-0000-0000-000000000001","role":"mcp_import","exp":4102444800,"client_id":"18100000-0000-0000-0000-000000000003","session_id":"18100000-0000-0000-0000-000000000005"}',true);
 insert into private.mcp_shift_update_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('18100000-0000-0000-0000-000000000002',true,'{}','18100000-0000-0000-0000-000000000001',now());
 insert into public.user_session_activity(session_hash,auth_session_id,user_id,last_activity,absolute_expires_at) values ('mcp180-browser','mcp180-browser','18100000-0000-0000-0000-000000000001',now(),now()+interval '1 hour');
+set constraints all immediate;
+set constraints all deferred;
 select set_config('test.first',private.prepare_mcp_shift_update('18100000-0000-0000-0000-000000000002','18100000-0000-0000-0000-000000000008','2026-11-01 02:00+00','2026-11-01 03:00+00','[{"start_at":"2026-11-01T02:00:00Z","end_at":"2026-11-01T03:00:00Z","staffs":[{"staff_id":"18100000-0000-0000-0000-000000000007"}]}]')::text,true);
 select set_config('test.stale',private.prepare_mcp_shift_update('18100000-0000-0000-0000-000000000002','18100000-0000-0000-0000-000000000008','2026-11-01 04:00+00','2026-11-01 05:00+00','[{"start_at":"2026-11-01T04:00:00Z","end_at":"2026-11-01T05:00:00Z","staffs":[{"staff_id":"18100000-0000-0000-0000-000000000007"}]}]')::text,true);
 select ok(has_function_privilege('authenticated','public.confirm_mcp_shift_update(uuid)','execute') and not has_function_privilege('mcp_import','public.confirm_mcp_shift_update(uuid)','execute'),'only the browser role can call confirmation');
@@ -27,6 +33,11 @@ select set_config('request.jwt.claims','{"sub":"18100000-0000-0000-0000-00000000
 select is(public.confirm_mcp_shift_update(current_setting('test.first')::uuid)->>'status','updated','browser confirmation updates shift');
 select is((select start_at from public.shifts where id='18100000-0000-0000-0000-000000000008'),'2026-11-01 02:00+00'::timestamptz,'confirmed start is applied');
 select is((select google_sync_status from public.shifts where id='18100000-0000-0000-0000-000000000008'),'pending_upsert','Google sync marked pending');
+set constraints all immediate;
+select is((select count(*) from public.notifications where user_id='18100000-0000-0000-0000-000000000009' and event_type='shift.assigned'),1::bigint,'confirmed update sends assignment notification');
+select is((select count(*) from public.notifications where user_id='18100000-0000-0000-0000-000000000009' and event_type='shift.time_changed'),1::bigint,'confirmed update sends time-change notification');
+set constraints all deferred;
+
 select is(public.confirm_mcp_shift_update(current_setting('test.first')::uuid)->>'newly_updated','false','repeated confirmation is idempotent');
 select is((select count(*) from public.audit_events where action_type='shift.update' and resource_id='18100000-0000-0000-0000-000000000008'),1::bigint,'exactly one success audit is written');
 select throws_ok($$select public.confirm_mcp_shift_update(current_setting('test.stale')::uuid)$$,'22023','proposal_changed','stale proposal is rejected');
