@@ -2922,6 +2922,10 @@ export type Database = {
         Args: { p_proposal_id: string }
         Returns: Json
       }
+      confirm_mcp_shift_create: {
+        Args: { p_proposal_id: string }
+        Returns: Json
+      }
       create_invitation_authorized: {
         Args: {
           p_code: string
@@ -3123,6 +3127,18 @@ export type Database = {
         Args: { p_organization_id: string; p_proposal_id: string }
         Returns: Json
       }
+      get_mcp_shift_create_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_create_proposal: {
+        Args: { p_proposal_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_create_result: {
+        Args: { p_organization_id: string; p_proposal_id: string }
+        Returns: Json
+      }
       get_mcp_shift_read_control: {
         Args: { p_organization_id: string }
         Returns: Json
@@ -3254,6 +3270,16 @@ export type Database = {
           p_end: string
           p_organization_id: string
           p_shift_id: string
+          p_staff_id: string
+          p_start: string
+        }
+        Returns: Json
+      }
+      propose_mcp_shift_create: {
+        Args: {
+          p_client_id: string
+          p_end: string
+          p_organization_id: string
           p_staff_id: string
           p_start: string
         }
@@ -3430,6 +3456,14 @@ export type Database = {
           p_organization_id: string
         }
         Returns: Json
+      }
+      set_mcp_shift_create_control: {
+        Args: {
+          p_conditions: Json
+          p_enabled: boolean
+          p_organization_id: string
+        }
+        Returns: undefined
       }
       soft_delete_organization: { Args: { p_org_id: string }; Returns: string }
       soft_delete_reports_authorized: {

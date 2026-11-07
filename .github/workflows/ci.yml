@@ -223,7 +223,18 @@ jobs:
             cp "$migration" "/tmp/care-record-baseline/$migration"
           done
       - name: Apply the release migration delta
-        run: supabase migration up --local --workdir /tmp/care-record-baseline
+        run: |
+          # These two #179 migrations were deployed before later-numbered main migrations.
+          # Test their actual upgrade order without accepting other out-of-order files.
+          added="$(git diff --name-only --diff-filter=A "$BASELINE_SHA" HEAD -- 'supabase/migrations/*.sql')"
+          expected="$(printf '%s\n' \
+            supabase/migrations/20261030000001_mcp_shift_create.sql \
+            supabase/migrations/20261030000002_mcp_shift_create_deleted_visibility.sql)"
+          if [[ "$added" == "$expected" ]]; then
+            supabase migration up --local --include-all --workdir /tmp/care-record-baseline
+          else
+            supabase migration up --local --workdir /tmp/care-record-baseline
+          fi
       - name: Verify pre-existing records and history survived the migration delta
         run: node scripts/db/check-upgrade-fixture.mjs "supabase_db_care-record-upgrade-test-${GITHUB_RUN_ID}a${GITHUB_RUN_ATTEMPT}" after
       - name: Run current pgTAP contracts against the upgraded database

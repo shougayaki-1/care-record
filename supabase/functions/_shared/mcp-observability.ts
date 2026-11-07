@@ -1,4 +1,4 @@
-type ToolName = 'prepare_shift_cancel' | 'get_shift_cancel_result' | 'get_monthly_statistics' | 'list_billing_unrecorded_shifts' | 'review_billing_records' | 'check_record_quality' | 'propose_shift_change' | 'list_staff_availability' | 'list_approval_queue' | 'list_records' | 'get_record' | 'search_people' | 'list_workspaces' | 'get_record_form' | 'submit_record_candidate' | 'list_shifts' | 'get_shift';
+type ToolName = 'propose_shift_create' | 'get_shift_create_result' | 'prepare_shift_cancel' | 'get_shift_cancel_result' | 'get_monthly_statistics' | 'list_billing_unrecorded_shifts' | 'review_billing_records' | 'check_record_quality' | 'propose_shift_change' | 'list_staff_availability' | 'list_approval_queue' | 'list_records' | 'get_record' | 'search_people' | 'list_workspaces' | 'get_record_form' | 'submit_record_candidate' | 'list_shifts' | 'get_shift';
 type ObservationOptions = { now?: () => number; traceId?: () => string; emit?: (line: string) => void };
 
 /** Operational counters only. Never serialize tool arguments, results or exceptions. */
