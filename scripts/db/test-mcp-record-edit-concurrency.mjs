@@ -42,7 +42,7 @@ for (let scenario = 0; scenario < 2; scenario++) {
   const id = randomBytes(4).toString('hex');
   const sql = prefix.replaceAll('18210000', id).replaceAll('mcp182-browser', `mcp${id}-browser`).replaceAll('mcp182-confirm@example.invalid', `mcp${id}@example.invalid`)
     .replace('create extension if not exists pgtap with schema extensions;', '')
-    .replace('select plan(41);', '');
+    .replace(/select plan\(\d+\);/, '');
   const output = query(`${sql}\nselect private.prepare_mcp_record_edit('${id}-0000-0000-0000-000000000002','${id}-0000-0000-0000-000000000007',(select current_version from public.reports where id='${id}-0000-0000-0000-000000000007'),'{"note":"after"}','reason'); commit;`);
   const matches = output.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g);
   assert.ok(matches?.length, 'fixture must produce a proposal id');
