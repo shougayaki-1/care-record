@@ -2918,6 +2918,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      confirm_mcp_record_edit: { Args: { p_proposal: string }; Returns: Json }
       confirm_mcp_shift_cancel: {
         Args: { p_proposal_id: string }
         Returns: Json
@@ -3004,6 +3005,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      disable_mcp_record_edit: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       disable_mcp_record_read: {
         Args: { p_organization_id: string }
         Returns: undefined
@@ -3037,6 +3042,10 @@ export type Database = {
         Returns: undefined
       }
       enable_mcp_person_search: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_record_edit: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
@@ -3109,6 +3118,22 @@ export type Database = {
       }
       get_mcp_record: {
         Args: { p_organization_id: string; p_record_id: string }
+        Returns: Json
+      }
+      get_mcp_record_edit_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_record_edit_result: {
+        Args: { p_org: string; p_proposal: string }
+        Returns: Json
+      }
+      get_mcp_record_edit_review: {
+        Args: { p_proposal: string }
+        Returns: Json
+      }
+      get_mcp_record_edit_template: {
+        Args: { p_org: string; p_report: string }
         Returns: Json
       }
       get_mcp_record_quality_source: {
@@ -3188,6 +3213,10 @@ export type Database = {
           p_start: string
           p_status?: string
         }
+        Returns: Json
+      }
+      list_mcp_record_correction_proposals: {
+        Args: { p_limit?: number; p_offset?: number; p_org: string }
         Returns: Json
       }
       list_mcp_records: {
@@ -3283,6 +3312,17 @@ export type Database = {
       prepare_mcp_reauth: {
         Args: { p_authorization_id: string; p_token_hash: string }
         Returns: undefined
+      }
+      prepare_mcp_record_edit: {
+        Args: {
+          p_changes?: Json
+          p_expected_version: number
+          p_org: string
+          p_reason: string
+          p_report: string
+          p_values: Json
+        }
+        Returns: Json
       }
       prepare_mcp_shift_cancel: {
         Args: {

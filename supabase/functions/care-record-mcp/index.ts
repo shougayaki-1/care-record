@@ -144,6 +144,45 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
     }));
 
+    server.registerTool('get_record_edit_template', {
+      title: '記録の変更前の内容を確認',
+      description: '変更案の作成に必要な現在の記録、版、担当者とサービスを確認します。記録は変更しません。',
+      inputSchema: z.object({ organization_id: uuid, record_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_record_edit_template', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_record_edit_template', { p_org: args.organization_id, p_report: args.record_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { template: data }, content: [{ type: 'text', text: JSON.stringify({ template: data }) }] };
+    }));
+
+    server.registerTool('prepare_record_edit', {
+      title: '記録の変更案を作成',
+      description: '確認済みの記録IDと現在の版、変更後の全項目、理由を指定します。日時・サービス・担当者の変更はchangesに指定します。画面で本人が確認するまで下書きは変更されません。承認済み記録の場合は元の記録を変更せず訂正案として保存します。',
+      inputSchema: z.object({ organization_id: uuid, record_id: uuid, expected_version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+        values: z.record(z.string().max(255), z.unknown()), reason: z.string().trim().min(1).max(500),
+        changes: z.strictObject({ start_at: z.iso.datetime({ offset: true }).optional(), end_at: z.iso.datetime({ offset: true }).optional(),
+          actual_service_type_id: uuid.nullable().optional(), actual_staffs: z.array(z.strictObject({ staff_id: uuid, staff_role_id: uuid.nullable().optional() })).max(20).optional() }).optional() }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_record_edit', async () => {
+      if (JSON.stringify(args.values).length > 1000000) throw new Error(connectionError);
+      const { data, error } = await supabase.rpc('prepare_mcp_record_edit', { p_org: args.organization_id, p_report: args.record_id,
+        p_expected_version: args.expected_version, p_values: args.values, p_reason: args.reason, p_changes: args.changes ?? {} });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.proposal_id ? `${appOrigin}/app/mcp-record-edit/${data.proposal_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
+    server.registerTool('get_record_edit_result', {
+      title: '記録の変更案の結果を確認',
+      description: '本人確認待ち、期限切れ、対象変更、下書き保存または訂正案保存の状態を確認します。',
+      inputSchema: z.object({ organization_id: uuid, proposal_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_record_edit_result', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_record_edit_result', { p_org: args.organization_id, p_proposal: args.proposal_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
+    }));
+
     server.registerTool('check_record_quality', {
       title: '提供記録の入力・予定差を確認',
       description: '権限のある記録の必須項目と日時を確認し、閲覧可能なシフトとの違いを要確認として返します。記録は変更しません。',
