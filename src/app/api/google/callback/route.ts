@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { google } from 'googleapis';
+import { google } from '@/lib/googleApis';
 import { createServerClient } from '@supabase/ssr';
 import { getGoogleOAuthClient, OAUTH_STATE_COOKIE } from '@/utils/googleCalendar';
 import { encryptGoogleToken } from '@/utils/googleTokenCrypto';

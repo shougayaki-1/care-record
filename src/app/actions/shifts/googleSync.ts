@@ -1,6 +1,6 @@
 'use server';
 
-import { type calendar_v3, google } from 'googleapis';
+import { type calendar_v3, google } from '@/lib/googleApis';
 
 import { ExpectedActionError, logExternalError, sanitizeDbError, sanitizeExternalError, withActionResult } from '@/utils/errors';
 import { getGoogleOAuthClient } from '@/utils/googleCalendar';

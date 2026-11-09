@@ -1,4 +1,4 @@
-import { google } from 'googleapis';
+import { google } from '@/lib/googleApis';
 
 // OAuth の CSRF 対策用 state(nonce)+orgId を保持する httpOnly Cookie 名
 export const OAUTH_STATE_COOKIE = 'g_oauth_state';

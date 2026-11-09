@@ -4,7 +4,7 @@ vi.mock('@/utils/supabase/auth', () => ({ createSessionClient: vi.fn(async () =>
 vi.mock('@/utils/googleCalendar', () => ({ getGoogleOAuthClient: () => ({ setCredentials: vi.fn() }) }));
 vi.mock('@/utils/googleTokenCrypto', () => ({ decryptGoogleToken: () => 'test-token' }));
 vi.mock('@/utils/googleRetry', () => ({ withRetry: (fn: () => Promise<unknown>) => fn() }));
-vi.mock('googleapis', () => ({ google: { calendar: () => ({ events: { delete: mocks.remoteDelete, list: mocks.list } }) } }));
+vi.mock('@/lib/googleApis', () => ({ google: { calendar: () => ({ events: { delete: mocks.remoteDelete, list: mocks.list } }) } }));
 import { processShiftsSequential } from './googleSyncInternal';
 import { SyncError } from '@/utils/googleSync';
 beforeEach(() => {

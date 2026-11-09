@@ -7,7 +7,7 @@ vi.mock('@/utils/supabase/auth', () => ({ createSessionClient: vi.fn(async () =>
 vi.mock('@/utils/googleCalendar', () => ({ getGoogleOAuthClient: () => ({ setCredentials: vi.fn() }) }));
 vi.mock('@/utils/googleTokenCrypto', () => ({ decryptGoogleToken: () => 'test-token' }));
 vi.mock('@/utils/supabase/audit', () => ({ recordAuditEvent: vi.fn() }));
-vi.mock('googleapis', () => ({ google: { calendar: () => ({}) } }));
+vi.mock('@/lib/googleApis', () => ({ google: { calendar: () => ({}) } }));
 vi.mock('./googleSyncInternal', () => ({ deleteGoogleEventIfExists: mocks.remove, listAllActiveGoogleEvents: mocks.list,
   markShiftGoogleSync: mocks.mark, deleteDuplicateGoogleEvents: vi.fn(), processShiftsSequential: vi.fn(),
   syncToGoogleCalendarDirect: vi.fn(), withRetry: vi.fn(),
