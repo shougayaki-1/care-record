@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(24);
+select plan(28);
 grant usage on schema extensions to mcp_import;
 grant execute on all functions in schema extensions to mcp_import;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values
@@ -34,6 +34,16 @@ set local role mcp_import;
 select is(public.get_mcp_record_quality_source('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001')->'shift', 'null'::jsonb, 'shift hidden when control disabled');
 reset role;
 insert into private.mcp_shift_read_controls(organization_id,enabled,conditions,confirmed_by,confirmed_at) values ('17200000-0000-0000-0000-000000000002',true,'{}','17200000-0000-0000-0000-000000000001',now());
+savepoint missing_date_test;
+insert into public.reports(id,client_id,helper_id,start_at,end_at,status) values ('17400000-0000-0000-0000-000000000003','17200000-0000-0000-0000-000000000006','17200000-0000-0000-0000-000000000001','2026-10-27 15:30+00','2026-10-27 16:30+00','draft');
+select is((select service_date from public.reports where id='17400000-0000-0000-0000-000000000003'),'2026-10-28'::date,'new report date uses Japan calendar time');
+select is((select snapshot->>'service_date' from public.record_versions where resource_type='report' and resource_id='17400000-0000-0000-0000-000000000003' order by version_number desc limit 1),'2026-10-28','initial version contains search date');
+update public.reports set service_date=null where id='17400000-0000-0000-0000-000000000003';
+set local role mcp_import;
+select is(jsonb_array_length(public.list_mcp_records('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28',p_client_id:='17200000-0000-0000-0000-000000000006',p_status:='draft')->'records'),1,'legacy missing date is found by Japan date');
+select is(public.list_mcp_records('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28',p_status:='draft')->'records'->0->>'service_date','2026-10-28','legacy row returns the effective service date');
+reset role;
+rollback to savepoint missing_date_test;
 set local role mcp_import;
 select is(public.get_mcp_record_quality_source('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001')->'shift'->>'id','17800000-0000-0000-0000-000000000001','authorized linked shift visible');
 select is(public.get_mcp_record_quality_source('17200000-0000-0000-0000-000000000002','17400000-0000-0000-0000-000000000001')->'values'->>'note','synthetic','authorized record values visible');
