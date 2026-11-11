@@ -45,4 +45,3 @@ begin
 end $$;
 revoke all on function public.list_mcp_records(uuid,date,date,uuid,uuid,text,integer,integer) from public, anon, authenticated, service_role, mcp_import;
 grant execute on function public.list_mcp_records(uuid,date,date,uuid,uuid,text,integer,integer) to mcp_import;
-
