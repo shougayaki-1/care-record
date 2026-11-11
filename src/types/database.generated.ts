@@ -2923,6 +2923,10 @@ export type Database = {
         Args: { p_proposal: string }
         Returns: Json
       }
+      confirm_mcp_report_transition_batch: {
+        Args: { p_batch: string }
+        Returns: Json
+      }
       confirm_mcp_shift_cancel: {
         Args: { p_proposal_id: string }
         Returns: Json
@@ -3160,6 +3164,14 @@ export type Database = {
         Args: { p_org: string; p_report: string }
         Returns: string
       }
+      get_mcp_report_transition_batch_result: {
+        Args: { p_batch: string; p_org: string }
+        Returns: Json
+      }
+      get_mcp_report_transition_batch_review: {
+        Args: { p_batch: string }
+        Returns: Json
+      }
       get_mcp_report_transition_control: {
         Args: { p_organization_id: string }
         Returns: Json
@@ -3358,6 +3370,15 @@ export type Database = {
           p_org: string
           p_reason?: string
           p_report: string
+          p_transition: string
+        }
+        Returns: Json
+      }
+      prepare_mcp_report_transition_batch: {
+        Args: {
+          p_org: string
+          p_reason?: string
+          p_records: Json
           p_transition: string
         }
         Returns: Json
