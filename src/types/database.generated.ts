@@ -2919,6 +2919,10 @@ export type Database = {
         Returns: undefined
       }
       confirm_mcp_record_edit: { Args: { p_proposal: string }; Returns: Json }
+      confirm_mcp_report_transition: {
+        Args: { p_proposal: string }
+        Returns: Json
+      }
       confirm_mcp_shift_cancel: {
         Args: { p_proposal_id: string }
         Returns: Json
@@ -3013,6 +3017,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      disable_mcp_report_transition: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       disable_mcp_shift_cancel: {
         Args: { p_organization_id: string }
         Returns: undefined
@@ -3050,6 +3058,10 @@ export type Database = {
         Returns: undefined
       }
       enable_mcp_record_read: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_report_transition: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
@@ -3142,6 +3154,22 @@ export type Database = {
       }
       get_mcp_record_read_control: {
         Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_report_remand_reason: {
+        Args: { p_org: string; p_report: string }
+        Returns: string
+      }
+      get_mcp_report_transition_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_report_transition_result: {
+        Args: { p_org: string; p_proposal: string }
+        Returns: Json
+      }
+      get_mcp_report_transition_review: {
+        Args: { p_proposal: string }
         Returns: Json
       }
       get_mcp_self_staff_names: {
@@ -3321,6 +3349,16 @@ export type Database = {
           p_reason: string
           p_report: string
           p_values: Json
+        }
+        Returns: Json
+      }
+      prepare_mcp_report_transition: {
+        Args: {
+          p_expected_version: number
+          p_org: string
+          p_reason?: string
+          p_report: string
+          p_transition: string
         }
         Returns: Json
       }
