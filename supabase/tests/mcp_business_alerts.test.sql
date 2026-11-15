@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(24);
+select plan(25);
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values ('18100000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','mcp181@example.invalid','x',now(),now());
 insert into public.organizations(id,name) values ('18100000-0000-0000-0000-000000000002','Synthetic');
 insert into public.organization_members(organization_id,user_id,role) values ('18100000-0000-0000-0000-000000000002','18100000-0000-0000-0000-000000000001','owner');
@@ -46,6 +46,8 @@ select is(private.dispatch_mcp_business_alerts('2026-11-02 00:00+00')->>'created
 select is(private.dispatch_mcp_business_alerts('2026-11-03 00:00+00')->>'created','0','weekly retry on next day does not duplicate');
 select ok(has_function_privilege('care_business_alert_worker','public.run_mcp_business_alerts()','execute') and not has_function_privilege('care_business_alert_worker','private.dispatch_mcp_business_alerts(timestamptz,integer,uuid,uuid)','execute'),'worker has only its bounded entry point');
 select ok(not has_table_privilege('care_business_alert_worker','public.reports','SELECT') and not has_table_privilege('care_business_alert_worker','public.notifications','SELECT'),'worker has no direct business table reads');
+select is((select count(*) from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid=p.pronamespace
+  where n.nspname='public' and has_function_privilege('care_business_alert_worker',p.oid,'execute') and p.proname<>'run_mcp_business_alerts'),0::bigint,'worker has no other public RPC privileges');
 select ok(not has_function_privilege('mcp_import','public.run_mcp_business_alerts()','execute') and not has_function_privilege('authenticated','public.run_mcp_business_alerts()','execute'),'MCP and browser cannot run worker');
 grant care_business_alert_worker to postgres;
 set local role care_business_alert_worker;
