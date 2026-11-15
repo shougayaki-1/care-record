@@ -2931,6 +2931,10 @@ export type Database = {
         Args: { p_proposal_id: string }
         Returns: Json
       }
+      confirm_mcp_shift_update_batch: {
+        Args: { p_batch_id: string; p_proposal_ids: string[] }
+        Returns: Json
+      }
       create_invitation_authorized: {
         Args: {
           p_code: string
@@ -3180,6 +3184,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: Json
       }
+      get_mcp_shift_update_batch: {
+        Args: { p_batch_id: string }
+        Returns: Json
+      }
       get_mcp_shift_update_control: {
         Args: { p_organization_id: string }
         Returns: Json
@@ -3341,6 +3349,10 @@ export type Database = {
           p_shift_id: string
           p_start: string
         }
+        Returns: Json
+      }
+      prepare_mcp_shift_update_batch: {
+        Args: { p_items: Json; p_organization_id: string }
         Returns: Json
       }
       propose_mcp_shift_change: {
