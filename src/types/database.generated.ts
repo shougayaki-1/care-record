@@ -3104,6 +3104,14 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: Json
       }
+      get_mcp_business_alert_preferences: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_business_alert_status: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
       get_mcp_kpi_control: {
         Args: { p_organization_id: string }
         Returns: Json
@@ -3455,6 +3463,7 @@ export type Database = {
         }
         Returns: Json
       }
+      run_mcp_business_alerts: { Args: never; Returns: number }
       save_report_atomic: {
         Args: {
           p_actual_service_type_id?: string
@@ -3534,6 +3543,16 @@ export type Database = {
           p_organization_id: string
         }
         Returns: Json
+      }
+      set_mcp_business_alert_preferences: {
+        Args: {
+          p_enabled: boolean
+          p_frequency: string
+          p_organization_id: string
+          p_pending_reports: boolean
+          p_unassigned_shifts: boolean
+        }
+        Returns: undefined
       }
       set_mcp_shift_create_control: {
         Args: {

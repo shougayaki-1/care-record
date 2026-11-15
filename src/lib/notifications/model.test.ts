@@ -30,10 +30,10 @@ describe('notification display contract', () => {
     }
   });
   it('uses the same fixed templates in the DB and application', () => {
-    const sql = readFileSync('supabase/migrations/20261007000003_account_notifications.sql', 'utf8');
+    const sql = readFileSync('supabase/migrations/20261115030003_mcp_business_alert_templates.sql', 'utf8');
     const template = sql.split('$notification_templates$')[1];
     expect(JSON.parse(template)).toEqual(notificationEvents);
-    expect(Object.keys(notificationEvents)).toHaveLength(15);
+    expect(Object.keys(notificationEvents)).toHaveLength(17);
     for (const event of Object.values(notificationEvents)) {
       expect(notificationCategories).toContain(event.category);
       expect(['normal', 'high', 'critical']).toContain(event.priority);

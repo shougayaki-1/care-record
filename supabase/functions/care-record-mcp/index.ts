@@ -61,6 +61,18 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: { workspaces }, content: [{ type: 'text', text: JSON.stringify({ workspaces }) }] };
     }));
 
+    server.registerTool('get_business_alert_status', {
+      title: '自分の業務通知設定を確認',
+      description: '指定事業所における自分自身のアプリ内業務通知の設定を確認します。変更や停止は CareRecord のプロフィール画面で本人が行います。',
+      inputSchema: z.object({ organization_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_business_alert_status', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_business_alert_status', { p_organization_id: args.organization_id });
+      if (error || !data) throw new Error(connectionError);
+      const output = { preferences: data, settings_url: appOrigin ? `${appOrigin}/app/profile` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
     server.registerTool('get_record_form', {
       title: 'サービス提供記録のフォームを取得',
       description: '紙の記録を読み取る前に、取込先アプリのフィールドID・選択肢を取得します。',

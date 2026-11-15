@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const stagingEndpoint = 'https://xhvvfovvlqzlkirpjocv.supabase.co/functions/v1/care-record-mcp';
 const maximumResponseBytes = 1_000_000;
-const toolNames = ['check_record_quality', 'get_monthly_statistics', 'get_record', 'get_record_edit_result', 'get_record_edit_template', 'get_record_form', 'get_shift', 'get_shift_cancel_result', 'get_shift_create_result', 'get_shift_update_result', 'get_shift_update_template', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'prepare_record_edit', 'prepare_shift_cancel', 'prepare_shift_update', 'propose_shift_change', 'propose_shift_create', 'review_billing_records', 'search_people', 'submit_record_candidate'];
+const toolNames = ['check_record_quality', 'get_business_alert_status', 'get_monthly_statistics', 'get_record', 'get_record_edit_result', 'get_record_edit_template', 'get_record_form', 'get_shift', 'get_shift_cancel_result', 'get_shift_create_result', 'get_shift_update_result', 'get_shift_update_template', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'prepare_record_edit', 'prepare_shift_cancel', 'prepare_shift_update', 'propose_shift_change', 'propose_shift_create', 'review_billing_records', 'search_people', 'submit_record_candidate'];
 
 export class McpContractError extends Error {
   constructor(code) { super(code); this.name = 'McpContractError'; }

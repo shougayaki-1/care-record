@@ -21,6 +21,7 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 import { deleteUserAccount, updateOwnProfile, uploadOwnAvatar } from '@/app/actions/user';
 import { InnerPageHeader, PageBody, PageLayout } from '@/components/ui';
+import { BusinessAlertSettings } from '@/components/profile/BusinessAlertSettings';
 import { logoutCurrentUser } from '@/utils/clientLogout';
 import Link from 'next/link';
 import { useReauth } from '@/hooks/useReauth';
@@ -283,6 +284,8 @@ export default function ProfilePage() {
                                 </Stack>
                             </Box>
                         </Box>
+
+                        {currentOrg && <BusinessAlertSettings organizationId={currentOrg.id} organizationName={currentOrg.name} />}
 
                         <Button variant="contained" size="large" startIcon={<SaveIcon />} onClick={handleUpdateProfile} disabled={saving} sx={{ py: 1.5 }}>
                             {saving ? '保存中...' : '設定を保存'}
