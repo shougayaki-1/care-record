@@ -19,6 +19,7 @@ import { McpKpiSettings } from '@/components/settings/McpKpiSettings';
 import { McpShiftCancelSettings } from '@/components/settings/McpShiftCancelSettings';
 import { McpShiftUpdateSettings } from '@/components/settings/McpShiftUpdateSettings';
 import { McpRecordEditSettings } from '@/components/settings/McpRecordEditSettings';
+import { McpMasterEditSettings } from '@/components/settings/McpMasterEditSettings';
 import { OrganizationDangerSettings } from '@/components/settings/OrganizationDangerSettings';
 
 import { supabase } from '@/lib/supabase';
@@ -447,6 +448,7 @@ function SettingsContent() {
                         {canManageIntegrations && <McpShiftCancelSettings key={currentOrg.id} organizationId={currentOrg.id} />}
                         {canManageIntegrations && <McpShiftUpdateSettings key={`shift-update-${currentOrg.id}`} organizationId={currentOrg.id} />}
                         {canManageIntegrations && <McpRecordEditSettings key={`record-edit-${currentOrg.id}`} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpMasterEditSettings key={`master-edit-${currentOrg.id}`} organizationId={currentOrg.id} />}
                         </>
                     )}
 

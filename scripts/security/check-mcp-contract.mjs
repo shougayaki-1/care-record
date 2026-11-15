@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const stagingEndpoint = 'https://xhvvfovvlqzlkirpjocv.supabase.co/functions/v1/care-record-mcp';
 const maximumResponseBytes = 1_000_000;
-const toolNames = ['check_record_quality', 'get_monthly_statistics', 'get_record', 'get_record_edit_result', 'get_record_edit_template', 'get_record_form', 'get_shift', 'get_shift_cancel_result', 'get_shift_create_result', 'get_shift_update_result', 'get_shift_update_template', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'prepare_record_edit', 'prepare_shift_cancel', 'prepare_shift_update', 'propose_shift_change', 'propose_shift_create', 'review_billing_records', 'search_people', 'submit_record_candidate'];
+const toolNames = ['check_record_quality', 'get_master_edit_result', 'get_monthly_statistics', 'get_record', 'get_record_edit_result', 'get_record_edit_template', 'get_record_form', 'get_shift', 'get_shift_cancel_result', 'get_shift_create_result', 'get_shift_update_result', 'get_shift_update_template', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'prepare_master_edit', 'prepare_record_edit', 'prepare_shift_cancel', 'prepare_shift_update', 'propose_shift_change', 'propose_shift_create', 'review_billing_records', 'search_people', 'submit_record_candidate'];
 
 export class McpContractError extends Error {
   constructor(code) { super(code); this.name = 'McpContractError'; }
@@ -15,7 +15,7 @@ export function validateToolContract(tools) {
     || tools.map(tool => tool?.name).sort().join(',') !== toolNames.join(',')) fail('tools_changed');
   for (const tool of tools) {
     if (tool.inputSchema?.type !== 'object') fail('input_schema_changed');
-    if (tool.annotations?.readOnlyHint !== (!['submit_record_candidate', 'prepare_record_edit', 'prepare_shift_cancel', 'prepare_shift_update', 'propose_shift_create'].includes(tool.name))
+    if (tool.annotations?.readOnlyHint !== (!['submit_record_candidate', 'prepare_master_edit', 'prepare_record_edit', 'prepare_shift_cancel', 'prepare_shift_update', 'propose_shift_create'].includes(tool.name))
       || tool.annotations?.destructiveHint !== false || tool.annotations?.openWorldHint !== false) fail('annotations_changed');
   }
   const availability = tools.find(tool => tool.name === 'list_staff_availability').inputSchema;
@@ -50,6 +50,12 @@ export function validateToolContract(tools) {
   for (const key of ['client_id', 'staff_id']) if (create.properties?.[key]?.format !== 'uuid' || !create.required?.includes(key)) fail('create_input_changed');
   for (const key of ['start_at', 'end_at']) if (create.properties?.[key]?.format !== 'date-time' || !create.required?.includes(key)) fail('create_input_changed');
   if (createResult.properties?.proposal_id?.format !== 'uuid' || !createResult.required?.includes('proposal_id')) fail('create_input_changed');
+  const masterEdit = tools.find(tool => tool.name === 'prepare_master_edit').inputSchema;
+  const masterResult = tools.find(tool => tool.name === 'get_master_edit_result').inputSchema;
+  if (!masterEdit.required?.includes('target_id') || masterEdit.properties?.target_id?.format !== 'uuid'
+    || masterEdit.properties?.kind?.enum?.join(',') !== 'client,staff' || !masterEdit.required?.includes('kind')
+    || !masterEdit.required?.includes('changes') || masterEdit.properties?.changes?.additionalProperties !== false
+    || !masterResult.required?.includes('proposal_id') || masterResult.properties?.proposal_id?.format !== 'uuid') fail('master_edit_input_changed');
   const recordEditTemplate = tools.find(tool => tool.name === 'get_record_edit_template').inputSchema;
   if (recordEditTemplate.properties?.record_id?.format !== 'uuid' || !recordEditTemplate.required?.includes('record_id')) fail('record_edit_input_changed');
   const recordEdit = tools.find(tool => tool.name === 'prepare_record_edit').inputSchema;

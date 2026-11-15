@@ -2918,6 +2918,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      confirm_mcp_master_edit: { Args: { p_proposal: string }; Returns: Json }
       confirm_mcp_record_edit: { Args: { p_proposal: string }; Returns: Json }
       confirm_mcp_shift_cancel: {
         Args: { p_proposal_id: string }
@@ -3001,6 +3002,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      disable_mcp_master_edit: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       disable_mcp_person_search: {
         Args: { p_organization_id: string }
         Returns: undefined
@@ -3038,6 +3043,10 @@ export type Database = {
         Returns: undefined
       }
       enable_mcp_kpi: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_master_edit: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
@@ -3110,6 +3119,18 @@ export type Database = {
       }
       get_mcp_kpi_source: {
         Args: { p_month: string; p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_master_edit_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_master_edit_result: {
+        Args: { p_organization_id: string; p_proposal: string }
+        Returns: Json
+      }
+      get_mcp_master_edit_review: {
+        Args: { p_proposal: string }
         Returns: Json
       }
       get_mcp_person_search_control: {
@@ -3308,6 +3329,15 @@ export type Database = {
           p_role_id: string
         }
         Returns: string
+      }
+      prepare_mcp_master_edit: {
+        Args: {
+          p_changes: Json
+          p_kind: string
+          p_organization_id: string
+          p_target_id: string
+        }
+        Returns: Json
       }
       prepare_mcp_reauth: {
         Args: { p_authorization_id: string; p_token_hash: string }
