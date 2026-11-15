@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(16);
+select plan(17);
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values ('18100000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','mcp181@example.invalid','x',now(),now());
 insert into public.organizations(id,name) values ('18100000-0000-0000-0000-000000000002','Synthetic');
 insert into public.organization_members(organization_id,user_id,role) values ('18100000-0000-0000-0000-000000000002','18100000-0000-0000-0000-000000000001','owner');
@@ -27,6 +27,7 @@ insert into public.shifts(id,organization_id,client_id,start_at,end_at,status) v
  ('18100000-0000-0000-0000-000000000010','18100000-0000-0000-0000-000000000002','18100000-0000-0000-0000-000000000006','2026-11-01 08:00+00','2026-11-01 09:00+00','published');
 select set_config('test.batch',public.prepare_mcp_shift_update_batch('18100000-0000-0000-0000-000000000002',
  '[{"shift_id":"18100000-0000-0000-0000-000000000008","start_at":"2026-11-01T02:00:00Z","end_at":"2026-11-01T03:00:00Z","segments":[{"start_at":"2026-11-01T02:00:00Z","end_at":"2026-11-01T03:00:00Z","staffs":[{"staff_id":"18100000-0000-0000-0000-000000000007"}]}]},{"shift_id":"18100000-0000-0000-0000-000000000010","start_at":"2026-11-01T10:00:00Z","end_at":"2026-11-01T11:00:00Z","segments":[{"start_at":"2026-11-01T10:00:00Z","end_at":"2026-11-01T11:00:00Z","staffs":[{"staff_id":"18100000-0000-0000-0000-000000000007"}]}]}]'::jsonb)->>'batch_id',true);
+select ok((select 'lock_timeout=5s'=any(proconfig) from pg_catalog.pg_proc where oid='public.confirm_mcp_shift_update_batch(uuid,uuid[])'::regprocedure),'batch confirmation bounds lock waits');
 select ok(not has_function_privilege('mcp_import','public.confirm_mcp_shift_update_batch(uuid,uuid[])','execute'),'MCP cannot confirm a batch');
 select is((select start_at from public.shifts where id='18100000-0000-0000-0000-000000000008'),'2026-11-01 00:00+00'::timestamptz,'preparing does not change shifts');
 select throws_ok($$select public.confirm_mcp_shift_update_batch(current_setting('test.batch')::uuid,array[(select proposal_id from private.mcp_shift_update_batch_items where batch_id=current_setting('test.batch')::uuid and position=1)])$$,'42501','proposal_unavailable','OAuth cannot confirm');
