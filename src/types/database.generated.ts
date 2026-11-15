@@ -3100,15 +3100,15 @@ export type Database = {
         Returns: Json
       }
       get_invitation_preview: { Args: { p_code: string }; Returns: Json }
-      get_mcp_import_control: {
-        Args: { p_organization_id: string }
-        Returns: Json
-      }
       get_mcp_business_alert_preferences: {
         Args: { p_organization_id: string }
         Returns: Json
       }
       get_mcp_business_alert_status: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_import_control: {
         Args: { p_organization_id: string }
         Returns: Json
       }
@@ -3445,6 +3445,7 @@ export type Database = {
         Args: { p_organization_id: string; p_report_ids: string[] }
         Returns: undefined
       }
+      run_mcp_business_alerts: { Args: never; Returns: number }
       save_generated_shift_atomic: {
         Args: { p_org_id: string; p_payload: Json; p_shift_id: string }
         Returns: string
@@ -3463,7 +3464,6 @@ export type Database = {
         }
         Returns: Json
       }
-      run_mcp_business_alerts: { Args: never; Returns: number }
       save_report_atomic: {
         Args: {
           p_actual_service_type_id?: string
