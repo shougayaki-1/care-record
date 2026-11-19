@@ -362,6 +362,21 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
     }));
 
+    server.registerTool('prepare_shift_updates_batch', {
+      title: '複数シフトの変更案をまとめて確認',
+      description: '確認済みの変更後区間を最大10件まとめて案にします。各案の空き・競合を事前に確認してください。CareRecord の画面で本人が選んだ案だけ確定し、確定時にも競合を再確認します。',
+      inputSchema: z.object({ organization_id: uuid, items: z.array(z.strictObject({ shift_id: uuid,
+        start_at: z.iso.datetime({ offset: true }), end_at: z.iso.datetime({ offset: true }),
+        segments: z.array(z.strictObject({ start_at: z.iso.datetime({ offset: true }), end_at: z.iso.datetime({ offset: true }),
+          service_type_id: uuid.nullable().optional(), staffs: z.array(z.strictObject({ staff_id: uuid, staff_role_id: uuid.nullable().optional() })).min(1).max(20) })).min(1).max(32) })).min(1).max(10) }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_shift_updates_batch', async () => {
+      const { data, error } = await supabase.rpc('prepare_mcp_shift_update_batch', { p_organization_id: args.organization_id, p_items: args.items });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.batch_id ? `${appOrigin}/app/mcp-shift-update-batch/${data.batch_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
     server.registerTool('get_shift_update_result', {
       title: 'シフト変更の確認結果を取得',
       description: '本人の確認待ち、変更済み、期限切れ、対象変更と Google 同期の状態を確認します。',
