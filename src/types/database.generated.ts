@@ -3621,6 +3621,10 @@ export type Database = {
         }
         Returns: number
       }
+      submit_mcp_batch_candidates: {
+        Args: { p_items: Json; p_organization_id: string }
+        Returns: Json
+      }
       submit_mcp_candidate: {
         Args: {
           p_organization_id: string

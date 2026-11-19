@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const stagingEndpoint = 'https://xhvvfovvlqzlkirpjocv.supabase.co/functions/v1/care-record-mcp';
 const maximumResponseBytes = 1_000_000;
-const toolNames = ['check_record_quality', 'get_monthly_statistics', 'get_record', 'get_record_edit_result', 'get_record_edit_template', 'get_record_form', 'get_record_transition_batch_result', 'get_record_transition_result', 'get_shift', 'get_shift_cancel_result', 'get_shift_create_result', 'get_shift_update_result', 'get_shift_update_template', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'prepare_record_edit', 'prepare_record_transition', 'prepare_record_transition_batch', 'prepare_shift_cancel', 'prepare_shift_update', 'propose_shift_change', 'propose_shift_create', 'review_billing_records', 'search_people', 'submit_record_candidate'];
+const toolNames = ['check_record_quality', 'find_import_shift_candidates', 'get_monthly_statistics', 'get_record', 'get_record_edit_result', 'get_record_edit_template', 'get_record_form', 'get_record_transition_batch_result', 'get_record_transition_result', 'get_shift', 'get_shift_cancel_result', 'get_shift_create_result', 'get_shift_update_result', 'get_shift_update_template', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'prepare_record_edit', 'prepare_record_transition', 'prepare_record_transition_batch', 'prepare_shift_cancel', 'prepare_shift_update', 'propose_shift_change', 'propose_shift_create', 'review_billing_records', 'search_people', 'submit_record_candidate', 'submit_record_candidates_batch'];
 
 export class McpContractError extends Error {
   constructor(code) { super(code); this.name = 'McpContractError'; }
@@ -15,7 +15,7 @@ export function validateToolContract(tools) {
     || tools.map(tool => tool?.name).sort().join(',') !== toolNames.join(',')) fail('tools_changed');
   for (const tool of tools) {
     if (tool.inputSchema?.type !== 'object') fail('input_schema_changed');
-    if (tool.annotations?.readOnlyHint !== (!['submit_record_candidate', 'prepare_record_edit', 'prepare_record_transition', 'prepare_record_transition_batch', 'prepare_shift_cancel', 'prepare_shift_update', 'propose_shift_create'].includes(tool.name))
+    if (tool.annotations?.readOnlyHint !== (!['submit_record_candidate', 'submit_record_candidates_batch', 'prepare_record_edit', 'prepare_record_transition', 'prepare_record_transition_batch', 'prepare_shift_cancel', 'prepare_shift_update', 'propose_shift_create'].includes(tool.name))
       || tool.annotations?.destructiveHint !== false || tool.annotations?.openWorldHint !== false) fail('annotations_changed');
   }
   const availability = tools.find(tool => tool.name === 'list_staff_availability').inputSchema;
@@ -87,6 +87,13 @@ export function validateToolContract(tools) {
     if (unrecorded.properties?.[key]?.format !== 'date' || !unrecorded.required?.includes(key)) fail('billing_date_input_changed');
   }
   if (quality.properties?.record_id?.format !== 'uuid' || !quality.required?.includes('record_id')) fail('record_input_changed');
+  const importBatch = tools.find(tool => tool.name === 'submit_record_candidates_batch').inputSchema;
+  const importShifts = tools.find(tool => tool.name === 'find_import_shift_candidates').inputSchema;
+  if (importBatch.properties?.items?.type !== 'array' || importBatch.properties.items.minItems !== 1 || importBatch.properties.items.maxItems !== 10
+    || !importBatch.required?.includes('items') || importBatch.properties.items.items?.properties?.request_id?.format !== 'uuid'
+    || !importBatch.properties.items.items?.required?.includes('request_id')) fail('import_batch_input_changed');
+  if (importShifts.properties?.client_id?.format !== 'uuid' || !importShifts.required?.includes('client_id')
+    || ['start_at', 'end_at'].some(key => importShifts.properties?.[key]?.format !== 'date-time' || !importShifts.required?.includes(key))) fail('import_shift_input_changed');
   const workspace = tools.find(tool => tool.name === 'list_workspaces').inputSchema;
   if (Object.keys(workspace.properties ?? {}).length) fail('workspace_inputs_changed');
   const form = tools.find(tool => tool.name === 'get_record_form').inputSchema;
@@ -97,7 +104,7 @@ export function validateToolContract(tools) {
   const records = tools.find(tool => tool.name === 'list_records').inputSchema;
   const record = tools.find(tool => tool.name === 'get_record').inputSchema;
   const people = tools.find(tool => tool.name === 'search_people').inputSchema;
-  for (const schema of [form, submit, list, detail, people, records, record, queue, availability, proposal, quality, billing, unrecorded, kpi, create, createResult, cancel, cancelResult, update, updateResult, updateTemplate, recordEdit, recordEditResult, recordEditTemplate, transition, transitionResult, batch, batchResult]) {
+  for (const schema of [form, submit, list, detail, people, records, record, queue, availability, proposal, quality, billing, unrecorded, kpi, create, createResult, cancel, cancelResult, update, updateResult, updateTemplate, recordEdit, recordEditResult, recordEditTemplate, transition, transitionResult, batch, batchResult, importBatch, importShifts]) {
     if (schema.properties?.organization_id?.type !== 'string'
       || schema.properties.organization_id.format !== 'uuid'
       || !schema.required?.includes('organization_id')) fail('organization_input_changed');
