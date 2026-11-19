@@ -183,6 +183,56 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
     }));
 
+    server.registerTool('prepare_record_transition', {
+      title: '記録の承認・差戻し案を作成',
+      description: '記録IDと現在の版を指定して承認または差戻しの案を作成します。差戻しには理由が必要です。CareRecord画面で本人が確認するまで記録は変更されません。',
+      inputSchema: z.object({ organization_id: uuid, record_id: uuid, expected_version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+        transition: z.enum(['approve', 'remand']), reason: z.string().trim().min(1).max(500).optional() }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_record_transition', async () => {
+      if ((args.transition === 'remand') !== Boolean(args.reason)) throw new Error('差戻しには理由を指定し、承認には理由を指定しないでください');
+      const { data, error } = await supabase.rpc('prepare_mcp_report_transition', { p_org: args.organization_id, p_report: args.record_id,
+        p_expected_version: args.expected_version, p_transition: args.transition, p_reason: args.reason ?? null });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.proposal_id ? `${appOrigin}/app/mcp-record-transition/${data.proposal_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
+    server.registerTool('get_record_transition_result', {
+      title: '記録の承認・差戻し案の結果を確認',
+      description: '本人確認待ち、期限切れ、対象変更、承認または差戻しの状態を確認します。',
+      inputSchema: z.object({ organization_id: uuid, proposal_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_record_transition_result', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_report_transition_result', { p_org: args.organization_id, p_proposal: args.proposal_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
+    }));
+
+    server.registerTool('prepare_record_transition_batch', {
+      title: '複数記録の承認・差戻し案を作成',
+      description: '確認済みの記録IDと各版を最大20件指定します。本人が画面で確認するまで変更せず、1件でも問題があれば全件を処理しません。',
+      inputSchema: z.object({ organization_id: uuid, records: z.array(z.object({ record_id: uuid, expected_version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })).min(1).max(20),
+        transition: z.enum(['approve','remand']), reason: z.string().trim().min(1).max(500).optional() }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_record_transition_batch', async () => {
+      if ((args.transition === 'remand') !== Boolean(args.reason)) throw new Error('差戻しには理由を指定し、承認には理由を指定しないでください');
+      const { data, error } = await supabase.rpc('prepare_mcp_report_transition_batch', { p_org: args.organization_id, p_records: args.records, p_transition: args.transition, p_reason: args.reason ?? null });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.batch_id ? `${appOrigin}/app/mcp-record-transition-batch/${data.batch_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+    server.registerTool('get_record_transition_batch_result', {
+      title: '複数記録の承認・差戻し案の結果を確認',
+      description: '本人確認待ち、期限切れ、対象変更または全件の処理結果を確認します。',
+      inputSchema: z.object({ organization_id: uuid, batch_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_record_transition_batch_result', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_report_transition_batch_result', { p_org: args.organization_id, p_batch: args.batch_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
+    }));
+
     server.registerTool('check_record_quality', {
       title: '提供記録の入力・予定差を確認',
       description: '権限のある記録の必須項目と日時を確認し、閲覧可能なシフトとの違いを要確認として返します。記録は変更しません。',
