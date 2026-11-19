@@ -157,6 +157,30 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: { template: data }, content: [{ type: 'text', text: JSON.stringify({ template: data }) }] };
     }));
 
+    server.registerTool('prepare_master_edit', {
+      title: '利用者・スタッフのマスタ変更案を作成',
+      description: '利用者名、またはスタッフ名・雇用形態・勤務形態の変更案を作成します。値を推測せず本人に確認してください。CareRecord 画面で本人が変更前後を確認するまでは更新されません。',
+      inputSchema: z.object({ organization_id: uuid, kind: z.enum(['client', 'staff']), target_id: uuid,
+        changes: z.strictObject({ name: z.string().trim().min(1).max(100).optional(), employment_type: z.enum(['常勤', '非常勤']).optional(), work_style: z.enum(['兼務', '専従']).optional() }) }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_master_edit', async () => {
+      const { data, error } = await supabase.rpc('prepare_mcp_master_edit', { p_organization_id: args.organization_id, p_kind: args.kind, p_target_id: args.target_id, p_changes: args.changes });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.proposal_id ? `${appOrigin}/app/mcp-master-edit/${data.proposal_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
+    server.registerTool('get_master_edit_result', {
+      title: 'マスタ変更の確認結果を取得',
+      description: '本人の確認待ち、変更済み、期限切れ、対象変更の状態を確認します。',
+      inputSchema: z.object({ organization_id: uuid, proposal_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_master_edit_result', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_master_edit_result', { p_organization_id: args.organization_id, p_proposal: args.proposal_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
+    }));
+
     server.registerTool('prepare_record_edit', {
       title: '記録の変更案を作成',
       description: '確認済みの記録IDと現在の版、変更後の全項目、理由を指定します。日時・サービス・担当者の変更はchangesに指定します。画面で本人が確認するまで下書きは変更されません。承認済み記録の場合は元の記録を変更せず訂正案として保存します。',
