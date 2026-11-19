@@ -1,6 +1,7 @@
 'use client';
 
 import { getActionErrorMessage, needsActionRecovery } from '@/utils/actionResult';
+import { McpRemandReason } from '@/components/record/McpRemandReason';
 import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { useEffect, useState } from 'react';
 import { markRecordBodyVisible } from '@/utils/recordLoadTiming';
@@ -101,6 +102,8 @@ export default function RecordPage() {
                 {autosaveState === 'saving' ? '入力内容を保存中です…' : autosaveState === 'saved' ? '入力内容は自動保存されています' : '自動保存に失敗しました。通信を確認して入力を続けてください。'}
               </Alert>
             )}
+            {currentStatus === 'remanded' && currentOrg?.id && currentReportId &&
+              <McpRemandReason key={`${currentOrg.id}:${currentReportId}`} organizationId={currentOrg.id} reportId={currentReportId} />}
             {hasMcpProvenance && (
               <Alert severity="warning">
                 AIが紙の記録から作成した下書きです。送信・承認前に原本と照合し、特に日付・チェック・丸印・特記事項を確認してください。
