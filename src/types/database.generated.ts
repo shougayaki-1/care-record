@@ -2918,7 +2918,16 @@ export type Database = {
         }
         Returns: undefined
       }
+      confirm_mcp_master_edit: { Args: { p_proposal: string }; Returns: Json }
       confirm_mcp_record_edit: { Args: { p_proposal: string }; Returns: Json }
+      confirm_mcp_report_transition: {
+        Args: { p_proposal: string }
+        Returns: Json
+      }
+      confirm_mcp_report_transition_batch: {
+        Args: { p_batch: string }
+        Returns: Json
+      }
       confirm_mcp_shift_cancel: {
         Args: { p_proposal_id: string }
         Returns: Json
@@ -2929,6 +2938,10 @@ export type Database = {
       }
       confirm_mcp_shift_update: {
         Args: { p_proposal_id: string }
+        Returns: Json
+      }
+      confirm_mcp_shift_update_batch: {
+        Args: { p_batch_id: string; p_proposal_ids: string[] }
         Returns: Json
       }
       create_invitation_authorized: {
@@ -3001,6 +3014,10 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      disable_mcp_master_edit: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
       disable_mcp_person_search: {
         Args: { p_organization_id: string }
         Returns: undefined
@@ -3010,6 +3027,10 @@ export type Database = {
         Returns: undefined
       }
       disable_mcp_record_read: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
+      disable_mcp_report_transition: {
         Args: { p_organization_id: string }
         Returns: undefined
       }
@@ -3041,6 +3062,10 @@ export type Database = {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
+      enable_mcp_master_edit: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
       enable_mcp_person_search: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
@@ -3050,6 +3075,10 @@ export type Database = {
         Returns: undefined
       }
       enable_mcp_record_read: {
+        Args: { p_conditions: Json; p_organization_id: string }
+        Returns: undefined
+      }
+      enable_mcp_report_transition: {
         Args: { p_conditions: Json; p_organization_id: string }
         Returns: undefined
       }
@@ -3120,6 +3149,18 @@ export type Database = {
         Args: { p_month: string; p_organization_id: string }
         Returns: Json
       }
+      get_mcp_master_edit_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_master_edit_result: {
+        Args: { p_organization_id: string; p_proposal: string }
+        Returns: Json
+      }
+      get_mcp_master_edit_review: {
+        Args: { p_proposal: string }
+        Returns: Json
+      }
       get_mcp_person_search_control: {
         Args: { p_organization_id: string }
         Returns: Json
@@ -3150,6 +3191,30 @@ export type Database = {
       }
       get_mcp_record_read_control: {
         Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_report_remand_reason: {
+        Args: { p_org: string; p_report: string }
+        Returns: string
+      }
+      get_mcp_report_transition_batch_result: {
+        Args: { p_batch: string; p_org: string }
+        Returns: Json
+      }
+      get_mcp_report_transition_batch_review: {
+        Args: { p_batch: string }
+        Returns: Json
+      }
+      get_mcp_report_transition_control: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_report_transition_result: {
+        Args: { p_org: string; p_proposal: string }
+        Returns: Json
+      }
+      get_mcp_report_transition_review: {
+        Args: { p_proposal: string }
         Returns: Json
       }
       get_mcp_self_staff_names: {
@@ -3186,6 +3251,10 @@ export type Database = {
       }
       get_mcp_shift_read_control: {
         Args: { p_organization_id: string }
+        Returns: Json
+      }
+      get_mcp_shift_update_batch: {
+        Args: { p_batch_id: string }
         Returns: Json
       }
       get_mcp_shift_update_control: {
@@ -3317,6 +3386,15 @@ export type Database = {
         }
         Returns: string
       }
+      prepare_mcp_master_edit: {
+        Args: {
+          p_changes: Json
+          p_kind: string
+          p_organization_id: string
+          p_target_id: string
+        }
+        Returns: Json
+      }
       prepare_mcp_reauth: {
         Args: { p_authorization_id: string; p_token_hash: string }
         Returns: undefined
@@ -3329,6 +3407,25 @@ export type Database = {
           p_reason: string
           p_report: string
           p_values: Json
+        }
+        Returns: Json
+      }
+      prepare_mcp_report_transition: {
+        Args: {
+          p_expected_version: number
+          p_org: string
+          p_reason?: string
+          p_report: string
+          p_transition: string
+        }
+        Returns: Json
+      }
+      prepare_mcp_report_transition_batch: {
+        Args: {
+          p_org: string
+          p_reason?: string
+          p_records: Json
+          p_transition: string
         }
         Returns: Json
       }
@@ -3349,6 +3446,10 @@ export type Database = {
           p_shift_id: string
           p_start: string
         }
+        Returns: Json
+      }
+      prepare_mcp_shift_update_batch: {
+        Args: { p_items: Json; p_organization_id: string }
         Returns: Json
       }
       propose_mcp_shift_change: {
@@ -3580,6 +3681,10 @@ export type Database = {
           p_sync_status: string
         }
         Returns: number
+      }
+      submit_mcp_batch_candidates: {
+        Args: { p_items: Json; p_organization_id: string }
+        Returns: Json
       }
       submit_mcp_candidate: {
         Args: {

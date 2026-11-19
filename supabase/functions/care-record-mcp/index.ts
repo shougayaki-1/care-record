@@ -4,12 +4,14 @@ import { createMcpHandler, McpServer } from 'npm:@modelcontextprotocol/server@^2
 import { withOAuthProtectedResource, withSupabase } from 'npm:@supabase/server@^1.6.0';
 import { z } from 'npm:zod@^4.3.6';
 import formTemplate from '../_shared/default-form-template.json' with { type: 'json' };
-import { buildClarificationQuestions } from '../_shared/clarify-candidate.ts';
-import { normalizeDate, normalizeTime, normalizeValues, type FormItem } from '../_shared/validate-candidate.ts';
+import { type FormItem } from '../_shared/validate-candidate.ts';
+import { prepareImportCandidate } from '../_shared/prepare-import-candidate.ts';
+import { prepareImportBatch, mergeImportBatchResults } from '../_shared/prepare-import-batch.ts';
 import { checkRecordQuality } from '../_shared/record-quality.ts';
 import { reviewBillingRecords } from '../_shared/billing-record-review.ts';
 import { summarizeKpiSource } from '../_shared/statistics-kpi-source.ts';
 import { observeMcpTool } from '../_shared/mcp-observability.ts';
+import { japanBusinessDate, matchImportShifts } from '../_shared/match-import-shifts.ts';
 
 const template = formTemplate as FormItem[];
 const uuid = z.uuid();
@@ -167,6 +169,30 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: { template: data }, content: [{ type: 'text', text: JSON.stringify({ template: data }) }] };
     }));
 
+    server.registerTool('prepare_master_edit', {
+      title: '利用者・スタッフのマスタ変更案を作成',
+      description: '利用者名、またはスタッフ名・雇用形態・勤務形態の変更案を作成します。値を推測せず本人に確認してください。CareRecord 画面で本人が変更前後を確認するまでは更新されません。',
+      inputSchema: z.object({ organization_id: uuid, kind: z.enum(['client', 'staff']), target_id: uuid,
+        changes: z.strictObject({ name: z.string().trim().min(1).max(100).optional(), employment_type: z.enum(['常勤', '非常勤']).optional(), work_style: z.enum(['兼務', '専従']).optional() }) }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_master_edit', async () => {
+      const { data, error } = await supabase.rpc('prepare_mcp_master_edit', { p_organization_id: args.organization_id, p_kind: args.kind, p_target_id: args.target_id, p_changes: args.changes });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.proposal_id ? `${appOrigin}/app/mcp-master-edit/${data.proposal_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
+    server.registerTool('get_master_edit_result', {
+      title: 'マスタ変更の確認結果を取得',
+      description: '本人の確認待ち、変更済み、期限切れ、対象変更の状態を確認します。',
+      inputSchema: z.object({ organization_id: uuid, proposal_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_master_edit_result', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_master_edit_result', { p_organization_id: args.organization_id, p_proposal: args.proposal_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
+    }));
+
     server.registerTool('prepare_record_edit', {
       title: '記録の変更案を作成',
       description: '確認済みの記録IDと現在の版、変更後の全項目、理由を指定します。日時・サービス・担当者の変更はchangesに指定します。画面で本人が確認するまで下書きは変更されません。承認済み記録の場合は元の記録を変更せず訂正案として保存します。',
@@ -191,6 +217,56 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     }, async (args) => observeMcpTool('get_record_edit_result', async () => {
       const { data, error } = await supabase.rpc('get_mcp_record_edit_result', { p_org: args.organization_id, p_proposal: args.proposal_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
+    }));
+
+    server.registerTool('prepare_record_transition', {
+      title: '記録の承認・差戻し案を作成',
+      description: '記録IDと現在の版を指定して承認または差戻しの案を作成します。差戻しには理由が必要です。CareRecord画面で本人が確認するまで記録は変更されません。',
+      inputSchema: z.object({ organization_id: uuid, record_id: uuid, expected_version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+        transition: z.enum(['approve', 'remand']), reason: z.string().trim().min(1).max(500).optional() }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_record_transition', async () => {
+      if ((args.transition === 'remand') !== Boolean(args.reason)) throw new Error('差戻しには理由を指定し、承認には理由を指定しないでください');
+      const { data, error } = await supabase.rpc('prepare_mcp_report_transition', { p_org: args.organization_id, p_report: args.record_id,
+        p_expected_version: args.expected_version, p_transition: args.transition, p_reason: args.reason ?? null });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.proposal_id ? `${appOrigin}/app/mcp-record-transition/${data.proposal_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
+    server.registerTool('get_record_transition_result', {
+      title: '記録の承認・差戻し案の結果を確認',
+      description: '本人確認待ち、期限切れ、対象変更、承認または差戻しの状態を確認します。',
+      inputSchema: z.object({ organization_id: uuid, proposal_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_record_transition_result', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_report_transition_result', { p_org: args.organization_id, p_proposal: args.proposal_id });
+      if (error) throw new Error(connectionError);
+      return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
+    }));
+
+    server.registerTool('prepare_record_transition_batch', {
+      title: '複数記録の承認・差戻し案を作成',
+      description: '確認済みの記録IDと各版を最大20件指定します。本人が画面で確認するまで変更せず、1件でも問題があれば全件を処理しません。',
+      inputSchema: z.object({ organization_id: uuid, records: z.array(z.object({ record_id: uuid, expected_version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })).min(1).max(20),
+        transition: z.enum(['approve','remand']), reason: z.string().trim().min(1).max(500).optional() }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_record_transition_batch', async () => {
+      if ((args.transition === 'remand') !== Boolean(args.reason)) throw new Error('差戻しには理由を指定し、承認には理由を指定しないでください');
+      const { data, error } = await supabase.rpc('prepare_mcp_report_transition_batch', { p_org: args.organization_id, p_records: args.records, p_transition: args.transition, p_reason: args.reason ?? null });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.batch_id ? `${appOrigin}/app/mcp-record-transition-batch/${data.batch_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+    server.registerTool('get_record_transition_batch_result', {
+      title: '複数記録の承認・差戻し案の結果を確認',
+      description: '本人確認待ち、期限切れ、対象変更または全件の処理結果を確認します。',
+      inputSchema: z.object({ organization_id: uuid, batch_id: uuid }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('get_record_transition_batch_result', async () => {
+      const { data, error } = await supabase.rpc('get_mcp_report_transition_batch_result', { p_org: args.organization_id, p_batch: args.batch_id });
       if (error) throw new Error(connectionError);
       return { structuredContent: { result: data }, content: [{ type: 'text', text: JSON.stringify({ result: data }) }] };
     }));
@@ -322,6 +398,21 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
     }));
 
+    server.registerTool('prepare_shift_updates_batch', {
+      title: '複数シフトの変更案をまとめて確認',
+      description: '確認済みの変更後区間を最大10件まとめて案にします。各案の空き・競合を事前に確認してください。CareRecord の画面で本人が選んだ案だけ確定し、確定時にも競合を再確認します。',
+      inputSchema: z.object({ organization_id: uuid, items: z.array(z.strictObject({ shift_id: uuid,
+        start_at: z.iso.datetime({ offset: true }), end_at: z.iso.datetime({ offset: true }),
+        segments: z.array(z.strictObject({ start_at: z.iso.datetime({ offset: true }), end_at: z.iso.datetime({ offset: true }),
+          service_type_id: uuid.nullable().optional(), staffs: z.array(z.strictObject({ staff_id: uuid, staff_role_id: uuid.nullable().optional() })).min(1).max(20) })).min(1).max(32) })).min(1).max(10) }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('prepare_shift_updates_batch', async () => {
+      const { data, error } = await supabase.rpc('prepare_mcp_shift_update_batch', { p_organization_id: args.organization_id, p_items: args.items });
+      if (error || !data) throw new Error(connectionError);
+      const output = { ...data, review_url: appOrigin && data.batch_id ? `${appOrigin}/app/mcp-shift-update-batch/${data.batch_id}` : null };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
     server.registerTool('get_shift_update_result', {
       title: 'シフト変更の確認結果を取得',
       description: '本人の確認待ち、変更済み、期限切れ、対象変更と Google 同期の状態を確認します。',
@@ -391,6 +482,51 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
     }));
 
+    server.registerTool('find_import_shift_candidates', {
+      title: '読み取り記録と照合するシフト候補を検索',
+      description: '利用者が確認した利用者IDと開始・終了時刻で、閲覧権限のあるシフトの重なりを確認します。候補は自動選択・紐付けされません。',
+      inputSchema: z.object({ organization_id: uuid, client_id: uuid, start_at: z.iso.datetime({ offset: true }), end_at: z.iso.datetime({ offset: true }),
+        offset: z.number().int().min(0).max(10000).default(0) }),
+      annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    }, async (args) => observeMcpTool('find_import_shift_candidates', async () => {
+      const start = Date.parse(args.start_at), end = Date.parse(args.end_at);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 86400000) throw new Error('開始・終了時刻を確認してください');
+      const { data, error } = await supabase.rpc('list_mcp_shifts', { p_organization_id: args.organization_id,
+        p_start: japanBusinessDate(start), p_end: japanBusinessDate(end), p_client_id: args.client_id, p_staff_id: null,
+        p_unassigned: false, p_sync_status: null, p_limit: 100, p_offset: args.offset });
+      if (error || !data || !Array.isArray(data.shifts)) throw new Error(connectionError);
+      if (typeof data.has_more !== 'boolean') throw new Error(connectionError);
+      const candidates = matchImportShifts(data.shifts, start, end);
+      const nextOffset = data.has_more && args.offset + 100 <= 10000 ? args.offset + 100 : null;
+      const output = { candidates, has_more: data.has_more, next_offset: nextOffset,
+        message: data.has_more && nextOffset === null ? '検索上限に達しました。期間を絞って再検索し、候補を原本と照合してください。' : '候補の内容を原本と照合してください。記録やシフトへの紐付けは行っていません。' };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
+    server.registerTool('submit_record_candidates_batch', {
+      title: '複数のAI読み取り記録を送信',
+      description: '最大10件の読み取り結果を候補として送信します。各request_idは再試行時も維持してください。不明点と重複候補は利用者に確認し、明示的な指示がある場合だけ送信を続けます。記録の承認は行いません。',
+      inputSchema: z.object({ organization_id: uuid, items: z.array(z.object({ request_id: uuid, source_file_name: shortText.optional(), record: z.unknown().describe('単件送信と同じmeta・values・confidence・warningsを持つ読み取り結果'),
+        send_anyway: z.boolean().default(false), allow_duplicate: z.boolean().default(false) })).min(1).max(10) }),
+      annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    }, async ({ organization_id, items }) => observeMcpTool('submit_record_candidates_batch', async () => {
+      if (new Set(items.map(item => item.request_id)).size !== items.length) throw new Error('各候補に異なるrequest_idを指定してください');
+      const { data: workspaces, error: workspaceError } = await supabase.rpc('list_mcp_workspaces');
+      if (workspaceError || !(workspaces ?? []).some((item: { id: string }) => item.id === organization_id)) throw new Error(connectionError);
+      const validated = items.map(item => { const record = recordInput.safeParse(item.record); return { ...item, record: record.success ? record.data : null }; });
+      const { results, pending } = prepareImportBatch(validated, template);
+      if (pending.length) {
+        const { data, error } = await supabase.rpc('submit_mcp_batch_candidates', { p_organization_id: organization_id,
+          p_items: pending.map(item => ({ request_id: item.request_id, source_file_name: item.source_file_name, payload: item.payload, allow_duplicate: item.allow_duplicate })) });
+        if (error || !data) throw new Error(connectionError);
+        try { mergeImportBatchResults(results, pending, data.items); }
+        catch { throw new Error(connectionError); }
+      }
+      const output = { items: results, review_url: appOrigin ? `${appOrigin}/app/ai-candidates` : null,
+        message: '送信済みの候補は管理者が原本と照合します。質問や重複を確認し、再試行時は同じrequest_idを使ってください。' };
+      return { structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] };
+    }));
+
     server.registerTool('submit_record_candidate', {
       title: 'AI読み取り記録を管理者へ送信',
       description: '紙/PDFの読み取り結果を管理者の確認待ちへ送信します。不明な項目は推測せずnullまたは省略し、warningsに記載してください。質問が返った場合は選択肢と自由記入で利用者に尋ね、回答を反映して再実行してください。利用者がこのまま送信を望む場合のみsend_anyway=trueを指定します。',
@@ -402,23 +538,7 @@ Deno.serve(withOAuthProtectedResource(withSupabase({ auth: 'user' }, async (requ
       }),
       annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
     }, async ({ organization_id, source_file_name, record, send_anyway }) => observeMcpTool('submit_record_candidate', async () => {
-      const warnings = [...record.warnings];
-      const payload = {
-        meta: {
-          date: normalizeDate(record.meta.date, warnings),
-          start_at: normalizeTime(record.meta.start_at, '開始時刻', warnings),
-          end_at: normalizeTime(record.meta.end_at, '終了時刻', warnings),
-          client_name: record.meta.client_name,
-          helper_names: record.meta.helper_names,
-          client_id_candidate: null,
-          helper_id_candidates: [],
-          travel_time_hours: record.meta.travel_time_hours ?? null,
-        },
-        values: normalizeValues(record.values, template, warnings),
-        confidence: record.confidence,
-        warnings: [...new Set(warnings)].slice(0, 50),
-      };
-      const questions = buildClarificationQuestions(record, payload.warnings, template);
+      const { payload, questions } = prepareImportCandidate(record, template);
       if (questions.length > 0 && !send_anyway) {
         const { data: workspaces, error: workspaceError } = await supabase.rpc('list_mcp_workspaces');
         if (workspaceError || !(workspaces ?? []).some((item: { id: string }) => item.id === organization_id)) {
