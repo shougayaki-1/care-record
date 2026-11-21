@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path TO public, extensions;
-SELECT plan(56);
+SELECT plan(79);
 
 SELECT ok((SELECT bool_and(relrowsecurity) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'),
   'all public tables have RLS enabled');
@@ -179,8 +179,13 @@ INSERT INTO public.user_session_activity (session_hash, auth_session_id, user_id
   ('rls-owner-hash', 'rls-owner-session', 'e2e00000-0000-0000-0000-000000000001', now(), now() + interval '1 hour'),
   ('rls-outsider-hash', 'rls-outsider-session', 'e2e00000-0000-0000-0000-000000000002', now(), now() + interval '1 hour'),
   ('accounts-manager-hash', 'accounts-manager-session', 'e2e00000-0000-0000-0000-000000000003', now(), now() + interval '1 hour');
+INSERT INTO public.organizations (id, name) VALUES ('e2e00000-0000-0000-0000-00000000000f', 'Other org');
+INSERT INTO public.organization_members (organization_id, user_id, role) VALUES ('e2e00000-0000-0000-0000-00000000000f', 'e2e00000-0000-0000-0000-000000000002', 'owner');
 INSERT INTO public.clients (id, organization_id, name)
 VALUES ('e2e00000-0000-0000-0000-00000000000b', 'e2e00000-0000-0000-0000-00000000000a', 'RLS Fixture Client');
+
+INSERT INTO public.clients (id, organization_id, name, deleted_at) VALUES ('e2e00000-0000-0000-0000-000000000010', 'e2e00000-0000-0000-0000-00000000000a', 'Deleted fixture', now());
+
 
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000001","role":"authenticated","session_id":"rls-owner-session"}', true);
@@ -194,6 +199,37 @@ SELECT lives_ok(
      VALUES ('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-00000000000b', 'RETURNING Shift', now(), now() + interval '1 hour', 'published')
      RETURNING id $$,
   'org owner can INSERT shifts with RETURNING (insert().select())');
+
+-- Client management: exercise real RLS and the public RPCs using this fixture.
+SELECT lives_ok($$ UPDATE public.clients SET name='Owner update' WHERE id='e2e00000-0000-0000-0000-00000000000b' $$, 'owner may update client');
+SELECT lives_ok($$ SELECT public.upsert_client_form_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b','[]'::jsonb) $$, 'owner may update client form');
+SELECT lives_ok($$ SELECT public.replace_client_assignments_with_costs_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b',ARRAY[]::uuid[],'{}'::jsonb) $$, 'owner may replace assignments');
+SELECT lives_ok($$ SELECT public.get_client_assignment_permission_hints_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b') $$, 'owner may read assignment hints');
+SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000003","role":"authenticated","session_id":"accounts-manager-session"}', true);
+SELECT is((SELECT count(*)::bigint FROM public.clients WHERE id='e2e00000-0000-0000-0000-00000000000b'), 0::bigint, 'member without client access cannot read client');
+SELECT throws_ok($$ INSERT INTO public.clients (organization_id, name) VALUES ('e2e00000-0000-0000-0000-00000000000a', 'forbidden') $$, '42501', 'new row violates row-level security policy for table "clients"', 'member without client management cannot insert client');
+WITH changed AS (UPDATE public.clients SET name='forbidden' WHERE id='e2e00000-0000-0000-0000-00000000000b' RETURNING 1) SELECT is((SELECT count(*)::bigint FROM changed), 0::bigint, 'member without client management cannot update client');
+SELECT throws_ok($$ SELECT public.upsert_client_form_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b','[]'::jsonb) $$, '42501', 'permission_denied', 'member cannot update form by RPC');
+SELECT throws_ok($$ SELECT public.replace_client_assignments_with_costs_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b',ARRAY[]::uuid[],'{}'::jsonb) $$, '42501', 'permission_denied', 'member cannot replace assignments by RPC');
+SELECT throws_ok($$ SELECT public.get_client_assignment_permission_hints_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b') $$, '42501', 'permission_denied', 'member cannot read hints by RPC');
+SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000002","role":"authenticated","session_id":"rls-outsider-session"}', true);
+WITH changed AS (UPDATE public.clients SET name='forbidden' WHERE id='e2e00000-0000-0000-0000-00000000000b' RETURNING 1) SELECT is((SELECT count(*)::bigint FROM changed), 0::bigint, 'other organization owner cannot update client');
+SELECT throws_ok($$ SELECT public.upsert_client_form_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b','[]'::jsonb) $$, '42501', 'permission_denied', 'other organization owner cannot update form');
+SELECT throws_ok($$ SELECT public.replace_client_assignments_with_costs_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b',ARRAY[]::uuid[],'{}'::jsonb) $$, '42501', 'permission_denied', 'other organization owner cannot replace assignments');
+SELECT throws_ok($$ SELECT public.get_client_assignment_permission_hints_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b') $$, '42501', 'permission_denied', 'other organization owner cannot read hints');
+
+SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000001","role":"authenticated","session_id":"rls-owner-session"}', true);
+SELECT throws_ok($$ SELECT public.upsert_client_form_authorized('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-000000000010', '[]'::jsonb) $$, 'P0002', 'client_not_found', 'upsert_client_form_authorized rejects deleted target');
+SELECT throws_ok($$ SELECT public.replace_client_assignments_with_costs_authorized('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-000000000010', ARRAY[]::uuid[], '{}'::jsonb) $$, 'P0002', 'client_not_found', 'replace_client_assignments_with_costs_authorized rejects deleted target');
+SELECT throws_ok($$ SELECT public.get_client_assignment_permission_hints_authorized('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-000000000010') $$, 'P0002', 'client_not_found', 'get_client_assignment_permission_hints_authorized rejects deleted target');
+SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000001","role":"authenticated","session_id":"rls-owner-session"}', true);
+SELECT throws_ok($$ SELECT public.upsert_client_form_authorized('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-000000000011', '[]'::jsonb) $$, 'P0002', 'client_not_found', 'upsert_client_form_authorized rejects missing target');
+SELECT throws_ok($$ SELECT public.replace_client_assignments_with_costs_authorized('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-000000000011', ARRAY[]::uuid[], '{}'::jsonb) $$, 'P0002', 'client_not_found', 'replace_client_assignments_with_costs_authorized rejects missing target');
+SELECT throws_ok($$ SELECT public.get_client_assignment_permission_hints_authorized('e2e00000-0000-0000-0000-00000000000a', 'e2e00000-0000-0000-0000-000000000011') $$, 'P0002', 'client_not_found', 'get_client_assignment_permission_hints_authorized rejects missing target');
+SELECT set_config('request.jwt.claims', '{"sub":"e2e00000-0000-0000-0000-000000000002","role":"authenticated","session_id":"rls-outsider-session"}', true);
+SELECT throws_ok($$ SELECT public.upsert_client_form_authorized('e2e00000-0000-0000-0000-00000000000f', 'e2e00000-0000-0000-0000-00000000000b', '[]'::jsonb) $$, 'P0002', 'client_not_found', 'upsert_client_form_authorized rejects foreign target');
+SELECT throws_ok($$ SELECT public.replace_client_assignments_with_costs_authorized('e2e00000-0000-0000-0000-00000000000f', 'e2e00000-0000-0000-0000-00000000000b', ARRAY[]::uuid[], '{}'::jsonb) $$, 'P0002', 'client_not_found', 'replace_client_assignments_with_costs_authorized rejects foreign target');
+SELECT throws_ok($$ SELECT public.get_client_assignment_permission_hints_authorized('e2e00000-0000-0000-0000-00000000000f', 'e2e00000-0000-0000-0000-00000000000b') $$, 'P0002', 'client_not_found', 'get_client_assignment_permission_hints_authorized rejects foreign target');
 
 -- Regression: the public invitation RPC is SECURITY DEFINER and callable by
 -- authenticated users. It must therefore enforce the same dangerous-role
