@@ -14,6 +14,7 @@ import { OrganizationBasics } from '@/components/settings/OrganizationBasics';
 import { GoogleIntegrationSettings } from '@/components/settings/GoogleIntegrationSettings';
 import { McpImportSettings } from '@/components/settings/McpImportSettings';
 import { McpRecordReadSettings } from '@/components/settings/McpRecordReadSettings';
+import { McpShiftReadSettings } from '@/components/settings/McpShiftReadSettings';
 import { McpShiftCreateSettings } from '@/components/settings/McpShiftCreateSettings';
 import { McpKpiSettings } from '@/components/settings/McpKpiSettings';
 import { McpShiftCancelSettings } from '@/components/settings/McpShiftCancelSettings';
@@ -444,6 +445,7 @@ function SettingsContent() {
                         />
                         {canManageIntegrations && <McpImportSettings key={currentOrg.id} organizationId={currentOrg.id} />}
                         {canManageIntegrations && <McpRecordReadSettings key={`record-read-${currentOrg.id}`} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpShiftReadSettings key={`shift-read-${currentOrg.id}`} organizationId={currentOrg.id} />}
                         {canManageIntegrations && <McpShiftCreateSettings key={`shift-${currentOrg.id}`} organizationId={currentOrg.id} />}
                         {canManageIntegrations && <McpKpiSettings key={currentOrg.id} organizationId={currentOrg.id} />}
                         {canManageIntegrations && <McpShiftCancelSettings key={currentOrg.id} organizationId={currentOrg.id} />}
