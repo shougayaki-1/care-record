@@ -5,7 +5,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { usePathname } from 'next/navigation';
-import { CircularProgress, Box } from '@mui/material';
+import { Alert, Box, Button, CircularProgress, Stack } from '@/components/ui/mui';
+import { RecoveryLogoutButton } from '@/components/auth/RecoveryLogoutButton';
 import { setLastOrganization } from '@/app/actions/user';
 import { FULL_PERMISSIONS, mergePermissions, type RolePermissions } from '@/utils/permissions';
 
@@ -42,12 +43,14 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const [currentOrg, setCurrentOrg] = useState<Workspace | null>(null);
   const [orgList, setOrgList] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(shouldLoadWorkspace);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [status, setStatus] = useState<WorkspaceLoadStatus>(shouldLoadWorkspace ? 'loading' : 'session_expired');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
   const fetchWorkspaces = useCallback(async (knownSession?: Session | null) => {
     const seq = ++fetchSeq.current;
+    setLoadAttempt(seq);
     const isCurrent = () => seq === fetchSeq.current;
     try {
       setLoading(true);
@@ -208,6 +211,23 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
     };
   }, [fetchWorkspaces, shouldLoadWorkspace]);
 
+  // Bound both the initial auth event wait and all workspace requests. A timed-out
+  // request must not overwrite a later retry when it eventually resolves.
+  useEffect(() => {
+    if (!shouldLoadWorkspace || !loading) return;
+    const timer = setTimeout(() => {
+      if (fetchSeq.current !== loadAttempt) return;
+      fetchSeq.current += 1;
+      loadedWorkspaceUserId.current = null;
+      setCurrentOrg(null);
+      setOrgList([]);
+      setStatus('error');
+      setErrorMessage('所属情報の確認がタイムアウトしました。通信状況を確認して再試行してください。');
+      setLoading(false);
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [loading, shouldLoadWorkspace, loadAttempt]);
+
   const refreshWorkspace = useCallback(async () => {
     await fetchWorkspaces();
   }, [fetchWorkspaces]);
@@ -239,6 +259,20 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
 
   if (loading) {
     return <Box height="100vh" display="flex" justifyContent="center" alignItems="center"><CircularProgress /></Box>;
+  }
+
+  if (shouldLoadWorkspace && (status === 'error' || status === 'forbidden')) {
+    return (
+      <Box maxWidth={560} mx="auto" mt={10} px={2}>
+        <Stack spacing={2} alignItems="center">
+          <Alert severity={status === 'forbidden' ? 'warning' : 'error'} sx={{ width: '100%' }}>
+            {errorMessage || '所属情報を確認できませんでした。'}
+          </Alert>
+          <Button variant="contained" onClick={() => void refreshWorkspace()}>再試行</Button>
+          <RecoveryLogoutButton />
+        </Stack>
+      </Box>
+    );
   }
 
   return (
