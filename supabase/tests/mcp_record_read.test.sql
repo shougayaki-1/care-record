@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path to public, extensions;
-select plan(28);
+select plan(31);
 grant usage on schema extensions to mcp_import;
 grant execute on all functions in schema extensions to mcp_import;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,created_at,updated_at) values
@@ -42,6 +42,15 @@ update public.reports set service_date=null where id='17400000-0000-0000-0000-00
 set local role mcp_import;
 select is(jsonb_array_length(public.list_mcp_records('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28',p_client_id:='17200000-0000-0000-0000-000000000006',p_status:='draft')->'records'),1,'legacy missing date is found by Japan date');
 select is(public.list_mcp_records('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28',p_status:='draft')->'records'->0->>'service_date','2026-10-28','legacy row returns the effective service date');
+reset role;
+update public.reports set status='pending' where id='17400000-0000-0000-0000-000000000003';
+set local role mcp_import;
+select is((public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28',p_status:='pending')->'counts'->>'pending')::int, 2, 'queue counts pending legacy row on its Japan service date');
+select is(
+  (select row->>'service_date' from jsonb_array_elements(public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-28','2026-10-28')->'records') as entry(row) where row->>'id'='17400000-0000-0000-0000-000000000003'),
+  '2026-10-28', 'queue returns the effective service date for the legacy row'
+);
+select is((public.list_mcp_approval_queue('17200000-0000-0000-0000-000000000002','2026-10-27','2026-10-27')->'counts'->>'pending')::int, 0, 'queue does not count the legacy row on its UTC date');
 reset role;
 rollback to savepoint missing_date_test;
 set local role mcp_import;
