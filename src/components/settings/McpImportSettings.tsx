@@ -45,7 +45,7 @@ function McpImportSettingsForOrg({ organizationId }: { organizationId: string })
     }
     const accepted = await confirm({
       message: next
-        ? '確認項目の内容と根拠を確認し、この事業所のAI記録送信を有効にしますか？ 外部AIへの情報提供は利用するサービスの条件にも従います。'
+        ? '外部AIの契約・取扱条件と必要な説明等を事業所の責任で確認しましたか？ この事業所のAI記録送信を有効にします。'
         : 'この事業所のAI記録送信を停止しますか？ 登録済みの候補は削除されません。',
       confirmText: next ? '確認して有効にする' : '停止する',
       confirmColor: next ? 'primary' : 'warning',
@@ -62,7 +62,7 @@ function McpImportSettingsForOrg({ organizationId }: { organizationId: string })
 
   return <Box sx={{ mt: 3, p: { xs: 2, sm: 4 }, borderRadius: 1 }}>
     <Typography variant="h6" fontWeight="bold" gutterBottom>AIアプリからの記録送信</Typography>
-    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>事業所ごとに提供条件を確認してから有効にします。確認結果と根拠には個人情報や秘密情報を入力しないでください。原本を外部AIへ添付する操作はこの設定より前に行われ、停止しても外部AIへの添付や送信は制御されません。</Typography>
+    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>事業所の管理者が外部AIの契約・データ取扱条件、保存・削除・二次利用、利用者への説明等を確認し、事業所の判断と責任で有効化します。CareRecordは認証・認可・事業所分離・停止・監査を提供しますが、外部AIの契約条件の個別審査は代行しません。確認結果と根拠には個人情報や秘密情報を入力しないでください。原本を外部AIへ添付する操作はこの設定では制御されません。</Typography>
     {loading ? <CircularProgress size={24} /> : loadError || enabled === null ? <Alert severity="error">設定を取得できませんでした。再読み込みしてください。</Alert> : <Stack spacing={2}>
       <Alert severity={enabled ? 'success' : 'info'}>事業所の設定: {enabled ? '有効' : '停止中'}。環境全体の設定によっては利用できない場合があります。停止しても登録済みの候補は残ります。</Alert>
       {fields.map(([key, label]) => <AppTextField key={key} label={`${label}の確認結果・根拠`} value={conditions[key]} onChange={event => setConditions({ ...conditions, [key]: event.target.value })} slotProps={{ htmlInput: { maxLength: 500 } }} disabled={saving} multiline />)}
