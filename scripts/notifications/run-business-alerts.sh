@@ -12,7 +12,7 @@ u = urlsplit(os.environ['BUSINESS_ALERT_DATABASE_URL'])
 q = parse_qs(u.query)
 valid = (u.scheme in ('postgres', 'postgresql') and u.hostname == os.environ['BUSINESS_ALERT_EXPECTED_HOST']
          and u.username == os.environ['BUSINESS_ALERT_EXPECTED_USER'] and u.username.split('.')[0] not in ('postgres', 'service_role', 'supabase_admin', 'authenticator') and u.path == '/postgres'
-         and q.get('sslmode') == ['verify-full'])
+         and q.get('sslmode') == ['verify-full'] and 'sslrootcert' not in q)
 if not valid:
     print('Business alert database configuration does not match the expected environment.', file=sys.stderr)
     sys.exit(1)
