@@ -1,6 +1,17 @@
 # MCP の契約試験と運用（Issue #171）
 
-状態: 一部実装・公開ゲート未達（2026-10-29）。本書は現行 main の3ツールを対象にする。#168 の認証強化は本番へ配備済みだが、本人確認後の実 OAuth 再接続は未検証。#170 の変更操作の安全契約は設計案であり未実装。本書をもって提供可能とは扱わない。提供前の判定は [system-decisions.md](system-decisions.md)、[MCPの提供条件](mcp-data-policy-169.md) を優先する。
+状態: 試験・運用の共通手順。各機能の公開状況と試験の結果は、対応 Issue・PR を正とする。本書をもって事業所の提供条件の確認や実データでの利用許可とは扱わない。提供前の判定は [system-decisions.md](system-decisions.md)、[MCPの提供条件](mcp-data-policy-169.md) を優先する。
+
+## 現在の証跡と確認範囲（2026-11-23）
+
+- 認証済み Staging MCP で合成事業所の一覧と本人の通知設定を取得済み。本番の「テスト用」事業所では、記録参照・変更・承認差戻し等を合成データで試験した。実施内容と片付けは各 Issue を参照する。実運用事業所の提供条件を確認したことにはならない。
+- `mcp-contract.test.mjs` の6件は、確認器に対する合成 JSON/SSE 応答、契約差・エラー処理・秘匿などの回帰であり、業務ツールの正常系・認可拒否や配備後の実接続を証明しない。確認器本体は現行のツール名・入力と read/write 分類を検査する。
+- 読取の正常・停止・認可境界は `mcp_shift_read.test.sql`（シフト・空き時間）、`mcp_person_search.test.sql`、`mcp_record_read.test.sql`、`mcp_billing_review.test.sql`、`mcp_kpi_source.test.sql` 等の合成 DB 試験で確認する。例として [PR #200](https://github.com/shougayaki-1/care-record/pull/200) と [PR #201](https://github.com/shougayaki-1/care-record/pull/201) は正常・別事業所・担当範囲・既定停止の結果、[PR #228](https://github.com/shougayaki-1/care-record/pull/228) は旧記録の承認キューと認可の結果を記録している。
+- 変更の確認前・権限・競合・再送・監査は、`mcp_shift_create.test.sql`、`mcp_shift_update_*`、`mcp_shift_cancel_*`、`mcp_record_edit_*`、`mcp_report_transition.test.sql`、`mcp_shift_batch.test.sql`、`mcp_master_edit.test.sql` 等と各 PR の結果を参照する。[PR #216](https://github.com/shougayaki-1/care-record/pull/216)、[#217](https://github.com/shougayaki-1/care-record/pull/217)、[#223](https://github.com/shougayaki-1/care-record/pull/223)、[#224](https://github.com/shougayaki-1/care-record/pull/224) は検証層と未実施事項を記録している。実 Google 同期などは合成 DB の試験と区別する。
+- 通知の配信・権限外や停止時の非配信・重複防止は `mcp_business_alerts.test.sql` と [PR #225](https://github.com/shougayaki-1/care-record/pull/225) を参照。[Actions 実行 44994142370](https://github.com/shougayaki-1/care-record/actions/runs/44994142370) の配信ステップは skipped で、実配信成功ではない。合成データ専用の接続先での Actions 実配信と運用開始は別途必要。
+- [監視実行 45040498555](https://github.com/shougayaki-1/care-record/actions/runs/45040498555) は Production 成功、Staging は cancelled、Staging 検証は skipped。監視成功を Staging や MCP 業務機能の成功と読み替えない。MCP 固有監視の追加や全クライアント E2E は #166 の現行方針で本 Issue の必須条件ではない。
+
+以下の導入時の説明には2026-10-29時点の状態を含む。配備版・実接続の最新結果に読み替えず、各 Issue と PR の新しい記録を優先する。
 
 ## 重複させない回帰試験
 
