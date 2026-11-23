@@ -444,6 +444,9 @@ function SettingsContent() {
                             handleRepairCalendar={handleRepairCalendar}
                             handleForceResyncCalendar={handleForceResyncCalendar}
                         />
+                        {canManageIntegrations && <Alert severity="info" sx={{ mt: 3 }}>
+                            外部AIサービスの選定・契約とデータの処理・保存・削除・二次利用、利用者への説明や必要な同意は、利用事業所が確認してから各機能を有効にしてください。CareRecordは連携の認証・認可、事業所間の分離、機能別の停止、変更時の本人確認および監査を担います。事業所による確認はCareRecord自身の法令・契約上の義務を免除するものではありません。
+                        </Alert>}
                         {canManageIntegrations && <McpImportSettings key={currentOrg.id} organizationId={currentOrg.id} />}
                         {canManageIntegrations && <McpRecordReadSettings key={`record-read-${currentOrg.id}`} organizationId={currentOrg.id} />}
                         {canManageIntegrations && <McpPersonSearchSettings key={`person-search-${currentOrg.id}`} organizationId={currentOrg.id} />}
