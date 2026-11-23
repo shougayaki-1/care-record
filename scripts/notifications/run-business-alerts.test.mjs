@@ -24,7 +24,7 @@ test('dispatches via pinned host and role without printing credentials', () => {
   assert.doesNotMatch(result.stdout + result.stderr, /synthetic-password/);
 });
 test('rejects host, username and TLS mismatches before connecting', () => {
-  for (const [key, value] of [['BUSINESS_ALERT_EXPECTED_HOST', 'other.invalid'], ['BUSINESS_ALERT_EXPECTED_USER', 'other'], ['BUSINESS_ALERT_DATABASE_URL', 'postgresql://alert_user:synthetic-password@example.invalid/postgres?sslmode=require']]) {
+  for (const [key, value] of [['BUSINESS_ALERT_EXPECTED_HOST', 'other.invalid'], ['BUSINESS_ALERT_EXPECTED_USER', 'other'], ['BUSINESS_ALERT_DATABASE_URL', 'postgresql://alert_user:synthetic-password@example.invalid/postgres?sslmode=require'], ['BUSINESS_ALERT_DATABASE_URL', 'postgresql://alert_user:synthetic-password@example.invalid/postgres?sslmode=verify-full&sslrootcert=system']]) {
     const { marker, env } = fixture(); env[key] = value;
     const result = spawnSync('bash', ['scripts/notifications/run-business-alerts.sh'], { env, encoding: 'utf8' });
     assert.notEqual(result.status, 0);

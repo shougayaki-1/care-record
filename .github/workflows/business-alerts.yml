@@ -29,4 +29,12 @@ jobs:
       - uses: actions/checkout@v5
       - name: Dispatch authorized in-app alerts
         if: vars.BUSINESS_ALERTS_ENABLED == 'true'
-        run: scripts/notifications/run-business-alerts.sh
+        env:
+          BUSINESS_ALERT_CA: ${{ secrets.SECURITY_MONITOR_CA_CERT }}
+          PGSSLROOTCERT: ${{ runner.temp }}/business-alert-ca.crt
+        run: |
+          : "${BUSINESS_ALERT_CA:?Database CA certificate is required}"
+          umask 077
+          trap 'rm -f "$PGSSLROOTCERT"' EXIT
+          printf '%s\n' "$BUSINESS_ALERT_CA" > "$PGSSLROOTCERT"
+          scripts/notifications/run-business-alerts.sh
