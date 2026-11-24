@@ -201,7 +201,8 @@ SELECT lives_ok(
   'org owner can INSERT shifts with RETURNING (insert().select())');
 
 -- Client management: exercise real RLS and the public RPCs using this fixture.
-SELECT lives_ok($$ UPDATE public.clients SET name='Owner update' WHERE id='e2e00000-0000-0000-0000-00000000000b' $$, 'owner may update client');
+WITH changed AS (UPDATE public.clients SET name='Owner update' WHERE id='e2e00000-0000-0000-0000-00000000000b' RETURNING 1)
+SELECT is((SELECT count(*)::bigint FROM changed), 1::bigint, 'owner may update client');
 SELECT lives_ok($$ SELECT public.upsert_client_form_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b','[]'::jsonb) $$, 'owner may update client form');
 SELECT lives_ok($$ SELECT public.replace_client_assignments_with_costs_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b',ARRAY[]::uuid[],'{}'::jsonb) $$, 'owner may replace assignments');
 SELECT lives_ok($$ SELECT public.get_client_assignment_permission_hints_authorized('e2e00000-0000-0000-0000-00000000000a','e2e00000-0000-0000-0000-00000000000b') $$, 'owner may read assignment hints');
