@@ -1,7 +1,8 @@
 'use client';
 
-import { Box, Tooltip } from '@/components/ui/mui';
+import { Box, Radio, RadioGroup, Tooltip } from '@/components/ui/mui';
 import CheckIcon from '@mui/icons-material/Check';
+import { getContrastRatio } from '@mui/material/styles';
 
 const PRESET_COLORS = [
   { label: 'レッド',     value: '#EF4444' },
@@ -25,34 +26,26 @@ type Props = {
 
 export default function ColorPresetPicker({ value, onChange }: Props) {
   return (
-    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+    <RadioGroup row aria-label="ロールの色" value={value} onChange={(_, color) => onChange(color)} sx={{ gap: 1 }}>
       {PRESET_COLORS.map((color) => (
         <Tooltip key={color.value} title={color.label} placement="top">
-          <Box
-            onClick={() => onChange(color.value)}
+          <Radio
+            value={color.value}
+            slotProps={{ input: { 'aria-label': color.label } }}
+            icon={<Box sx={{ width: 28, height: 28, borderRadius: '50%', bgcolor: color.value, border: '1px solid', borderColor: 'text.secondary' }} />}
+            checkedIcon={
+              <Box sx={{ width: 28, height: 28, borderRadius: '50%', bgcolor: color.value, border: '1px solid', borderColor: 'text.secondary', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CheckIcon sx={(theme) => ({ fontSize: 18, color: getContrastRatio(theme.palette.text.primary, color.value) >= getContrastRatio(theme.palette.common.white, color.value) ? 'text.primary' : 'common.white' })} />
+              </Box>
+            }
             sx={{
-              width: 28,
-              height: 28,
-              borderRadius: '50%',
-              bgcolor: color.value,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              outline: value === color.value
-                ? `3px solid ${color.value}`
-                : '3px solid transparent',
-              outlineOffset: 2,
-              transition: 'outline 0.1s',
-              '&:hover': { opacity: 0.85 },
+              p: 0.5,
+              '&.Mui-checked': { outline: '2px solid', outlineColor: 'text.primary', outlineOffset: 1 },
+              '&.Mui-focusVisible': { outline: '3px solid', outlineColor: 'primary.dark', outlineOffset: 2 },
             }}
-          >
-            {value === color.value && (
-              <CheckIcon sx={{ fontSize: 16, color: '#fff' }} />
-            )}
-          </Box>
+          />
         </Tooltip>
       ))}
-    </Box>
+    </RadioGroup>
   );
 }
