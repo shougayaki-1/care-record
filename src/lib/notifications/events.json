@@ -13,5 +13,7 @@
   "google_calendar.sync_failed": { "category": "warning", "priority": "high", "title": "Googleカレンダーの同期に失敗しました", "content": "未同期のシフトを確認してください。", "resourceType": null, "linkUrl": "/app/shifts/manage" },
   "backup.failed": { "category": "warning", "priority": "critical", "title": "バックアップに失敗しました", "content": "バックアップの状態を確認してください。", "resourceType": null, "linkUrl": "/app/backup" },
   "account.permissions_changed": { "category": "action_required", "priority": "normal", "title": "権限が変更されました", "content": "事業所で利用できる機能が変更されました。", "resourceType": "account", "linkUrl": null },
-  "account.removed_from_organization": { "category": "action_required", "priority": "high", "title": "事業所の所属が解除されました", "content": "この事業所へのアクセス権がなくなりました。", "resourceType": "account", "linkUrl": null }
+  "account.removed_from_organization": { "category": "action_required", "priority": "high", "title": "事業所の所属が解除されました", "content": "この事業所へのアクセス権がなくなりました。", "resourceType": "account", "linkUrl": null },
+  "business.pending_reports": { "category": "action_required", "priority": "normal", "title": "未承認の記録があります", "content": "未承認の記録を確認してください。", "resourceType": null, "linkUrl": "/app/reports" },
+  "business.unassigned_shifts": { "category": "action_required", "priority": "normal", "title": "未割当のシフトがあります", "content": "担当が未割当のシフトを確認してください。", "resourceType": null, "linkUrl": "/app/shifts/manage" }
 }

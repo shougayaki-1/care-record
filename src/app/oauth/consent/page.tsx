@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
 import { Alert, Box, Button, Container, Divider, Paper, Stack, Typography } from '@/components/ui/mui';
 import { createSessionClient, getAuthedUser } from '@/utils/supabase/auth';
-import { decideMcpAuthorization } from './actions';
+import { decideMcpAuthorization, finalizeMcpReauth } from './actions';
+import { McpReauth } from './reauth';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,11 +29,19 @@ export default async function McpConsentPage({
   }
 
   const supabase = await createSessionClient();
+  const prepared = await supabase.rpc('mcp_reauth_prepared', { p_authorization_id: authorizationId });
+  if (prepared.error) return <ConsentMessage>本人確認を開始できませんでした。最初から接続をやり直してください。</ConsentMessage>;
+  if (!prepared.data) return <McpReauth authorizationId={authorizationId} />;
   const { data, error } = await supabase.auth.oauth.getAuthorizationDetails(authorizationId);
   if (error || !data) {
     return <ConsentMessage>接続リクエストを確認できませんでした。最初から接続をやり直してください。</ConsentMessage>;
   }
-  if (!('authorization_id' in data)) redirect(data.redirect_url);
+  if (!('authorization_id' in data)) {
+    try { await finalizeMcpReauth(authorizationId); } catch {
+      return <ConsentMessage>本人確認を完了できませんでした。最初から接続をやり直してください。</ConsentMessage>;
+    }
+    redirect(data.redirect_url);
+  }
 
   return (
     <Box component="main" sx={{ height: '100dvh', overflowY: 'auto', bgcolor: 'background.default', py: { xs: 4, sm: 8 }, px: 2 }}>

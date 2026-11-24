@@ -26,6 +26,8 @@
 
 ## 監査ログ
 
+- 不審ログインの件数集計・Discord・日次サマリー・実行死活監視: [不審アクセス監視](security-monitoring.md)。基盤専用ロールを使い、個人情報やハッシュを外部へ送らない。有効化・実配送は別途確認する。
+
 - 追記専用テーブル `audit_events`、記録処理: `src/utils/supabase/audit.ts`
 - 外部アーカイブ送信（別アカウント/WORM相当）: 環境変数 `AUDIT_ARCHIVE_URL` /
   `AUDIT_ARCHIVE_HMAC_SECRET`（署名検証・重複排除は受信側の実装に依存、要確認）

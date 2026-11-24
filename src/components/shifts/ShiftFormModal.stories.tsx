@@ -129,7 +129,7 @@ export const NullableFetchedRelations: Story = {
     initialData: toShiftListItem({
       id: 'shift', organization_id: 'fixture-org', client_id: 'client', title: null,
       start_at: '2026-10-06T09:00:00+09:00', end_at: '2026-10-06T10:00:00+09:00',
-      status: null, cancel_reason: null, clients: null, shift_staffs: [], report_shifts: [],
+      status: null, cancel_reason: null, clients: null, shift_staffs: [], shift_segments: [], report_shifts: [],
     }),
   },
   play: async () => {

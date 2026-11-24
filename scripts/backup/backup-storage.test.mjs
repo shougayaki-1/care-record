@@ -135,7 +135,7 @@ console.log(arg ? Date.parse(arg.slice(7)) / 1000 : process.env.MOCK_NOW);
 
 function executableNotificationMocks(dir) {
   writeFileSync(join(dir, 'jq'), `#!${process.execPath}\nconst fs = require('node:fs');\nfs.appendFileSync(process.env.MOCK_ROOT + '/notification-jq-args', JSON.stringify(process.argv.slice(2)) + '\\n');\nconsole.log('fixture-payload');\n`, { mode: 0o755 });
-  writeFileSync(join(dir, 'curl'), `#!${process.execPath}\nconst fs = require('node:fs');\nfs.appendFileSync(process.env.MOCK_ROOT + '/notification-curl-args', JSON.stringify(process.argv.slice(2)) + '\\n');\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'node'), `#!${process.execPath}\nconst fs = require('node:fs');\nfs.readFileSync(0);\nfs.appendFileSync(process.env.MOCK_ROOT + '/notification-send-args', JSON.stringify(process.argv.slice(2)) + '\\n');\n`, { mode: 0o755 });
 }
 
 test('freshness requires a pair and uses dump start rather than copy time, at the 14h boundary', () => freshnessFixture(({ dir, check, uri }) => {
@@ -224,7 +224,7 @@ test('six-hour replication tolerates delayed dumps, a just-missed transfer and o
 
 test('both unhealthy targets produce independent notifications with valid diagnostic payloads', () => freshnessFixture(({ dir, check }) => {
   // Use real jq so the test validates the Discord JSON, not just argument passing.
-  writeFileSync(join(dir, 'curl'), `#!${process.execPath}\nconst fs = require('node:fs');\nconst args = process.argv.slice(2);\nfs.appendFileSync(process.env.MOCK_ROOT + '/payloads', JSON.stringify(JSON.parse(args[args.indexOf('--data') + 1])) + '\\n');\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'node'), `#!${process.execPath}\nconst fs = require('node:fs');\nfs.appendFileSync(process.env.MOCK_ROOT + '/payloads', JSON.stringify(JSON.parse(fs.readFileSync(0,'utf8'))) + '\\n');\n`, { mode: 0o755 });
   const result = check(27, { DISCORD_ALERT_WEBHOOK_URL: 'https://discord.invalid/webhook' });
   assert.equal(result.status, 1);
   const payloads = readFileSync(join(dir, 'payloads'), 'utf8').trim().split('\n').map(JSON.parse);
@@ -252,5 +252,5 @@ test('stale generation logs include its timestamp, computed age, threshold, and 
   assert.ok(notificationArgs[0].includes('replica_freshness_over_26h_age_over_threshold'));
   assert.ok(notificationArgs[0].includes('cause=age_over_threshold latest_generation_utc=2026-10-07T00:17:00Z age_seconds=97200 threshold_seconds=93600'));
   assert.ok(notificationArgs[0].includes('https://github.com/fixture/repo/actions/runs/42'));
-  assert.equal(readFileSync(join(dir, 'notification-curl-args'), 'utf8').trim().split('\n').length, 1);
+  assert.equal(readFileSync(join(dir, 'notification-send-args'), 'utf8').trim().split('\n').length, 1);
 }));

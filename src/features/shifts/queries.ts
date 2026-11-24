@@ -12,10 +12,11 @@ export function createShiftListQuery(client: SupabaseClient<Database>, staffFilt
               end_at,
               status,
               cancel_reason,
+              shift_segments (shift_segment_staffs (staff_id)),
               clients (id, name),
               report_shifts (shift_id, is_primary, reports (id, status, deleted_at))`;
     return staffFiltered
-        ? client.from('shifts').select(`${columns}, shift_staffs!inner (staff_id, staffs (name))`)
+        ? client.from('shifts').select(`${columns}, shift_staffs (staff_id, staffs (name)), staff_filter:shift_staffs (), segment_filter:shift_segments (shift_segment_staffs!inner (staff_id))`)
         : client.from('shifts').select(`${columns}, shift_staffs (staff_id, staffs (name))`);
 }
 
