@@ -2,6 +2,12 @@
 
 CareRecord uses MUI v7 with semantic tokens from `src/theme.ts`. New product UI must use the exports from `src/components/ui` when a matching component exists.
 
+## Color meaning
+
+- Use white and gray for surfaces and supporting actions. Reserve blue for primary actions and selected states, and red for destructive actions and serious errors.
+- Use warning colors only when they communicate a real caution. Do not add purple, green, or orange as decoration; preserve business-required role colors, calendar event colors, and official brand colors.
+- Do not communicate a state through color alone: include a label, icon, or other visible cue. Keep keyboard focus visible and check contrast in the affected context.
+
 ## Conventions
 
 - Use `AppButton` for actions. `primary` is the main action, `secondary` is supporting, and `danger` is destructive. Button labels stay on one line through the shared theme; let the parent wrap whole buttons or scroll instead of wrapping label text.
