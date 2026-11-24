@@ -3,6 +3,13 @@ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path TO public, extensions;
 SELECT no_plan();
 
+-- Upgrade checks retain pre-existing tenants. Global backup broadcasts include
+-- those tenants, so counts below cover both organizations owned by this fixture.
+CREATE TEMP VIEW fixture_backup_notifications AS
+SELECT * FROM public.notifications WHERE organization_id IN (
+ '62000000-0000-4000-8000-000000000010', '62000000-0000-4000-8000-000000000011'
+) AND event_type='backup.failed';
+
 SELECT ok(NOT has_table_privilege('authenticated','private.google_sync_failure_episodes','SELECT'),'episode bookkeeping is not client data');
 SELECT ok(NOT has_table_privilege('service_role','private.google_sync_failure_episodes','UPDATE'),'backend cannot forge sync episodes');
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid='private.google_sync_failure_episodes'::regclass),'private table has RLS');
@@ -92,12 +99,12 @@ SELECT throws_ok($$ SELECT public.create_notification('62000000-0000-4000-8000-0
 RESET ROLE;
 SELECT lives_ok($$ SELECT private.notify_full_backup_failure('123456') $$,'full backup reuses private common helper for all affected organizations');
 SELECT lives_ok($$ SELECT private.notify_full_backup_failure('123456') $$,'workflow retry uses same run key');
-SELECT is((SELECT count(*) FROM public.notifications WHERE event_type='backup.failed'),4::bigint,'full run creates only one notification per eligible organization recipient');
+SELECT is((SELECT count(*) FROM fixture_backup_notifications),4::bigint,'full run creates only one notification per eligible organization recipient');
 SELECT lives_ok($$ SELECT private.notify_full_backup_failure('123457') $$,'next full run is independent');
-SELECT is((SELECT count(*) FROM public.notifications WHERE event_type='backup.failed'),6::bigint,'new full run notifies again');
-SELECT ok((SELECT bool_and(category='warning' AND link_url='/app/backup' AND content='バックアップの状態を確認してください。') FROM public.notifications WHERE event_type='backup.failed'),'backup uses common fixed warning template');
+SELECT is((SELECT count(*) FROM fixture_backup_notifications),6::bigint,'new full run notifies again');
+SELECT ok((SELECT bool_and(category='warning' AND link_url='/app/backup' AND content='バックアップの状態を確認してください。') FROM fixture_backup_notifications),'backup uses common fixed warning template');
 UPDATE public.organizations SET deleted_at=now() WHERE id='62000000-0000-4000-8000-000000000011';
-SELECT is((SELECT count(*) FROM public.get_backup_notification_recipients(NULL)),1::bigint,'deleted organizations are excluded');
+SELECT is((SELECT count(*) FROM public.get_backup_notification_recipients(NULL) WHERE organization_id IN ('62000000-0000-4000-8000-000000000010','62000000-0000-4000-8000-000000000011')),1::bigint,'deleted organizations are excluded');
 SELECT throws_ok($$ SELECT private.notify_full_backup_failure('token or raw error') $$,'P0001','invalid_backup_run','full backup accepts only numeric GitHub run identifiers');
 
 SET LOCAL ROLE authenticated;
@@ -124,7 +131,7 @@ ALTER TABLE public.profiles DROP COLUMN role;
 SELECT is((SELECT count(*) FROM private.failure_notification_recipients('62000000-0000-4000-8000-000000000010','google_calendar.sync_failed')),2::bigint,'missing legacy role column still applies sync permissions and disabled-user filters');
 SELECT is((SELECT count(*) FROM public.get_backup_notification_recipients('62000000-0000-4000-8000-000000000010')),2::bigint,'missing legacy role column still applies backup permissions');
 SELECT lives_ok($$ SELECT private.notify_full_backup_failure('123458') $$,'backup notification delivery works with hosted profiles shape');
-SELECT is((SELECT count(*) FROM public.notifications WHERE event_type='backup.failed' AND dedupe_key=md5('backup.failed:full:123458')::uuid),2::bigint,'hosted shape delivers once to current eligible recipients across organizations');
+SELECT is((SELECT count(*) FROM fixture_backup_notifications WHERE dedupe_key=md5('backup.failed:full:123458')::uuid),2::bigint,'hosted shape delivers once to current eligible recipients across organizations');
 SELECT ok(NOT has_function_privilege('authenticated','private.failure_notification_recipients(uuid,text)','EXECUTE'),'compatibility helper remains inaccessible to browser sessions');
 
 SELECT * FROM finish();

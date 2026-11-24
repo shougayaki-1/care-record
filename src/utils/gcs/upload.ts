@@ -38,7 +38,7 @@ export function isGcsBackupConfigured(): boolean {
   );
 }
 
-function getStorage(): Storage {
+export function getStorage(): Storage {
   const projectId = process.env.GCP_PROJECT_ID;
   const credentials = parseServiceAccountCredentials();
   if (credentials) {

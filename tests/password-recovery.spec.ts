@@ -49,8 +49,14 @@ test('メールのリンクで再設定し新しいパスワードでログイ�
   expect(Boolean(link)).toBe(true);
   await page.goto(link!);
   await expect(page).toHaveURL('/auth/reset-password');
-  await page.getByLabel(/^新しいパスワード[\s*]*$/).fill(replacement);
-  await page.getByLabel('新しいパスワード（確認）').fill(replacement);
+  // Streaming/navigation can retain a hidden form. Operate on the unique form
+  // exposed to the user, and still fail if two visible inputs are rendered.
+  const password = page.getByLabel(/^新しいパスワード[\s*]*$/).filter({ visible: true });
+  const confirmation = page.getByLabel('新しいパスワード（確認）').filter({ visible: true });
+  await expect(password).toHaveCount(1);
+  await expect(confirmation).toHaveCount(1);
+  await password.fill(replacement);
+  await confirmation.fill(replacement);
   await page.getByRole('button', { name: 'パスワードを再設定', exact: true }).click();
   await expect(page).toHaveURL('/', { timeout: 30_000 });
   expect((await context.cookies()).some(cookie => cookie.name === 'cr_password_recovery')).toBe(false);

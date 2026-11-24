@@ -33,11 +33,11 @@
   },
   {
     "accessor": "serviceRoleForAuditPreservation",
-    "purpose": "Append-only audit event write and archive checkpoint",
-    "targets": ["audit_events", "audit_archive_checkpoints"],
-    "authorization": "Server-derived actor/session context or CRON_SECRET",
-    "audit": "Hash-chained events and archive checkpoint/receipt",
-    "consumers": ["src/utils/supabase/audit.ts", "src/app/api/cron/archive-audit/route.ts"]
+    "purpose": "Append-only audit event write and bounded archive snapshots/progress cache",
+    "targets": ["audit_events", "audit_archive_checkpoints (legacy)", "begin_audit_archive", "read_audit_archive", "cache_audit_archive"],
+    "authorization": "Server-derived actor/session context or CRON_SECRET with pinned environment/control; archive RPCs are service_role only",
+    "audit": "Hash-chained events; external create-only manifests are receipts and DB progress is a derived cache",
+    "consumers": ["src/utils/supabase/audit.ts", "src/utils/auditArchive/source.ts", "src/app/api/cron/archive-audit/route.ts"]
   },
   {
     "accessor": "serviceRoleForLoginSecurity",

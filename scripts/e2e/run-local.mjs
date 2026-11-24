@@ -7,6 +7,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertLocalSupabaseEnvironment } from './local-environment.mjs';
 import { playwrightArguments } from './playwright-arguments.mjs';
+import { configureLocalE2E } from './local-config.mjs';
+import { e2eApiPath, e2eAppOrigin } from './rewrites.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sourceSupabaseDir = resolve(repoRoot, 'supabase');
@@ -18,12 +20,15 @@ const playwrightArgs = playwrightArguments(requestedSuite, requestedFiles, proce
 assertLocalSupabaseEnvironment(process.env, { requireApi: false });
 
 function run(command, args, options = {}) {
+  const startedAt = performance.now();
   const result = spawnSync(command, args, {
     cwd: repoRoot,
     encoding: 'utf8',
     env: options.env ?? process.env,
     stdio: options.inherit ? 'inherit' : 'pipe',
   });
+  // Never print status -o env: its output contains the disposable stack's keys.
+  if (options.phase) console.log(`[e2e:${options.phase}] ${((performance.now() - startedAt) / 1000).toFixed(1)}s`);
 
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -50,7 +55,7 @@ async function freePort(usedPorts) {
 async function writeIsolatedConfig(workdir) {
   const usedPorts = new Set();
   const configPath = resolve(sourceSupabaseDir, 'config.toml');
-  let config = readFileSync(configPath, 'utf8');
+  let config = configureLocalE2E(readFileSync(configPath, 'utf8'));
   const projectId = `care-record-e2e-${randomUUID().replaceAll('-', '').slice(0, 10)}`;
   config = config.replace(/^project_id\s*=\s*"[^"]+"/m, `project_id = "${projectId}"`);
 
@@ -105,8 +110,10 @@ try {
   projectId = await writeIsolatedConfig(workdir);
 
   stackStartAttempted = true;
-  run('supabase', ['start', '--workdir', workdir]);
-  run('supabase', ['db', 'reset', '--local', '--no-seed', '--workdir', workdir]);
+  // UUID project + fresh directory means start applies all migrations exactly once.
+  // Disable developer services in the disposable config, rather than relying on
+  // CLI-version-specific --exclude aliases. Keep Auth/Storage/Realtime/Mailpit.
+  run('supabase', ['start', '--workdir', workdir], { phase: 'database-start' });
 
   const localConfig = parseSupabaseEnv(run('supabase', ['status', '-o', 'env', '--workdir', workdir]));
   const supabaseEnv = {
@@ -116,7 +123,9 @@ try {
     AI_IMPORT_ENABLED: 'false',
     EXTERNAL_INTEGRATIONS_ENABLED: 'false',
     E2E_TEST_ENV: 'true',
-    NEXT_PUBLIC_SUPABASE_URL: localConfig.API_URL,
+    // Keep browser connections same-origin under the unchanged production CSP.
+    NEXT_PUBLIC_SUPABASE_URL: `${e2eAppOrigin}${e2eApiPath}`,
+    E2E_SUPABASE_TARGET_URL: localConfig.API_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: localConfig.ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY: localConfig.SERVICE_ROLE_KEY,
     SUPABASE_DB_URL: localConfig.DB_URL,
@@ -127,11 +136,17 @@ try {
     throw new Error('Supabase CLI did not return the local API keys and database URL required for E2E tests.');
   }
 
+  // NEXT_PUBLIC_* is embedded at build time. Build only after the disposable DB
+  // exists, with the same environment passed to next start and the browser tests.
+  run('npm', ['run', 'build'], { env: supabaseEnv, inherit: true, phase: 'production-build' });
+
+  const startedAt = performance.now();
   const result = spawnSync('npx', ['--no-install', 'playwright', ...playwrightArgs], {
     cwd: repoRoot,
     env: supabaseEnv,
     stdio: 'inherit',
   });
+  console.log(`[e2e:playwright] ${((performance.now() - startedAt) / 1000).toFixed(1)}s`);
   if (result.error) throw result.error;
   exitCode = result.status ?? 1;
 } catch (error) {
@@ -140,7 +155,7 @@ try {
 } finally {
   if (stackStartAttempted && workdir && projectId) {
     try {
-      run('supabase', ['stop', '--no-backup', '--workdir', workdir]);
+      run('supabase', ['stop', '--no-backup', '--workdir', workdir], { phase: 'database-stop' });
     } catch (error) {
       process.stderr.write(`Supabase cleanup failed for ${projectId}: ${error instanceof Error ? error.message : String(error)}\n`);
       exitCode = exitCode === 0 ? 1 : exitCode;

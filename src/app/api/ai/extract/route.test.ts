@@ -1,66 +1,114 @@
-import { describe, it, expect } from 'vitest';
-import { formatSseEvent } from './sseUtils';
+import { NextRequest } from 'next/server';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-describe('formatSseEvent', () => {
-  it('正しい SSE フォーマットの文字列を返す', () => {
-    const result = formatSseEvent('record', { type: 'record', index: 0 });
-    expect(result).toBe('event: record\ndata: {"type":"record","index":0}\n\n');
+const mocks = vi.hoisted(() => ({
+  enabled: true, user: vi.fn(), role: vi.fn(), audit: vi.fn(),
+  model: vi.fn(), generate: vi.fn(), sanitize: vi.fn(),
+}));
+vi.mock('@/lib/env/server', () => ({ isAiImportEnabled: () => mocks.enabled }));
+vi.mock('@/utils/supabase/auth', () => ({ getAuthedUser: mocks.user, assertOrgRole: mocks.role }));
+vi.mock('@/utils/supabase/audit', () => ({ recordAuditEvent: mocks.audit }));
+vi.mock('@/utils/log', () => ({ logError: vi.fn(), serializeError: () => ({ message: 'safe fixture error' }) }));
+vi.mock('@/lib/ai/gemini', () => ({ getGenerativeModel: mocks.model }));
+vi.mock('@/utils/uploadSecurity', () => ({ sanitizeUploadedImage: mocks.sanitize }));
+import { POST } from './route';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.enabled = true;
+  mocks.user.mockResolvedValue({ id: 'synthetic-actor', sessionId: 'synthetic-session' });
+  mocks.role.mockResolvedValue(undefined);
+  mocks.audit.mockResolvedValue(undefined);
+  mocks.model.mockReturnValue({ generateContent: mocks.generate });
+  mocks.generate.mockResolvedValue({ response: { candidates: [{ content: { parts: [{ text: '{"records":[]}' }] } }] } });
+});
+
+function request(form = new FormData(), query = '?organizationId=synthetic-org') {
+  return new NextRequest(`http://localhost/api/ai/extract${query}`, { method: 'POST', body: form });
+}
+function files() {
+  const form = new FormData();
+  form.append('files[]', new File(['synthetic PDF'], 'synthetic.pdf', { type: 'application/pdf' }));
+  return form;
+}
+
+describe('AI extraction HTTP boundary', () => {
+  it('returns 404 before authentication, body parsing or Vertex initialization when disabled', async () => {
+    mocks.enabled = false;
+    const req = request();
+    const parse = vi.spyOn(req, 'formData');
+    expect((await POST(req)).status).toBe(404);
+    for (const fn of [parse, mocks.user, mocks.role, mocks.model, mocks.audit]) expect(fn).not.toHaveBeenCalled();
   });
 
-  it('event 名が出力に含まれる', () => {
-    const result = formatSseEvent('done', { type: 'done', total: 3 });
-    expect(result).toContain('event: done');
+  it('requires organization scope before authentication and parsing', async () => {
+    const req = request(new FormData(), '');
+    const parse = vi.spyOn(req, 'formData');
+    expect((await POST(req)).status).toBe(400);
+    expect(parse).not.toHaveBeenCalled();
+    expect(mocks.user).not.toHaveBeenCalled();
+    expect(mocks.model).not.toHaveBeenCalled();
   });
 
-  it('data が JSON シリアライズされている', () => {
-    const data = { type: 'error', fileIndex: 1, message: '読み取りエラー' };
-    const result = formatSseEvent('error', data);
-    expect(result).toContain(`data: ${JSON.stringify(data)}`);
+  it.each(['user', 'role'] as const)('rejects %s denial before parsing or contacting Vertex', async boundary => {
+    mocks[boundary].mockRejectedValueOnce(new Error('synthetic private auth detail'));
+    const req = request(files());
+    const parse = vi.spyOn(req, 'formData');
+    const response = await POST(req);
+    expect(response.status).toBe(401);
+    expect(await response.text()).not.toContain('private');
+    for (const fn of [parse, mocks.model, mocks.audit]) expect(fn).not.toHaveBeenCalled();
   });
 
-  it('イベントの末尾が "\\n\\n" で終わる', () => {
-    const result = formatSseEvent('record', { type: 'record', index: 0, fileIndex: 0, result: {} });
-    expect(result.endsWith('\n\n')).toBe(true);
+  it('rejects malformed multipart without creating the model', async () => {
+    const req = request();
+    vi.spyOn(req, 'formData').mockRejectedValueOnce(new Error('synthetic parser detail'));
+    const response = await POST(req);
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe('Bad Request: invalid form data');
+    expect(mocks.model).not.toHaveBeenCalled();
   });
 
-  it('空オブジェクトでも正常に出力できる', () => {
-    const result = formatSseEvent('done', {});
-    expect(result).toBe('event: done\ndata: {}\n\n');
+  it('rejects missing files and malformed JSON before audit and Vertex', async () => {
+    expect((await POST(request())).status).toBe(400);
+    const form = files();
+    form.set('clients', '{broken');
+    expect((await POST(request(form))).status).toBe(400);
+    expect(mocks.model).not.toHaveBeenCalled();
+    expect(mocks.audit).not.toHaveBeenCalled();
   });
 
-  it('ネストされたオブジェクトを正しくシリアライズする', () => {
-    const data = {
-      type: 'record',
-      index: 0,
-      fileIndex: 0,
-      result: {
-        meta: {
-          date: '2026-06-28',
-          start_at: '09:00',
-          end_at: '11:00',
-          client_name: '山田太郎',
-          helper_names: [],
-          client_id_candidate: null,
-          helper_id_candidates: [],
-        },
-        values: {},
-        confidence: 'high',
-        warnings: [],
-      },
-    };
-    const result = formatSseEvent('record', data);
-    expect(result).toBe(`event: record\ndata: ${JSON.stringify(data)}\n\n`);
+  it('passes the authenticated actor and session to audit and completes an empty extraction', async () => {
+    const response = await POST(request(files()));
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    expect(await response.text()).toContain('data: {"type":"done","total":0}');
+    expect(mocks.role).toHaveBeenCalledWith('synthetic-org');
+    expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: 'synthetic-actor', sessionId: 'synthetic-session', organizationId: 'synthetic-org', action: 'ai_import.started',
+    }));
+    expect(mocks.generate).toHaveBeenCalledTimes(1);
+    expect(mocks.audit.mock.invocationCallOrder[0]).toBeLessThan(mocks.generate.mock.invocationCallOrder[0]);
   });
 
-  it('record イベントの SSE 行構造が正しい', () => {
-    const result = formatSseEvent('record', { type: 'record', index: 2, fileIndex: 1, result: {} });
-    const lines = result.split('\n');
-    // event: record
-    expect(lines[0]).toBe('event: record');
-    // data: ...
-    expect(lines[1]).toMatch(/^data: \{.*\}$/);
-    // 空行2つ（末尾の \n\n により lines[2]="" lines[3]=""）
-    expect(lines[2]).toBe('');
-    expect(lines[3]).toBe('');
+  it('redacts provider errors and continues later groups through completion', async () => {
+    mocks.generate.mockRejectedValueOnce(new Error('synthetic private provider credential'));
+    const form = files();
+    form.append('files[]', new File(['another synthetic PDF'], 'second.pdf', { type: 'application/pdf' }));
+    const text = await (await POST(request(form))).text();
+    expect(text).toContain('event: error');
+    expect(text).not.toContain('private provider');
+    expect(text).toContain('event: group_done');
+    expect(text).toContain('event: done');
+    expect(mocks.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not send an image to Vertex when image sanitization fails', async () => {
+    mocks.sanitize.mockRejectedValueOnce(new Error('synthetic image decoder detail'));
+    const form = new FormData();
+    form.append('files[]', new File(['synthetic bytes'], 'image.png', { type: 'image/png' }));
+    const text = await (await POST(request(form))).text();
+    expect(text).toContain('event: error');
+    expect(text).not.toContain('decoder detail');
+    expect(mocks.generate).not.toHaveBeenCalled();
   });
 });

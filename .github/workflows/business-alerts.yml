@@ -1,0 +1,40 @@
+name: Business alerts
+on:
+  schedule:
+    - cron: '10 0 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment containing the dedicated business alert login
+        type: choice
+        required: true
+        default: staging
+        options: [staging, production]
+permissions:
+  contents: read
+concurrency:
+  group: business-alerts-${{ inputs.environment || 'production' }}
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.environment || 'production' }}
+    env:
+      BUSINESS_ALERT_DATABASE_URL: ${{ secrets.BUSINESS_ALERT_DATABASE_URL }}
+      BUSINESS_ALERT_EXPECTED_HOST: ${{ vars.BUSINESS_ALERT_EXPECTED_HOST }}
+      BUSINESS_ALERT_EXPECTED_USER: ${{ vars.BUSINESS_ALERT_EXPECTED_USER }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dispatch authorized in-app alerts
+        if: vars.BUSINESS_ALERTS_ENABLED == 'true'
+        env:
+          BUSINESS_ALERT_CA: ${{ secrets.SECURITY_MONITOR_CA_CERT }}
+          PGSSLROOTCERT: ${{ runner.temp }}/business-alert-ca.crt
+        run: |
+          : "${BUSINESS_ALERT_CA:?Database CA certificate is required}"
+          umask 077
+          trap 'rm -f "$PGSSLROOTCERT"' EXIT
+          printf '%s\n' "$BUSINESS_ALERT_CA" > "$PGSSLROOTCERT"
+          scripts/notifications/run-business-alerts.sh

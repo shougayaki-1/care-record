@@ -6,7 +6,7 @@
 | GOV-02 | リスク評価 | `compliance_risks`、本表 | implemented | 全資産・脅威・残存リスクの承認 |
 | IAM-01 | 一意な利用者識別 | Supabase Auth、組織ロール | implemented | 本番設定票と退職者失効試験 |
 | IAM-02 | 二要素認証 | 明示的免除 | accepted-risk | 受容理由・代替策・承認者の記録 |
-| IAM-03 | セッション制御 | `user_session_activity`、24時間idle、30日absolute、重要操作再認証 | pending | 複数端末・改ざん・失効・再認証E2E試験 |
+| IAM-03 | セッション制御 | 通常アプリは`user_session_activity`、24時間idle、30日absolute。MCP OAuthは無操作期限なし、30日absolute | pending | MCPの無操作期限緩和のリスク評価・承認、実環境での失効・再認証検証、複数端末・改ざん試験 |
 | IAM-04 | 総当たり対策 | IP＋メール制限、段階遅延 | implemented | Supabase Auth側制限の設定証跡 |
 | ACC-01 | テナント分離 | RLS、認可RPC | pending | 全テーブルRLS試験と本番カタログ出力 |
 | ACC-02 | service role最小化 | 原子記録RPCへ移行 | pending | 通常操作からservice roleを全廃 |

@@ -1,0 +1,18 @@
+name: Install Chromium on the host runner
+description: Avoid the throttled Azure Ubuntu package mirror while retaining all browser dependencies.
+runs:
+  using: composite
+  steps:
+    - name: Use the upstream Ubuntu package mirror
+      shell: bash
+      run: |
+        # Only replace the observed slow mirror. Preserve suites, security entries and signatures.
+        sources=(/etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources)
+        for source in "${sources[@]}"; do
+          if [[ -f "$source" ]]; then
+            sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g; s|https://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$source"
+          fi
+        done
+    - name: Install headless Chromium and operating system dependencies
+      shell: bash
+      run: npx playwright install --with-deps --only-shell chromium

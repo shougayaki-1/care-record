@@ -1,6 +1,22 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('認証フォームのテスト', () => {
+  test('CSPが許可していない外部接続をブラウザで拒否する', async ({ page }) => {
+    const response = await page.goto('/');
+    expect(response?.headers()['content-security-policy']).toContain('connect-src');
+    const directive = await page.evaluate(() => new Promise<string>(resolve => {
+      const onViolation = (event: SecurityPolicyViolationEvent) => {
+        if (event.blockedURI.startsWith('https://csp-denied.invalid')) {
+          document.removeEventListener('securitypolicyviolation', onViolation);
+          resolve(event.effectiveDirective);
+        }
+      };
+      document.addEventListener('securitypolicyviolation', onViolation);
+      // CSP must reject this request before DNS or any external connection.
+      void fetch('https://csp-denied.invalid/blocked').catch(() => {});
+    }));
+    expect(directive).toBe('connect-src');
+  });
   
   test('未登録アドレスでログインしようとするとエラーになる', async ({ page }) => {
     await page.goto('/');

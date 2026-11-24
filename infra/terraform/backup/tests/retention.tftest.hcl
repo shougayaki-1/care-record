@@ -50,9 +50,9 @@ run "additive_tiers" {
       !job.transfer_spec[0].transfer_options[0].delete_objects_unique_in_sink &&
       !job.transfer_spec[0].transfer_options[0].delete_objects_from_source_after_transfer &&
       !job.transfer_spec[0].transfer_options[0].overwrite_objects_already_existing_in_sink &&
-      job.schedule[0].repeat_interval == "86400s"
+      job.schedule[0].repeat_interval == ({ recent = "21600s", daily = "86400s", weekly = "86400s", monthly = "86400s" })[tier]
     ])
-    error_message = "Every tier must replicate without deletion or overwrite."
+    error_message = "Recent must replicate every six hours; other tiers remain daily and all jobs must preserve immutable replicas."
   }
   assert {
     condition = (

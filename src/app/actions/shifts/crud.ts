@@ -182,22 +182,25 @@ export async function getShifts(organizationId: string, startDate: string, endDa
               .lt('start_at', endDate)
               .gt('end_at', startDate)
               .order('start_at', { ascending: false });
-          if (filter.staffId) query = query.eq('shift_staffs.staff_id', filter.staffId);
+          if (filter.staffId) query = query.eq('staff_filter.staff_id', filter.staffId)
+              .eq('segment_filter.shift_segment_staffs.staff_id', filter.staffId)
+              .or('staff_filter.not.is.null,segment_filter.not.is.null');
           if (filter.clientId) query = query.eq('client_id', filter.clientId);
 
           const { data, error } = await query;
           if (error) throw sanitizeDbError(error, 'action.shifts');
-          const withReportStatuses = (data ?? []).map(toShiftListItem);
+          const matchesStaff = (shift: NonNullable<typeof data>[number], staffId: string) =>
+              shift.shift_staffs.some(staff => staff.staff_id === staffId) ||
+              shift.shift_segments.some(segment => segment.shift_segment_staffs.some(staff => staff.staff_id === staffId));
+          const visibleRows = data ?? [];
+          const withReportStatuses = visibleRows.map(toShiftListItem);
           if (actor.isOwner) return withReportStatuses;
           const { permissions } = await getEffectivePermissions(organizationId, actor.userId);
           if (permissions.shifts.view === 'all') return withReportStatuses;
           const staffId = actor.staffId;
           const assignedClientIds = new Set(actor.clientIds);
-          return (withReportStatuses || []).filter((shift) => {
-              const clientId = shift.client_id;
-              const shiftStaffs = shift.shift_staffs;
-              return assignedClientIds.has(clientId) || Boolean(staffId && shiftStaffs.some((staff) => staff.staff_id === staffId));
-          });
+          return visibleRows.filter(shift => assignedClientIds.has(shift.client_id) ||
+              Boolean(staffId && matchesStaff(shift, staffId))).map(toShiftListItem);
       } catch (error) { logError('getShifts failed', { organizationId, error: serializeError(error) }); throw error; }
   });
 }
