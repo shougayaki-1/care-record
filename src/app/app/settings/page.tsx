@@ -13,6 +13,16 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import { OrganizationBasics } from '@/components/settings/OrganizationBasics';
 import { GoogleIntegrationSettings } from '@/components/settings/GoogleIntegrationSettings';
 import { McpImportSettings } from '@/components/settings/McpImportSettings';
+import { McpRecordReadSettings } from '@/components/settings/McpRecordReadSettings';
+import { McpPersonSearchSettings } from '@/components/settings/McpPersonSearchSettings';
+import { McpShiftReadSettings } from '@/components/settings/McpShiftReadSettings';
+import { McpShiftCreateSettings } from '@/components/settings/McpShiftCreateSettings';
+import { McpKpiSettings } from '@/components/settings/McpKpiSettings';
+import { McpShiftCancelSettings } from '@/components/settings/McpShiftCancelSettings';
+import { McpShiftUpdateSettings } from '@/components/settings/McpShiftUpdateSettings';
+import { McpReportTransitionSettings } from '@/components/settings/McpReportTransitionSettings';
+import { McpRecordEditSettings } from '@/components/settings/McpRecordEditSettings';
+import { McpMasterEditSettings } from '@/components/settings/McpMasterEditSettings';
 import { OrganizationDangerSettings } from '@/components/settings/OrganizationDangerSettings';
 
 import { supabase } from '@/lib/supabase';
@@ -434,7 +444,20 @@ function SettingsContent() {
                             handleRepairCalendar={handleRepairCalendar}
                             handleForceResyncCalendar={handleForceResyncCalendar}
                         />
+                        {canManageIntegrations && <Alert severity="info" sx={{ mt: 3 }}>
+                            外部AIサービスの選定・契約とデータの処理・保存・削除・二次利用、利用者への説明や必要な同意は、利用事業所が確認してから各機能を有効にしてください。CareRecordは連携の認証・認可、事業所間の分離、機能別の停止、変更時の本人確認および監査を担います。事業所による確認はCareRecord自身の法令・契約上の義務を免除するものではありません。
+                        </Alert>}
                         {canManageIntegrations && <McpImportSettings key={currentOrg.id} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpRecordReadSettings key={`record-read-${currentOrg.id}`} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpPersonSearchSettings key={`person-search-${currentOrg.id}`} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpShiftReadSettings key={`shift-read-${currentOrg.id}`} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpShiftCreateSettings key={`shift-${currentOrg.id}`} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpKpiSettings key={currentOrg.id} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpShiftCancelSettings key={currentOrg.id} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpShiftUpdateSettings key={`shift-update-${currentOrg.id}`} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpRecordEditSettings key={`record-edit-${currentOrg.id}`} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpMasterEditSettings key={`master-edit-${currentOrg.id}`} organizationId={currentOrg.id} />}
+                        {canManageIntegrations && <McpReportTransitionSettings key={`report-transition-${currentOrg.id}`} organizationId={currentOrg.id} />}
                         </>
                     )}
 
