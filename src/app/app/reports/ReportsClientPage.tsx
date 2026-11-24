@@ -250,6 +250,7 @@ export default function ReportsClientPage() {
 
        <PageBody maxWidth={false}>
            {!isExportView && <AppButton intent="secondary" variant="outlined" sx={{ mb: 2 }} onClick={() => router.push('/app/reports/deletion-requests')}>削除申請を確認</AppButton>}
+           {!isExportView && <AppButton intent="secondary" variant="outlined" sx={{ mb: 2, ml: 1 }} onClick={() => router.push('/app/mcp-record-corrections')}>保存した訂正案</AppButton>}
            {!isExportView && aiSentCount > 0 && <Alert severity="warning" sx={{ mb: 2 }} action={
              <Button color="inherit" size="small" onClick={() => router.push('/app/ai-candidates')}>確認する</Button>
            }>
