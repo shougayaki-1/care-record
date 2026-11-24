@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import { StrictMode } from 'react';
 
 const mocks = vi.hoisted(() => ({
   callback: null as ((event: AuthChangeEvent, session: Session | null) => void) | null,
@@ -36,6 +37,32 @@ describe('workspace initialization', () => {
     render(<WorkspaceProvider><Status /></WorkspaceProvider>);
     await act(async () => { mocks.callback!('INITIAL_SESSION', session); await vi.advanceTimersByTimeAsync(0); });
     expect(screen.getByText('no_membership')).toBeTruthy();
+  });
+
+  it('keeps the normal membership flow ready', async () => {
+    mocks.query.mockImplementation((table: string) => Promise.resolve({ data: table === 'profiles' ? null : [
+      { role: 'owner', organizations: { id: 'org', name: 'Synthetic org' }, organization_member_roles: [] },
+    ], error: null }));
+    render(<WorkspaceProvider><Status /></WorkspaceProvider>);
+    await act(async () => { mocks.callback!('INITIAL_SESSION', session); await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText('ready')).toBeTruthy();
+  });
+
+  it('handles the initial event after a Strict Mode subscription restart', async () => {
+    mocks.query.mockImplementation((table: string) => Promise.resolve({ data: table === 'profiles' ? null : [], error: null }));
+    render(<StrictMode><WorkspaceProvider><Status /></WorkspaceProvider></StrictMode>);
+    await act(async () => { mocks.callback!('INITIAL_SESSION', session); await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText('no_membership')).toBeTruthy();
+  });
+
+  it('shows an error rather than no membership when lookup fails', async () => {
+    mocks.query.mockImplementation((table: string) => Promise.resolve(table === 'profiles'
+      ? { data: null, error: null } : { data: null, error: { code: 'network' } }));
+    render(<WorkspaceProvider><Status /></WorkspaceProvider>);
+    await act(async () => { mocks.callback!('INITIAL_SESSION', session); await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText(/所属情報を取得できませんでした/)).toBeTruthy();
+    expect(screen.getByText('再試行')).toBeTruthy();
+    expect(screen.queryByText('no_membership')).toBeNull();
   });
 
   it('allows retry and logout when the initial auth event never arrives', async () => {
@@ -90,6 +117,58 @@ describe('workspace initialization', () => {
     expect(screen.queryByText(/タイムアウト/)).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(screen.getByText(/タイムアウト/)).toBeTruthy();
+  });
+
+  it('does not restore a pending workspace after sign out', async () => {
+    let resolveMembers!: (value: unknown) => void;
+    mocks.query.mockImplementation((table: string) => table === 'profiles'
+      ? Promise.resolve({ data: null, error: null }) : new Promise(resolve => { resolveMembers = resolve; }));
+    mocks.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    render(<WorkspaceProvider><Status /></WorkspaceProvider>);
+    await act(async () => { mocks.callback!('INITIAL_SESSION', session); await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { mocks.callback!('SIGNED_OUT', null); await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText('session_expired')).toBeTruthy();
+    await act(async () => { resolveMembers({ data: [], error: null }); });
+    expect(screen.getByText('session_expired')).toBeTruthy();
+  });
+
+  it('does not let a delayed sign-out check overwrite a newer sign-in', async () => {
+    let resolveSession!: (value: unknown) => void;
+    mocks.getSession.mockReturnValue(new Promise(resolve => { resolveSession = resolve; }));
+    mocks.query.mockImplementation((table: string) => Promise.resolve({ data: table === 'profiles' ? null : [], error: null }));
+    render(<WorkspaceProvider><Status /></WorkspaceProvider>);
+    await act(async () => { mocks.callback!('SIGNED_OUT', null); await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { mocks.callback!('SIGNED_IN', session); await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText('no_membership')).toBeTruthy();
+    await act(async () => { resolveSession({ data: { session: null }, error: null }); });
+    expect(screen.getByText('no_membership')).toBeTruthy();
+  });
+
+  it('keeps a timeout visible when the initial event arrives late', async () => {
+    render(<WorkspaceProvider><Status /></WorkspaceProvider>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+    await act(async () => { mocks.callback!('INITIAL_SESSION', session); await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText(/タイムアウト/)).toBeTruthy();
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
+
+  it('shows recovery when the sign-out session check fails', async () => {
+    mocks.getSession.mockRejectedValue(new Error('network failure'));
+    render(<WorkspaceProvider><Status /></WorkspaceProvider>);
+    await act(async () => { mocks.callback!('SIGNED_OUT', null); await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText(/セッションを確認できませんでした/)).toBeTruthy();
+    expect(screen.getByText('再試行')).toBeTruthy();
+    expect(screen.getByText('ログアウト')).toBeTruthy();
+  });
+
+  it('offers another retry when the session lookup returns an error', async () => {
+    mocks.getSession.mockResolvedValue({ data: { session: null }, error: new Error('network failure') });
+    render(<WorkspaceProvider><Status /></WorkspaceProvider>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+    await act(async () => { fireEvent.click(screen.getByText('再試行')); });
+    expect(screen.getByText(/所属情報を取得できませんでした/)).toBeTruthy();
+    expect(screen.getByText('再試行')).toBeTruthy();
+    expect(screen.queryByText('session_expired')).toBeNull();
   });
 
 });

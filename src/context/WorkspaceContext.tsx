@@ -39,6 +39,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const pathname = usePathname();
   const shouldLoadWorkspace = pathname.startsWith('/app') || pathname.startsWith('/super-admin');
   const fetchSeq = useRef(0);
+  const initialSessionHandled = useRef(false);
   const loadedWorkspaceUserId = useRef<string | null>(null);
   const [currentOrg, setCurrentOrg] = useState<Workspace | null>(null);
   const [orgList, setOrgList] = useState<Workspace[]>([]);
@@ -49,6 +50,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
   const [userId, setUserId] = useState<string | null>(null);
 
   const fetchWorkspaces = useCallback(async (knownSession?: Session | null) => {
+    initialSessionHandled.current = true;
     const seq = ++fetchSeq.current;
     setLoadAttempt(seq);
     const isCurrent = () => seq === fetchSeq.current;
@@ -60,7 +62,8 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
         ? await supabase.auth.getSession()
         : { data: { session: knownSession }, error: null };
       const { data: { session }, error: sessionError } = sessionResult;
-      if (sessionError || !session?.user) {
+      if (sessionError) throw sessionError;
+      if (!session?.user) {
         if (!isCurrent()) return;
         loadedWorkspaceUserId.current = null;
         setOrgList([]);
@@ -178,35 +181,65 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
       return;
     }
 
+    let subscribed = true;
+    let eventSequence = 0;
     // INITIAL_SESSIONを初回読み込みの唯一の起点にし、二重取得による状態上書きを防ぐ。
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log(`[WorkspaceProvider] Auth event: ${event}`);
       if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // A late initial event must not replace a timeout or a manual retry.
+        if (event === 'INITIAL_SESSION' && initialSessionHandled.current) return;
         // A background tab can emit TOKEN_REFRESHED when it becomes active again.
         // Keep the current page mounted when the loaded workspace belongs to that user.
         if (event !== 'INITIAL_SESSION' && session?.user.id === loadedWorkspaceUserId.current) return;
+        const eventId = ++eventSequence;
+        // Invalidate the previous lookup before scheduling the next one.
+        const seq = ++fetchSeq.current;
         // Authの内部ロック解放後に読み込む。コールバック内でAuth APIを再入させない。
-        setTimeout(() => void fetchWorkspaces(session), 0);
+        setTimeout(() => {
+          if (subscribed && eventSequence === eventId && fetchSeq.current === seq) void fetchWorkspaces(session);
+        }, 0);
       } else if (event === 'SIGNED_OUT') {
+        const eventId = ++eventSequence;
+        const seq = ++fetchSeq.current;
+        initialSessionHandled.current = true;
+        loadedWorkspaceUserId.current = null;
+        setLoadAttempt(seq);
+        setLoading(true);
+        setStatus('loading');
         // トークン更新中の一時イベントで正常な表示を消さないよう、現在値を再確認する。
         setTimeout(() => void (async () => {
-          const { data: { session: currentSession } } = await supabase.auth.getSession();
-          if (currentSession) {
-            await fetchWorkspaces(currentSession);
-            return;
+          if (!subscribed || eventSequence !== eventId || fetchSeq.current !== seq) return;
+          try {
+            const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+            if (!subscribed || eventSequence !== eventId || fetchSeq.current !== seq) return;
+            if (error) throw error;
+            if (currentSession) {
+              await fetchWorkspaces(currentSession);
+              return;
+            }
+            setCurrentOrg(null);
+            setOrgList([]);
+            setUserId(null);
+            loadedWorkspaceUserId.current = null;
+            setStatus('session_expired');
+            setErrorMessage(null);
+          } catch {
+            if (!subscribed || eventSequence !== eventId || fetchSeq.current !== seq) return;
+            loadedWorkspaceUserId.current = null;
+            setStatus('error');
+            setErrorMessage('セッションを確認できませんでした。時間をおいて再試行してください。');
+          } finally {
+            if (subscribed && eventSequence === eventId && fetchSeq.current === seq) setLoading(false);
           }
-          setCurrentOrg(null);
-          setOrgList([]);
-          setUserId(null);
-          loadedWorkspaceUserId.current = null;
-          setLoading(false);
-          setStatus('session_expired');
-          setErrorMessage(null);
         })(), 0);
       }
     });
 
     return () => {
+      subscribed = false;
+      fetchSeq.current += 1;
+      initialSessionHandled.current = false;
       subscription.unsubscribe();
     };
   }, [fetchWorkspaces, shouldLoadWorkspace]);
@@ -218,6 +251,7 @@ export const WorkspaceProvider = ({ children }: { children: React.ReactNode }) =
     const timer = setTimeout(() => {
       if (fetchSeq.current !== loadAttempt) return;
       fetchSeq.current += 1;
+      initialSessionHandled.current = true;
       loadedWorkspaceUserId.current = null;
       setCurrentOrg(null);
       setOrgList([]);
