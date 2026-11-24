@@ -396,6 +396,8 @@ const NavDrawer = React.memo(function NavDrawer({
           {aiImportEnabled && navButton('AI一括取込', <AutoFixHighIcon fontSize="small" />, '/app/ai-import')}
           {navButton('内勤を記録', <WorkHistoryIcon fontSize="small" />, '/app/internal-work')}
           {navButton('自分の履歴', <HistoryIcon fontSize="small" />, '/app/history')}
+          {currentOrg.effectivePermissions.records.view !== 'none' && currentOrg.effectivePermissions.records.edit !== 'none'
+            && navButton('保存した訂正案', <HistoryIcon fontSize="small" />, '/app/mcp-record-corrections')}
         </List>
 
         <Typography sx={categoryStyle}>シフト</Typography>

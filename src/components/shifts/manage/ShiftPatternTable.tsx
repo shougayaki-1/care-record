@@ -1,3 +1,7 @@
+'use client';
+
+import { Fragment, useState } from 'react';
+import { RadioGroupField } from '@/components/ui/SelectionFields';
 import { Typography, Chip, Tooltip, IconButton, Table, TableHead, TableBody, TableRow, TableCell, TableContainer } from '@/components/ui/mui';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -28,6 +32,48 @@ const formatRule = (rrule: string) => {
 };
 
 
+const modes = [
+    { value: 'all', label: 'すべて混合' },
+    { value: 'staff', label: 'ヘルパーごと' },
+    { value: 'client', label: '利用者ごと' },
+] as const;
+
+type DisplayMode = typeof modes[number]['value'];
+type PatternGroup = { id: string; name: string; patterns: ShiftPatternData[] };
+
+function weekday(rrule: string): number {
+    const days = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
+    const byDay = rrule.match(/(?:^|;)BYDAY=([^;]+)/)?.[1];
+    return Math.min(7, ...(byDay?.split(',').map(day => days.indexOf(day.replace(/^[+-]?\d+/, ''))).filter(day => day >= 0) ?? []));
+}
+
+function comparePatterns(a: ShiftPatternData, b: ShiftPatternData): number {
+    return weekday(a.rrule) - weekday(b.rrule)
+        || a.start_time.localeCompare(b.start_time)
+        || (a.clients?.name ?? '').localeCompare(b.clients?.name ?? '', 'ja')
+        || a.id.localeCompare(b.id);
+}
+
+function groupPatterns(patterns: ShiftPatternData[], mode: DisplayMode): PatternGroup[] {
+    const sorted = [...patterns].sort(comparePatterns);
+    if (mode === 'all') return [{ id: 'all', name: '', patterns: sorted }];
+
+    const groups = new Map<string, PatternGroup>();
+    for (const pattern of sorted) {
+        const keys = mode === 'client'
+            ? [{ id: pattern.client_id, name: pattern.clients?.name ?? '利用者名不明' }]
+            : pattern.shift_pattern_staffs.length
+                ? pattern.shift_pattern_staffs.map(staff => ({ id: staff.staff_id, name: staff.staffs?.name ?? '担当者名不明' }))
+                : [{ id: '', name: '未割り当て' }];
+        for (const { id, name } of keys) {
+            if (!groups.has(id)) groups.set(id, { id, name, patterns: [] });
+            const group = groups.get(id)!;
+            if (!group.patterns.some(item => item.id === pattern.id)) group.patterns.push(pattern);
+        }
+    }
+    return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name, 'ja') || a.id.localeCompare(b.id));
+}
+
 type Props = {
     patterns: ShiftPatternData[];
     mastersReady: boolean;
@@ -37,8 +83,13 @@ type Props = {
     onDelete: (id: string) => void;
 };
 export function ShiftPatternTable({ patterns, mastersReady, canEditShift, canDeleteShift, onEdit, onDelete }: Props) {
+    const [mode, setMode] = useState<DisplayMode>('all');
+    const groups = groupPatterns(patterns, mode);
     return <>
         <Typography variant="subtitle1" fontWeight="bold" mb={2}>登録済みのひな形パターン一覧</Typography>
+        <RadioGroupField label="表示方法" options={modes} value={mode}
+            onChange={value => setMode(value as DisplayMode)}
+            getOptionLabel={option => option.label} getOptionValue={option => option.value} />
         <TableContainer sx={{ borderRadius: 1, mb: 4 }}>
             <Table>
                 <TableHead sx={{ bgcolor: 'background.subtle' }}>
@@ -54,7 +105,10 @@ export function ShiftPatternTable({ patterns, mastersReady, canEditShift, canDel
                     {patterns.length === 0 ? (
                         <TableRow><TableCell colSpan={5} align="center" sx={{ py: 5, color: 'text.secondary' }}>ひな形が登録されていません</TableCell></TableRow>
                     ) : (
-                        patterns.map((p) => (
+                        groups.map(group => (
+                            <Fragment key={group.id}>
+                            {mode !== 'all' && <TableRow><TableCell colSpan={5} component="th" scope="rowgroup" sx={{ fontWeight: 'bold', bgcolor: 'background.subtle' }}>{group.name}</TableCell></TableRow>}
+                            {group.patterns.map((p) => (
                             <TableRow key={p.id} hover>
                                 <TableCell sx={{ fontWeight: 'bold' }}>{p.clients?.name}</TableCell>
                                 <TableCell>{p.shift_pattern_staffs.map(s => s.staffs?.name).join(', ') || '未割り当て'}</TableCell>
@@ -65,6 +119,8 @@ export function ShiftPatternTable({ patterns, mastersReady, canEditShift, canDel
                                     {canDeleteShift && <Tooltip title="ひな形を削除"><IconButton size="small" color="error" onClick={() => onDelete(p.id)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>}
                                 </TableCell>
                             </TableRow>
+                            ))}
+                            </Fragment>
                         ))
                     )}
                 </TableBody>
