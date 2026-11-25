@@ -3,7 +3,7 @@ import { ArchiveFailure, requireCondition, type Cursor, type ObjectRef, type Sto
 import { readPreservedArchive } from '@/utils/auditArchive/publisher';
 import { readSnapshotPages } from './pages';
 import { comparePreservation } from './preservation';
-import { readLegacyClassification } from './legacy';
+import { compareLegacyStructure, readLegacyClassification } from './legacy';
 
 export interface VerificationSnapshotSource {
   begin(): Promise<string>;
@@ -39,8 +39,9 @@ export async function inspectPreservation(
     const legacy = await withinDeadline(() => readLegacyClassification(store, archive.baselineRef, environment, archive.cutoverId, archive.v1Count, archive.v1Digest, deadline), deadline);
     const run = z.uuid().safeParse(await withinDeadline(() => source.begin(), deadline));
     requireCondition(run.success);
-    const { chain, pages } = await readSnapshotPages(cursor => withinDeadline(() => source.page(run.data, cursor), deadline), deadline);
-    const comparison = comparePreservation(chain, archive);
+    const { snapshot:scanned, pages } = await readSnapshotPages(cursor => withinDeadline(() => source.page(run.data, cursor), deadline), deadline);
+    const comparison = comparePreservation(scanned, archive);
+    compareLegacyStructure(scanned.legacyFindings, legacy.findings, scanned.legacyIdentities);
     if (Date.now() >= deadline) throw new ArchiveFailure('incomplete');
     return { status: 'evidence_only' as const, pages, v1Count: comparison.v1Count,
       archivedRows: comparison.archivedRows, newerRows: comparison.newerRows,

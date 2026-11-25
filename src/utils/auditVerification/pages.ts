@@ -48,6 +48,6 @@ export async function readSnapshotPages(
     } else {
       requireCondition(JSON.stringify(parsed.cursor) === JSON.stringify(cursor));
     }
-    if (!parsed.more) { chain.finish(); return { chain, pages }; }
+    if (!parsed.more) return { chain, snapshot:chain.finish(), pages };
   }
 }

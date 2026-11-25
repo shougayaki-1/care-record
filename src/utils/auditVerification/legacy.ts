@@ -53,7 +53,7 @@ export async function readLegacyClassification(
     scopeCounts.set(item.scope,BigInt(item.count));
   }
   requireCondition([...scopeCounts.values()].reduce((sum,n) => sum+n,BigInt(0)) === BigInt(expectedCount));
-  const ids = new Set<string>(); const counts = new Map<string,bigint>(); const perScope = new Map<string,bigint>();
+  const ids = new Set<string>(); const findings = new Map<string,{scope:string;categories:Set<string>}>(); const counts = new Map<string,bigint>(); const perScope = new Map<string,bigint>();
   for (const ref of report.anomalyParts) {
     if (Date.now() >= deadline) throw new ArchiveFailure('incomplete');
     requireCondition(ref.name === `${prefix}anomalies/${ref.digest}.json`);
@@ -66,6 +66,7 @@ export async function readLegacyClassification(
       requireCondition(!ids.has(row.id) && scopeCounts.has(row.scope)); ids.add(row.id);
       perScope.set(row.scope,(perScope.get(row.scope) ?? BigInt(0))+BigInt(1));
       const unique = new Set(row.categories);
+      findings.set(row.id,{scope:row.scope,categories:unique});
       requireCondition(unique.size === row.categories.length && row.categories.every(c => categories.has(c)));
       for (const category of unique) counts.set(category,(counts.get(category) ?? BigInt(0))+BigInt(1));
     }
@@ -77,5 +78,27 @@ export async function readLegacyClassification(
   if (report.recomputationSettingsEvidence === null) {
     requireCondition((counts.get('unreproducible') ?? BigInt(0)) === BigInt(expectedCount) && !counts.has('hash_mismatch'));
   } else requireCondition(!counts.has('unreproducible'));
-  return { historicalVerdict:'unresolved' as const, anomalyCount:ids.size.toString(), recomputationAvailable:report.recomputationSettingsEvidence !== null };
+  return { historicalVerdict:'unresolved' as const, anomalyCount:ids.size.toString(), recomputationAvailable:report.recomputationSettingsEvidence !== null, findings };
+}
+
+// Classification metadata is not enough: compare its structural findings to
+// an independent traversal of the actual frozen v1 rows. Recomputed-hash and
+// unreproducible categories are deliberately left to evidence-backed checks.
+export function compareLegacyStructure(
+  actual: Map<string,{scope:string;categories:Set<string>}>,
+  expected: Map<string,{scope:string;categories:Set<string>}>,
+  identities: Map<string,string>,
+) {
+  for (const [id,row] of actual) {
+    const pinned=expected.get(id);
+    requireCondition(pinned && pinned.scope === row.scope && [...row.categories].every(c => pinned.categories.has(c)));
+  }
+  for (const [id,row] of expected) {
+    requireCondition(identities.get(id) === row.scope);
+    const structural=[...row.categories].filter(c => c !== 'unreproducible' && c !== 'hash_mismatch');
+    if (structural.length) {
+      const found=actual.get(id);
+      requireCondition(found && found.scope === row.scope && structural.every(c => found.categories.has(c)));
+    }
+  }
 }

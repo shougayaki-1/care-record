@@ -1,5 +1,7 @@
 import { ArchiveFailure, decodeBase64, encode, itemSchema, requireCondition, sha256, type Head, type Item } from '@/utils/auditArchive/contracts';
 
+import { LegacyGraph } from './legacyGraph';
+
 type Position = { sequence: bigint; hash: string; cutoverId: string };
 
 // This validates only the DB snapshot's v2 chain. It is deliberately not a
@@ -14,6 +16,7 @@ export class SnapshotChain {
   private v1Digest = sha256(Buffer.alloc(0));
   private lastV1: string | null = null;
   private readonly inventory = new Map<string, string>();
+  private readonly legacy = new LegacyGraph();
 
   accept(raw: unknown): Item {
     let item: Item;
@@ -38,6 +41,7 @@ export class SnapshotChain {
       const key = `${item.scope}/${item.id}`;
       requireCondition(this.lastV1 === null || this.lastV1 < key);
       this.lastV1 = key;
+      this.legacy.accept(item);
       this.v1++;
       this.v1Digest = sha256(Buffer.concat([Buffer.from(this.v1Digest, 'hex'), encode([item.id, sha256(decodeBase64(item.inventory))])]));
       return item;
@@ -65,6 +69,6 @@ export class SnapshotChain {
       const position = this.positions.get(scope);
       requireCondition(position && position.sequence.toString() === head.sequence && position.hash === head.hash && position.cutoverId === head.cutoverId);
     }
-    return { v1Count: this.v1.toString(), v1Digest: this.v1Digest, heads: new Map(this.heads), inventory: new Map(this.inventory) };
+    return { v1Count: this.v1.toString(), v1Digest: this.v1Digest, legacyFindings: this.legacy.finish(), legacyIdentities: this.legacy.identities(), heads: new Map(this.heads), inventory: new Map(this.inventory) };
   }
 }

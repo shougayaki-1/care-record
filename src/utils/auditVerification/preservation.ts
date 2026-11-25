@@ -8,8 +8,7 @@ type ArchiveEvidence = Awaited<ReturnType<typeof readPreservedArchive>>;
 // from the DB. A DB row newer than the archive is explicitly outside this check.
 // This is preservation evidence only; v1 historical findings, freshness, all
 // pages, result receipt and monitoring remain independent success requirements.
-export function comparePreservation(scan: SnapshotChain, archive: ArchiveEvidence) {
-  const snapshot = scan.finish();
+export function comparePreservation(snapshot: ReturnType<SnapshotChain['finish']>, archive: ArchiveEvidence) {
   requireCondition(snapshot.v1Count === archive.v1Count && snapshot.v1Digest === archive.v1Digest);
   for (const [scope, position] of archive.positions) {
     const head = snapshot.heads.get(scope);

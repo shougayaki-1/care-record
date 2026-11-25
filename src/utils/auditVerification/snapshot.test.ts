@@ -56,7 +56,7 @@ describe('external preservation comparison', () => {
     const { comparePreservation } = await import('./preservation');
     const { first,second,head } = sample(); const scan = new SnapshotChain();
     [head,first,second].forEach(row => scan.accept(row));
-    expect(comparePreservation(scan,archiveFor(first))).toMatchObject({archivedRows:'1',newerRows:'1',v1Count:'0'});
+    expect(comparePreservation(scan.finish(),archiveFor(first))).toMatchObject({archivedRows:'1',newerRows:'1',v1Count:'0'});
   });
   it('matches the v1 baseline digest and rejects a changed historical inventory', async () => {
     const { comparePreservation } = await import('./preservation');
@@ -66,18 +66,18 @@ describe('external preservation comparison', () => {
     legacy.inventory = Buffer.from(JSON.stringify(row)).toString('base64');
     const digest = sha256(Buffer.concat([Buffer.from(sha256(Buffer.alloc(0)),'hex'),Buffer.from(JSON.stringify([legacy.id,sha256(Buffer.from(legacy.inventory,'base64'))]))]));
     const scan = new SnapshotChain(); [head,legacy,first,second].forEach(item => scan.accept(item));
-    expect(comparePreservation(scan,{...archiveFor(first),v1Count:'1',v1Digest:digest}).v1Count).toBe('1');
-    expect(() => comparePreservation(scan,{...archiveFor(first),v1Count:'1',v1Digest:'f'.repeat(64)})).toThrow();
+    expect(comparePreservation(scan.finish(),{...archiveFor(first),v1Count:'1',v1Digest:digest}).v1Count).toBe('1');
+    expect(() => comparePreservation(scan.finish(),{...archiveFor(first),v1Count:'1',v1Digest:'f'.repeat(64)})).toThrow();
   });
   it('rejects removed scopes, altered inventory and a different v1 baseline', async () => {
     const { comparePreservation } = await import('./preservation');
     const { first,second,head } = sample();
     const scan = new SnapshotChain(); [head,first,second].forEach(row => scan.accept(row));
     const archive = archiveFor(first);
-    expect(() => comparePreservation(scan,{...archive,inventory:new Map([[`${scope}/1`,'f'.repeat(64)]])})).toThrow();
-    expect(() => comparePreservation(scan,{...archive,v1Count:'1'})).toThrow();
+    expect(() => comparePreservation(scan.finish(),{...archive,inventory:new Map([[`${scope}/1`,'f'.repeat(64)]])})).toThrow();
+    expect(() => comparePreservation(scan.finish(),{...archive,v1Count:'1'})).toThrow();
     const missing = new SnapshotChain();
-    expect(() => comparePreservation(missing,archive)).toThrow();
+    expect(() => comparePreservation(missing.finish(),archive)).toThrow();
   });
 });
 

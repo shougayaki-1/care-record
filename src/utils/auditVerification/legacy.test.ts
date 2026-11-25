@@ -23,7 +23,7 @@ async function fixture(store:MemoryStore, countOverride = '1', boundaryAt = '202
 describe('legacy classification evidence', () => {
   it('verifies pinned classification and retains the unresolved historical verdict', async () => {
     const store = new MemoryStore(); const baseline = await fixture(store);
-    await expect(readLegacyClassification(store,baseline.ref,'local',cutover,'1','a'.repeat(64),Date.now()+10000)).resolves.toEqual({historicalVerdict:'unresolved',anomalyCount:'1',recomputationAvailable:false});
+    await expect(readLegacyClassification(store,baseline.ref,'local',cutover,'1','a'.repeat(64),Date.now()+10000)).resolves.toMatchObject({historicalVerdict:'unresolved',anomalyCount:'1',recomputationAvailable:false});
   });
   it('accepts the PostgreSQL timestamp form accepted by the G operator', async () => {
     const store = new MemoryStore(); const baseline = await fixture(store,'1','2026-01-01 00:00:00.123456+00');
