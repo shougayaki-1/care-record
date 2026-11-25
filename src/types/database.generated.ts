@@ -3477,6 +3477,10 @@ export type Database = {
         Args: { p_cursor?: Json; p_run: string }
         Returns: Json
       }
+      read_audit_verification_snapshot: {
+        Args: { p_cursor?: Json; p_run: string }
+        Returns: Json
+      }
       recompute_audit_v1_snapshot: {
         Args: {
           p_datestyle: string

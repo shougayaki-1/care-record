@@ -15,7 +15,7 @@ describe('verification source', () => {
     expect(await source.recompute!('run',['id'],'UTC','ISO, MDY')).toEqual([{id:'15200000-0000-4000-8000-000000000002',hash:'a'.repeat(64)}]);
     expect(mocks.rpc.mock.calls).toEqual([
       ['begin_audit_verification_snapshot'],
-      ['read_audit_archive',{p_run:'run',p_cursor:null}],
+      ['read_audit_verification_snapshot',{p_run:'run',p_cursor:null}],
       ['recompute_audit_v1_snapshot',{p_run:'run',p_ids:['id'],p_timezone:'UTC',p_datestyle:'ISO, MDY'}],
     ]);
   });

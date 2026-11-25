@@ -12,7 +12,7 @@ export function createVerificationSource(): VerificationSnapshotSource {
       return data;
     },
     async page(run,cursor) {
-      const {data,error} = await client.rpc('read_audit_archive',{p_run:run,p_cursor:cursor});
+      const {data,error} = await client.rpc('read_audit_verification_snapshot',{p_run:run,p_cursor:cursor});
       if (error || !data) throw new ArchiveFailure('unavailable');
       const parsed=pageSchema.safeParse(data);
       if (!parsed.success) throw new ArchiveFailure('mismatch');
