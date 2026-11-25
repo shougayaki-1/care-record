@@ -57,10 +57,13 @@ SELECT throws_ok($$ SELECT public.replace_shift_staffs_atomic('15500000-0000-400
 
 SELECT set_config('request.jwt.claims','{"sub":"15500000-0000-4000-8000-000000000001","role":"authenticated","session_id":"155-idle"}',true);
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),0::bigint,'idle session cannot read the report');
+SELECT throws_ok($$ SELECT public.replace_shift_staffs_atomic('15500000-0000-4000-8000-000000000060',ARRAY[]::uuid[]) $$,'P0001','access denied','idle session cannot update shift staffing');
 SELECT set_config('request.jwt.claims','{"sub":"15500000-0000-4000-8000-000000000001","role":"authenticated","session_id":"155-expired"}',true);
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),0::bigint,'expired session cannot read the report');
+SELECT throws_ok($$ SELECT public.replace_shift_staffs_atomic('15500000-0000-4000-8000-000000000060',ARRAY[]::uuid[]) $$,'P0001','access denied','expired session cannot update shift staffing');
 SELECT set_config('request.jwt.claims','{"sub":"15500000-0000-4000-8000-000000000001","role":"authenticated","session_id":"155-unknown"}',true);
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),0::bigint,'unknown session cannot read the report');
+SELECT throws_ok($$ SELECT public.replace_shift_staffs_atomic('15500000-0000-4000-8000-000000000060',ARRAY[]::uuid[]) $$,'P0001','access denied','unknown session cannot update shift staffing');
 SELECT set_config('request.jwt.claims','{"sub":"15500000-0000-4000-8000-000000000002","role":"authenticated","session_id":"155-member"}',true);
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),1::bigint,'member with view permission reads the report');
 SELECT lives_ok($$ SELECT public.save_report_autosave_authorized('15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000020','15500000-0000-4000-8000-000000000030','15500000-0000-4000-8000-000000000041',0,1,'{}'::jsonb) $$,'member with edit permission saves a draft');
