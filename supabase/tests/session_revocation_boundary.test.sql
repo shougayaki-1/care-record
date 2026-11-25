@@ -74,6 +74,16 @@ SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000
 SELECT throws_ok($$ SELECT public.load_report_autosave_authorized('15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000041') $$,'42501','permission_denied','member loses draft access after permission removal');
 SELECT throws_ok($$ SELECT public.save_report_versioned('15500000-0000-4000-8000-000000000010',NULL,'15500000-0000-4000-8000-000000000020',NULL,NULL,now(),now()+interval '1 hour','draft','{}'::jsonb,0,'15500000-0000-4000-8000-000000000073') $$,'P0001','access_denied','member cannot create report after permission removal');
 RESET ROLE;
+UPDATE public.organization_roles SET permissions='{"records":{"view":"assigned","edit":"assigned","create":"assigned","approve":"assigned"},"shifts":{"view":"assigned"},"management":{"reports":true}}' WHERE id='15500000-0000-4000-8000-000000000050';
+UPDATE public.reports SET status='pending' WHERE id IN ('15500000-0000-4000-8000-000000000030','15500000-0000-4000-8000-000000000031');
+SET LOCAL ROLE authenticated;
+SELECT throws_ok($$ SELECT public.transition_reports_authorized('15500000-0000-4000-8000-000000000010',ARRAY['15500000-0000-4000-8000-000000000030'::uuid,'15500000-0000-4000-8000-000000000031'::uuid],'approve') $$,'22023','invalid_or_inaccessible_reports','mixed assigned and unassigned approval rejected');
+SELECT is((SELECT status FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),'pending','mixed approval did not change the assigned report');
+SELECT lives_ok($$ SELECT public.transition_reports_authorized('15500000-0000-4000-8000-000000000010',ARRAY['15500000-0000-4000-8000-000000000030'::uuid],'approve') $$,'assigned report can be approved');
+SELECT is((SELECT status FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),'approved','authorized approval actually changes status');
+RESET ROLE;
+SELECT is((SELECT status FROM public.reports WHERE id='15500000-0000-4000-8000-000000000031'),'pending','unassigned report remains pending');
+UPDATE public.reports SET status='draft',approved_by=NULL,approved_at=NULL WHERE id='15500000-0000-4000-8000-000000000030';
 UPDATE public.organization_roles SET permissions='{"records":{"view":"assigned","edit":"assigned","create":"assigned"},"shifts":{"view":"assigned"}}' WHERE id='15500000-0000-4000-8000-000000000050';
 SET LOCAL ROLE authenticated;
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),1::bigint,'assigned member reads assigned report');
