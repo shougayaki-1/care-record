@@ -179,6 +179,23 @@ async function loadBaseline(store: Store, control: Control) {
   }
   return baseline;
 }
+// Replays the independently stored archive, never the DB checkpoint. The result
+// is evidence for a verifier, not a historical or full verification verdict.
+export async function readPreservedArchive(store: Store, pinnedControl: ObjectRef, environment: string, budgetMs = 40_000) {
+  const deadline = Date.now() + budgetMs;
+  if (budgetMs <= 0) throw new ArchiveFailure('incomplete');
+  const control = await loadControl(store, pinnedControl, environment);
+  requireCondition(control.baselineFinalized && control.baseline !== null);
+  const state = freshState();
+  state.baseline = await loadBaseline(store, control);
+  requireCondition(state.baseline !== null);
+  await recover(store, control, state, deadline);
+  if (state.pending || state.latestKind !== 'complete' || state.latestComplete === null) throw new ArchiveFailure('incomplete');
+  return { cutoverId: control.cutoverId, v1Count: state.baseline.v1Count, v1Digest: state.baseline.v1Digest,
+    positions: new Map(state.positions), inventory: new Map(state.inventory), latestComplete: state.latestComplete,
+    ordinal: state.ordinal, manifestDigest: state.digest };
+}
+
 export async function runArchive(store: Store, source: Source, control: Control, budgetMs = 40_000): Promise<ArchiveResult> {
   const deadline = Date.now() + budgetMs;
   const state = freshState();

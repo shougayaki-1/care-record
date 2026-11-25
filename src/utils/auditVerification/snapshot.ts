@@ -1,4 +1,4 @@
-import { ArchiveFailure, decodeBase64, itemSchema, requireCondition, sha256, type Head, type Item } from '@/utils/auditArchive/contracts';
+import { ArchiveFailure, decodeBase64, encode, itemSchema, requireCondition, sha256, type Head, type Item } from '@/utils/auditArchive/contracts';
 
 type Position = { sequence: bigint; hash: string; cutoverId: string };
 
@@ -11,6 +11,9 @@ export class SnapshotChain {
   private readonly ids = new Set<string>();
   private readonly eventIds = new Set<string>();
   private v1 = BigInt(0);
+  private v1Digest = sha256(Buffer.alloc(0));
+  private lastV1: string | null = null;
+  private readonly inventory = new Map<string, string>();
 
   accept(raw: unknown): Item {
     let item: Item;
@@ -32,7 +35,11 @@ export class SnapshotChain {
       requireCondition(item.version === 1 && item.sequence === '0' && item.canonical === null
         && item.cutoverId === null && inventory[19] === null && inventory[20] === null && inventory[21] === null
         && item.scope === (inventory[3] === null ? 'global' : `org:${inventory[3]}`));
+      const key = `${item.scope}/${item.id}`;
+      requireCondition(this.lastV1 === null || this.lastV1 < key);
+      this.lastV1 = key;
       this.v1++;
+      this.v1Digest = sha256(Buffer.concat([Buffer.from(this.v1Digest, 'hex'), encode([item.id, sha256(decodeBase64(item.inventory))])]));
       return item;
     }
     requireCondition(item.version === 2 && item.canonical !== null && item.cutoverId !== null && item.hash !== null);
@@ -48,6 +55,7 @@ export class SnapshotChain {
     const prior = this.positions.get(item.scope) ?? { sequence: BigInt(0), hash: `GENESIS:v2:${item.cutoverId}:${item.scope}`, cutoverId: item.cutoverId };
     requireCondition(prior.cutoverId === item.cutoverId && BigInt(item.sequence) === prior.sequence + BigInt(1) && item.previousHash === prior.hash);
     this.positions.set(item.scope, { sequence: BigInt(item.sequence), hash: item.hash, cutoverId: item.cutoverId });
+    this.inventory.set(`${item.scope}/${item.sequence}`, sha256(decodeBase64(item.inventory)));
     return item;
   }
 
@@ -57,6 +65,6 @@ export class SnapshotChain {
       const position = this.positions.get(scope);
       requireCondition(position && position.sequence.toString() === head.sequence && position.hash === head.hash && position.cutoverId === head.cutoverId);
     }
-    return { v1Count: this.v1.toString(), heads: new Map(this.heads) };
+    return { v1Count: this.v1.toString(), v1Digest: this.v1Digest, heads: new Map(this.heads), inventory: new Map(this.inventory) };
   }
 }

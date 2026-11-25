@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { archiveHealth, archivePrefix, loadControl, runArchive, type Manifest } from './publisher';
+import { archiveHealth, archivePrefix, loadControl, readPreservedArchive, runArchive, type Manifest } from './publisher';
 import { encode, sha256, type Control, type Cursor, type Event, type Head, type Item, type ObjectRef, type Source, type Store } from './contracts';
 
 const cutover = '15000000-0000-4000-8000-000000000001';
@@ -76,6 +76,21 @@ function manifests(store: MemoryStore, control: Control) {
 }
 
 describe('immutable audit preservation', () => {
+  it('replays pinned external evidence and refuses missing or unfinalized references', async () => {
+    const store = new MemoryStore(); const control = await enabled(store); const rows = events(3);
+    const pinned = await store.create('control/local/root.json', encode(control));
+    await runArchive(store, sourceFor(rows), control);
+    const evidence = await readPreservedArchive(store, pinned.ref, 'local');
+    expect(evidence.positions.get('global')).toEqual({ sequence:'3', hash:(rows.at(-1) as Event).hash });
+    expect(evidence.inventory.size).toBe(3);
+    await expect(readPreservedArchive(store, { ...pinned.ref, digest:'f'.repeat(64) }, 'local')).rejects.toThrow();
+    await expect(readPreservedArchive(store, pinned.ref, 'staging')).rejects.toThrow();
+    const provisionalPin = await store.create('control/local/provisional.json', encode(provisional()));
+    await expect(readPreservedArchive(store, provisionalPin.ref, 'local')).rejects.toThrow();
+    store.objects.delete(`${archivePrefix(control)}manifests/1.json`);
+    await expect(readPreservedArchive(store, pinned.ref, 'local')).rejects.toThrow();
+  });
+
   it('preserves every null-hash/global v1 row beyond 500 with identical microsecond timestamps; remains provisional', async () => {
     const store = new MemoryStore(); const control = provisional();
     const rows = Array.from({ length: 1001 }, () => v1()).sort((a, b) => a.id.localeCompare(b.id));
