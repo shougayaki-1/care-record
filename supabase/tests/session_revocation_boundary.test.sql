@@ -45,6 +45,15 @@ VALUES ('155-member', '155-member', '15500000-0000-4000-8000-000000000002', now(
 INSERT INTO public.assignments(client_id, helper_id)
 VALUES ('15500000-0000-4000-8000-000000000020', '15500000-0000-4000-8000-000000000002');
 
+INSERT INTO public.staffs(id,organization_id,user_id,name) VALUES
+ ('15500000-0000-4000-8000-000000000081','15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000002','Synthetic own'),
+ ('15500000-0000-4000-8000-000000000082','15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000001','Synthetic other'),
+ ('15500000-0000-4000-8000-000000000083','15500000-0000-4000-8000-000000000011',NULL,'Synthetic foreign');
+INSERT INTO public.internal_work_records(id,organization_id,staff_id,recorded_by,title,start_at,end_at,work_hours) VALUES
+ ('15500000-0000-4000-8000-000000000091','15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000081','15500000-0000-4000-8000-000000000002','Own',now(),now()+interval '1 hour',1),
+ ('15500000-0000-4000-8000-000000000092','15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000082','15500000-0000-4000-8000-000000000001','Other',now(),now()+interval '1 hour',1),
+ ('15500000-0000-4000-8000-000000000093','15500000-0000-4000-8000-000000000011','15500000-0000-4000-8000-000000000083','15500000-0000-4000-8000-000000000001','Foreign',now(),now()+interval '1 hour',1);
+
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claims','{"sub":"15500000-0000-4000-8000-000000000001","role":"authenticated","session_id":"155-active"}',true);
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),1::bigint,'active owner session reads the report');
@@ -66,6 +75,23 @@ SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000
 SELECT throws_ok($$ SELECT public.replace_shift_staffs_atomic('15500000-0000-4000-8000-000000000060',ARRAY[]::uuid[]) $$,'P0001','access denied','unknown session cannot update shift staffing');
 SELECT set_config('request.jwt.claims','{"sub":"15500000-0000-4000-8000-000000000002","role":"authenticated","session_id":"155-member"}',true);
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),1::bigint,'member with view permission reads the report');
+RESET ROLE;
+UPDATE public.organization_roles SET permissions='{"internalWork":{"view":"assigned"}}' WHERE id='15500000-0000-4000-8000-000000000050';
+SET LOCAL ROLE authenticated;
+SELECT is((SELECT count(*) FROM public.internal_work_records WHERE id='15500000-0000-4000-8000-000000000091'),1::bigint,'assigned member reads own internal work');
+SELECT is((SELECT count(*) FROM public.internal_work_records WHERE id IN ('15500000-0000-4000-8000-000000000092','15500000-0000-4000-8000-000000000093')),0::bigint,'assigned member cannot read other or foreign internal work');
+RESET ROLE;
+UPDATE public.organization_roles SET permissions='{"internalWork":{"view":"all"}}' WHERE id='15500000-0000-4000-8000-000000000050';
+SET LOCAL ROLE authenticated;
+SELECT is((SELECT count(*) FROM public.internal_work_records WHERE id IN ('15500000-0000-4000-8000-000000000091','15500000-0000-4000-8000-000000000092')),2::bigint,'all scope reads both organization records');
+SELECT is((SELECT count(*) FROM public.internal_work_records WHERE id='15500000-0000-4000-8000-000000000093'),0::bigint,'all scope cannot read other organization internal work');
+RESET ROLE;
+UPDATE public.organization_roles SET permissions='{"internalWork":{"view":"none"}}' WHERE id='15500000-0000-4000-8000-000000000050';
+SET LOCAL ROLE authenticated;
+SELECT is((SELECT count(*) FROM public.internal_work_records WHERE id='15500000-0000-4000-8000-000000000091'),0::bigint,'none scope cannot read own internal work');
+RESET ROLE;
+UPDATE public.organization_roles SET permissions='{"records":{"view":"all","edit":"all"}}' WHERE id='15500000-0000-4000-8000-000000000050';
+SET LOCAL ROLE authenticated;
 SELECT lives_ok($$ SELECT public.save_report_autosave_authorized('15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000020','15500000-0000-4000-8000-000000000030','15500000-0000-4000-8000-000000000041',0,1,'{}'::jsonb) $$,'member with edit permission saves a draft');
 RESET ROLE;
 UPDATE public.organization_roles SET permissions='{"records":{"view":"none","edit":"none"}}' WHERE id='15500000-0000-4000-8000-000000000050';
