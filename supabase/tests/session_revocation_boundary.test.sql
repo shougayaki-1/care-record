@@ -72,10 +72,15 @@ UPDATE public.organization_roles SET permissions='{"records":{"view":"none","edi
 SET LOCAL ROLE authenticated;
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),0::bigint,'member loses report access after permission removal');
 SELECT throws_ok($$ SELECT public.load_report_autosave_authorized('15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000041') $$,'42501','permission_denied','member loses draft access after permission removal');
+SELECT throws_ok($$ SELECT public.save_report_versioned('15500000-0000-4000-8000-000000000010',NULL,'15500000-0000-4000-8000-000000000020',NULL,NULL,now(),now()+interval '1 hour','draft','{}'::jsonb,0,'15500000-0000-4000-8000-000000000073') $$,'P0001','access_denied','member cannot create report after permission removal');
 RESET ROLE;
-UPDATE public.organization_roles SET permissions='{"records":{"view":"assigned","edit":"assigned"},"shifts":{"view":"assigned"}}' WHERE id='15500000-0000-4000-8000-000000000050';
+UPDATE public.organization_roles SET permissions='{"records":{"view":"assigned","edit":"assigned","create":"assigned"},"shifts":{"view":"assigned"}}' WHERE id='15500000-0000-4000-8000-000000000050';
 SET LOCAL ROLE authenticated;
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),1::bigint,'assigned member reads assigned report');
+SELECT lives_ok($$ SELECT public.save_report_versioned('15500000-0000-4000-8000-000000000010',NULL,'15500000-0000-4000-8000-000000000020',NULL,NULL,now(),now()+interval '1 hour','draft','{}'::jsonb,0,'15500000-0000-4000-8000-000000000071') $$,'assigned member creates assigned report via versioned RPC');
+SELECT is((SELECT count(*) FROM public.reports WHERE client_id='15500000-0000-4000-8000-000000000020'),2::bigint,'assigned report was actually created');
+SELECT throws_ok($$ SELECT public.save_report_versioned('15500000-0000-4000-8000-000000000010',NULL,'15500000-0000-4000-8000-000000000021',NULL,NULL,now(),now()+interval '1 hour','draft','{}'::jsonb,0,'15500000-0000-4000-8000-000000000072') $$,'P0001','access_denied','assigned member cannot create unassigned report via versioned RPC');
+SELECT throws_ok($$ SELECT public.save_report_versioned('15500000-0000-4000-8000-000000000011',NULL,'15500000-0000-4000-8000-000000000022',NULL,NULL,now(),now()+interval '1 hour','draft','{}'::jsonb,0,'15500000-0000-4000-8000-000000000074') $$,'P0001','access_denied','assigned member cannot create other organization report');
 SELECT is((SELECT count(*) FROM public.reports WHERE id IN ('15500000-0000-4000-8000-000000000031','15500000-0000-4000-8000-000000000032')),0::bigint,'assigned member cannot read unassigned or other organization reports');
 SELECT lives_ok($$ SELECT public.save_report_autosave_authorized('15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000020','15500000-0000-4000-8000-000000000030','15500000-0000-4000-8000-000000000041',0,2,'{}'::jsonb) $$,'assigned member edits assigned client draft');
 SELECT throws_ok($$ SELECT public.save_report_autosave_authorized('15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000021','15500000-0000-4000-8000-000000000031','15500000-0000-4000-8000-000000000042',0,1,'{}'::jsonb) $$,'42501','permission_denied','assigned member cannot edit unassigned client draft');
