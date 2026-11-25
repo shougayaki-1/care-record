@@ -10,6 +10,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Normal: Story = { play: async ({ canvasElement, args }) => {
   const canvas = within(canvasElement);
+  await expect(canvas.getByRole('button', { name: '一括自動展開する' })).toHaveClass('MuiButton-colorPrimary');
   await userEvent.click(canvas.getByRole('button', { name: '一括自動展開する' })); await expect(args.onPreview).toHaveBeenCalledOnce();
   await userEvent.click(canvas.getByRole('button', { name: '一括消去する' })); await expect(args.onClear).toHaveBeenCalledOnce();
 } };
