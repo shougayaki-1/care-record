@@ -39,11 +39,11 @@ function v2(sequence: string, previousHash: string): Event {
   return event;
 }
 const provisional = (): Control => ({ schema: 'audit-control:1', environment: 'local', cutoverId: 'pre-cutover', baselineFinalized: false, baseline: null, monitoringStartedAt: new Date().toISOString() });
-async function enabled(store: MemoryStore): Promise<Control> {
+async function enabled(store: MemoryStore, recomputationSettingsEvidence: string | null = null): Promise<Control> {
   const receipt: Manifest = { schema: 'audit-manifest:1', environment: 'local', cutoverId: 'pre-cutover', ordinal: '1', previousDigest: null, run: randomUUID(), createdAt: new Date().toISOString(), kind: 'inventory', chunk: null, ranges: [], snapshot: { cursor: null, heads: [], requiredScopes: [], v1Count: '0', v1Digest: sha256(Buffer.alloc(0)) }, v1Count: '0', v1Digest: sha256(Buffer.alloc(0)) };
   const saved = await store.create('archive/local/pre-cutover/manifests/1.json', encode(receipt));
   const prefix = `control/local/${cutover}/`;
-  const classification = await store.create(`${prefix}classification.json`,encode({ schema:'audit-v1-classification:1',historicalVerdict:'unresolved',v1Count:'0',v1Digest:receipt.v1Digest,scopes:[],counts:{},anomalyParts:[],evidenceDigest:'b'.repeat(64),recomputationSettingsEvidence:null }));
+  const classification = await store.create(`${prefix}classification.json`,encode({ schema:'audit-v1-classification:1',historicalVerdict:'unresolved',v1Count:'0',v1Digest:receipt.v1Digest,scopes:[],counts:{},anomalyParts:[],evidenceDigest:'b'.repeat(64),recomputationSettingsEvidence }));
   const baseline = await store.create(`${prefix}baseline.json`, encode({ schema: 'audit-baseline:1', environment: 'local', cutoverId: cutover, v1Count: '0', v1Digest: receipt.v1Digest, inventoryReceipt: saved.ref, historicalVerdict: 'unresolved',classification:classification.ref,evidenceDigest:'b'.repeat(64),boundary:{cutoverId:cutover,v1Count:'0',v1Digest:receipt.v1Digest,at:'2026-01-01T00:00:00.000000Z'} }));
   return { ...provisional(), cutoverId: cutover, baselineFinalized: true, baseline: baseline.ref };
 }
@@ -78,6 +78,16 @@ function manifests(store: MemoryStore, control: Control) {
 }
 
 describe('immutable audit preservation', () => {
+  it('requires independently pinned settings before evidence-backed recomputation', async () => {
+    const { inspectPreservation } = await import('@/utils/auditVerification/inspect');
+    const store=new MemoryStore(), evidence='a'.repeat(64), control=await enabled(store,evidence), rows=events(1);
+    const pin=await store.create('control/local/root.json',encode(control));
+    await runArchive(store,sourceFor(rows),control);
+    const snapshot=sourceFor(rows), source={begin:() => snapshot.begin({},false),page:(run:string,cursor:Cursor) => snapshot.page(run,cursor),recompute:async()=>[]};
+    await expect(inspectPreservation(store,pin.ref,'local',source)).rejects.toMatchObject({category:'incomplete'});
+    const settings=await store.create(`control/local/${cutover}/recompute-settings.json`,encode({schema:'audit-v1-recompute-settings:1',environment:'local',cutoverId:cutover,timeZone:'UTC',dateStyle:'ISO, MDY',settingsEvidenceDigest:evidence}));
+    await expect(inspectPreservation(store,pin.ref,'local',source,10000,settings.ref)).resolves.toMatchObject({status:'evidence_only',recomputedRows:'0',historicalVerdict:'unresolved'});
+  });
   it('connects pinned archive to all snapshot pages without issuing a success verdict', async () => {
     const { inspectPreservation } = await import('@/utils/auditVerification/inspect');
     const store = new MemoryStore(); const control = await enabled(store); const rows = events(3);

@@ -69,6 +69,6 @@ export class SnapshotChain {
       const position = this.positions.get(scope);
       requireCondition(position && position.sequence.toString() === head.sequence && position.hash === head.hash && position.cutoverId === head.cutoverId);
     }
-    return { v1Count: this.v1.toString(), v1Digest: this.v1Digest, legacyFindings: this.legacy.finish(), legacyIdentities: this.legacy.identities(), heads: new Map(this.heads), inventory: new Map(this.inventory) };
+    return { v1Count: this.v1.toString(), v1Digest: this.v1Digest, legacyFindings: this.legacy.finish(), legacyIdentities: this.legacy.identities(), legacyRows: this.legacy.recomputationRows(), heads: new Map(this.heads), inventory: new Map(this.inventory) };
   }
 }

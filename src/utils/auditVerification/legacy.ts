@@ -78,7 +78,7 @@ export async function readLegacyClassification(
   if (report.recomputationSettingsEvidence === null) {
     requireCondition((counts.get('unreproducible') ?? BigInt(0)) === BigInt(expectedCount) && !counts.has('hash_mismatch'));
   } else requireCondition(!counts.has('unreproducible'));
-  return { historicalVerdict:'unresolved' as const, anomalyCount:ids.size.toString(), recomputationAvailable:report.recomputationSettingsEvidence !== null, findings };
+  return { historicalVerdict:'unresolved' as const, anomalyCount:ids.size.toString(), recomputationAvailable:report.recomputationSettingsEvidence !== null, recomputationSettingsEvidence:report.recomputationSettingsEvidence, findings };
 }
 
 // Classification metadata is not enough: compare its structural findings to

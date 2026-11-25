@@ -12,6 +12,7 @@ export class LegacyGraph {
     this.rows.set(event.id,{id:event.id,scope:event.scope,hash:event.hash,previous:event.previousHash});
   }
   identities() { return new Map([...this.rows].map(([id,row]) => [id,row.scope])); }
+  recomputationRows() { return [...this.rows.values()].map(({id,hash}) => ({id,hash})); }
   finish() {
     const findings = new Map<string,Finding>();
     const groups = new Map<string,Row[]>();
