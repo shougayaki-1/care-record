@@ -36,7 +36,7 @@ export type ArchiveResult = { status: 'complete' | 'inventory' | 'incomplete'; a
 export function archivePrefix(control: Control): string {
   return `archive/${control.environment}/${control.cutoverId}/`;
 }
-async function exact(store: Store, ref: ObjectRef) {
+export async function readExactArchiveObject(store: Store, ref: ObjectRef) {
   const object = await store.read(ref.name, ref.generation);
   requireCondition(object && object.ref.name === ref.name && object.ref.digest === ref.digest && object.ref.size === ref.size
     && object.ref.generation === ref.generation && object.bytes.length <= MAX_BYTES
@@ -45,7 +45,7 @@ async function exact(store: Store, ref: ObjectRef) {
 }
 export async function loadControl(store: Store, pinned: ObjectRef, environment: string): Promise<Control> {
   requireCondition(pinned.name.startsWith(`control/${environment}/`));
-  const object = await exact(store, pinned);
+  const object = await readExactArchiveObject(store, pinned);
   const control = controlSchema.parse(JSON.parse(object.bytes.toString()));
   requireCondition(control.environment === environment);
   requireCondition(control.baselineFinalized === (control.baseline !== null));
@@ -112,7 +112,7 @@ async function accept(store: Store, saved: { bytes: Buffer; ref: ObjectRef }, st
   if (prior) requireCondition(JSON.stringify(prior.requiredScopes) === JSON.stringify(manifest.snapshot.requiredScopes));
   if (manifest.chunk) {
     requireCondition(manifest.chunk.name === `${prefix}chunks/${manifest.chunk.digest}.json`);
-    const chunk = await exact(store, manifest.chunk);
+    const chunk = await readExactArchiveObject(store, manifest.chunk);
     const items = chunkSchema.parse(JSON.parse(chunk.bytes.toString())).items;
     requireCondition(JSON.stringify(manifest.ranges) === JSON.stringify(ranges(items)));
     let count = BigInt(prior?.v1Count ?? '0');
@@ -174,9 +174,9 @@ async function loadBaseline(store: Store, control: Control) {
   let baseline: z.infer<typeof baselineSchema> | null = null;
   if (control.baseline) {
     requireCondition(control.baseline.name.startsWith(`control/${control.environment}/`));
-    baseline = baselineSchema.parse(JSON.parse((await exact(store, control.baseline)).bytes.toString()));
+    baseline = baselineSchema.parse(JSON.parse((await readExactArchiveObject(store, control.baseline)).bytes.toString()));
     requireCondition(baseline.environment === control.environment && baseline.cutoverId === control.cutoverId);
-    const receipt = manifestSchema.parse(JSON.parse((await exact(store, baseline.inventoryReceipt)).bytes.toString()));
+    const receipt = manifestSchema.parse(JSON.parse((await readExactArchiveObject(store, baseline.inventoryReceipt)).bytes.toString()));
     requireCondition(receipt.environment === control.environment && receipt.kind === 'inventory'
       && receipt.v1Count === baseline.v1Count && receipt.v1Digest === baseline.v1Digest);
   }
@@ -194,7 +194,7 @@ export async function readPreservedArchive(store: Store, pinnedControl: ObjectRe
   requireCondition(state.baseline !== null);
   await recover(store, control, state, deadline);
   if (state.pending || state.latestKind !== 'complete' || state.latestComplete === null) throw new ArchiveFailure('incomplete');
-  return { cutoverId: control.cutoverId, v1Count: state.baseline.v1Count, v1Digest: state.baseline.v1Digest,
+  return { cutoverId: control.cutoverId, baselineRef: control.baseline, v1Count: state.baseline.v1Count, v1Digest: state.baseline.v1Digest,
     positions: new Map(state.positions), inventory: new Map(state.inventory), latestComplete: state.latestComplete,
     ordinal: state.ordinal, manifestDigest: state.digest };
 }

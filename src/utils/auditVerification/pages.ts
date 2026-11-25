@@ -16,6 +16,7 @@ export async function readSnapshotPages(
   const chain = new SnapshotChain();
   let cursor: Cursor = null;
   let pages = 0;
+  let rows = 0;
   const seen = new Set<string>();
   for (;;) {
     if (now() >= deadline || pages >= 10000) throw new ArchiveFailure('incomplete');
@@ -28,6 +29,8 @@ export async function readSnapshotPages(
       parsed = pageSchema.parse(raw);
     } catch { throw new ArchiveFailure('mismatch'); }
     pages++;
+    rows += parsed.items.length;
+    if (rows > 200_000) throw new ArchiveFailure('incomplete');
     requireCondition(!parsed.more || (parsed.items.length > 0 && parsed.cursor !== null));
     if (parsed.items.length) {
       const last = parsed.items[parsed.items.length - 1];

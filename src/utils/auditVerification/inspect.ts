@@ -3,6 +3,7 @@ import { ArchiveFailure, requireCondition, type Cursor, type ObjectRef, type Sto
 import { readPreservedArchive } from '@/utils/auditArchive/publisher';
 import { readSnapshotPages } from './pages';
 import { comparePreservation } from './preservation';
+import { readLegacyClassification } from './legacy';
 
 export interface VerificationSnapshotSource {
   begin(): Promise<string>;
@@ -35,6 +36,7 @@ export async function inspectPreservation(
     const latest = Date.parse(archive.latestComplete);
     if (!Number.isFinite(latest) || latest > Date.now()) throw new ArchiveFailure('mismatch');
     if (Date.now() - latest > 26 * 60 * 60 * 1000) throw new ArchiveFailure('incomplete');
+    const legacy = await withinDeadline(() => readLegacyClassification(store, archive.baselineRef, environment, archive.cutoverId, archive.v1Count, archive.v1Digest, deadline), deadline);
     const run = z.uuid().safeParse(await withinDeadline(() => source.begin(), deadline));
     requireCondition(run.success);
     const { chain, pages } = await readSnapshotPages(cursor => withinDeadline(() => source.page(run.data, cursor), deadline), deadline);
@@ -42,7 +44,8 @@ export async function inspectPreservation(
     if (Date.now() >= deadline) throw new ArchiveFailure('incomplete');
     return { status: 'evidence_only' as const, pages, v1Count: comparison.v1Count,
       archivedRows: comparison.archivedRows, newerRows: comparison.newerRows,
-      historicalVerdict: 'unresolved' as const };
+      historicalVerdict: legacy.historicalVerdict, legacyAnomalies: legacy.anomalyCount,
+      legacyRecomputationAvailable: legacy.recomputationAvailable };
   } catch (error) {
     if (error instanceof ArchiveFailure) throw error;
     throw new ArchiveFailure('unavailable');

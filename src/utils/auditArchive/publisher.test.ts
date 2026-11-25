@@ -42,7 +42,9 @@ const provisional = (): Control => ({ schema: 'audit-control:1', environment: 'l
 async function enabled(store: MemoryStore): Promise<Control> {
   const receipt: Manifest = { schema: 'audit-manifest:1', environment: 'local', cutoverId: 'pre-cutover', ordinal: '1', previousDigest: null, run: randomUUID(), createdAt: new Date().toISOString(), kind: 'inventory', chunk: null, ranges: [], snapshot: { cursor: null, heads: [], requiredScopes: [], v1Count: '0', v1Digest: sha256(Buffer.alloc(0)) }, v1Count: '0', v1Digest: sha256(Buffer.alloc(0)) };
   const saved = await store.create('archive/local/pre-cutover/manifests/1.json', encode(receipt));
-  const baseline = await store.create('control/local/baseline.json', encode({ schema: 'audit-baseline:1', environment: 'local', cutoverId: cutover, v1Count: '0', v1Digest: receipt.v1Digest, inventoryReceipt: saved.ref, historicalVerdict: 'unresolved' }));
+  const prefix = `control/local/${cutover}/`;
+  const classification = await store.create(`${prefix}classification.json`,encode({ schema:'audit-v1-classification:1',historicalVerdict:'unresolved',v1Count:'0',v1Digest:receipt.v1Digest,scopes:[],counts:{},anomalyParts:[],evidenceDigest:'b'.repeat(64),recomputationSettingsEvidence:null }));
+  const baseline = await store.create(`${prefix}baseline.json`, encode({ schema: 'audit-baseline:1', environment: 'local', cutoverId: cutover, v1Count: '0', v1Digest: receipt.v1Digest, inventoryReceipt: saved.ref, historicalVerdict: 'unresolved',classification:classification.ref,evidenceDigest:'b'.repeat(64),boundary:{cutoverId:cutover,v1Count:'0',v1Digest:receipt.v1Digest,at:'2026-01-01T00:00:00.000000Z'} }));
   return { ...provisional(), cutoverId: cutover, baselineFinalized: true, baseline: baseline.ref };
 }
 function sourceFor(items: Item[], failCache = false): Source & { caches: string[]; begins: number } {
