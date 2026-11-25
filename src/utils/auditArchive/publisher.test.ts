@@ -76,6 +76,26 @@ function manifests(store: MemoryStore, control: Control) {
 }
 
 describe('immutable audit preservation', () => {
+  it('connects pinned archive to all snapshot pages without issuing a success verdict', async () => {
+    const { inspectPreservation } = await import('@/utils/auditVerification/inspect');
+    const store = new MemoryStore(); const control = await enabled(store); const rows = events(3);
+    const pinned = await store.create('control/local/root.json',encode(control));
+    await runArchive(store,sourceFor(rows),control);
+    const newer = v2('4',(rows.at(-1) as Event).hash!);
+    const snapshot = sourceFor([{ ...(rows[0] as Head),sequence:'4',hash:newer.hash! },...rows.slice(1),newer]);
+    const source = { begin:() => snapshot.begin({},false), page:(run: string,cursor: Cursor) => snapshot.page(run,cursor) };
+    await expect(inspectPreservation(store,pinned.ref,'local',source)).resolves.toMatchObject({status:'evidence_only',archivedRows:'3',newerRows:'1',historicalVerdict:'unresolved'});
+    const missing = sourceFor([]);
+    await expect(inspectPreservation(store,pinned.ref,'local',{begin:() => missing.begin({},false),page:(run,cursor) => missing.page(run,cursor)})).rejects.toMatchObject({category:'mismatch'});
+    await expect(inspectPreservation(store,pinned.ref,'local',{begin:() => new Promise<string>(() => {}),page:async () => null},100)).rejects.toMatchObject({category:'incomplete'});
+  });
+
+  it('rejects bytes that do not match the pinned control reference', async () => {
+    const store = new MemoryStore(); const control = await enabled(store);
+    const pinned = await store.create('control/local/root.json',encode(control));
+    store.objects.set(pinned.ref.name,{ ref:pinned.ref,bytes:Buffer.from('{}') });
+    await expect(readPreservedArchive(store,pinned.ref,'local')).rejects.toThrow();
+  });
   it('replays pinned external evidence and refuses missing or unfinalized references', async () => {
     const store = new MemoryStore(); const control = await enabled(store); const rows = events(3);
     const pinned = await store.create('control/local/root.json', encode(control));

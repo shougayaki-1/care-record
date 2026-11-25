@@ -38,7 +38,9 @@ export function archivePrefix(control: Control): string {
 }
 async function exact(store: Store, ref: ObjectRef) {
   const object = await store.read(ref.name, ref.generation);
-  requireCondition(object && object.ref.digest === ref.digest && object.ref.size === ref.size && object.ref.generation === ref.generation);
+  requireCondition(object && object.ref.name === ref.name && object.ref.digest === ref.digest && object.ref.size === ref.size
+    && object.ref.generation === ref.generation && object.bytes.length <= MAX_BYTES
+    && BigInt(object.bytes.length) === BigInt(ref.size) && sha256(object.bytes) === ref.digest);
   return object;
 }
 export async function loadControl(store: Store, pinned: ObjectRef, environment: string): Promise<Control> {
@@ -99,6 +101,7 @@ function ranges(items: Item[]) {
   return [...result.values()];
 }
 async function accept(store: Store, saved: { bytes: Buffer; ref: ObjectRef }, state: State, control: Control) {
+  requireCondition(saved.bytes.length <= MAX_BYTES && BigInt(saved.bytes.length) === BigInt(saved.ref.size) && sha256(saved.bytes) === saved.ref.digest);
   const manifest = manifestSchema.parse(JSON.parse(saved.bytes.toString()));
   const prefix = archivePrefix(control);
   requireCondition(manifest.environment === control.environment && manifest.cutoverId === control.cutoverId
