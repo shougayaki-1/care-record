@@ -26,3 +26,24 @@ export const Processing: Story = { args: { generating: true }, play: async ({ ca
   await expect(canvas.getByRole('button', { name: '一括消去する' })).toBeDisabled();
 } };
 export const ReadOnly: Story = { args: { canGenerate: false, canClear: false }, play: Empty.play };
+
+export const KeyboardActions: Story = { play: async ({ canvasElement, args }) => {
+  const canvas = within(canvasElement);
+  const document = canvasElement.ownerDocument;
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  const month = canvas.getByLabelText('対象月');
+  const preview = canvas.getByRole('button', { name: '一括自動展開する' });
+  const clear = canvas.getByRole('button', { name: '一括消去する' });
+  await userEvent.tab();
+  await expect(month).toHaveFocus();
+  await userEvent.tab();
+  await expect(canvas.getByRole('button', { name: '対象月をカレンダーから選択' })).toHaveFocus();
+  await userEvent.tab();
+  await expect(preview).toHaveFocus();
+  await userEvent.keyboard('{Enter}');
+  await expect(args.onPreview).toHaveBeenCalledOnce();
+  await userEvent.tab();
+  await expect(clear).toHaveFocus();
+  await userEvent.keyboard(' ');
+  await expect(args.onClear).toHaveBeenCalledOnce();
+} };

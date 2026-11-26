@@ -33,3 +33,19 @@ export const Attention: Story = { args: { googleCalendarId: 'synthetic-calendar'
   await expect(canvas.getByText(/未同期の予定が/)).toBeVisible();
   await expect(canvas.getByRole('button', { name: /未同期を同期/ })).toBeEnabled();
 } };
+
+export const KeyboardConnection: Story = { play: async ({ canvasElement, args }) => {
+  const canvas = within(canvasElement);
+  const document = canvasElement.ownerDocument;
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  const drive = canvas.getByRole('button', { name: '連携フォルダを作成する' });
+  const calendar = canvas.getByRole('button', { name: 'シフト用カレンダーを作成・連携する' });
+  await userEvent.tab();
+  await expect(drive).toHaveFocus();
+  await userEvent.keyboard(' ');
+  await expect(args.handleConnectDrive).toHaveBeenCalledOnce();
+  await userEvent.tab();
+  await expect(calendar).toHaveFocus();
+  await userEvent.keyboard('{Enter}');
+  await expect(args.handleConnectCalendar).toHaveBeenCalledOnce();
+} };
