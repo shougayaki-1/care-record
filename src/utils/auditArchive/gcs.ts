@@ -1,5 +1,6 @@
 import 'server-only';
 import { getStorage } from '@/utils/gcs/upload';
+import type { Storage } from '@google-cloud/storage';
 import { ArchiveFailure, MAX_BYTES, decimal, sha256, type Store, type ObjectRef } from './contracts';
 
 // The installed storage SDK coerces File({generation: string}) to Number.
@@ -20,8 +21,7 @@ export async function boundedBody(response: Response): Promise<Buffer> {
   } finally { await reader.cancel(); }
   return Buffer.concat(parts);
 }
-export function createArchiveStore(bucket: string, writablePrefix: string): Store {
-  const storage = getStorage();
+export function createArchiveStore(bucket: string, writablePrefix: string, storage: Storage = getStorage()): Store {
   async function request(url: URL, init?: RequestInit) {
     const auth = await storage.authClient.getRequestHeaders(url.toString());
     const headers = new Headers(init?.headers);
