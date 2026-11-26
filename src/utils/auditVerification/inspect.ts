@@ -8,8 +8,8 @@ import { withinDeadline } from './deadline';
 import { recomputeLegacy, type RecomputeSource } from './recompute';
 
 export interface VerificationSnapshotSource {
-  begin(): Promise<string>;
-  page(run: string, cursor: Cursor): Promise<unknown>;
+  begin(signal?: AbortSignal): Promise<string>;
+  page(run: string, cursor: Cursor, signal?: AbortSignal): Promise<unknown>;
   recompute?: RecomputeSource;
 }
 
@@ -28,9 +28,9 @@ export async function inspectPreservation(
     if (!Number.isFinite(latest) || latest > Date.now()) throw new ArchiveFailure('mismatch');
     if (Date.now() - latest > 26 * 60 * 60 * 1000) throw new ArchiveFailure('incomplete');
     const legacy = await withinDeadline(() => readLegacyClassification(store, archive.baselineRef, environment, archive.cutoverId, archive.v1Count, archive.v1Digest, deadline), deadline);
-    const run = z.uuid().safeParse(await withinDeadline(() => source.begin(), deadline));
+    const run = z.uuid().safeParse(await withinDeadline(signal => source.begin(signal), deadline));
     requireCondition(run.success);
-    const { snapshot:scanned, pages } = await readSnapshotPages(cursor => withinDeadline(() => source.page(run.data, cursor), deadline), deadline);
+    const { snapshot:scanned, pages } = await readSnapshotPages(cursor => withinDeadline(signal => source.page(run.data, cursor, signal), deadline), deadline);
     const comparison = comparePreservation(scanned, archive);
     compareLegacyStructure(scanned.legacyFindings, legacy.findings, scanned.legacyIdentities);
     let recomputedRows = '0';

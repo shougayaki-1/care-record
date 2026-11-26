@@ -19,6 +19,20 @@ describe('verification source', () => {
       ['recompute_audit_v1_snapshot',{p_run:'run',p_ids:['id'],p_timezone:'UTC',p_datestyle:'ISO, MDY'}],
     ]);
   });
+  it('passes the request deadline signal to the RPC transport', async () => {
+    const signal = new AbortController().signal;
+    const abortSignal = vi.fn()
+      .mockResolvedValueOnce({data:'15200000-0000-4000-8000-000000000001',error:null})
+      .mockResolvedValueOnce({data:{items:[],cursor:null,more:false},error:null})
+      .mockResolvedValueOnce({data:[{id:'15200000-0000-4000-8000-000000000002',hash:'a'.repeat(64)}],error:null});
+    mocks.rpc.mockReturnValue({abortSignal});
+    const source=createVerificationSource(signal);
+    expect(await source.begin()).toBe('15200000-0000-4000-8000-000000000001');
+    expect(await source.page('run',null)).toEqual({items:[],cursor:null,more:false});
+    expect(await source.recompute!('run',['id'],'UTC','ISO, MDY')).toHaveLength(1);
+    expect(abortSignal).toHaveBeenCalledTimes(3);
+    for (const [received] of abortSignal.mock.calls) expect(received).toBe(signal);
+  });
   it('classifies malformed data and hides raw database errors', async () => {
     const source=createVerificationSource();
     mocks.rpc.mockResolvedValueOnce({data:{items:null,cursor:null,more:false},error:null})

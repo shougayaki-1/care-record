@@ -11,7 +11,7 @@ const responseSchema = z.array(z.strictObject({id:z.uuid(),hash:digest})).max(10
 
 type Row = {id:string;hash:string|null};
 type Findings = Map<string,{scope:string;categories:Set<string>}>;
-export type RecomputeSource = (run:string,ids:string[],timeZone:string,dateStyle:string) => Promise<unknown>;
+export type RecomputeSource = (run:string,ids:string[],timeZone:string,dateStyle:string,signal?:AbortSignal) => Promise<unknown>;
 
 // The operator pins this object independently of the database. Its evidence
 // digest must match G's classification; this does not make historical v1 safe.
@@ -27,7 +27,7 @@ export async function recomputeLegacy(
   requireCondition(settings.environment === environment && settings.cutoverId === cutoverId && settings.settingsEvidenceDigest === evidenceDigest);
   for (let index=0; index<rows.length; index+=100) {
     const batch=rows.slice(index,index+100);
-    const raw=await withinDeadline(() => source(run,batch.map(row=>row.id),settings.timeZone,settings.dateStyle),deadline);
+    const raw=await withinDeadline(signal => source(run,batch.map(row=>row.id),settings.timeZone,settings.dateStyle,signal),deadline);
     const parsed=responseSchema.safeParse(raw);
     requireCondition(parsed.success && parsed.data.length === batch.length);
     for (let i=0; i<batch.length; i++) {
