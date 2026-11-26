@@ -14,7 +14,7 @@ worker は GitHub Actions の `google-github-actions/auth` による WIF 外部�
 
 ## schedule の独立監視試作
 
-`npm run audit:watch-schedule` は既定で無効です。将来、GitHub Actions と障害点を共有しない別の実行基盤から起動する想定で、control を固定 generation で読み、GitHub の scheduled run と環境名付き `Audit verification (<environment>)` ジョブ内の `Verify audit preservation` ステップ開始を確認します。手動実行や別環境、skip されたステップは数えません。8 日を超えて対象の開始がなければ固定分類で通知します。実際の schedule はまだ存在せず、監視先や定期起動も設定していません。
+`npm run audit:watch-schedule` は既定で無効です。将来、GitHub Actions と障害点を共有しない別の実行基盤から起動する想定で、control を固定 generation で読み、GitHub の scheduled run と環境名付き `Audit verification (<environment>)` ジョブ内の `Verify audit preservation` ステップ開始を確認します。手動実行や別環境、skip されたステップは数えません。再実行で対象ジョブが省かれる場合に備えて最大10 attempt を遡り、それより古い結果が必要なら未完了とします。8 日を超えて対象の開始がなければ固定分類で通知します。実際の schedule はまだ存在せず、監視先や定期起動も設定していません。
 
 監視に対応する成功 receipt の契約はまだなく、対象ステップが開始されても検証成功とは扱いません。運用者が DB 外に固定した週次監視開始時刻から 8 日超は、検証成功を裏付ける対応済み証拠がない状態として通知し、プロセスは常に非ゼロで終了します。これは最後の成功 receipt からの経過時間を測定する完成済み監視ではありません。成功 receipt の形式・履歴の扱いを決めた後に更新する必要があります。
 

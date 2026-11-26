@@ -43,6 +43,21 @@ describe('independent schedule observation', () => {
     const wrong=async (url:URL) => url.pathname.endsWith('/jobs') ? response({total_count:1,jobs:[job('production')]}) : response({total_count:1,workflow_runs:[run]});
     expect((await checkScheduledVerification(store,pin,'staging','token',monitoringStartedAt,wrong,now)).schedule).toBe('missing');
   });
+  it('checks earlier attempts when a rerun omits the verification job', async () => {
+    const {store,pin,monitoringStartedAt}=control(now-9*day);
+    const request=vi.fn(async (url:URL) => {
+      if (url.pathname.endsWith('/attempts/2/jobs')) return response({total_count:0,jobs:[]});
+      if (url.pathname.endsWith('/attempts/1/jobs')) return response({total_count:1,jobs:[job('staging')]});
+      return response({total_count:1,workflow_runs:[{...run,run_attempt:2}]});
+    });
+    expect((await checkScheduledVerification(store,pin,'staging','token',monitoringStartedAt,request,now)).schedule).toBe('observed');
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+  it('does not declare a missing schedule when the attempt history exceeds its bound', async () => {
+    const {store,pin,monitoringStartedAt}=control(now-9*day);
+    const request=async (url:URL) => url.pathname.endsWith('/jobs') ? response({total_count:0,jobs:[]}) : response({total_count:1,workflow_runs:[{...run,run_attempt:11}]});
+    await expect(checkScheduledVerification(store,pin,'staging','token',monitoringStartedAt,request,now)).rejects.toMatchObject({category:'incomplete'});
+  });
   it('rejects manual runs, unstarted steps and incomplete pagination', async () => {
     const {store,pin,monitoringStartedAt}=control(now-9*day);
     await expect(checkScheduledVerification(store,pin,'staging','token',monitoringStartedAt,async () => response({total_count:1,workflow_runs:[{...run,event:'workflow_dispatch'}]}),now)).rejects.toMatchObject({category:'mismatch'});

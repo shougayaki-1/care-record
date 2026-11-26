@@ -65,19 +65,25 @@ export async function checkScheduledVerification(store: Store, pinned: ObjectRef
     const createdAt=Date.parse(run.created_at);
     requireCondition(Number.isFinite(createdAt) && createdAt<=now);
     if (createdAt<cutoff) continue;
-    const jobs=z.object({total_count:z.number().int().nonnegative(),jobs:z.array(jobSchema).max(100)}).safeParse(
-      await read(`actions/runs/${run.id}/attempts/${run.run_attempt}/jobs`,{per_page:'100'}));
-    requireCondition(jobs.success && jobs.data.total_count>=jobs.data.jobs.length);
-    for (const job of jobs.data.jobs) {
-      if (job.name!==`Audit verification (${environment})`) continue;
-      const step=job.steps.find(value => value.name==='Verify audit preservation');
-      if (!step || !step.started_at || !(step.status==='in_progress' && step.conclusion===null
-        || step.status==='completed' && ['success','failure','timed_out','cancelled'].includes(step.conclusion ?? ''))) continue;
-      const started=Date.parse(step.started_at);
-      requireCondition(Number.isFinite(started) && started>=createdAt && started<=now);
-      if (started>=cutoff) return {schedule:'observed' as const,verification:'incomplete' as const,successEvidenceOverdue};
+    // A rerun may contain only failed jobs, so inspect earlier attempts too.
+    // Bound the work; if older attempts are omitted, never claim the schedule is missing.
+    const firstAttempt=Math.max(1,run.run_attempt-9);
+    for (let attempt=run.run_attempt; attempt>=firstAttempt; attempt--) {
+      const jobs=z.object({total_count:z.number().int().nonnegative(),jobs:z.array(jobSchema).max(100)}).safeParse(
+        await read(`actions/runs/${run.id}/attempts/${attempt}/jobs`,{per_page:'100'}));
+      requireCondition(jobs.success && jobs.data.total_count>=jobs.data.jobs.length);
+      for (const job of jobs.data.jobs) {
+        if (job.name!==`Audit verification (${environment})`) continue;
+        const step=job.steps.find(value => value.name==='Verify audit preservation');
+        if (!step || !step.started_at || !(step.status==='in_progress' && step.conclusion===null
+          || step.status==='completed' && ['success','failure','timed_out','cancelled'].includes(step.conclusion ?? ''))) continue;
+        const started=Date.parse(step.started_at);
+        requireCondition(Number.isFinite(started) && started>=createdAt && started<=now);
+        if (started>=cutoff) return {schedule:'observed' as const,verification:'incomplete' as const,successEvidenceOverdue};
+      }
+      if (jobs.data.total_count>jobs.data.jobs.length) throw new ArchiveFailure('incomplete');
     }
-    if (jobs.data.total_count>jobs.data.jobs.length) throw new ArchiveFailure('incomplete');
+    if (firstAttempt>1) throw new ArchiveFailure('incomplete');
   }
   if (runs.data.total_count>runs.data.workflow_runs.length) throw new ArchiveFailure('incomplete');
   return {schedule:successEvidenceOverdue ? 'missing' as const : 'awaiting' as const,verification:'incomplete' as const,successEvidenceOverdue};
