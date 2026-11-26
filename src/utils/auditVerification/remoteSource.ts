@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ArchiveFailure, cursorSchema, digest, MAX_BYTES, pageSchema, refSchema, requireCondition, type ObjectRef } from '@/utils/auditArchive/contracts';
+import { ArchiveFailure, cursorSchema, digest, MAX_BYTES, pageSchema, refSchema, requireCondition } from '@/utils/auditArchive/contracts';
 import type { VerificationSnapshotSource } from './inspect';
 import { verificationControlDigest } from './controlContext';
 
@@ -11,19 +11,17 @@ type Fetch = (input: URL, init: RequestInit) => Promise<Response>;
 // The origin is a deployment-controlled fixed HTTPS origin, never an input
 // received from an API request. Redirects are forbidden before sending secrets.
 // requestId must be stable across retries of one logical run, and unique per run.
-export function createRemoteVerificationSource(origin: string, environment: string, secret: string, requestId: string, pinnedControl: ObjectRef, request: Fetch = fetch): VerificationSnapshotSource {
+export function createRemoteVerificationSource(origin: string, environment: string, secret: string, requestId: string, request: Fetch = fetch): VerificationSnapshotSource {
   let endpoint: URL;
   try {
     const base = new URL(origin);
     if (base.protocol !== 'https:' || base.username || base.password || base.pathname !== '/' || base.search || base.hash
-      || base.origin !== origin || !environmentSchema.safeParse(environment).success || !z.uuid().safeParse(requestId).success
-      || !refSchema.strict().safeParse(pinnedControl).success || !pinnedControl.name.startsWith(`control/${environment}/`) || !secret || /[\r\n]/.test(secret)) {
+      || base.origin !== origin || !environmentSchema.safeParse(environment).success || !z.uuid().safeParse(requestId).success || !secret || /[\r\n]/.test(secret)) {
       throw new Error('invalid configuration');
     }
     endpoint = new URL('/api/cron/verify-audit', base);
   } catch { throw new ArchiveFailure('not_configured'); }
 
-  const controlContext = verificationControlDigest(environment, pinnedControl);
   async function call(body: unknown, signal?: AbortSignal) {
     const bytes = JSON.stringify(body);
     requireCondition(Buffer.byteLength(bytes, 'utf8') <= 16 * 1024);
@@ -64,7 +62,10 @@ export function createRemoteVerificationSource(origin: string, environment: stri
     return value;
   }
   return {
-    async begin(signal) {
+    async begin(signal, pinnedControl) {
+      const pin = refSchema.strict().safeParse(pinnedControl);
+      requireCondition(pin.success && pin.data.name.startsWith(`control/${environment}/`));
+      const controlContext = verificationControlDigest(environment, pin.data);
       const result = z.strictObject({run:z.uuid()}).safeParse(await call({operation:'begin',requestId,controlContext},signal));
       requireCondition(result.success);
       return result.data.run;

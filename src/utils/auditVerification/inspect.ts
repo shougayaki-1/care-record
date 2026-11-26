@@ -8,7 +8,7 @@ import { withinDeadline } from './deadline';
 import { recomputeLegacy, type RecomputeSource } from './recompute';
 
 export interface VerificationSnapshotSource {
-  begin(signal?: AbortSignal): Promise<string>;
+  begin(signal?: AbortSignal, pinnedControl?: ObjectRef): Promise<string>;
   page(run: string, cursor: Cursor, signal?: AbortSignal): Promise<unknown>;
   recompute?: RecomputeSource;
 }
@@ -20,19 +20,20 @@ export async function inspectPreservation(
   budgetMs = 30 * 60 * 1000, settingsPin?: ObjectRef, parent?: AbortSignal,
   onTarget?: (target: {cutoverId:string; ordinal:string; ref:ObjectRef}) => void,
 ) {
+  const trustAnchor = {...pinnedControl};
   const deadline = Date.now() + budgetMs;
   if (parent?.aborted || !Number.isInteger(budgetMs) || budgetMs <= 0 || budgetMs > 30 * 60 * 1000) throw new ArchiveFailure('incomplete');
   try {
     const archiveBudget = Math.min(budgetMs, 40_000);
     const archiveDeadline = Math.min(deadline, Date.now() + archiveBudget);
-    const archive = await withinDeadline(() => readPreservedArchive(store, pinnedControl, environment, archiveBudget), archiveDeadline, parent);
+    const archive = await withinDeadline(() => readPreservedArchive(store, trustAnchor, environment, archiveBudget), archiveDeadline, parent);
     if (parent?.aborted || Date.now() >= deadline) throw new ArchiveFailure('incomplete');
     onTarget?.({cutoverId:archive.cutoverId,ordinal:archive.ordinal,ref:{...archive.manifestRef}});
     const latest = Date.parse(archive.latestComplete);
     if (!Number.isFinite(latest) || latest > Date.now()) throw new ArchiveFailure('mismatch');
     if (Date.now() - latest > 26 * 60 * 60 * 1000) throw new ArchiveFailure('incomplete');
     const legacy = await withinDeadline(() => readLegacyClassification(store, archive.baselineRef, environment, archive.cutoverId, archive.v1Count, archive.v1Digest, deadline), deadline, parent);
-    const run = z.uuid().safeParse(await withinDeadline(signal => source.begin(signal), deadline, parent));
+    const run = z.uuid().safeParse(await withinDeadline(signal => source.begin(signal, trustAnchor), deadline, parent));
     requireCondition(run.success);
     const { snapshot:scanned, pages } = await readSnapshotPages(cursor => withinDeadline(signal => source.page(run.data, cursor, signal), deadline, parent), deadline);
     const comparison = comparePreservation(scanned, archive);
