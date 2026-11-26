@@ -66,6 +66,7 @@ jobs:
       - run: npm run lint -- --max-warnings=0
       - run: npm run security:service-role
       - run: npm run test:ci-scope
+      - run: node --test scripts/audit/*.test.mjs
       - run: node --test scripts/backup/*.test.mjs
       - run: node --test scripts/security/*.test.mjs
       - run: node --test scripts/notifications/*.test.mjs
