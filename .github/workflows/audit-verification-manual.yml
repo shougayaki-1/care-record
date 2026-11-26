@@ -28,6 +28,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Require explicit enablement
+        id: guard
         env:
           INPUT_ENVIRONMENT: ${{ inputs.environment }}
           ENABLED: ${{ vars.AUDIT_VERIFIER_MANUAL_ENABLED }}
@@ -65,6 +66,7 @@ jobs:
           service_account: ${{ vars.AUDIT_VERIFIER_SERVICE_ACCOUNT }}
           create_credentials_file: true
       - name: Verify audit preservation
+        id: verifier
         env:
           AUDIT_VERIFIER_ENABLED: 'true'
           APP_ENV: ${{ inputs.environment }}
@@ -86,3 +88,10 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
         run: npm run audit:verify
+      - name: Notify a startup failure
+        if: ${{ failure() && steps.guard.outcome == 'success' && steps.verifier.outcome == 'skipped' }}
+        timeout-minutes: 1
+        env:
+          APP_ENV: ${{ inputs.environment }}
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+        run: node scripts/audit/notify-preflight.mjs

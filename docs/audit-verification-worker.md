@@ -6,7 +6,7 @@ worker は GitHub Actions の `google-github-actions/auth` による WIF 外部�
 
 将来の実行側は、`APP_ENV`、`AUDIT_ARCHIVE_MODE=v2`、監査 bucket・project と一致確認用 project、DB 外に固定した control の object 名・generation・SHA-256・サイズを既存アーカイブ設定と同じ変数で渡します。加えて固定 HTTPS origin (`AUDIT_VERIFIER_ORIGIN`)、`CRON_SECRET`、Discord webhook、WIF の `GOOGLE_APPLICATION_CREDENTIALS`、および実行ごとに安定した実開始時刻 `AUDIT_VERIFICATION_STARTED_AT` を渡します。v1 再計算設定がある場合は `AUDIT_RECOMPUTE_OBJECT`、`AUDIT_RECOMPUTE_GENERATION`、`AUDIT_RECOMPUTE_SHA256`、`AUDIT_RECOMPUTE_SIZE` をすべて固定します。
 
-同じ GitHub Actions run・attempt の再送は同じ snapshot 要求 ID を使い、別 attempt は別 ID を使います。receipt の再送には同じ実開始時刻も必要です。`AUDIT_VERIFIER_ENABLED=true` がない場合、または認証・環境・固定参照が不正な場合は実行前に非成功で終了します。成功経路はまだなく、検証と通知を終えても現状は非成功です。通知不能や結果保存不能も非成功です。
+同じ GitHub Actions run・attempt の再送は同じ snapshot 要求 ID を使い、別 attempt は別 ID を使います。receipt の再送には同じ実開始時刻も必要です。`AUDIT_VERIFIER_ENABLED=true` がない場合、または認証・環境・固定参照が不正な場合は実行前に非成功で終了します。成功経路はまだなく、検証と通知を終えても現状は非成功です。通知不能や結果保存不能も非成功です。worker 起動前の依存取得・時刻取得・WIF 認証の失敗時は、ガード通過後に依存不要の固定分類通知を試みます。checkout が失敗して通知用スクリプトを取得できない場合や runner 自体の停止は通知を保証できず、独立監視が必要です。応答喪失時の再送では通知が重複する場合があります。
 
 入口は `npm run audit:verify` です。手動 workflow は staging を既定とし、main 以外または `AUDIT_VERIFIER_MANUAL_ENABLED` 未設定では認証前に失敗します。production には別途 `AUDIT_VERIFIER_PRODUCTION_APPROVED` が必要です。これらの設定値は今回変更していません。実行 attempt の開始時刻は GitHub API の該当 attempt から読み、receipt の再送時に固定します。環境ごとの同時実行は直列化し、既存実行を中断しません。
 

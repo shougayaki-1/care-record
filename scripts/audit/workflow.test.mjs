@@ -13,6 +13,8 @@ test('manual workflow has no scheduled trigger and serializes each environment',
   assert.match(workflow,/default: staging/); assert.match(workflow,/group: audit-verification-\$\{\{ inputs\.environment \}\}/);
   assert.match(workflow,/cancel-in-progress: false/);
   assert.ok(workflow.indexOf('Require explicit enablement')<workflow.indexOf('google-github-actions/auth@'));
+  assert.match(workflow,/failure\(\) && steps\.guard\.outcome == 'success' && steps\.verifier\.outcome == 'skipped'/);
+  assert.match(workflow,/run: node scripts\/audit\/notify-preflight\.mjs/);
 });
 test('guard fails closed unless manual main execution is explicitly enabled', () => {
   assert.equal(run().status,0);

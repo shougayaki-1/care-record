@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ObjectRef, Store } from '@/utils/auditArchive/contracts';
 const mocks = vi.hoisted(() => ({run: vi.fn()}));
 vi.mock('./run', () => ({runVerification: mocks.run}));
-import { notifyVerificationFailure, runVerificationWithNotification } from './notify';
+import { notifyVerificationFailure, NotifiedVerificationFailure, runVerificationWithNotification } from './notify';
 
 const metadata = {environment:'staging', runId:'12345', attempt:'1', createdAt:'2026-01-01T00:00:00Z'};
 const webhook = 'https://discord.com/api/webhooks/123456/test-token';
@@ -40,7 +40,7 @@ describe('verification notification', () => {
   it('notifies each non-success and propagates notification failure', async () => {
     mocks.run.mockResolvedValue({status:'incomplete',receipt});
     const request = vi.fn(async () => confirmed());
-    await expect(runVerificationWithNotification(metadata,store,store,pin,source,webhook,undefined,1000,request)).rejects.toMatchObject({category:'incomplete'});
+    await expect(runVerificationWithNotification(metadata,store,store,pin,source,webhook,undefined,1000,request)).rejects.toBeInstanceOf(NotifiedVerificationFailure);
     expect(request).toHaveBeenCalledOnce();
     await expect(runVerificationWithNotification(metadata,store,store,pin,source,webhook,undefined,1000,async () => {throw new Error('secret');})).rejects.toMatchObject({category:'unavailable'});
   });

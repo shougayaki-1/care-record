@@ -7,6 +7,9 @@ import { runVerification } from './run';
 const categorySchema = z.enum(['mismatch', 'incomplete', 'unavailable']);
 type Request = (input: URL, init: RequestInit) => Promise<Response>;
 
+// Marks only a confirmed alert; all other failures may need a fallback alert.
+export class NotifiedVerificationFailure extends ArchiveFailure {}
+
 // The webhook is deployment configuration, not a request parameter. Discord's
 // wait=true is necessary: without it an unsaved message may still return 204.
 function webhookUrl(webhook: string): URL {
@@ -63,8 +66,8 @@ export async function runVerificationWithNotification(
     result = await runVerification(metadata, archiveStore, receiptStore, pinnedControl, source, settingsPin, budgetMs);
   } catch {
     await notifyVerificationFailure(metadata, 'unavailable', webhook, request);
-    throw new ArchiveFailure('unavailable');
+    throw new NotifiedVerificationFailure('unavailable');
   }
   await notifyVerificationFailure(metadata, result.status, webhook, request);
-  throw new ArchiveFailure(result.status);
+  throw new NotifiedVerificationFailure(result.status);
 }
