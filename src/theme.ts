@@ -1,6 +1,6 @@
 'use client';
 
-import { alpha, createTheme } from '@mui/material/styles';
+import { createTheme } from '@mui/material/styles';
 
 declare module '@mui/material/styles' {
   interface TypeBackground {
@@ -19,6 +19,12 @@ export const designTokens = {
     main: '#1A73E8',
     light: '#4285F4',
     dark: '#1557B0',
+  },
+  neutral: {
+    main: '#4E5660',
+    light: '#747C86',
+    dark: '#343B43',
+    contrastText: '#FFFFFF',
   },
   surface: {
     canvas: '#FFFFFF',
@@ -52,7 +58,7 @@ const theme = createTheme({
   palette: {
     mode: 'light',
     primary: designTokens.brand,
-    secondary: { main: '#6C5CE7' },
+    secondary: designTokens.neutral,
     success: { main: '#2E7D32' },
     error: { main: '#D32F2F', light: '#FFEBEE' },
     warning: { main: '#9A4A00', light: designTokens.status.warning, contrastText: '#FFFFFF' },
@@ -82,7 +88,7 @@ const theme = createTheme({
     MuiCssBaseline: {
       styleOverrides: {
         ':focus-visible': {
-          outline: `3px solid ${alpha(designTokens.brand.main, 0.3)}`,
+          outline: `3px solid ${designTokens.brand.dark}`,
           outlineOffset: 2,
         },
       },
@@ -90,7 +96,14 @@ const theme = createTheme({
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: { minHeight: 36, borderRadius: designTokens.radius.control, paddingInline: 16, whiteSpace: 'nowrap' },
+        root: {
+          minHeight: 36, borderRadius: designTokens.radius.control, paddingInline: 16, whiteSpace: 'nowrap',
+          '&:focus-visible, &.Mui-focusVisible': { outline: `3px solid ${designTokens.brand.dark}`, outlineOffset: 2 },
+          '&.MuiButton-outlined.MuiButton-colorSecondary:not(.Mui-disabled)': {
+            borderColor: designTokens.neutral.main,
+            '&:hover': { borderColor: designTokens.neutral.dark },
+          },
+        },
       },
     },
     MuiTextField: { defaultProps: { size: 'small', variant: 'outlined' } },
