@@ -9,12 +9,13 @@ type Fetch = (input: URL, init: RequestInit) => Promise<Response>;
 
 // The origin is a deployment-controlled fixed HTTPS origin, never an input
 // received from an API request. Redirects are forbidden before sending secrets.
-export function createRemoteVerificationSource(origin: string, environment: string, secret: string, request: Fetch = fetch): VerificationSnapshotSource {
+// requestId must be stable across retries of one logical run, and unique per run.
+export function createRemoteVerificationSource(origin: string, environment: string, secret: string, requestId: string, request: Fetch = fetch): VerificationSnapshotSource {
   let endpoint: URL;
   try {
     const base = new URL(origin);
     if (base.protocol !== 'https:' || base.username || base.password || base.pathname !== '/' || base.search || base.hash
-      || base.origin !== origin || !environmentSchema.safeParse(environment).success || !secret || /[\r\n]/.test(secret)) {
+      || base.origin !== origin || !environmentSchema.safeParse(environment).success || !z.uuid().safeParse(requestId).success || !secret || /[\r\n]/.test(secret)) {
       throw new Error('invalid configuration');
     }
     endpoint = new URL('/api/cron/verify-audit', base);
@@ -61,7 +62,7 @@ export function createRemoteVerificationSource(origin: string, environment: stri
   }
   return {
     async begin(signal) {
-      const result = z.strictObject({run:z.uuid()}).safeParse(await call({operation:'begin'},signal));
+      const result = z.strictObject({run:z.uuid()}).safeParse(await call({operation:'begin',requestId},signal));
       requireCondition(result.success);
       return result.data.run;
     },

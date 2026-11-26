@@ -2901,6 +2901,10 @@ export type Database = {
         Args: { p_include_v1?: boolean; p_positions?: Json }
         Returns: string
       }
+      begin_audit_verification_request: {
+        Args: { p_context_digest: string; p_request_id: string }
+        Returns: string
+      }
       begin_audit_verification_snapshot: { Args: never; Returns: string }
       cache_audit_archive: {
         Args: { p_destination: string; p_digest: string; p_ordinal: string }

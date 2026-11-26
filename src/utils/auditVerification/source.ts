@@ -3,16 +3,21 @@ import { serviceRoleForAuditPreservation } from '@/utils/supabase/serviceRole';
 import { ArchiveFailure, pageSchema } from '@/utils/auditArchive/contracts';
 import type { VerificationSnapshotSource } from './inspect';
 
-export function createVerificationSource(signal?: AbortSignal): VerificationSnapshotSource {
+export function createVerificationSource(signal?: AbortSignal, request?: { requestId: string; contextDigest: string }): VerificationSnapshotSource {
   const client = serviceRoleForAuditPreservation();
   const requestSignal = (operationSignal?: AbortSignal) => signal && operationSignal
     ? AbortSignal.any([signal, operationSignal]) : signal ?? operationSignal;
   return {
     async begin(operationSignal) {
-      const query = client.rpc('begin_audit_verification_snapshot');
+      if (!request) throw new ArchiveFailure('not_configured');
+      const query = client.rpc('begin_audit_verification_request',{p_request_id:request.requestId,p_context_digest:request.contextDigest});
       const abort = requestSignal(operationSignal);
       const {data,error} = await (abort ? query.abortSignal(abort) : query);
-      if (error || !data) throw new ArchiveFailure('unavailable');
+      if (error) {
+        if (error.code === 'P0001' && ['audit_verification_request_invalid','audit_verification_request_conflict'].includes(error.message)) throw new ArchiveFailure('mismatch');
+        throw new ArchiveFailure('unavailable');
+      }
+      if (!data) throw new ArchiveFailure('unavailable');
       return data;
     },
     async page(run,cursor,operationSignal) {
