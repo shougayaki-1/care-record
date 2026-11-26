@@ -35,7 +35,8 @@ const FormFieldItem = memo(function FormFieldItem({
   }, [item.id, onAnswerChange]);
 
   return (
-    <Box sx={{ p: { xs: 2, sm: 3 }, bgcolor: error ? 'background.danger' : warning || isAiFilled ? 'background.aiHighlight' : 'transparent' }}>
+    <Box sx={{ p: { xs: 2, sm: 3 }, bgcolor: error ? 'background.danger' : warning ? 'background.warning' : isAiFilled ? 'background.aiHighlight' : 'transparent' }}>
+      {isAiFilled && <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>AI入力済み・要確認</Typography>}
       <DynamicFormField
         item={item}
         value={value}
