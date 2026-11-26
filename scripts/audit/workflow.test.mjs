@@ -10,7 +10,7 @@ const run=(changes={}) => spawnSync('bash',['-c',guard],{encoding:'utf8',env:{PA
   GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REF:'refs/heads/main',INPUT_ENVIRONMENT:'staging',ENABLED:'true',PRODUCTION_APPROVED:'',...changes}});
 test('manual workflow has no scheduled trigger and serializes each environment', () => {
   assert.match(workflow,/workflow_dispatch:/); assert.doesNotMatch(workflow,/^\s*schedule:/m);
-  assert.match(workflow,/default: staging/); assert.match(workflow,/group: audit-verification-\$\{\{ inputs\.environment \}\}/);
+  assert.match(workflow,/default: staging/); assert.match(workflow,/name: Audit verification \(\$\{\{ inputs\.environment \}\}\)/); assert.match(workflow,/group: audit-verification-\$\{\{ inputs\.environment \}\}/);
   assert.match(workflow,/cancel-in-progress: false/);
   assert.ok(workflow.indexOf('Require explicit enablement')<workflow.indexOf('google-github-actions/auth@'));
   assert.match(workflow,/failure\(\) && steps\.guard\.outcome == 'success' && steps\.verifier\.outcome == 'skipped'/);

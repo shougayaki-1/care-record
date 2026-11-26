@@ -11,3 +11,11 @@ worker は GitHub Actions の `google-github-actions/auth` による WIF 外部�
 入口は `npm run audit:verify` です。手動 workflow は staging を既定とし、main 以外または `AUDIT_VERIFIER_MANUAL_ENABLED` 未設定では認証前に失敗します。production には別途 `AUDIT_VERIFIER_PRODUCTION_APPROVED` が必要です。これらの設定値は今回変更していません。実行 attempt の開始時刻は GitHub API の該当 attempt から読み、receipt の再送時に固定します。環境ごとの同時実行は直列化し、既存実行を中断しません。
 
 現時点では合成環境でのみ確認し、実環境への適用や schedule 有効化には別途計画と承認が必要です。
+
+## schedule の独立監視試作
+
+`npm run audit:watch-schedule` は既定で無効です。将来、GitHub Actions と障害点を共有しない別の実行基盤から起動する想定で、control を固定 generation で読み、GitHub の scheduled run と環境名付き `Audit verification (<environment>)` ジョブ内の `Verify audit preservation` ステップ開始を確認します。手動実行や別環境、skip されたステップは数えません。8 日を超えて対象の開始がなければ固定分類で通知します。実際の schedule はまだ存在せず、監視先や定期起動も設定していません。
+
+監視に対応する成功 receipt の契約はまだなく、対象ステップが開始されても検証成功とは扱いません。運用者が DB 外に固定した週次監視開始時刻から 8 日超は、検証成功を裏付ける対応済み証拠がない状態として通知し、プロセスは常に非ゼロで終了します。これは最後の成功 receipt からの経過時間を測定する完成済み監視ではありません。成功 receipt の形式・履歴の扱いを決めた後に更新する必要があります。
+
+実行には環境別 control・bucket・project の固定値に加え、アーカイブ開始時刻とは別の `AUDIT_VERIFICATION_MONITORING_STARTED_AT`、読み取り専用の `AUDIT_WATCHDOG_GITHUB_TOKEN`、固定 Actions run link `AUDIT_WATCHDOG_EVIDENCE_URL`、Discord webhook と `AUDIT_SCHEDULE_WATCH_ENABLED=true` が必要です。静的 GCP 鍵や `GOOGLE_APPLICATION_CREDENTIALS` は受け付けず、実行基盤の ambient identity を使います。保存先の読み取り以外の GCS 操作は呼ばず、実 IAM の読み取り限定と通知配送は別途確認が必要です。schedule・IAM・secret を変更したり、有効化したりしていません。

@@ -26,6 +26,7 @@
     "security:audit": "npm audit --omit=dev --audit-level=high",
     "security:service-role": "node scripts/security/check-service-role-usage.mjs",
     "audit:verify": "node --conditions=react-server --import tsx scripts/audit/verify.ts",
+    "audit:watch-schedule": "node --conditions=react-server --import tsx scripts/audit/watch-schedule.ts",
     "security:sbom": "npm sbom --package-lock-only --omit=dev --sbom-format=cyclonedx"
   },
   "dependencies": {
