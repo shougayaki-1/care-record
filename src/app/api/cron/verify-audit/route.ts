@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { archiveConfig } from '@/utils/auditArchive/config';
-import { ArchiveFailure, cursorSchema, digest, encode, MAX_BYTES, pageSchema, requireCondition, sha256 } from '@/utils/auditArchive/contracts';
+import { ArchiveFailure, cursorSchema, digest, MAX_BYTES, pageSchema, requireCondition } from '@/utils/auditArchive/contracts';
 import { loadControl } from '@/utils/auditArchive/publisher';
 import { withinDeadline } from '@/utils/auditVerification/deadline';
+import { verificationControlDigest } from '@/utils/auditVerification/controlContext';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -12,7 +13,7 @@ const MAX_REQUEST_BYTES = 16 * 1024;
 const headers = { 'Cache-Control': 'private, no-store, max-age=0', 'Content-Type': 'application/json' };
 const cursor = cursorSchema.refine(value => value === null || /^(global|org:[0-9a-f-]{36})$/.test(value[1]));
 const input = z.discriminatedUnion('operation', [
-  z.strictObject({ operation: z.literal('begin'), requestId: z.uuid() }),
+  z.strictObject({ operation: z.literal('begin'), requestId: z.uuid(), controlContext: digest }),
   z.strictObject({ operation: z.literal('page'), run: z.uuid(), cursor }),
   z.strictObject({ operation: z.literal('recompute'), run: z.uuid(), ids: z.array(z.uuid()).min(1).max(100)
     .refine(ids => new Set(ids).size === ids.length), timeZone: z.string().min(1).max(128),
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
     try { body = await readInput(request); } catch { return json({ status: 'invalid_request' }, 400); }
     if (Date.now() >= deadline) return json({ status: 'incomplete' }, 503);
     if (body.operation === 'begin') {
+      requireCondition(body.controlContext === verificationControlDigest(config.environment, config.pinned));
       // Do not start a persistent snapshot without the pinned, finalized control.
       const { createArchiveStore } = await import('@/utils/auditArchive/gcs');
       const store = createArchiveStore(config.bucket, `verification/${config.environment}/`);
@@ -76,9 +78,7 @@ export async function POST(request: NextRequest) {
     const { createVerificationSource } = await import('@/utils/auditVerification/source');
     const remaining = deadline - Date.now();
     if (remaining <= 0) return json({ status: 'incomplete' }, 503);
-    const requestContext = body.operation === 'begin' ? { requestId:body.requestId, contextDigest:sha256(encode([
-      'audit-verification-request:1',config.environment,config.pinned.name,config.pinned.generation,config.pinned.digest,config.pinned.size,
-    ])) } : undefined;
+    const requestContext = body.operation === 'begin' ? { requestId:body.requestId, contextDigest:verificationControlDigest(config.environment, config.pinned) } : undefined;
     const source = createVerificationSource(AbortSignal.timeout(remaining), requestContext);
     if (body.operation === 'begin') {
       const run = z.uuid().safeParse(await withinDeadline(() => source.begin(), deadline));

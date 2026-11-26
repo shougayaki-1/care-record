@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRemoteVerificationSource } from './remoteSource';
+import { verificationControlDigest } from './controlContext';
 
 const mocks=vi.hoisted(() => ({config:vi.fn(),store:vi.fn(),control:vi.fn(),source:vi.fn(),begin:vi.fn(),page:vi.fn(),recompute:vi.fn()}));
 vi.mock('@/utils/auditArchive/config',() => ({archiveConfig:mocks.config}));
@@ -11,6 +12,8 @@ import { POST } from '@/app/api/cron/verify-audit/route';
 
 const run='15200000-0000-4000-8000-000000000001',row='15200000-0000-4000-8000-000000000002';
 const requestId='15200000-0000-4000-8000-000000000003';
+const pinned = {name:'control/staging/root.json',generation:'1',digest:'b'.repeat(64),size:'10'};
+const controlContext = verificationControlDigest('staging',pinned);
 const safeHeaders={'cache-control':'private, no-store, max-age=0','content-type':'application/json'};
 afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => {
@@ -24,11 +27,11 @@ beforeEach(() => {
 describe('remote audit verification source', () => {
   it('connects the worker to the route with a fixed origin, private responses and no redirects', async () => {
     const request=vi.fn(async (url:URL,init:RequestInit) => POST(new NextRequest(url,init as ConstructorParameters<typeof NextRequest>[1])));
-    const source=createRemoteVerificationSource('https://example.test','staging','test-only',requestId,request);
+    const source=createRemoteVerificationSource('https://example.test','staging','test-only',requestId,pinned,request);
     expect(await source.begin()).toBe(run);
     expect(await source.begin()).toBe(run);
-    expect(JSON.parse(request.mock.calls[0][1].body as string)).toEqual({operation:'begin',requestId});
-    expect(JSON.parse(request.mock.calls[1][1].body as string)).toEqual({operation:'begin',requestId});
+    expect(JSON.parse(request.mock.calls[0][1].body as string)).toEqual({operation:'begin',requestId,controlContext});
+    expect(JSON.parse(request.mock.calls[1][1].body as string)).toEqual({operation:'begin',requestId,controlContext});
     expect(await source.page(run,null)).toEqual({items:[],cursor:null,more:false});
     expect(await source.recompute!(run,[row],'UTC','ISO, MDY')).toEqual([{id:row,hash:'a'.repeat(64)}]);
     expect(request).toHaveBeenCalledTimes(4);
@@ -41,14 +44,15 @@ describe('remote audit verification source', () => {
   it('rejects untrusted origin shapes before sending the secret', () => {
     const request=vi.fn();
     for (const origin of ['http://example.test','https://user:pass@example.test','https://example.test/path','https://example.test?x=1','https://example.test/#x']) {
-      expect(() => createRemoteVerificationSource(origin,'staging','test-only',requestId,request)).toThrow();
+      expect(() => createRemoteVerificationSource(origin,'staging','test-only',requestId,pinned,request)).toThrow();
     }
-    expect(() => createRemoteVerificationSource('https://example.test','staging','bad\nsecret',requestId,request)).toThrow();
-    expect(() => createRemoteVerificationSource('https://example.test','staging','test-only','invalid-id',request)).toThrow();
+    expect(() => createRemoteVerificationSource('https://example.test','staging','bad\nsecret',requestId,pinned,request)).toThrow();
+    expect(() => createRemoteVerificationSource('https://example.test','staging','test-only','invalid-id',pinned,request)).toThrow();
+    expect(() => createRemoteVerificationSource('https://example.test','staging','test-only',requestId,{...pinned,name:'control/production/root.json'},request)).toThrow();
     expect(request).not.toHaveBeenCalled();
   });
   it('refuses redirects, missing cache protection and oversized responses', async () => {
-    const reply=vi.fn(); const source=createRemoteVerificationSource('https://example.test','staging','test-only',requestId,reply);
+    const reply=vi.fn(); const source=createRemoteVerificationSource('https://example.test','staging','test-only',requestId,pinned,reply);
     reply.mockResolvedValueOnce(new Response('',{status:302,headers:{location:'https://other.test',...safeHeaders}}));
     await expect(source.begin()).rejects.toMatchObject({category:'unavailable'});
     reply.mockResolvedValueOnce(new Response('{}',{status:200}));
@@ -62,7 +66,7 @@ describe('remote audit verification source', () => {
     const request = vi.fn((_url:URL,init:RequestInit) => new Promise<Response>((_,reject) => {
       init.signal!.addEventListener('abort',() => reject(new Error('aborted')));
     }));
-    const source=createRemoteVerificationSource('https://example.test','staging','test-only',requestId,request);
+    const source=createRemoteVerificationSource('https://example.test','staging','test-only',requestId,pinned,request);
     const controller=new AbortController();
     const pending=source.begin(controller.signal);
     controller.abort();
@@ -70,7 +74,7 @@ describe('remote audit verification source', () => {
     expect(request).toHaveBeenCalledOnce();
   });
   it('rejects malformed or mismatched data and suppresses raw transport errors', async () => {
-    const reply=vi.fn(); const source=createRemoteVerificationSource('https://example.test','staging','test-only',requestId,reply);
+    const reply=vi.fn(); const source=createRemoteVerificationSource('https://example.test','staging','test-only',requestId,pinned,reply);
     reply.mockRejectedValueOnce(new Error('secret details'));
     await expect(source.begin()).rejects.toMatchObject({category:'unavailable',message:'unavailable'});
     reply.mockResolvedValueOnce(new Response('{',{status:200,headers:safeHeaders}));

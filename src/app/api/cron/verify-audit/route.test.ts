@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArchiveFailure } from '@/utils/auditArchive/contracts';
+import { verificationControlDigest } from '@/utils/auditVerification/controlContext';
 
 const mocks = vi.hoisted(() => ({ config:vi.fn(), store:vi.fn(), control:vi.fn(), createSource:vi.fn(), begin:vi.fn(), page:vi.fn(), recompute:vi.fn() }));
 vi.mock('@/utils/auditArchive/config', () => ({ archiveConfig:mocks.config }));
@@ -12,6 +13,8 @@ import { POST } from './route';
 const run = '15200000-0000-4000-8000-000000000001';
 const row = '15200000-0000-4000-8000-000000000002';
 const requestId = '15200000-0000-4000-8000-000000000003';
+const pinned = {name:'control/staging/root.json',generation:'1',digest:'b'.repeat(64),size:'10'};
+const controlContext = verificationControlDigest('staging', pinned);
 const request = (body: string, auth = 'Bearer test-only', environment = 'staging', extra: Record<string,string> = {}) =>
   new NextRequest('https://example.test/api/cron/verify-audit', { method:'POST', body,
     headers: { authorization:auth, 'x-carerecord-environment':environment, ...extra } });
@@ -19,7 +22,7 @@ const send = (body: unknown) => request(JSON.stringify(body));
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubEnv('CRON_SECRET','test-only'); vi.stubEnv('AUDIT_VERIFICATION_API_ENABLED','true');
-  mocks.config.mockReturnValue({environment:'staging',mode:'v2',bucket:'test',pinned:{name:'control/staging/root.json',generation:'1',digest:'b'.repeat(64),size:'10'}});
+  mocks.config.mockReturnValue({environment:'staging',mode:'v2',bucket:'test',pinned});
   mocks.control.mockResolvedValue({baselineFinalized:true,baseline:{}});
   mocks.createSource.mockReturnValue({begin:mocks.begin,page:mocks.page,recompute:mocks.recompute});
   mocks.begin.mockResolvedValue(run); mocks.page.mockResolvedValue({items:[],cursor:null,more:false});
@@ -31,11 +34,11 @@ describe('audit verification transport', () => {
       const response=await POST(request('{"operation":"begin"}',auth));
       expect(response.status).toBe(401); expect(response.headers.get('cache-control')).toContain('private, no-store');
     }
-    vi.stubEnv('CRON_SECRET',''); expect((await POST(send({operation:'begin',requestId}))).status).toBe(401);
+    vi.stubEnv('CRON_SECRET',''); expect((await POST(send({operation:'begin',requestId,controlContext}))).status).toBe(401);
     expect(mocks.config).not.toHaveBeenCalled(); expect(mocks.createSource).not.toHaveBeenCalled();
   });
   it('is disabled by default and rejects a missing or different environment before DB/GCS access', async () => {
-    vi.stubEnv('AUDIT_VERIFICATION_API_ENABLED',''); expect((await POST(send({operation:'begin',requestId}))).status).toBe(503);
+    vi.stubEnv('AUDIT_VERIFICATION_API_ENABLED',''); expect((await POST(send({operation:'begin',requestId,controlContext}))).status).toBe(503);
     vi.stubEnv('AUDIT_VERIFICATION_API_ENABLED','true');
     expect((await POST(request('{"operation":"begin"}','Bearer test-only','production'))).status).toBe(403);
     expect((await POST(request('{"operation":"begin"}','Bearer test-only',''))).status).toBe(403);
@@ -43,24 +46,24 @@ describe('audit verification transport', () => {
   });
   it('requires v2 and a pinned finalized control before creating a snapshot', async () => {
     mocks.config.mockReturnValueOnce({environment:'staging',mode:'inventory'});
-    expect((await POST(send({operation:'begin',requestId}))).status).toBe(503);
+    expect((await POST(send({operation:'begin',requestId,controlContext}))).status).toBe(503);
     mocks.control.mockResolvedValueOnce({baselineFinalized:false,baseline:null});
-    expect((await POST(send({operation:'begin',requestId}))).status).toBe(503);
+    expect((await POST(send({operation:'begin',requestId,controlContext}))).status).toBe(503);
     expect(mocks.createSource).not.toHaveBeenCalled();
-    const response=await POST(send({operation:'begin',requestId}));
+    const response=await POST(send({operation:'begin',requestId,controlContext}));
     expect(response.status).toBe(200); expect(await response.json()).toEqual({run});
     expect(mocks.begin).toHaveBeenCalledOnce(); expect(mocks.control).toHaveBeenCalledTimes(2);
     expect(mocks.createSource.mock.calls.at(-1)?.[1]).toMatchObject({requestId,contextDigest:expect.stringMatching(/^[0-9a-f]{64}$/)});
   });
-  it('binds a stable request ID to the exact pinned control generation', async () => {
-    await POST(send({operation:'begin',requestId}));
-    const first=mocks.createSource.mock.calls.at(-1)?.[1];
-    mocks.config.mockReturnValue({environment:'staging',mode:'v2',bucket:'test',
-      pinned:{name:'control/staging/root.json',generation:'2',digest:'b'.repeat(64),size:'10'}});
-    await POST(send({operation:'begin',requestId}));
-    const second=mocks.createSource.mock.calls.at(-1)?.[1];
-    expect(first.requestId).toBe(requestId); expect(second.requestId).toBe(requestId);
-    expect(first.contextDigest).not.toBe(second.contextDigest);
+  it('rejects a different verifier trust anchor before any GCS or DB access', async () => {
+    for (const change of [{name:'control/staging/other.json'}, {generation:'2'}, {digest:'c'.repeat(64)}, {size:'11'}]) {
+      const other = verificationControlDigest('staging', {...pinned,...change});
+      const response = await POST(send({operation:'begin',requestId,controlContext:other}));
+      expect(response.status).toBe(503); expect(await response.json()).toEqual({status:'mismatch'});
+    }
+    expect(mocks.store).not.toHaveBeenCalled(); expect(mocks.createSource).not.toHaveBeenCalled();
+    expect((await POST(send({operation:'begin',requestId,controlContext}))).status).toBe(200);
+    expect(mocks.createSource.mock.calls.at(-1)?.[1]).toEqual({requestId,contextDigest:controlContext});
   });
   it('accepts bounded page and recomputation requests without a verification success verdict', async () => {
     const page=await POST(send({operation:'page',run,cursor:null}));
