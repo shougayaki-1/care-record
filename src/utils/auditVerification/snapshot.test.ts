@@ -50,7 +50,8 @@ describe('external preservation comparison', () => {
     return { cutoverId:cutover, baselineRef:{name:'synthetic',generation:'1',size:'1',digest:'a'.repeat(64)}, v1Count:'0', v1Digest:sha256(Buffer.alloc(0)),
       positions:new Map([[scope,{sequence:'1',hash:first.hash!}]]),
       inventory:new Map([[`${scope}/1`,sha256(Buffer.from(first.inventory,'base64'))]]),
-      latestComplete:'2026-01-01T00:00:00.000Z', ordinal:'1', manifestDigest:'a'.repeat(64) };
+      latestComplete:'2026-01-01T00:00:00.000Z', ordinal:'1', manifestDigest:'a'.repeat(64),
+      manifestRef:{name:'synthetic',generation:'1',size:'1',digest:'a'.repeat(64)} };
   }
   it('checks archived rows and reports newer rows as outside the archived boundary', async () => {
     const { comparePreservation } = await import('./preservation');

@@ -17,17 +17,17 @@ export type RecomputeSource = (run:string,ids:string[],timeZone:string,dateStyle
 // digest must match G's classification; this does not make historical v1 safe.
 export async function recomputeLegacy(
   store:Store, pin:ObjectRef, environment:string, cutoverId:string, evidenceDigest:string,
-  run:string, rows:Row[], findings:Findings, source:RecomputeSource, deadline:number,
+  run:string, rows:Row[], findings:Findings, source:RecomputeSource, deadline:number, parent?:AbortSignal,
 ) {
   requireCondition(pin.name === `control/${environment}/${cutoverId}/recompute-settings.json`);
-  const object = await withinDeadline(() => readExactArchiveObject(store,pin),deadline);
+  const object = await withinDeadline(() => readExactArchiveObject(store,pin),deadline,parent);
   let settings: z.infer<typeof settingsSchema>;
   try { settings = settingsSchema.parse(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(object.bytes))); }
   catch { throw new ArchiveFailure('mismatch'); }
   requireCondition(settings.environment === environment && settings.cutoverId === cutoverId && settings.settingsEvidenceDigest === evidenceDigest);
   for (let index=0; index<rows.length; index+=100) {
     const batch=rows.slice(index,index+100);
-    const raw=await withinDeadline(signal => source(run,batch.map(row=>row.id),settings.timeZone,settings.dateStyle,signal),deadline);
+    const raw=await withinDeadline(signal => source(run,batch.map(row=>row.id),settings.timeZone,settings.dateStyle,signal),deadline,parent);
     const parsed=responseSchema.safeParse(raw);
     requireCondition(parsed.success && parsed.data.length === batch.length);
     for (let i=0; i<batch.length; i++) {

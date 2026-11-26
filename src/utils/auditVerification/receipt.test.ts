@@ -27,6 +27,15 @@ describe('failure receipt', () => {
     await expect(writeFailureReceipt(store,{...input,category:'incomplete'})).rejects.toThrow();
     expect((await writeFailureReceipt(store,{...input,attempt:'2',category:'incomplete'})).name).not.toBe((await writeFailureReceipt(store,input)).name);
   });
+  it('records a pinned target only under the matching environment and ordinal', async () => {
+    const store=new MemoryStore(), cutover='15200000-0000-4000-8000-000000000004';
+    const target={cutoverId:cutover,ordinal:'2',ref:{name:`archive/staging/${cutover}/manifests/2.json`,generation:'9007199254740993',size:'7',digest:'b'.repeat(64)}};
+    const saved=await writeFailureReceipt(store,{...input,target});
+    expect(JSON.parse((await store.read(saved.name))!.bytes.toString()).target).toEqual(target);
+    const wrong={...target,ref:{...target.ref,name:`archive/production/${cutover}/manifests/2.json`}};
+    await expect(writeFailureReceipt(new MemoryStore(),{...input,target:wrong})).rejects.toThrow();
+    await expect(writeFailureReceipt(new MemoryStore(),{...input,target:{...target,ordinal:'02'}})).rejects.toThrow();
+  });
   it('fails closed if the receipt cannot be read back', async () => {
     const store=new MemoryStore(); store.read=async () => null;
     await expect(writeFailureReceipt(store,input)).rejects.toThrow();

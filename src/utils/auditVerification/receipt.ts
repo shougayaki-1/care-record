@@ -1,13 +1,15 @@
 import { z } from 'zod';
-import { ArchiveFailure, encode, requireCondition, sha256, type ObjectRef, type Store } from '@/utils/auditArchive/contracts';
+import { ArchiveFailure, encode, refSchema, requireCondition, sha256, type ObjectRef, type Store } from '@/utils/auditArchive/contracts';
 import { readExactArchiveObject } from '@/utils/auditArchive/publisher';
 
-const inputSchema = z.strictObject({
+export const runMetadataSchema = z.strictObject({
   environment: z.enum(['local','staging','production']),
   runId: z.string().max(20).regex(/^[1-9][0-9]*$/),
   attempt: z.string().max(6).regex(/^[1-9][0-9]*$/),
   createdAt: z.iso.datetime(),
-  category: z.enum(['mismatch','incomplete','unavailable']),
+});
+const inputSchema = runMetadataSchema.extend({ category: z.enum(['mismatch','incomplete','unavailable']),
+  target: z.strictObject({ cutoverId:z.uuid(), ordinal:z.string().regex(/^[1-9][0-9]*$/), ref:refSchema.strict() }).optional(),
 });
 
 // Until v1 recomputation and every other gate are integrated, no function here
@@ -16,11 +18,12 @@ const inputSchema = z.strictObject({
 export async function writeFailureReceipt(store: Store, input: unknown): Promise<ObjectRef> {
   const parsed = inputSchema.safeParse(input);
   requireCondition(parsed.success);
-  const { environment,runId,attempt,createdAt,category } = parsed.data;
+  const { environment,runId,attempt,createdAt,category,target } = parsed.data;
+  if (target) requireCondition(target.ref.name === `archive/${environment}/${target.cutoverId}/manifests/${target.ordinal}.json`);
   const name = `verification/${environment}/runs/${runId}/${attempt}.json`;
   const bytes = encode({schema:'audit-verification-result:1',environment,runId,attempt,
     runUrl:`https://github.com/shougayaki-1/care-record/actions/runs/${runId}`,
-    verifierVersion:'audit-verifier:1',createdAt,status:category});
+    verifierVersion:'audit-verifier:1',createdAt,status:category,...(target ? {target} : {})});
   try {
     const saved = await store.create(name,bytes);
     requireCondition(saved.ref.name === name && saved.ref.digest === sha256(bytes)
