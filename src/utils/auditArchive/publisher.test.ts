@@ -91,6 +91,14 @@ describe('immutable audit preservation', () => {
     expect(manifests(other,enabledControl)).toHaveLength(0);
   });
 
+  it('preserves malformed historical v1 hashes for G classification without granting a chain verdict', async () => {
+    const store = new MemoryStore(); const control = provisional();
+    const row = v1({ hash: 'legacy-unreproducible-hash' });
+    expect(await runArchive(store, sourceFor([row]), control)).toEqual({ status: 'inventory', archived: '1' });
+    const chunk = [...store.objects.values()].find(object => object.ref.name.includes('/chunks/'))!;
+    expect(JSON.parse(chunk.bytes.toString()).items[0].hash).toBe('legacy-unreproducible-hash');
+    expect((await archiveHealth(store, control)).critical).toBe(true);
+  });
   it('preserves every null-hash/global v1 row beyond 500 with identical microsecond timestamps; remains provisional', async () => {
     const store = new MemoryStore(); const control = provisional();
     const rows = Array.from({ length: 1001 }, () => v1()).sort((a, b) => a.id.localeCompare(b.id));

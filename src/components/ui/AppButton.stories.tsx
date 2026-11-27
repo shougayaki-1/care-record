@@ -1,10 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import SaveIcon from '@mui/icons-material/Save';
 import { Box, Button, Stack } from '@mui/material';
+import { getContrastRatio } from '@mui/material/styles';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AssignmentReturnIcon from '@mui/icons-material/AssignmentReturn';
 import SendIcon from '@mui/icons-material/Send';
-import { expect, within } from 'storybook/test';
+import { expect, userEvent, within } from 'storybook/test';
+import theme from '@/theme';
 import { InnerPageHeader, ScrollableActions } from './Layout';
 import { AppButton } from './AppButton';
 
@@ -18,6 +20,38 @@ export const Disabled: Story = { args: { disabled: true } };
 export const WithIcon: Story = { args: { startIcon: <SaveIcon /> } };
 export const Intents: Story = {
   render: () => <Stack direction="row" spacing={1}>{(['primary', 'secondary', 'success', 'warning', 'danger'] as const).map((intent) => <AppButton key={intent} intent={intent}>{intent}</AppButton>)}</Stack>,
+};
+
+export const SecondaryStates: Story = {
+  render: () => (
+    <Stack direction="row" spacing={1}>
+      <AppButton intent="secondary">補助操作</AppButton>
+      <AppButton intent="secondary" variant="outlined">戻る</AppButton>
+      <AppButton intent="secondary" variant="text">キャンセル</AppButton>
+      <AppButton intent="secondary" disabled>無効</AppButton>
+    </Stack>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const contained = canvas.getByRole('button', { name: '補助操作' });
+    const outlined = canvas.getByRole('button', { name: '戻る' });
+    const text = canvas.getByRole('button', { name: 'キャンセル' });
+    const containedStyle = getComputedStyle(contained);
+    await expect(getContrastRatio(containedStyle.color, containedStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+    for (const button of [outlined, text]) {
+      await expect(getContrastRatio(getComputedStyle(button).color, 'rgb(255, 255, 255)')).toBeGreaterThanOrEqual(4.5);
+    }
+    await expect(getContrastRatio(getComputedStyle(outlined).borderColor, 'rgb(255, 255, 255)')).toBeGreaterThanOrEqual(3);
+    await expect(canvas.getByRole('button', { name: '無効' })).toBeDisabled();
+    await userEvent.hover(contained);
+    await expect(getContrastRatio(theme.palette.secondary.contrastText, theme.palette.secondary.dark)).toBeGreaterThanOrEqual(4.5);
+    await userEvent.unhover(contained);
+    for (const button of [contained, outlined, text]) {
+      await userEvent.tab();
+      await expect(button).toHaveFocus();
+      await expect(getComputedStyle(button).outlineStyle).not.toBe('none');
+    }
+  },
 };
 
 

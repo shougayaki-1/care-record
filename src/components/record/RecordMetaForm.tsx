@@ -55,6 +55,7 @@ export function RecordMetaForm(props: RecordMetaFormProps) {
         </Box>
 
         <Box sx={{ bgcolor: aiFilledFields.has('_helpers') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
+          {aiFilledFields.has('_helpers') && <Typography variant="caption" color="text.secondary" display="block">AI入力済み・要確認</Typography>}
           <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}>
             <PersonIcon fontSize="small" /> 担当スタッフ <Typography component="span" color="error">*</Typography>
           </Typography>
@@ -78,6 +79,7 @@ export function RecordMetaForm(props: RecordMetaFormProps) {
         </Box>
 
         <Box sx={{ bgcolor: aiFilledFields.has('startDateTime') || aiFilledFields.has('endDateTime') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
+          {(aiFilledFields.has('startDateTime') || aiFilledFields.has('endDateTime')) && <Typography variant="caption" color="text.secondary" display="block">AI入力済み・要確認</Typography>}
           <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}><CalendarTodayIcon fontSize="small" /> サービス日時</Typography>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
             <DateTimeField label="開始日時" value={startDateTime} onChange={(event) => onStartChange(event.target.value)} disabled={disabled} />
@@ -87,6 +89,7 @@ export function RecordMetaForm(props: RecordMetaFormProps) {
         </Box>
 
         <Box sx={{ bgcolor: aiFilledFields.has('serviceTime') ? 'background.aiHighlight' : 'transparent', p: 1, mx: -1, borderRadius: 1 }}>
+          {aiFilledFields.has('serviceTime') && <Typography variant="caption" color="text.secondary" display="block">AI入力済み・要確認</Typography>}
           <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={0.5}><AccessTimeIcon fontSize="small" /> 提供時間 <Typography component="span" color="error">*</Typography></Typography>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <TextField label="サービス提供" type="number" fullWidth value={serviceTime} onChange={(event) => onServiceTimeChange(event.target.value)} onWheel={(event) => (event.target as HTMLElement).blur()} error={!!errors.serviceTime} disabled={disabled} slotProps={{ input: { endAdornment: <UnitAdornment>時間</UnitAdornment> }, htmlInput: { inputMode: 'decimal', step: '0.5' } }} />
