@@ -250,6 +250,7 @@ export default function ReportsClientPage() {
 
        <PageBody maxWidth={false}>
            {!isExportView && <AppButton intent="secondary" variant="outlined" sx={{ mb: 2 }} onClick={() => router.push('/app/reports/deletion-requests')}>削除申請を確認</AppButton>}
+           {!isExportView && <AppButton intent="secondary" variant="outlined" sx={{ mb: 2, ml: 1 }} onClick={() => router.push('/app/mcp-record-corrections')}>保存した訂正案</AppButton>}
            {!isExportView && aiSentCount > 0 && <Alert severity="warning" sx={{ mb: 2 }} action={
              <Button color="inherit" size="small" onClick={() => router.push('/app/ai-candidates')}>確認する</Button>
            }>
@@ -274,7 +275,7 @@ export default function ReportsClientPage() {
                         <Typography sx={{ display: { xs: 'none', sm: 'block' } }}>～</Typography>
                         <TextField type="date" label="終了日" size="small" slotProps={{ inputLabel: { shrink: true } }} value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ bgcolor: 'background.paper', width: { xs: '100%', sm: 'auto' } }} />
                     </Box>
-                    {!isExportView && <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="warning" />} label="未承認・差戻しのみ" />}
+                    {!isExportView && <FormControlLabel control={<Switch checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} color="primary" />} label="未承認・差戻しのみ" />}
                     <Button variant="contained" startIcon={<SearchIcon />} onClick={fetchReports} sx={{ px: 3, boxShadow: 'none', width: { xs: '100%', md: 'auto' } }}>検索</Button>
                     <AppButton intent="secondary" variant="text" onClick={resetFilters}>絞り込みをリセット</AppButton>
            </RecordListFilterBar>
@@ -286,22 +287,22 @@ export default function ReportsClientPage() {
                    </Typography>
                </Box>
                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}>
-                 {isExportView && <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing || exporting}>CSV</Button>}
-                 {isExportView && <Button variant="outlined" size="small" startIcon={<DownloadIcon />} onClick={handleExportTravelCosts} disabled={processing || exporting}>交通費精算CSV</Button>}
-                 {isExportView && <Button variant="outlined" size="small" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF} disabled={processing || exporting}>PDF</Button>}
+                 {isExportView && <AppButton variant="outlined" intent="secondary" size="small" startIcon={<DownloadIcon />} onClick={handleExportCSV} disabled={processing || exporting}>CSV</AppButton>}
+                 {isExportView && <AppButton variant="outlined" intent="secondary" size="small" startIcon={<DownloadIcon />} onClick={handleExportTravelCosts} disabled={processing || exporting}>交通費精算CSV</AppButton>}
+                 {isExportView && <AppButton variant="outlined" intent="secondary" size="small" startIcon={<PictureAsPdfIcon />} onClick={handleBulkDownloadPDF} disabled={processing || exporting}>PDF</AppButton>}
                  {selected.length > 0 ? (
                     <>
-                        {isExportView && <Button variant="contained" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={processing || exporting}>
+                        {isExportView && <AppButton variant="outlined" intent="secondary" size="small" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={processing || exporting}>
                             {gasProgress ? '作成中...' : '帳票作成(GAS)'}
-                        </Button>}
+                        </AppButton>}
                         {!isExportView && canApproveRecords && <Button variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={handleBulkApprove} disabled={processing || exporting} sx={{ boxShadow: 'none' }}>一括承認</Button>}
-                        {!isExportView && canApproveRecords && <Button variant="contained" size="small" color="warning" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing || exporting}>一括差戻し</Button>}
+                        {!isExportView && canApproveRecords && <AppButton variant="outlined" intent="secondary" size="small" startIcon={<RestoreIcon />} onClick={handleBulkRemand} disabled={processing || exporting}>一括差戻し</AppButton>}
                         {!isExportView && canDeleteRecords && <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} disabled={processing || exporting}>削除</Button>}
                     </>
                  ) : isExportView ? (
-                     <Button variant="outlined" size="small" color="success" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={processing || exporting}>
+                     <AppButton variant="outlined" intent="secondary" size="small" startIcon={<ArticleIcon />} onClick={handleCreateGasPdf} disabled={processing || exporting}>
                         {gasProgress ? '作成中...' : '全件帳票作成'}
-                     </Button>
+                     </AppButton>
                  ) : null}
                </Stack>
            </Box>

@@ -1,0 +1,209 @@
+import { pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
+
+const stagingEndpoint = 'https://xhvvfovvlqzlkirpjocv.supabase.co/functions/v1/care-record-mcp';
+const maximumResponseBytes = 1_000_000;
+const toolNames = ['check_record_quality', 'find_import_shift_candidates', 'get_business_alert_status', 'get_master_edit_result', 'get_monthly_statistics', 'get_record', 'get_record_edit_result', 'get_record_edit_template', 'get_record_form', 'get_record_transition_batch_result', 'get_record_transition_result', 'get_shift', 'get_shift_cancel_result', 'get_shift_create_result', 'get_shift_update_result', 'get_shift_update_template', 'list_approval_queue', 'list_billing_unrecorded_shifts', 'list_records', 'list_shifts', 'list_staff_availability', 'list_workspaces', 'prepare_master_edit', 'prepare_record_edit', 'prepare_record_transition', 'prepare_record_transition_batch', 'prepare_shift_cancel', 'prepare_shift_update', 'prepare_shift_updates_batch', 'propose_shift_change', 'propose_shift_create', 'review_billing_records', 'search_people', 'submit_record_candidate', 'submit_record_candidates_batch'];
+
+export class McpContractError extends Error {
+  constructor(code) { super(code); this.name = 'McpContractError'; }
+}
+const fail = code => { throw new McpContractError(code); };
+
+export function validateToolContract(tools) {
+  if (!Array.isArray(tools) || tools.length !== toolNames.length
+    || tools.map(tool => tool?.name).sort().join(',') !== toolNames.join(',')) fail('tools_changed');
+  for (const tool of tools) {
+    if (tool.inputSchema?.type !== 'object') fail('input_schema_changed');
+    if (tool.annotations?.readOnlyHint !== (!['submit_record_candidate', 'submit_record_candidates_batch', 'prepare_master_edit', 'prepare_record_edit', 'prepare_record_transition', 'prepare_record_transition_batch', 'prepare_shift_cancel', 'prepare_shift_update', 'prepare_shift_updates_batch', 'propose_shift_create'].includes(tool.name))
+      || tool.annotations?.destructiveHint !== false || tool.annotations?.openWorldHint !== false) fail('annotations_changed');
+  }
+  const availability = tools.find(tool => tool.name === 'list_staff_availability').inputSchema;
+  for (const key of ['start_at', 'end_at']) {
+    if (availability.properties?.[key]?.format !== 'date-time' || !availability.required?.includes(key)) fail('availability_input_changed');
+  }
+  const proposal = tools.find(tool => tool.name === 'propose_shift_change').inputSchema;
+  for (const key of ['start_at', 'end_at']) {
+    if (proposal.properties?.[key]?.format !== 'date-time' || !proposal.required?.includes(key)) fail('proposal_input_changed');
+  }
+  for (const key of ['shift_id', 'staff_id']) {
+    if (proposal.properties?.[key]?.format !== 'uuid' || !proposal.required?.includes(key)) fail('proposal_input_changed');
+  }
+  const cancel = tools.find(tool => tool.name === 'prepare_shift_cancel').inputSchema;
+  const cancelResult = tools.find(tool => tool.name === 'get_shift_cancel_result').inputSchema;
+  if (cancel.properties?.shift_id?.format !== 'uuid' || !cancel.required?.includes('shift_id')
+    || cancel.properties?.operation?.enum?.join(',') !== 'cancel,soft_delete' || !cancel.required?.includes('operation')
+    || cancel.properties?.reason?.type !== 'string' || cancel.properties.reason.maxLength !== 500 || !cancel.required?.includes('reason')
+    || cancelResult.properties?.proposal_id?.format !== 'uuid' || !cancelResult.required?.includes('proposal_id')) fail('cancel_input_changed');
+  const update = tools.find(tool => tool.name === 'prepare_shift_update').inputSchema;
+  const batchUpdate = tools.find(tool => tool.name === 'prepare_shift_updates_batch').inputSchema;
+  if (!batchUpdate.required?.includes('items') || batchUpdate.properties?.items?.type !== 'array' || batchUpdate.properties.items.minItems !== 1 || batchUpdate.properties.items.maxItems !== 10 || batchUpdate.properties.items.items?.additionalProperties !== false) fail('shift_update_input_changed');
+  const updateResult = tools.find(tool => tool.name === 'get_shift_update_result').inputSchema;
+  const updateTemplate = tools.find(tool => tool.name === 'get_shift_update_template').inputSchema;
+  if (updateTemplate.properties?.shift_id?.format !== 'uuid' || !updateTemplate.required?.includes('shift_id')) fail('shift_update_input_changed');
+  if (update.properties?.shift_id?.format !== 'uuid' || !update.required?.includes('shift_id')
+    || update.properties?.confirmed !== undefined || update.properties?.segments?.type !== 'array'
+    || update.properties.segments.minItems !== 1 || update.properties.segments.maxItems !== 32
+    || !update.required?.includes('segments') || update.properties.segments.items?.additionalProperties !== false) fail('shift_update_input_changed');
+  for (const key of ['start_at', 'end_at']) if (update.properties?.[key]?.format !== 'date-time' || !update.required?.includes(key)) fail('shift_update_input_changed');
+  if (updateResult.properties?.proposal_id?.format !== 'uuid' || !updateResult.required?.includes('proposal_id')) fail('shift_update_input_changed');
+  const create = tools.find(tool => tool.name === 'propose_shift_create').inputSchema;
+  const createResult = tools.find(tool => tool.name === 'get_shift_create_result').inputSchema;
+  for (const key of ['client_id', 'staff_id']) if (create.properties?.[key]?.format !== 'uuid' || !create.required?.includes(key)) fail('create_input_changed');
+  for (const key of ['start_at', 'end_at']) if (create.properties?.[key]?.format !== 'date-time' || !create.required?.includes(key)) fail('create_input_changed');
+  if (createResult.properties?.proposal_id?.format !== 'uuid' || !createResult.required?.includes('proposal_id')) fail('create_input_changed');
+  const masterEdit = tools.find(tool => tool.name === 'prepare_master_edit').inputSchema;
+  const masterResult = tools.find(tool => tool.name === 'get_master_edit_result').inputSchema;
+  if (!masterEdit.required?.includes('target_id') || masterEdit.properties?.target_id?.format !== 'uuid'
+    || masterEdit.properties?.kind?.enum?.join(',') !== 'client,staff' || !masterEdit.required?.includes('kind')
+    || !masterEdit.required?.includes('changes') || masterEdit.properties?.changes?.additionalProperties !== false
+    || !masterResult.required?.includes('proposal_id') || masterResult.properties?.proposal_id?.format !== 'uuid') fail('master_edit_input_changed');
+  const recordEditTemplate = tools.find(tool => tool.name === 'get_record_edit_template').inputSchema;
+  if (recordEditTemplate.properties?.record_id?.format !== 'uuid' || !recordEditTemplate.required?.includes('record_id')) fail('record_edit_input_changed');
+  const recordEdit = tools.find(tool => tool.name === 'prepare_record_edit').inputSchema;
+  const recordEditResult = tools.find(tool => tool.name === 'get_record_edit_result').inputSchema;
+  if (recordEdit.properties?.record_id?.format !== 'uuid' || !recordEdit.required?.includes('record_id')
+    || recordEdit.properties?.expected_version?.type !== 'integer' || !recordEdit.required?.includes('expected_version')
+    || recordEdit.properties?.values?.type !== 'object' || !recordEdit.required?.includes('values')
+    || recordEdit.properties?.changes?.type !== 'object' || recordEdit.properties.changes.additionalProperties !== false
+    || recordEdit.properties?.reason?.type !== 'string' || recordEdit.properties.reason.maxLength !== 500 || !recordEdit.required?.includes('reason')
+    || recordEditResult.properties?.proposal_id?.format !== 'uuid' || !recordEditResult.required?.includes('proposal_id')) fail('record_edit_input_changed');
+  const transition = tools.find(tool => tool.name === 'prepare_record_transition').inputSchema;
+  const transitionResult = tools.find(tool => tool.name === 'get_record_transition_result').inputSchema;
+  if (transition.properties?.record_id?.format !== 'uuid' || !transition.required?.includes('record_id')
+    || transition.properties?.expected_version?.type !== 'integer' || !transition.required?.includes('expected_version')
+    || transition.properties?.transition?.enum?.join(',') !== 'approve,remand' || !transition.required?.includes('transition')
+    || transition.properties?.reason?.type !== 'string' || transition.properties.reason.maxLength !== 500
+    || transition.properties?.confirmed !== undefined || transitionResult.properties?.proposal_id?.format !== 'uuid'
+    || !transitionResult.required?.includes('proposal_id')) fail('record_transition_input_changed');
+  const batch = tools.find(tool => tool.name === 'prepare_record_transition_batch').inputSchema;
+  const batchResult = tools.find(tool => tool.name === 'get_record_transition_batch_result').inputSchema;
+  if (batch.properties?.records?.type !== 'array' || batch.properties.records.minItems !== 1 || batch.properties.records.maxItems !== 20
+    || !batch.required?.includes('records') || batch.properties.records.items?.properties?.record_id?.format !== 'uuid'
+    || batch.properties.records.items?.properties?.expected_version?.type !== 'integer'
+    || !batch.properties.records.items?.required?.includes('record_id') || !batch.properties.records.items?.required?.includes('expected_version')
+    || batch.properties?.transition?.enum?.join(',') !== 'approve,remand'
+    || !batch.required?.includes('transition') || batch.properties?.confirmed !== undefined
+    || batchResult.properties?.batch_id?.format !== 'uuid' || !batchResult.required?.includes('batch_id')) fail('record_transition_batch_input_changed');
+  const quality = tools.find(tool => tool.name === 'check_record_quality').inputSchema;
+  const billing = tools.find(tool => tool.name === 'review_billing_records').inputSchema;
+  const unrecorded = tools.find(tool => tool.name === 'list_billing_unrecorded_shifts').inputSchema;
+  const kpi = tools.find(tool => tool.name === 'get_monthly_statistics').inputSchema;
+  if (kpi.properties?.month?.type !== 'string' || typeof kpi.properties.month.pattern !== 'string' || !kpi.required?.includes('month')) fail('kpi_month_input_changed');
+  for (const key of ['start_date', 'end_date']) {
+    if (billing.properties?.[key]?.format !== 'date' || !billing.required?.includes(key)) fail('billing_date_input_changed');
+    if (unrecorded.properties?.[key]?.format !== 'date' || !unrecorded.required?.includes(key)) fail('billing_date_input_changed');
+  }
+  if (quality.properties?.record_id?.format !== 'uuid' || !quality.required?.includes('record_id')) fail('record_input_changed');
+  const importBatch = tools.find(tool => tool.name === 'submit_record_candidates_batch').inputSchema;
+  const importShifts = tools.find(tool => tool.name === 'find_import_shift_candidates').inputSchema;
+  if (importBatch.properties?.items?.type !== 'array' || importBatch.properties.items.minItems !== 1 || importBatch.properties.items.maxItems !== 10
+    || !importBatch.required?.includes('items') || importBatch.properties.items.items?.properties?.request_id?.format !== 'uuid'
+    || !importBatch.properties.items.items?.required?.includes('request_id')) fail('import_batch_input_changed');
+  if (importShifts.properties?.client_id?.format !== 'uuid' || !importShifts.required?.includes('client_id')
+    || ['start_at', 'end_at'].some(key => importShifts.properties?.[key]?.format !== 'date-time' || !importShifts.required?.includes(key))) fail('import_shift_input_changed');
+  const workspace = tools.find(tool => tool.name === 'list_workspaces').inputSchema;
+  if (Object.keys(workspace.properties ?? {}).length) fail('workspace_inputs_changed');
+  const form = tools.find(tool => tool.name === 'get_record_form').inputSchema;
+  const submit = tools.find(tool => tool.name === 'submit_record_candidate').inputSchema;
+  const list = tools.find(tool => tool.name === 'list_shifts').inputSchema;
+  const detail = tools.find(tool => tool.name === 'get_shift').inputSchema;
+  const queue = tools.find(tool => tool.name === 'list_approval_queue').inputSchema;
+  const records = tools.find(tool => tool.name === 'list_records').inputSchema;
+  const record = tools.find(tool => tool.name === 'get_record').inputSchema;
+  const people = tools.find(tool => tool.name === 'search_people').inputSchema;
+  for (const schema of [form, submit, list, detail, people, records, record, queue, availability, proposal, quality, billing, unrecorded, kpi, create, createResult, cancel, cancelResult, update, updateResult, updateTemplate, recordEdit, recordEditResult, recordEditTemplate, transition, transitionResult, batch, batchResult, importBatch, importShifts]) {
+    if (schema.properties?.organization_id?.type !== 'string'
+      || schema.properties.organization_id.format !== 'uuid'
+      || !schema.required?.includes('organization_id')) fail('organization_input_changed');
+  }
+  if (people.properties?.name?.type !== 'string' || !people.required?.includes('name')
+    || !people.required?.includes('kind') || people.properties?.kind?.enum?.join(',') !== 'client,staff') fail('person_search_input_changed');
+  for (const key of ['start_date', 'end_date']) {
+    if (list.properties?.[key]?.format !== 'date' || !list.required?.includes(key)) fail('shift_date_input_changed');
+  }
+  for (const key of ['start_date', 'end_date']) {
+    if (queue.properties?.[key]?.format !== 'date' || !queue.required?.includes(key)) fail('queue_date_input_changed');
+    if (records.properties?.[key]?.format !== 'date' || !records.required?.includes(key)) fail('record_date_input_changed');
+  }
+  if (record.properties?.record_id?.format !== 'uuid' || !record.required?.includes('record_id')) fail('record_id_input_changed');
+  if (detail.properties?.shift_id?.format !== 'uuid' || !detail.required?.includes('shift_id')) fail('shift_id_input_changed');
+  if (submit.properties?.send_anyway?.type !== 'boolean'
+    || submit.properties.send_anyway.default !== false
+    || submit.required?.includes('send_anyway')) fail('send_anyway_changed');
+  if (submit.properties?.record?.type !== 'object' || !submit.required?.includes('record')) fail('record_input_changed');
+  if (submit.properties?.source_file_name?.type !== 'string'
+    || submit.properties.source_file_name.maxLength !== 255) fail('source_file_input_changed');
+}
+
+async function readResponse(response, id) {
+  if (!response.ok) fail(response.status === 401 ? 'authentication_required' : 'http_failure');
+  if (!response.body) fail('missing_response');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = ''; let bytes = 0;
+  try {
+    while (true) {
+      const item = await reader.read();
+      if (item.done) break;
+      bytes += item.value.byteLength;
+      if (bytes > maximumResponseBytes) fail('response_too_large');
+      text += decoder.decode(item.value, { stream: true });
+      // SSE servers may keep the stream open; stop after the matching response.
+      if (response.headers.get('content-type')?.includes('text/event-stream')) {
+        const messages = text.replace(/\r\n/g, '\n').split('\n\n');
+        for (const message of messages.slice(0, -1)) {
+          const data = message.split('\n').filter(line => line.startsWith('data:'))
+            .map(line => line.slice(5).trimStart()).join('\n');
+          if (!data) continue;
+          let parsed;
+          try { parsed = JSON.parse(data); } catch { fail('invalid_response'); }
+          if (parsed.id === id) return parsed;
+        }
+      }
+    }
+    text += decoder.decode();
+    try { return JSON.parse(text); } catch { fail('invalid_response'); }
+  } finally { await reader.cancel().catch(() => {}); }
+}
+
+/** Metadata only: never calls a tool or sends record content. */
+export async function checkMcpContract({ endpoint = stagingEndpoint, token, fetchImpl = fetch }) {
+  if (endpoint !== stagingEndpoint) fail('staging_endpoint_required');
+  if (typeof token !== 'string' || !token || /[\r\n]/.test(token)) fail('token_required');
+  let session; let protocol;
+  const request = async (method, params, id) => {
+    const response = await fetchImpl(endpoint, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream', ...(session ? { 'Mcp-Session-Id': session } : {}),
+        ...(protocol ? { 'MCP-Protocol-Version': protocol } : {}) },
+      body: JSON.stringify({ jsonrpc: '2.0', method, ...(id ? { id } : {}), ...(params ? { params } : {}) }),
+    }).catch(() => fail('transport_failure'));
+    if (!id) { await response.body?.cancel(); if (!response.ok) fail('http_failure'); return; }
+    const message = await readResponse(response, id);
+    if (message.jsonrpc !== '2.0' || message.id !== id || message.error || !message.result) fail('protocol_failure');
+    session = response.headers.get('mcp-session-id') ?? session;
+    return message.result;
+  };
+  const initialized = await request('initialize', {
+    protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'care-record-contract-check', version: '1.0.0' },
+  }, 1);
+  if (typeof initialized.protocolVersion !== 'string' || !initialized.capabilities?.tools) fail('initialization_changed');
+  protocol = initialized.protocolVersion;
+  await request('notifications/initialized');
+  const result = await request('tools/list', {}, 2);
+  if (result.nextCursor) fail('tools_pagination_changed');
+  validateToolContract(result.tools);
+  return { status: 'passed', checked: 'initialize/tools/list', toolCount: result.tools.length };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  // Never include response bodies, tokens, URL queries, SDK errors, or stack traces.
+  checkMcpContract({ token: process.env.MCP_STAGING_ACCESS_TOKEN }).then(result => {
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+  }).catch(error => {
+    const code = error instanceof McpContractError ? error.message : 'check_failed';
+    process.stderr.write(`MCP contract: ${code}\n`); process.exitCode = 1;
+  });
+}

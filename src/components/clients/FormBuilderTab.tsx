@@ -123,7 +123,7 @@ export function FormBuilderTab({
                     {item.type !== 'section' && <FormControlLabel control={<Switch size="small" checked={item.required} onChange={(event) => onUpdateField(index, 'required', event.target.checked)} />} label="回答を必須にする" sx={{ minWidth: 150, alignSelf: { xs: 'flex-start', md: 'center' } }} />}
                   </Stack>
                   {(item.type === 'checkbox' || item.type === 'multicheckbox' || item.type === 'select' || item.type === 'number') && (
-                      <Box><FormControlLabel control={<Switch size="small" color="secondary" checked={!!item.hasDetail} onChange={(event) => { onUpdateField(index, 'hasDetail', event.target.checked); if (item.type === 'number') onUpdateField(index, 'detailMode', 'always'); }} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />補足欄を表示する</Box>} sx={{ mb: 0.5, ml: { xs: 0, sm: 1 } }} />
+                      <Box><FormControlLabel control={<Switch size="small" color="primary" checked={!!item.hasDetail} onChange={(event) => { onUpdateField(index, 'hasDetail', event.target.checked); if (item.type === 'number') onUpdateField(index, 'detailMode', 'always'); }} />} label={<Box display="flex" alignItems="center" gap={0.5}><CommentIcon fontSize="small" color="action" />補足欄を表示する</Box>} sx={{ mb: 0.5, ml: { xs: 0, sm: 1 } }} />
                       {item.hasDetail && <Typography variant="caption" color="text.secondary" display="block">{item.detailMode === 'always' || item.type === 'number' ? '回答の下に常に表示' : item.type === 'checkbox' ? '「実施した」を選んだ時に表示' : '「他」を含む選択肢を選んだ時に表示'}</Typography>}</Box>
                   )}
                   {(item.type === 'select' || item.type === 'multicheckbox') && (
