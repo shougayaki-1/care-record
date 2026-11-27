@@ -29,21 +29,31 @@ const baselineSchema = z.object({
 export type Manifest = z.infer<typeof manifestSchema>;
 type Position = { sequence: string; hash: string };
 type State = {
-  ordinal: string; digest: string | null; positions: Map<string, Position>;
+  ordinal: string; digest: string | null; latestRef: ObjectRef | null; positions: Map<string, Position>;
   baseline: { v1Count: string; v1Digest: string } | null; inventory: Map<string, string>; pending: Manifest | null; runs: Map<string, Snapshot>; latestComplete: string | null; latestKind: Manifest['kind'] | null;
 };
 export type ArchiveResult = { status: 'complete' | 'inventory' | 'incomplete'; archived: string };
 export function archivePrefix(control: Control): string {
   return `archive/${control.environment}/${control.cutoverId}/`;
 }
-async function exact(store: Store, ref: ObjectRef) {
+export async function readExactArchiveObject(store: Store, ref: ObjectRef) {
   const object = await store.read(ref.name, ref.generation);
-  requireCondition(object && object.ref.digest === ref.digest && object.ref.size === ref.size && object.ref.generation === ref.generation);
+  requireCondition(object && object.ref.name === ref.name && object.ref.digest === ref.digest && object.ref.size === ref.size
+    && object.ref.generation === ref.generation && object.bytes.length <= MAX_BYTES
+    && BigInt(object.bytes.length) === BigInt(ref.size) && sha256(object.bytes) === ref.digest);
   return object;
+}
+// Re-read the pinned generation and ensure it remains the current object.
+export async function readCurrentExactArchiveObject(store: Store, ref: ObjectRef) {
+  const pinned = await readExactArchiveObject(store, ref);
+  const current = await store.read(ref.name);
+  requireCondition(current && current.ref.name === ref.name && current.ref.generation === ref.generation
+    && current.ref.digest === ref.digest && current.ref.size === ref.size && current.bytes.equals(pinned.bytes));
+  return pinned;
 }
 export async function loadControl(store: Store, pinned: ObjectRef, environment: string): Promise<Control> {
   requireCondition(pinned.name.startsWith(`control/${environment}/`));
-  const object = await exact(store, pinned);
+  const object = await readExactArchiveObject(store, pinned);
   const control = controlSchema.parse(JSON.parse(object.bytes.toString()));
   requireCondition(control.environment === environment);
   requireCondition(control.baselineFinalized === (control.baseline !== null));
@@ -99,6 +109,7 @@ function ranges(items: Item[]) {
   return [...result.values()];
 }
 async function accept(store: Store, saved: { bytes: Buffer; ref: ObjectRef }, state: State, control: Control) {
+  requireCondition(saved.bytes.length <= MAX_BYTES && BigInt(saved.bytes.length) === BigInt(saved.ref.size) && sha256(saved.bytes) === saved.ref.digest);
   const manifest = manifestSchema.parse(JSON.parse(saved.bytes.toString()));
   const prefix = archivePrefix(control);
   requireCondition(manifest.environment === control.environment && manifest.cutoverId === control.cutoverId
@@ -109,7 +120,7 @@ async function accept(store: Store, saved: { bytes: Buffer; ref: ObjectRef }, st
   if (prior) requireCondition(JSON.stringify(prior.requiredScopes) === JSON.stringify(manifest.snapshot.requiredScopes));
   if (manifest.chunk) {
     requireCondition(manifest.chunk.name === `${prefix}chunks/${manifest.chunk.digest}.json`);
-    const chunk = await exact(store, manifest.chunk);
+    const chunk = await readExactArchiveObject(store, manifest.chunk);
     const items = chunkSchema.parse(JSON.parse(chunk.bytes.toString())).items;
     requireCondition(JSON.stringify(manifest.ranges) === JSON.stringify(ranges(items)));
     let count = BigInt(prior?.v1Count ?? '0');
@@ -133,12 +144,13 @@ async function accept(store: Store, saved: { bytes: Buffer; ref: ObjectRef }, st
   state.pending = manifest.kind === 'chunk' ? manifest : null;
   state.ordinal = manifest.ordinal;
   state.digest = saved.ref.digest;
+  state.latestRef = refSchema.parse(saved.ref);
   state.latestKind = manifest.kind;
   if (manifest.kind === 'complete') state.latestComplete = manifest.createdAt;
   return manifest;
 }
 function freshState(): State {
-  return { ordinal: '0', digest: null, positions: new Map(), inventory: new Map(), baseline: null, pending: null, runs: new Map(), latestComplete: null, latestKind: null };
+  return { ordinal: '0', digest: null, latestRef: null, positions: new Map(), inventory: new Map(), baseline: null, pending: null, runs: new Map(), latestComplete: null, latestKind: null };
 }
 async function recover(store: Store, control: Control, state: State, deadline: number) {
   const prefix = `${archivePrefix(control)}manifests/`;
@@ -171,14 +183,35 @@ async function loadBaseline(store: Store, control: Control) {
   let baseline: z.infer<typeof baselineSchema> | null = null;
   if (control.baseline) {
     requireCondition(control.baseline.name.startsWith(`control/${control.environment}/`));
-    baseline = baselineSchema.parse(JSON.parse((await exact(store, control.baseline)).bytes.toString()));
+    baseline = baselineSchema.parse(JSON.parse((await readExactArchiveObject(store, control.baseline)).bytes.toString()));
     requireCondition(baseline.environment === control.environment && baseline.cutoverId === control.cutoverId);
-    const receipt = manifestSchema.parse(JSON.parse((await exact(store, baseline.inventoryReceipt)).bytes.toString()));
+    const receipt = manifestSchema.parse(JSON.parse((await readExactArchiveObject(store, baseline.inventoryReceipt)).bytes.toString()));
     requireCondition(receipt.environment === control.environment && receipt.kind === 'inventory'
       && receipt.v1Count === baseline.v1Count && receipt.v1Digest === baseline.v1Digest);
   }
   return baseline;
 }
+// Replays the independently stored archive, never the DB checkpoint. The result
+// is evidence for a verifier, not a historical or full verification verdict.
+export async function readPreservedArchive(store: Store, pinnedControl: ObjectRef, environment: string, budgetMs = 40_000) {
+  const deadline = Date.now() + budgetMs;
+  if (budgetMs <= 0) throw new ArchiveFailure('incomplete');
+  const control = await loadControl(store, pinnedControl, environment);
+  requireCondition(control.baselineFinalized && control.baseline !== null);
+  const state = freshState();
+  state.baseline = await loadBaseline(store, control);
+  requireCondition(state.baseline !== null);
+  await recover(store, control, state, deadline);
+  if (state.pending || state.latestKind !== 'complete' || state.latestComplete === null || state.latestRef === null) throw new ArchiveFailure('incomplete');
+  // Pin and re-read the exact generation, then ensure it is still current.
+  if (Date.now() >= deadline) throw new ArchiveFailure('incomplete');
+  await readCurrentExactArchiveObject(store, state.latestRef);
+  if (Date.now() >= deadline) throw new ArchiveFailure('incomplete');
+  return { cutoverId: control.cutoverId, baselineRef: control.baseline, v1Count: state.baseline.v1Count, v1Digest: state.baseline.v1Digest,
+    positions: new Map(state.positions), inventory: new Map(state.inventory), latestComplete: state.latestComplete,
+    ordinal: state.ordinal, manifestDigest: state.digest, manifestRef: state.latestRef };
+}
+
 export async function runArchive(store: Store, source: Source, control: Control, budgetMs = 40_000): Promise<ArchiveResult> {
   const deadline = Date.now() + budgetMs;
   const state = freshState();

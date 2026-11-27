@@ -2901,6 +2901,11 @@ export type Database = {
         Args: { p_include_v1?: boolean; p_positions?: Json }
         Returns: string
       }
+      begin_audit_verification_request: {
+        Args: { p_context_digest: string; p_request_id: string }
+        Returns: string
+      }
+      begin_audit_verification_snapshot: { Args: never; Returns: string }
       cache_audit_archive: {
         Args: { p_destination: string; p_digest: string; p_ordinal: string }
         Returns: undefined
@@ -3474,6 +3479,19 @@ export type Database = {
       }
       read_audit_archive: {
         Args: { p_cursor?: Json; p_run: string }
+        Returns: Json
+      }
+      read_audit_verification_snapshot: {
+        Args: { p_cursor?: Json; p_run: string }
+        Returns: Json
+      }
+      recompute_audit_v1_snapshot: {
+        Args: {
+          p_datestyle: string
+          p_ids: string[]
+          p_run: string
+          p_timezone: string
+        }
         Returns: Json
       }
       refresh_shift_staffs: { Args: { p_shift_id: string }; Returns: undefined }

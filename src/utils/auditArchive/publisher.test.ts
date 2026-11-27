@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
-import { archiveHealth, archivePrefix, loadControl, runArchive, type Manifest } from './publisher';
+import { describe, expect, it, vi } from 'vitest';
+import { archiveHealth, archivePrefix, loadControl, readPreservedArchive, runArchive, type Manifest } from './publisher';
 import { encode, sha256, type Control, type Cursor, type Event, type Head, type Item, type ObjectRef, type Source, type Store } from './contracts';
 
 const cutover = '15000000-0000-4000-8000-000000000001';
@@ -39,10 +39,12 @@ function v2(sequence: string, previousHash: string): Event {
   return event;
 }
 const provisional = (): Control => ({ schema: 'audit-control:1', environment: 'local', cutoverId: 'pre-cutover', baselineFinalized: false, baseline: null, monitoringStartedAt: new Date().toISOString() });
-async function enabled(store: MemoryStore): Promise<Control> {
+async function enabled(store: MemoryStore, recomputationSettingsEvidence: string | null = null): Promise<Control> {
   const receipt: Manifest = { schema: 'audit-manifest:1', environment: 'local', cutoverId: 'pre-cutover', ordinal: '1', previousDigest: null, run: randomUUID(), createdAt: new Date().toISOString(), kind: 'inventory', chunk: null, ranges: [], snapshot: { cursor: null, heads: [], requiredScopes: [], v1Count: '0', v1Digest: sha256(Buffer.alloc(0)) }, v1Count: '0', v1Digest: sha256(Buffer.alloc(0)) };
   const saved = await store.create('archive/local/pre-cutover/manifests/1.json', encode(receipt));
-  const baseline = await store.create('control/local/baseline.json', encode({ schema: 'audit-baseline:1', environment: 'local', cutoverId: cutover, v1Count: '0', v1Digest: receipt.v1Digest, inventoryReceipt: saved.ref, historicalVerdict: 'unresolved' }));
+  const prefix = `control/local/${cutover}/`;
+  const classification = await store.create(`${prefix}classification.json`,encode({ schema:'audit-v1-classification:1',historicalVerdict:'unresolved',v1Count:'0',v1Digest:receipt.v1Digest,scopes:[],counts:{},anomalyParts:[],evidenceDigest:'b'.repeat(64),recomputationSettingsEvidence }));
+  const baseline = await store.create(`${prefix}baseline.json`, encode({ schema: 'audit-baseline:1', environment: 'local', cutoverId: cutover, v1Count: '0', v1Digest: receipt.v1Digest, inventoryReceipt: saved.ref, historicalVerdict: 'unresolved',classification:classification.ref,evidenceDigest:'b'.repeat(64),boundary:{cutoverId:cutover,v1Count:'0',v1Digest:receipt.v1Digest,at:'2026-01-01T00:00:00.000000Z'} }));
   return { ...provisional(), cutoverId: cutover, baselineFinalized: true, baseline: baseline.ref };
 }
 function sourceFor(items: Item[], failCache = false): Source & { caches: string[]; begins: number } {
@@ -76,6 +78,145 @@ function manifests(store: MemoryStore, control: Control) {
 }
 
 describe('immutable audit preservation', () => {
+  it('requires independently pinned settings before evidence-backed recomputation', async () => {
+    const { inspectPreservation } = await import('@/utils/auditVerification/inspect');
+    const store=new MemoryStore(), evidence='a'.repeat(64), control=await enabled(store,evidence), rows=events(1);
+    const pin=await store.create('control/local/root.json',encode(control));
+    await runArchive(store,sourceFor(rows),control);
+    const snapshot=sourceFor(rows), source={begin:() => snapshot.begin({},false),page:(run:string,cursor:Cursor) => snapshot.page(run,cursor),recompute:async()=>[]};
+    await expect(inspectPreservation(store,pin.ref,'local',source)).rejects.toMatchObject({category:'incomplete'});
+    const settings=await store.create(`control/local/${cutover}/recompute-settings.json`,encode({schema:'audit-v1-recompute-settings:1',environment:'local',cutoverId:cutover,timeZone:'UTC',dateStyle:'ISO, MDY',settingsEvidenceDigest:evidence}));
+    await expect(inspectPreservation(store,pin.ref,'local',source,10000,settings.ref)).resolves.toMatchObject({status:'evidence_only',recomputedRows:'0',historicalVerdict:'unresolved'});
+  });
+  it('connects pinned archive to all snapshot pages without issuing a success verdict', async () => {
+    const { inspectPreservation } = await import('@/utils/auditVerification/inspect');
+    const store = new MemoryStore(); const control = await enabled(store); const rows = events(3);
+    const pinned = await store.create('control/local/root.json',encode(control));
+    await runArchive(store,sourceFor(rows),control);
+    const newer = v2('4',(rows.at(-1) as Event).hash!);
+    const snapshot = sourceFor([{ ...(rows[0] as Head),sequence:'4',hash:newer.hash! },...rows.slice(1),newer]);
+    const source = { begin:() => snapshot.begin({},false), page:(run: string,cursor: Cursor) => snapshot.page(run,cursor) };
+    const result=await inspectPreservation(store,pinned.ref,'local',source);
+    expect(result).toMatchObject({status:'evidence_only',archivedRows:'3',newerRows:'1',historicalVerdict:'unresolved'});
+    expect(result.targetManifest).toEqual((await store.read(`${archivePrefix(control)}manifests/${result.targetOrdinal}.json`))?.ref);
+    const missing = sourceFor([]);
+    await expect(inspectPreservation(store,pinned.ref,'local',{begin:() => missing.begin({},false),page:(run,cursor) => missing.page(run,cursor)})).rejects.toMatchObject({category:'mismatch'});
+    await expect(inspectPreservation(store,pinned.ref,'local',{begin:() => new Promise<string>(() => {}),page:async () => null},100)).rejects.toMatchObject({category:'incomplete'});
+  });
+
+  it('runs real evidence checks but records incomplete while historical v1 remains unresolved', async () => {
+    const { runVerification } = await import('@/utils/auditVerification/run');
+    const archive=new MemoryStore(), receipts=new MemoryStore(), control=await enabled(archive), rows=events(1);
+    const pin=await archive.create('control/local/root.json',encode(control));
+    await runArchive(archive,sourceFor(rows),control);
+    const snapshot=sourceFor(rows), source={begin:() => snapshot.begin({},false),page:(run:string,cursor:Cursor) => snapshot.page(run,cursor)};
+    const result=await runVerification({environment:'local',runId:'123',attempt:'1',createdAt:'2026-01-01T00:00:00Z'},archive,receipts,pin.ref,source);
+    expect(result.status).toBe('incomplete');
+    const recorded=JSON.parse((await receipts.read(result.receipt.name))!.bytes.toString());
+    const target=manifests(archive,control).at(-1)!;
+    expect(recorded).toMatchObject({status:'incomplete',runId:'123',target:{cutoverId:cutover,ordinal:target.ordinal,ref:(await archive.read(`${archivePrefix(control)}manifests/${target.ordinal}.json`))!.ref}});
+    expect(snapshot.begins).toBe(1);
+  });
+
+  it('classifies malformed pinned control as mismatch before starting a snapshot', async () => {
+    const { inspectPreservation } = await import('@/utils/auditVerification/inspect');
+    for (const bytes of [Buffer.from('{'),encode({schema:'audit-control:1'})]) {
+      const store=new MemoryStore(), pin=await store.create('control/local/root.json',bytes);
+      let begins=0;
+      const source={begin:async () => { begins++; return randomUUID(); },page:async () => null};
+      await expect(inspectPreservation(store,pin.ref,'local',source)).rejects.toMatchObject({category:'mismatch'});
+      expect(begins).toBe(0);
+    }
+  });
+
+  it('bounds a stalled external archive read before starting a snapshot', async () => {
+    const { inspectPreservation } = await import('@/utils/auditVerification/inspect');
+    const store=new MemoryStore(), pin={name:'control/local/root.json',generation:'1',size:'1',digest:'a'.repeat(64)};
+    store.read=async () => new Promise(() => {});
+    let begins=0; const source={begin:async () => { begins++; return randomUUID(); },page:async () => null};
+    vi.useFakeTimers();
+    try {
+      const result=expect(inspectPreservation(store,pin,'local',source)).rejects.toMatchObject({category:'incomplete'});
+      await vi.advanceTimersByTimeAsync(40_001);
+      await result;
+      expect(begins).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('rejects bytes that do not match the pinned control reference', async () => {
+    const store = new MemoryStore(); const control = await enabled(store);
+    const pinned = await store.create('control/local/root.json',encode(control));
+    store.objects.set(pinned.ref.name,{ ref:pinned.ref,bytes:Buffer.from('{}') });
+    await expect(readPreservedArchive(store,pinned.ref,'local')).rejects.toThrow();
+  });
+  it('replays pinned external evidence and refuses missing or unfinalized references', async () => {
+    const store = new MemoryStore(); const control = await enabled(store); const rows = events(3);
+    const pinned = await store.create('control/local/root.json', encode(control));
+    await runArchive(store, sourceFor(rows), control);
+    const evidence = await readPreservedArchive(store, pinned.ref, 'local');
+    expect(evidence.positions.get('global')).toEqual({ sequence:'3', hash:(rows.at(-1) as Event).hash });
+    expect(evidence.inventory.size).toBe(3);
+    const target=await store.read(`${archivePrefix(control)}manifests/${evidence.ordinal}.json`);
+    expect(evidence.manifestRef).toEqual(target?.ref);
+    expect(BigInt(evidence.manifestRef.generation)).toBeGreaterThan(BigInt(Number.MAX_SAFE_INTEGER));
+    expect(evidence.manifestRef.digest).toBe(evidence.manifestDigest);
+    await expect(readPreservedArchive(store, { ...pinned.ref, digest:'f'.repeat(64) }, 'local')).rejects.toThrow();
+    await expect(readPreservedArchive(store, pinned.ref, 'staging')).rejects.toThrow();
+    const provisionalPin = await store.create('control/local/provisional.json', encode(provisional()));
+    await expect(readPreservedArchive(store, provisionalPin.ref, 'local')).rejects.toThrow();
+    store.objects.delete(`${archivePrefix(control)}manifests/1.json`);
+    await expect(readPreservedArchive(store, pinned.ref, 'local')).rejects.toThrow();
+  });
+
+  it('refuses to start a snapshot if the recovered manifest generation cannot be re-read', async () => {
+    const { inspectPreservation } = await import('@/utils/auditVerification/inspect');
+    const store=new MemoryStore(), control=await enabled(store), rows=events(1);
+    const pin=await store.create('control/local/root.json',encode(control));
+    await runArchive(store,sourceFor(rows),control);
+    const target=manifests(store,control).at(-1)!;
+    const name=`${archivePrefix(control)}manifests/${target.ordinal}.json`;
+    const read=store.read.bind(store);
+    store.read=async (key,generation) => key===name && generation ? null : read(key,generation);
+    let begins=0;
+    const snapshot=sourceFor(rows), source={begin:() => { begins++; return snapshot.begin({},false); },page:(run:string,cursor:Cursor) => snapshot.page(run,cursor)};
+    await expect(inspectPreservation(store,pin.ref,'local',source)).rejects.toMatchObject({category:'mismatch'});
+    expect(begins).toBe(0);
+  });
+
+  it('rejects a manifest that is replaced between recovery and generation recheck', async () => {
+    const store=new MemoryStore(), control=await enabled(store), rows=events(1);
+    const pin=await store.create('control/local/root.json',encode(control));
+    await runArchive(store,sourceFor(rows),control);
+    const target=manifests(store,control).at(-1)!;
+    const name=`${archivePrefix(control)}manifests/${target.ordinal}.json`;
+    const read=store.read.bind(store); let latestReads=0;
+    store.read=async (key,generation) => {
+      const item=await read(key,generation);
+      if (key===name && !generation && ++latestReads===2 && item) return {...item,ref:{...item.ref,generation:(BigInt(item.ref.generation)+BigInt(1)).toString()}};
+      return item;
+    };
+    await expect(readPreservedArchive(store,pin.ref,'local')).rejects.toMatchObject({category:'mismatch'});
+  });
+
+  it('records a mismatch and pinned target when the manifest changes during DB reading', async () => {
+    const { runVerification } = await import('@/utils/auditVerification/run');
+    const store=new MemoryStore(), receipts=new MemoryStore(), control=await enabled(store), rows=events(1);
+    const pin=await store.create('control/local/root.json',encode(control));
+    await runArchive(store,sourceFor(rows),control);
+    const target=manifests(store,control).at(-1)!;
+    const name=`${archivePrefix(control)}manifests/${target.ordinal}.json`;
+    const original=(await store.read(name))!.ref;
+    const snapshot=sourceFor(rows);
+    const source={begin:() => snapshot.begin({},false),page:async (run:string,cursor:Cursor) => {
+      const item=(await store.read(name))!;
+      store.objects.set(name,{...item,ref:{...item.ref,generation:(BigInt(item.ref.generation)+BigInt(1)).toString()}});
+      return snapshot.page(run,cursor);
+    }};
+    const result=await runVerification({environment:'local',runId:'124',attempt:'1',createdAt:'2026-01-01T00:00:00Z'},store,receipts,pin.ref,source);
+    expect(result.status).toBe('mismatch');
+    expect(JSON.parse((await receipts.read(result.receipt.name))!.bytes.toString())).toMatchObject({status:'mismatch',target:{ref:original}});
+  });
+
   it('preserves an invalid historical v1 hash without accepting it for v2', async () => {
     const store = new MemoryStore(); const control = provisional(); const legacy = v1({hash:'legacy-invalid-hash'});
     const rows = [legacy,v1({hash:'a'.repeat(64)}),v1({hash:null})].sort((a,b) => a.id.localeCompare(b.id));

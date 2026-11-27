@@ -1,0 +1,98 @@
+name: Audit verification manual (disabled by default)
+
+# No schedule is installed here. Production activation needs a separate plan.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to verify (requires explicit enablement)
+        type: choice
+        required: true
+        default: staging
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  verify:
+    name: Audit verification (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: audit-verification-${{ inputs.environment }}
+      cancel-in-progress: false
+    steps:
+      - name: Require explicit enablement
+        id: guard
+        env:
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          ENABLED: ${{ vars.AUDIT_VERIFIER_MANUAL_ENABLED }}
+          PRODUCTION_APPROVED: ${{ vars.AUDIT_VERIFIER_PRODUCTION_APPROVED }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" != workflow_dispatch || "$GITHUB_REF" != refs/heads/main || "$ENABLED" != true ]]; then
+            echo audit_verification_disabled >&2
+            exit 1
+          fi
+          if [[ "$INPUT_ENVIRONMENT" != staging && "$INPUT_ENVIRONMENT" != production ]]; then
+            echo audit_verification_invalid_environment >&2
+            exit 1
+          fi
+          if [[ "$INPUT_ENVIRONMENT" == production && "$PRODUCTION_APPROVED" != true ]]; then
+            echo audit_verification_production_not_approved >&2
+            exit 1
+          fi
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Fix attempt start time
+        id: attempt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/audit/github-attempt.mjs
+      - name: Obtain verifier identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.AUDIT_VERIFIER_WIF_PROVIDER }}
+          service_account: ${{ vars.AUDIT_VERIFIER_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+      - name: Verify audit preservation
+        id: verifier
+        env:
+          AUDIT_VERIFIER_ENABLED: 'true'
+          APP_ENV: ${{ inputs.environment }}
+          AUDIT_ARCHIVE_MODE: v2
+          GCS_AUDIT_BUCKET: ${{ vars.GCS_AUDIT_BUCKET }}
+          GCS_AUDIT_LEGACY_BUCKET: ${{ vars.GCS_AUDIT_LEGACY_BUCKET }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          EXPECTED_GCP_PROJECT_ID: ${{ vars.EXPECTED_GCP_PROJECT_ID }}
+          AUDIT_CONTROL_OBJECT: ${{ vars.AUDIT_CONTROL_OBJECT }}
+          AUDIT_CONTROL_GENERATION: ${{ vars.AUDIT_CONTROL_GENERATION }}
+          AUDIT_CONTROL_SHA256: ${{ vars.AUDIT_CONTROL_SHA256 }}
+          AUDIT_CONTROL_SIZE: ${{ vars.AUDIT_CONTROL_SIZE }}
+          AUDIT_RECOMPUTE_OBJECT: ${{ vars.AUDIT_RECOMPUTE_OBJECT }}
+          AUDIT_RECOMPUTE_GENERATION: ${{ vars.AUDIT_RECOMPUTE_GENERATION }}
+          AUDIT_RECOMPUTE_SHA256: ${{ vars.AUDIT_RECOMPUTE_SHA256 }}
+          AUDIT_RECOMPUTE_SIZE: ${{ vars.AUDIT_RECOMPUTE_SIZE }}
+          AUDIT_VERIFIER_ORIGIN: ${{ vars.AUDIT_VERIFIER_ORIGIN }}
+          AUDIT_VERIFICATION_STARTED_AT: ${{ steps.attempt.outputs.started_at }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+        run: npm run audit:verify
+      - name: Notify a startup failure
+        if: ${{ failure() && steps.guard.outcome == 'success' && steps.verifier.outcome == 'skipped' }}
+        timeout-minutes: 1
+        env:
+          APP_ENV: ${{ inputs.environment }}
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+        run: node scripts/audit/notify-preflight.mjs

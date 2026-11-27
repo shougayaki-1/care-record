@@ -25,6 +25,8 @@
     "test:ci-scope": "node --test scripts/ci/*.test.mjs scripts/e2e/*.test.mjs",
     "security:audit": "npm audit --omit=dev --audit-level=high",
     "security:service-role": "node scripts/security/check-service-role-usage.mjs",
+    "audit:verify": "node --conditions=react-server --import tsx scripts/audit/verify.ts",
+    "audit:watch-schedule": "node --conditions=react-server --import tsx scripts/audit/watch-schedule.ts",
     "security:sbom": "npm sbom --package-lock-only --omit=dev --sbom-format=cyclonedx"
   },
   "dependencies": {
@@ -52,6 +54,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "rrule": "^2.8.1",
+    "server-only": "0.0.1",
     "sharp": "0.35.5",
     "zod": "^4.6.6"
   },
@@ -75,6 +78,7 @@
     "playwright": "^1.61.0",
     "storybook": "^10.6.3",
     "tailwindcss": "^4",
+    "tsx": "4.23.15",
     "typescript": "^5",
     "vitest": "4.1.11"
   }

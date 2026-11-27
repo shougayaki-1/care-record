@@ -66,6 +66,7 @@ jobs:
       - run: npm run lint -- --max-warnings=0
       - run: npm run security:service-role
       - run: npm run test:ci-scope
+      - run: node --test scripts/audit/*.test.mjs
       - run: node --test scripts/backup/*.test.mjs
       - run: node --test scripts/security/*.test.mjs
       - run: node --test scripts/notifications/*.test.mjs
@@ -166,6 +167,8 @@ jobs:
         run: node scripts/db/test-internal-work-concurrency.mjs "supabase_db_care-record-owner-add-test-${GITHUB_RUN_ID}a${GITHUB_RUN_ATTEMPT}"
       - name: Verify audit v2 concurrent allocation (disposable DB only)
         run: node scripts/db/test-audit-v2-concurrency.mjs "supabase_db_care-record-owner-add-test-${GITHUB_RUN_ID}a${GITHUB_RUN_ATTEMPT}"
+      - name: Verify audit verification request retries (disposable DB only)
+        run: node scripts/db/test-audit-verification-request-concurrency.mjs "supabase_db_care-record-owner-add-test-${GITHUB_RUN_ID}a${GITHUB_RUN_ATTEMPT}"
       - name: Stop local Supabase
         if: ${{ always() }}
         run: supabase stop --no-backup
