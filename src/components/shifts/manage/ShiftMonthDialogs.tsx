@@ -42,7 +42,7 @@ export function ShiftMonthPreviewDialog({ open, targetMonth, onClose, onConfirm,
     previewDetails: ShiftMonthPreview | null; mastersReady: boolean;
 }) {
     return (
-        <AppDialog open={open} onClose={onClose} maxWidth="sm" title={`${targetMonth}月 シフト展開の確認`} actions={<><AppButton variant="text" intent="secondary" onClick={onClose}>閉じる</AppButton><AppButton disabled={!mastersReady} onClick={onConfirm} intent="secondary" autoFocus>確定してカレンダーに展開</AppButton></>}>
+        <AppDialog open={open} onClose={onClose} maxWidth="sm" title={`${targetMonth}月 シフト展開の確認`} actions={<><AppButton variant="text" intent="secondary" onClick={onClose}>閉じる</AppButton><AppButton disabled={!mastersReady} onClick={onConfirm} autoFocus>確定してカレンダーに展開</AppButton></>}>
             {previewDetails && (
                 <Stack spacing={2}>
                     <Typography variant="body2" paragraph>
@@ -57,7 +57,7 @@ export function ShiftMonthPreviewDialog({ open, targetMonth, onClose, onConfirm,
                             <Box key={index} display="flex" justifyContent="space-between" alignItems="center">
                                 <Typography variant="caption" fontWeight="bold">{d.title}</Typography>
                                 <Stack direction="row" spacing={1} alignItems="center">
-                                    {d.isOvernight && <Chip label="日またぎ夜勤" size="small" color="secondary" variant="outlined" sx={{ height: 16, fontSize: '0.65rem' }} />}
+                                    {d.isOvernight && <Chip label="日またぎ夜勤" size="small" variant="outlined" sx={{ height: 16, fontSize: '0.65rem' }} />}
                                     <Typography variant="caption" color="text.secondary">{d.count} 件</Typography>
                                 </Stack>
                             </Box>
