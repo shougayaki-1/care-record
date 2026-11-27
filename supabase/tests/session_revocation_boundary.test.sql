@@ -73,6 +73,11 @@ SELECT throws_ok($$ SELECT public.replace_shift_staffs_atomic('15500000-0000-400
 SELECT set_config('request.jwt.claims','{"sub":"15500000-0000-4000-8000-000000000001","role":"authenticated","session_id":"155-unknown"}',true);
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),0::bigint,'unknown session cannot read the report');
 SELECT throws_ok($$ SELECT public.replace_shift_staffs_atomic('15500000-0000-4000-8000-000000000060',ARRAY[]::uuid[]) $$,'P0001','access denied','unknown session cannot update shift staffing');
+SELECT set_config('request.jwt.claims','{"sub":"15500000-0000-4000-8000-000000000001","role":"authenticated","session_id":"155-member"}',true);
+SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),0::bigint,'owner cannot read with another user''s active session');
+SELECT throws_ok($$ SELECT public.replace_shift_staffs_atomic('15500000-0000-4000-8000-000000000060',ARRAY[]::uuid[]) $$,'P0001','access denied','owner cannot update shift staffing with another user''s active session');
+SELECT set_config('request.jwt.claims','{"sub":"15500000-0000-4000-8000-000000000002","role":"authenticated","session_id":"155-active"}',true);
+SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),0::bigint,'member cannot read with the owner''s active session');
 SELECT set_config('request.jwt.claims','{"sub":"15500000-0000-4000-8000-000000000002","role":"authenticated","session_id":"155-member"}',true);
 SELECT is((SELECT count(*) FROM public.reports WHERE id='15500000-0000-4000-8000-000000000030'),1::bigint,'member with view permission reads the report');
 RESET ROLE;
