@@ -44,7 +44,7 @@ export function GoogleIntegrationSettings({ orgName, googleFolderId, googleCalen
                     <Typography variant="h6" fontWeight="bold">Googleドライブ連携</Typography>
                     <Typography variant="body2" color="text.secondary">帳票の保存先フォルダを管理します（GAS経由）</Typography>
                 </Box>
-                <Chip label={googleFolderId ? "連携済み" : "未連携"} color={googleFolderId ? "success" : "default"} size="small" icon={<LinkIcon />} sx={{ ml: { sm: 'auto' } }} />
+                <Chip label={googleFolderId ? "連携済み" : "未連携"} size="small" icon={<LinkIcon />} sx={{ ml: { sm: 'auto' } }} />
             </Stack>
 
             <Box sx={{ mt: 2, p: { xs: 1.5, sm: 2 }, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider', minWidth: 0 }}>
@@ -88,16 +88,16 @@ export function GoogleIntegrationSettings({ orgName, googleFolderId, googleCalen
         </Box>
 
         {/* Googleカレンダー連携 (OAuth方式) */}
-        <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: googleCalendarId ? 'success.main' : 'divider', bgcolor: googleCalendarId ? 'background.success' : 'background.paper' }}>
+        <Box sx={{ p: { xs: 2, sm: 4 }, borderRadius: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={2}>
-                <CalendarMonthIcon color="success" fontSize="large" />
+                <CalendarMonthIcon color="action" fontSize="large" />
                 <Box sx={{ minWidth: 0 }}>
                     <Typography variant="h6" fontWeight="bold">Googleカレンダー連携</Typography>
                     <Typography variant="body2" color="text.secondary">事業所ごとの専用カレンダーを自動作成し、シフトを同期します（OAuth直接連携）</Typography>
                 </Box>
                 <Chip
                     label={googleCalendarId ? GOOGLE_CONNECTION_LABELS[googleConnectionState] : '未連携'}
-                    color={googleCalendarId && googleConnectionState === 'healthy' ? 'success' : googleCalendarId ? 'warning' : 'default'}
+                    color={googleCalendarId && googleConnectionState !== 'healthy' ? 'warning' : 'default'}
                     size="small"
                     icon={<LinkIcon />}
                     sx={{ ml: { sm: 'auto' } }}
@@ -130,7 +130,7 @@ export function GoogleIntegrationSettings({ orgName, googleFolderId, googleCalen
                                         未同期の予定が <strong>{syncStatus.unsynced} 件</strong> あります（全 {syncStatus.total} 件中）。「未同期を同期」で解消できます。
                                     </Alert>
                                 ) : googleConnectionState === 'healthy' ? (
-                                    <Alert severity="success" sx={{ mt: 1 }}>
+                                    <Alert severity="success" sx={{ mt: 1, bgcolor: 'background.muted', color: 'text.primary', '& .MuiAlert-icon': { color: 'text.secondary' } }}>
                                         すべての予定（{syncStatus.total} 件）がGoogleカレンダーと同期済みです。
                                     </Alert>
                                 ) : null
@@ -155,6 +155,7 @@ export function GoogleIntegrationSettings({ orgName, googleFolderId, googleCalen
                                 {/* 全件強制再同期（通常は未同期同期で十分。Google側で予定がずれた場合の最終手段） */}
                                 {canRepairCalendarSync && <AppButton
                                     variant="outlined"
+                                    intent="secondary"
                                     startIcon={resyncingCal ? <CircularProgress size={16} color="inherit" aria-hidden /> : <SyncIcon />}
                                     onClick={handleForceResyncCalendar}
                                     disabled={repairingCal || resyncingCal}
@@ -173,7 +174,7 @@ export function GoogleIntegrationSettings({ orgName, googleFolderId, googleCalen
                                 </AppButton>
                                 <AppButton
                                     variant="outlined"
-                                    intent="warning"
+                                    intent="secondary"
                                     onClick={() => handleConnectCalendar('reauthorize')}
                                     disabled={connectingCal || repairingCal || resyncingCal}
                                 >
@@ -186,7 +187,7 @@ export function GoogleIntegrationSettings({ orgName, googleFolderId, googleCalen
                             <Alert severity="info">
                                 ボタンを押すとGoogleの認証画面へ移動します。許可すると、あなたのアカウントに事業所専用のGoogleカレンダーが自動作成され、以降のシフトが自動同期されます。
                             </Alert>
-                            <AppButton intent="success" onClick={() => handleConnectCalendar()} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                            <AppButton onClick={() => handleConnectCalendar()} disabled={connectingCal} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                                 {connectingCal ? 'Googleへ移動中...' : 'シフト用カレンダーを作成・連携する'}
                             </AppButton>
                         </Stack>
