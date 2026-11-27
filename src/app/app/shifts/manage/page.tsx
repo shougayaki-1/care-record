@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback, useTransition } from 'react';
 import dynamic from 'next/dynamic';
 import { Box, Typography, CircularProgress, Tabs, Tab, Button, Stack, LinearProgress, Alert } from '@/components/ui/mui';
-import { CalendarPageSkeleton } from '@/components/ui';
+import { AppButton, CalendarPageSkeleton } from '@/components/ui';
 import AddIcon from '@mui/icons-material/Add';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
@@ -263,13 +263,13 @@ export default function ShiftManagePage() {
                                         </Button>
                                     )}
                                     {activeTab === 'byStaff' && selectedStaffId === 'all' && (
-                                        <Button variant="outlined" color="primary" startIcon={<GridOnIcon />} onClick={handleDownloadMatrixPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'background.paper' }}>
+                                        <AppButton variant="outlined" intent="secondary" startIcon={<GridOnIcon />} onClick={handleDownloadMatrixPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'background.paper' }}>
                                             {pdfGenerating ? '作成中...' : '全体マトリックスPDF'}
-                                        </Button>
+                                        </AppButton>
                                     )}
-                                    <Button variant="outlined" color="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleDownloadPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'background.paper' }}>
+                                    <AppButton variant="outlined" intent="secondary" startIcon={<PictureAsPdfIcon />} onClick={handleDownloadPdf} disabled={pdfGenerating || resyncingCal} sx={{ bgcolor: 'background.paper' }}>
                                         {pdfGenerating ? '作成中...' : '表示中の形式でPDF出力'}
-                                    </Button>
+                                    </AppButton>
                                 </Stack>
                             </ShiftManageFilters>
                         )}

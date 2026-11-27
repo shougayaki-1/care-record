@@ -123,6 +123,13 @@ v1の不整合が実DBで見つかった場合は元データを保全し、事�
 | 監査失敗・版履歴 | `record_version_invariants.test.sql`はrecord_versionsの連鎖と監査失敗rollback | audit_events自体の連鎖検証とは区別。v2導入後も既存原子的処理のrollbackを再実行 |
 | UI/REST/RPC/署名URL | tenant-isolation E2Eは画面非表示の一例。super-admin/署名URLを含む経路横断の専用拒否試験は今回の探索では見当たらない | 同fixtureでREST/RPC直呼び、Storage署名URLの発行/取得拒否を確認。未発行URLの拒否と発行済みURLの有効期間は区別 |
 
+### Issue #153 の検証証跡
+
+- `src/app/actions/clients.test.ts`: 公開8 Action（archive/restoreは別ケース）で未認証・権限拒否、guard後のDB/RPC/監査なし、削除済み・対象不在、許可対照を検証する。対象取得の組織IDフィルタも確認する。guardのmockは実際のRLSの証明ではない。
+- `supabase/tests/security_hardening.test.sql`: 既存のowner・無権限member・別組織owner fixtureでclientsの読取・更新と3つの関連RPCを実DBで確認する。ownerのRPC成功と比較する。テストはtransactionをrollbackする。
+- 空の使い捨てローカルSupabaseに現行migrationを適用し、security_hardening 79件が成功（2026-10-30）。本番・共有DBは変更していない。
+- RPCは別組織対象・論理削除済み・不存在も確認。mock unitはRLSやguard内部の証明に代えない。
+
 unitは現行withActionResult契約の`ok: false`とerror codeを検証し、旧案のrejects.toThrowを流用しない。guardをmockして拒否する試験を、guard内部やRLSの証明にしない。
 
 参照: [認証unit](../src/utils/supabase/authResults.test.ts)、[権限unit](../src/utils/permissions.test.ts)、[DB安全性](../supabase/tests/security_hardening.test.sql)、[RPC契約](../supabase/tests/rpc_contracts.test.sql)、[組織分離E2E](../tests/tenant-isolation.spec.ts)。
@@ -144,6 +151,8 @@ unitは現行withActionResult契約の`ok: false`とerror codeを検証し、旧
 各実装は着手時の最新origin/mainから専用branch/PRを作る。[testing.md](testing.md)に従い、DB変更は空DB・upgrade・関連pgTAP・security_hardening・unit、アプリ変更はtypecheck/lint、リリース相当はbuildを実施。E2Eはユーザー確認後。
 
 配備順はAの準備schema→Bのdual読出し配備→Gの切替→Cの週次有効化。各schema変更をStaging→Productionへ手動適用し、migration history・dry-run・backup freshnessを確認する。GはBの配備済みversionを照合し、旧アーカイブjobの起動停止とin-flight完了を計画・承認範囲で確認してから実行する。旧checkpointをv2へ流用しない。baselineの全量保存・照合後に新アーカイブを有効にし、成功前は移行未完了を明示する。G失敗時も旧jobへ無条件に戻さず、v1/v2双方を保存できるBで保全を続ける。
+
+Gの実施準備は[切替runbook](audit-cutover-runbook.md)と[環境別証跡テンプレート](compliance/audit-cutover-evidence-template.md)に記録する。実装・ローカル検証と実環境の切替証跡は区別し、文書やコードの存在だけで環境適用済みとしない。
 
 初回baseline/検証はStaging合成データで試す。ProductionのGは新規migration適用と新規証跡作成を伴うため、影響・lock待機・中断条件を提示して手動適用する。通常検証は読取と新規結果作成に限定する。
 
