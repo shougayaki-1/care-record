@@ -105,6 +105,30 @@ describe('workspace initialization', () => {
     expect(screen.getByText('no_membership')).toBeTruthy();
   });
 
+  it('does not replace a newer user workspace with a late response from another user', async () => {
+    const pending: Array<(value: unknown) => void> = [];
+    mocks.query.mockImplementation((table: string) => table === 'profiles'
+      ? Promise.resolve({ data: null, error: null }) : new Promise(resolve => { pending.push(resolve); }));
+    function IdentityStatus() {
+      const { userId, currentOrg } = useWorkspace();
+      return <div>{userId}:{currentOrg?.name}</div>;
+    }
+    const nextSession = { user: { id: 'other-user' } } as Session;
+    render(<WorkspaceProvider><IdentityStatus /></WorkspaceProvider>);
+    await act(async () => { mocks.callback!('INITIAL_SESSION', session); await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { mocks.callback!('SIGNED_IN', nextSession); await vi.advanceTimersByTimeAsync(0); });
+    expect(pending).toHaveLength(2);
+    await act(async () => {
+      pending[1]({ data: [{ role: 'owner', organizations: { id: 'org-b', name: 'Organization B' }, organization_member_roles: [] }], error: null });
+    });
+    expect(screen.getByText('other-user:Organization B')).toBeTruthy();
+    await act(async () => {
+      pending[0]({ data: [{ role: 'owner', organizations: { id: 'org-a', name: 'Organization A' }, organization_member_roles: [] }], error: null });
+    });
+    expect(screen.getByText('other-user:Organization B')).toBeTruthy();
+    expect(screen.queryByText(/Organization A/)).toBeNull();
+  });
+
 
   it('times out a newer pending lookup only after its own deadline', async () => {
     mocks.query.mockImplementation((table: string) => table === 'profiles'
