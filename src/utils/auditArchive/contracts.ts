@@ -10,13 +10,13 @@ export const encode = (value: unknown) => Buffer.from(JSON.stringify(value));
 export const refSchema = z.object({ name: z.string(), generation: decimal, size: decimal, digest });
 export type ObjectRef = z.infer<typeof refSchema>;
 export const headSchema = z.object({ kind: z.literal('head'), scope, sequence: decimal, hash: z.string(), cutoverId: z.uuid() });
+// Historical v1 hashes are preserved verbatim for anomaly classification.
+// A v2 hash retains the SHA-256 format check before canonical verification.
 export const eventSchema = z.object({
   kind: z.enum(['v1', 'v2']), version: z.number().int(), scope, sequence: decimal,
-  // Preserve malformed historical v1 hashes too. v2 validates its exact SHA-256
-  // against canonical bytes in the publisher; v1 anomalies stay unresolved.
   id: z.uuid(), eventId: z.uuid(), hash: z.string().nullable(), previousHash: z.string().nullable(),
   cutoverId: z.uuid().nullable(), inventory: z.string(), canonical: z.string().nullable(),
-});
+}).refine(event => event.kind === 'v1' || event.hash === null || digest.safeParse(event.hash).success);
 export const itemSchema = z.union([headSchema, eventSchema]);
 export type Item = z.infer<typeof itemSchema>;
 export type Event = z.infer<typeof eventSchema>;
