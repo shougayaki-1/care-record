@@ -11,6 +11,7 @@ export const Normal: Story = { play: async ({ args }) => {
   const dialog = within(await within(document.body).findByRole('dialog'));
   await waitFor(() => expect(dialog.getByText(/展開予定の総シフト数： 4 件/)).toBeVisible());
   await expect(dialog.getByText('日またぎ夜勤')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '確定してカレンダーに展開' })).toHaveClass('MuiButton-colorPrimary');
   await userEvent.click(dialog.getByRole('button', { name: '確定してカレンダーに展開' })); await expect(args.onConfirm).toHaveBeenCalledOnce();
 } };
 export const CancelPreview: Story = { play: async ({ args }) => {

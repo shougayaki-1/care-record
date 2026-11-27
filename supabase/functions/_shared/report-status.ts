@@ -11,9 +11,9 @@ export const REPORT_STATUS_LABELS: Record<ReportStatus, string> = {
 
 export const REPORT_STATUS_CHIP_COLORS: Record<ReportStatus, ReportStatusChipColor> = {
   draft: 'default',
-  pending: 'warning',
-  approved: 'success',
-  remanded: 'error',
+  pending: 'default',
+  approved: 'default',
+  remanded: 'warning',
 };
 
 export function isReportStatus(status: string): status is ReportStatus {

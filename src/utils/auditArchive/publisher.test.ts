@@ -76,6 +76,29 @@ function manifests(store: MemoryStore, control: Control) {
 }
 
 describe('immutable audit preservation', () => {
+  it('preserves an invalid historical v1 hash without accepting it for v2', async () => {
+    const store = new MemoryStore(); const control = provisional(); const legacy = v1({hash:'legacy-invalid-hash'});
+    const rows = [legacy,v1({hash:'a'.repeat(64)}),v1({hash:null})].sort((a,b) => a.id.localeCompare(b.id));
+    expect((await runArchive(store,sourceFor(rows),control)).status).toBe('inventory');
+    const receipt = manifests(store,control).find(value => value.chunk !== null)!;
+    const chunk = await store.read(receipt.chunk!.name,receipt.chunk!.generation);
+    const saved = (JSON.parse(chunk!.bytes.toString()).items as Event[]).find(row => row.id === legacy.id)!;
+    expect(saved.hash).toBe('legacy-invalid-hash');
+    expect(saved.inventory).toBe(legacy.inventory);
+    const invalidV2 = events(1); (invalidV2[1] as Event).hash = 'legacy-invalid-hash';
+    const other = new MemoryStore(); const enabledControl = await enabled(other);
+    await expect(runArchive(other,sourceFor(invalidV2),enabledControl)).rejects.toThrow();
+    expect(manifests(other,enabledControl)).toHaveLength(0);
+  });
+
+  it('preserves malformed historical v1 hashes for G classification without granting a chain verdict', async () => {
+    const store = new MemoryStore(); const control = provisional();
+    const row = v1({ hash: 'legacy-unreproducible-hash' });
+    expect(await runArchive(store, sourceFor([row]), control)).toEqual({ status: 'inventory', archived: '1' });
+    const chunk = [...store.objects.values()].find(object => object.ref.name.includes('/chunks/'))!;
+    expect(JSON.parse(chunk.bytes.toString()).items[0].hash).toBe('legacy-unreproducible-hash');
+    expect((await archiveHealth(store, control)).critical).toBe(true);
+  });
   it('preserves every null-hash/global v1 row beyond 500 with identical microsecond timestamps; remains provisional', async () => {
     const store = new MemoryStore(); const control = provisional();
     const rows = Array.from({ length: 1001 }, () => v1()).sort((a, b) => a.id.localeCompare(b.id));
